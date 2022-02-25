@@ -43,18 +43,9 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
 
 // Construct input-specs vector from the inputs of the original graph
 std::vector<mobile::nnc::InputSpec> toInputSpecs(
-    const std::shared_ptr<tensorexpr::TensorExprKernel>& kernel) {
-  const std::shared_ptr<Graph>& g = kernel->graph();
+    const std::shared_ptr<Graph>& g) {
   std::vector<mobile::nnc::InputSpec> specs;
-
-  // Graph inputs include scalar values for symbolic shapes, for which we
-  // don't need input specs. These scalar values come last among the graph
-  // inputs
-  auto num_inputs =
-      g->inputs().size() - kernel->getSymbolicShapeInputs().size();
-
-  for (int i = 0; i < num_inputs; i++) {
-    auto v = g->inputs()[i];
+  for (auto v : g->inputs()) {
     const auto& t = v->type();
     mobile::nnc::InputSpec spec;
     TORCH_CHECK(t->kind() == TypeKind::TensorType, "Unsupported input type");
@@ -129,7 +120,7 @@ std::unique_ptr<Function> compileMethod(
     const std::vector<at::ScalarType>& types) {
   auto func = std::make_unique<Function>();
   func->set_name(method_name);
-  func->set_input_specs(toInputSpecs(kernel));
+  func->set_input_specs(toInputSpecs(kernel->graph()));
 
   auto params = c10::impl::GenericList(c10::AnyType::get());
   auto const_descriptors = kernel->getConstantDescriptors();
@@ -186,33 +177,18 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     std::shared_ptr<Graph>& g,
     const std::vector<std::vector<int64_t>>& sizes,
     const std::vector<at::ScalarType>& types,
-    const std::string& kernel_func_name,
-    const std::vector<int64_t>& symbolic_ind) {
+    const std::string& kernel_func_name) {
   GRAPH_DEBUG("Input sizes ", sizes);
   GRAPH_DEBUG("Input types ", types);
   GRAPH_DEBUG("Method name ", method_name);
   GRAPH_DEBUG("Kernel func name ", kernel_func_name);
-  GRAPH_DEBUG("Symbolic indices ", symbolic_ind);
 
-  std::shared_ptr<tensorexpr::TensorExprKernel> kernel;
-  std::vector<torch::jit::StrideInput> stride_desc = {
-      torch::jit::StrideInput::TENSOR_CONT};
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides;
-  if (!symbolic_ind.empty()) {
-    for (auto i : g->inputs()) {
-      symbolic_strides[i] = stride_desc;
-    }
-    for (auto o : g->outputs()) {
-      symbolic_strides[o] = stride_desc;
-    }
-  }
-  kernel = std::make_shared<tensorexpr::TensorExprKernel>(TensorExprKernel(
-      g, kernel_func_name, {}, symbolic_ind, false, symbolic_strides));
+  std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
+      std::make_shared<tensorexpr::TensorExprKernel>(
+          TensorExprKernel(g, kernel_func_name));
 
   const std::string compiled_assembly = kernel->getCodeText();
+
   auto func = compileMethod(kernel, method_name, sizes, types);
   return std::make_pair(std::move(func), compiled_assembly);
 }
@@ -295,17 +271,6 @@ std::vector<at::MemoryFormat> parseInputMemoryFormats(
   return memFormats;
 }
 
-std::vector<int64_t> parseInputDynamicShapes(
-    const std::string& dynamic_dims_s) {
-  std::vector<std::string> dynamic_dims_list = split(',', dynamic_dims_s);
-  std::vector<int64_t> dynamic_dims;
-  dynamic_dims.reserve(dynamic_dims_list.size());
-  for (const auto& dim : dynamic_dims_list) {
-    dynamic_dims.push_back(c10::stoi(dim));
-  }
-  return dynamic_dims;
-}
-
 std::string getNncKernelId(
     const std::string& model_name,
     const std::string& model_version,
@@ -323,12 +288,9 @@ std::string getNncKernelFuncName(
   return "nnc_" + model_name + "_" + model_version + "_" + method_name;
 }
 
-// Preprocess the graph and returns the processed graph and
-// symbolic values if dynamic input shapes are specified
-std::pair<std::shared_ptr<Graph>, std::vector<int64_t>> preprocessGraphPasses(
+std::shared_ptr<Graph> preprocessGraphPasses(
     std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs,
-    const std::vector<int64_t>& dynamic_sizes) {
+    const std::vector<c10::optional<at::Tensor>>& example_inputs) {
   GRAPH_DEBUG("Before preprocessing graph passes: ", *graph);
   torch::jit::RemoveTensorMutation(graph);
   torch::jit::EliminateDeadCode(graph->block());
@@ -359,12 +321,8 @@ std::pair<std::shared_ptr<Graph>, std::vector<int64_t>> preprocessGraphPasses(
   RemoveTensorMutation(graph);
   EliminateDeadCode(graph);
   LowerAllTuples(graph);
-
-  auto sym_val =
-      torch::jit::tensorexpr::makeShapesSymbolic(graph, dynamic_sizes);
-
   GRAPH_DEBUG("After preprocessing graph passes: ", *graph);
-  return std::make_pair(graph, sym_val);
+  return graph;
 }
 
 std::vector<c10::optional<at::Tensor>> generateExampleInputs(
@@ -377,7 +335,8 @@ std::vector<c10::optional<at::Tensor>> generateExampleInputs(
     const auto dtype = at::dtype(inputTypes[i]);
     const auto memory_format = inputMemoryFormats[i];
     example_inputs.emplace_back(
-        at::rand(inputShapes[i]).to(dtype).contiguous(memory_format));
+        at::rand(inputShapes[i], at::TensorOptions(dtype))
+            .contiguous(memory_format));
   }
   return example_inputs;
 }
@@ -405,8 +364,6 @@ c10::IValue preprocess(
 
     auto sizes = parseInputShapes(*method_spec.at("sizes").toString());
     auto types = parseInputTypes(*method_spec.at("types").toString());
-    auto dynamic_sizes =
-        parseInputDynamicShapes(*method_spec.at("dynamic_sizes").toString());
 
     std::string memory_formats_str = method_spec.contains("memory_formats")
         ? (*method_spec.at("memory_formats").toString()).string()
@@ -417,20 +374,12 @@ c10::IValue preprocess(
         : parseInputMemoryFormats(memory_formats_str);
 
     auto example_inputs = generateExampleInputs(sizes, types, memory_formats);
-    auto preprocessed =
-        preprocessGraphPasses(graph, example_inputs, dynamic_sizes);
+    graph = preprocessGraphPasses(graph, example_inputs);
 
     auto kernel_func_name =
         getNncKernelFuncName(model_name, model_version, method_name);
-    auto processed_graph = preprocessed.first;
-    auto sym_values = preprocessed.second;
     auto compiled = torch::jit::mobile::nnc::aotCompile(
-        method_name,
-        processed_graph,
-        sizes,
-        types,
-        kernel_func_name,
-        sym_values);
+        method_name, graph, sizes, types, kernel_func_name);
     writeOutputLlvmAssembly(compiled.second, asmfile_name);
     auto func = std::move(compiled.first);
     func->set_nnc_kernel_id(

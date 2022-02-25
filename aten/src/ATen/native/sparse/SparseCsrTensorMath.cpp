@@ -92,7 +92,6 @@
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zero_native.h>
 #endif
 
 #include <algorithm>
@@ -309,8 +308,6 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-
-CREATE_UNARY_UFUNC_INPLACE(zero);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.

@@ -18,7 +18,6 @@ on:
 {%- if not is_scheduled %}
     branches:
       - master
-      - main
       - release/*
 {%- endif %}
 {%- for label in ciflow_config.labels | sort %}

@@ -1,6 +1,5 @@
 #include <c10/util/StringUtil.h>
 #include <c10d/Utils.hpp>
-#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
 #include <string>
@@ -125,11 +124,11 @@ std::vector<std::vector<size_t>> Logger::get_per_bucket_variable_indices() {
   return per_bucket_variable_indices;
 }
 
-std::vector<int64_t> Logger::get_bucket_sizes() {
-  std::vector<int64_t> bucket_sizes;
+std::vector<int> Logger::get_bucket_sizes() {
+  std::vector<int> bucket_sizes;
   for (const auto& bucket : reducer_->buckets_) {
-    const auto& variables = bucket.variables;
-    int64_t bucket_size = 0;
+    const auto& variables = bucket.replicas[0].variables;
+    int bucket_size = 0;
     for (const auto& v : variables) {
       bucket_size += v.numel() * v.element_size();
     }
@@ -208,7 +207,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["backend_name"] =
       reducer_->process_group_->getBackendName();
 
-  if (debug_level() != DebugLevel::Off) {
+  if (parseDistDebugLevel() != DistributedDebugLevel::OFF) {
     std::string initInfo = fmt::format(
         "[Rank {}]: DDP Initialized with: \n",
         ddp_logging_data_->ints_map["rank"]);
@@ -382,7 +381,7 @@ void Logger::set_runtime_stats_and_log() {
   );
 
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
-  if (debug_level() == DebugLevel::Detail) {
+  if (parseDistDebugLevel() == DistributedDebugLevel::DETAIL) {
     LOG(INFO) << *this;
   }
 

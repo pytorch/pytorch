@@ -4,8 +4,11 @@ from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data import IterDataPipe, functional_datapipe
-from torch.utils.data.datapipes.utils.common import check_lambda_fn
-from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn
+from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+
+if DILL_AVAILABLE:
+    import dill
+    dill.extend(use_dill=False)
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -153,31 +156,6 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.slowest_ptr = 0
         self.leading_ptr = 0
         self.end_ptr = None
-
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
-        state = (
-            self.main_datapipe,
-            self.num_instances,
-            self.buffer_size,
-        )
-        return state
-
-    def __setstate__(self, state):
-        (
-            self.main_datapipe,
-            self.num_instances,
-            self.buffer_size,
-        ) = state
-        self._datapipe_iterator = None
-        self.buffer = deque()
-        self.child_pointers = [0] * self.num_instances
-        self.slowest_ptr = 0
-        self.leading_ptr = 0
-        self.end_ptr = None
-
 
 class _ChildDataPipe(IterDataPipe):
     r"""
@@ -343,12 +321,15 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
 
-        serialized_fn_with_method = serialize_fn(self.classifier_fn)
+        if DILL_AVAILABLE:
+            dill_function = dill.dumps(self.classifier_fn)
+        else:
+            dill_function = self.classifier_fn
         state = (
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            serialized_fn_with_method,
+            dill_function,
             self.drop_none,
         )
         return state
@@ -358,10 +339,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            serialized_fn_with_method,
+            dill_function,
             self.drop_none,
         ) = state
-        self.classifier_fn = deserialize_fn(serialized_fn_with_method)
+        if DILL_AVAILABLE:
+            self.classifier_fn = dill.loads(dill_function)  # type: ignore[assignment]
+        else:
+            self.classifier_fn = dill_function  # type: ignore[assignment]
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]

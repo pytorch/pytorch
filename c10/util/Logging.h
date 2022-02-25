@@ -305,9 +305,6 @@ namespace detail {
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 } // namespace detail
 
-// Initializes the c10 logger.
-C10_API void initLogging();
-
 } // namespace c10
 
 #endif // C10_UTIL_LOGGING_H_

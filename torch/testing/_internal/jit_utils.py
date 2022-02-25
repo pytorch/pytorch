@@ -37,7 +37,7 @@ import sys
 import tempfile
 import textwrap
 from importlib.abc import Loader
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1

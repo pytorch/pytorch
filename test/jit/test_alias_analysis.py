@@ -69,11 +69,6 @@ class TestAliasAnalysis(JitTestCase):
             self.assertTrue(alias_db.has_writers(inps[1]))
             self.assertFalse(alias_db.has_writers(inps[2]))
 
-        func_inps = [list(func_call.inputs()) for func_call in func_calls]
-        a = func_inps[0][1]
-        d = func_inps[1][1]
-        self.assertFalse(alias_db.may_contain_alias(a, d))
-
         class Mod(torch.nn.Module):
             def forward(self):
                 a = torch.rand([2, 2])
@@ -96,11 +91,3 @@ class TestAliasAnalysis(JitTestCase):
             inps = list(node.inputs())
             self.assertTrue(alias_db.has_writers(inps[1]))
             self.assertFalse(alias_db.has_writers(inps[2]))
-
-        a = next(func_calls[0].inputs())
-        d = next(func_calls[1].inputs())
-
-        func_inps = [list(func_call.inputs()) for func_call in func_calls]
-        a = func_inps[0][1]
-        d = func_inps[1][1]
-        self.assertFalse(alias_db.may_contain_alias(a, d))
