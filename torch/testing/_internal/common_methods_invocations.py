@@ -16,7 +16,7 @@ import collections.abc
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
-from torch.testing import make_non_contiguous, make_tensor
+from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
@@ -15831,7 +15831,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
 
     def map_arg(arg):
         def maybe_non_contig(tensor):
-            return tensor if not non_contiguous else make_non_contiguous(tensor)
+            if not non_contiguous or tensor.numel() < 2:
+                return tensor.clone()
+
+            return noncontiguous_like(tensor)
 
         def conjugate(tensor):
             return tensor.conj()
