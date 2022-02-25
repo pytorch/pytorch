@@ -144,7 +144,7 @@ class TestOperators(TestCase):
             AssertionError,
             lambda: torch.onnx.export(model, (x,), f, opset_version=_onnx_opset_version),
             ("A mismatch between the number of arguments (2) and their descriptors (1) was found at symbolic function "
-             "'cat'. If you believe this is not due to custom symbolic implementation within your code oran external "
+             "'cat'. If you believe this is not due to custom symbolic implementation within your code or an external "
              "library, please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md to "
              "report this bug."))
         unregister_custom_op_symbolic('::cat', _onnx_opset_version)
