@@ -155,10 +155,8 @@ class TestFSDPStateDict(FSDPTest):
         # Save a copy of the state_dict
         state_dict = {k: v.clone() for k, v in model.state_dict().items()}
         _zero_model(model)
-        torch.cuda.synchronize()  # not needed after D34430602
-        zerod_params = _get_full_detached_param(model)
 
-        # Load state_dict into zeroed mode
+        # Load state_dict into zeroed model
         model.load_state_dict(state_dict)
         loaded_params = _get_full_detached_param(model)
         self.assertEqual(loaded_params, trained_params)
