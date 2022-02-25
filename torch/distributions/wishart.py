@@ -263,14 +263,15 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
 
-        assert nu.gt(p - 1).all(), "Wrong domain for multivariate digamma function."
         return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + 0.5 * p * (p + 1) * _log_2
             + torch.mvlgamma(0.5 * nu, p=p)
             - 0.5 * (nu - p - 1) * torch.digamma(
-                0.5 * nu.unsqueeze(-1)
-                - torch.arange(p, dtype=nu.dtype, device=nu.device).div(2).expand(nu.shape + (-1,))
+                0.5 * (
+                    nu.unsqueeze(-1)
+                    - torch.arange(p, dtype=nu.dtype, device=nu.device).expand(nu.shape + (-1,))
+                )
             ).sum(-1)
             + 0.5 * nu * p
         )
