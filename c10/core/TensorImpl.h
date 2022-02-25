@@ -1559,6 +1559,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         (is_sparse(key_set_) && is_sparse(from));
   }
 
+ private:
+  template <typename VariableVersion>
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach_core(
+      VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const;
+
+ public:
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *

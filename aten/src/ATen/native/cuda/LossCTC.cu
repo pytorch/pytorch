@@ -213,8 +213,6 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   TORCH_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
   TORCH_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
-  int64_t lp_input_stride = log_probs.stride(0);
-  int64_t lp_char_stride = log_probs.stride(2);
   int64_t tg_target_stride;
 
   int64_t max_target_length = 0;
@@ -418,7 +416,7 @@ C10_LAUNCH_BOUNDS_2((std::is_same<scalar_t, float>::value ? 1024 : 896), 1)
 ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_data,
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
                                                      const scalar_t* __restrict__ log_alpha_data, const scalar_t* __restrict__ log_beta_data,
-                                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths, int64_t max_input_length,
+                                                     const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths,
                                                      const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
                                                      const scalar_t* __restrict__ neg_log_likelihood_data,
                                                      int64_t gr_input_stride, int64_t gr_batch_stride, int64_t gr_char_stride,
@@ -574,8 +572,6 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  int64_t lp_input_stride = log_probs.stride(0);
-  int64_t lp_char_stride = log_probs.stride(2);
   int64_t tg_target_stride;
 
   int64_t max_target_length;
@@ -679,7 +675,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (grad.data_ptr<scalar_t>(),
        grad_out.data_ptr<scalar_t>(), grad_out.stride(0),
        log_alpha.data_ptr<scalar_t>(), log_beta.data_ptr<scalar_t>(),
-       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(), log_probs.size(0),
+       log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(),
        targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
        neg_log_likelihood.data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),

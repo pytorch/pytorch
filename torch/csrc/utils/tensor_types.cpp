@@ -6,6 +6,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <ATen/Context.h>
+#include <ATen/Formatting.h>
 
 #include <sstream>
 #include <unordered_map>

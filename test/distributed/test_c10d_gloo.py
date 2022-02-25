@@ -1564,9 +1564,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            cpu_model._set_static_graph()
         run_and_verify_grad(cpu_model)
 
         # Test on GPU
@@ -1577,9 +1576,8 @@ class DistributedDataParallelTest(
             process_group=process_group,
             find_unused_parameters=True,
             gradient_as_bucket_view=gradient_as_bucket_view,
+            static_graph=static_graph,
         )
-        if static_graph:
-            gpu_model._set_static_graph()
         run_and_verify_grad(gpu_model)
 
     @requires_gloo()

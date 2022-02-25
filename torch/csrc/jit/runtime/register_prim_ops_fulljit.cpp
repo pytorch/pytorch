@@ -3,6 +3,7 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <algorithm>
 #include <bitset>
