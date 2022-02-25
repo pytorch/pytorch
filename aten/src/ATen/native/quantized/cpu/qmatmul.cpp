@@ -67,7 +67,7 @@ Tensor qmatmul(
 
   ruy::Context context;
 
-  AT_DISPATCH_QINT_8_BIT_TYPES(qa.scalar_type(), "qmatmul", [&] {
+  AT_DISPATCH_QINT_BYTE_TYPES(qa.scalar_type(), "qmatmul", [&] {
     using underlying_t = typename scalar_t::underlying;
 
     const underlying_t* qa_data = reinterpret_cast<const underlying_t*>(
