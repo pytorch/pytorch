@@ -1,9 +1,11 @@
-# WARNING: the contents of this file must BOTH be valid Skylark (for Buck and
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
+
 # Bazel) as well as valid Python (for our cmake build).  This means that
 # load() directives are not allowed (as they are not recognized by Python).
 # If you want to fix this, figure out how run this file from cmake with a proper
-# Skylark interpreter as part of the default OSS build process.  If you need
-# some nontrivial Skylark features, make a separate bzl file (remember that
+# Starlark interpreter as part of the default OSS build process.  If you need
+# some nontrivial Starlark features, make a separate bzl file (remember that
+
 # bzl files are not exported via ShipIt by default, so you may also need to
 # update PyTorch's ShipIt config)
 
