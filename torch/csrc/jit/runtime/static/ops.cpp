@@ -2547,15 +2547,41 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-/*
+namespace {
 
-TODO(T112769635): Fix broadcasting for this out variant
+void where_out(
+    at::Tensor& out,
+    const at::Tensor& condition,
+    const at::Tensor& self,
+    const at::Tensor& other) {
+  // No need to do the device check, everything is CPU in static runtime
+
+  if (condition.scalar_type() == c10::ScalarType::Byte) {
+    TORCH_WARN_ONCE(
+        "where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+  } else {
+    TORCH_CHECK(
+        condition.scalar_type() == c10::ScalarType::Bool,
+        "where expected condition to be a boolean tensor, but got a tensor with dtype ",
+        condition.scalar_type());
+  }
+
+  c10::MaybeOwned<at::Tensor> b_condition, b_self, b_other;
+  std::tie(b_condition, b_self, b_other) =
+      expand_outplace(condition, self, other, "where");
+
+  // `out` will be resized by TensorIterator in the op implementation.
+  at::cpu::_s_where_out(out, condition, self, other);
+}
+
+} // namespace
 
 REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::where.self(Tensor condition, Tensor self, Tensor other) ->
-Tensor"))) { return [](ProcessedNode* p_node) { const auto& cond =
-p_node->Input(0).toTensor(); const auto& self = p_node->Input(1).toTensor();
+          "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& cond = p_node->Input(0).toTensor();
+      const auto& self = p_node->Input(1).toTensor();
       const auto& other = p_node->Input(2).toTensor();
 
       if (p_node->Output(0).isNone()) {
@@ -2563,15 +2589,13 @@ p_node->Input(0).toTensor(); const auto& self = p_node->Input(1).toTensor();
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::where_out(cond, self, other, out);
+      where_out(out, cond, self, other);
     };
   }
 
   LogAndDumpSchema(n);
   return nullptr;
 });
-
-*/
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::NumToTensor,

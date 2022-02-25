@@ -11,7 +11,7 @@ namespace at { namespace native {
 
 namespace {
 
-void where_kernel_impl(TensorIterator &iter) {
+void where_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.dtype(), "where_cuda", [&] {
       gpu_kernel(
         iter,

@@ -4792,6 +4792,12 @@
 
 - func: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   variants: function
+  structured_delegate: _s_where.out
+
+- func: _s_where.out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: _s_where
 
