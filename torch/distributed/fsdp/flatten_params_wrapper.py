@@ -18,14 +18,60 @@ from typing import (
     Optional,
     Sequence,
     Tuple,
+    TYPE_CHECKING,
+    Union,
 )
 
 import torch
 import torch.nn as nn
 from torch import Tensor
 
+from .utils import _replace_by_prefix
+
+if TYPE_CHECKING:
+    from collections import OrderedDict  # noqa: F401
+
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
+FLAT_PARAM = "flat_param"
+FPW_MODULE = "_fpw_module"
+
+
+def _post_state_dict_hook(
+    module: nn.Module, state_dict: "OrderedDict[str, Tensor]", prefix: str, *args: Any
+) -> "OrderedDict[str, Tensor]":
+    """
+    _post_state_dict_hook() is called after the state_dict() is executed
+    and before returning the state_dict to the users.
+    This API post-processes the keys of the state_dict to remove the
+    FlattenParamsWrapper internal prefix.
+    """
+    # Move everything from FPW_MODULE up one level.
+    _replace_by_prefix(state_dict, prefix + f"{FPW_MODULE}.", prefix)
+    return state_dict
+
+
+def _pre_load_state_dict_hook(
+    state_dict: Union[Dict[str, Tensor], "OrderedDict[str, Tensor]"],
+    prefix: str,
+    *args: Any,
+) -> None:
+    """
+    _post_state_dict_hook() is called before the _load_from_state_dict() is
+    This API pre-processes the keys of the state_dict to add the
+    FlattenParamsWrapper internal prefix
+    """
+    # Push everything down to FPW_MODULE level.
+    _replace_by_prefix(state_dict, prefix, prefix + f"{FPW_MODULE}.")
+    # The flat_param_* keys actually needs to move one level up.
+    flat_param_key = prefix + f"{FPW_MODULE}.{FLAT_PARAM}"
+    for k in list(state_dict.keys()):
+        if k.startswith(flat_param_key):
+            last_part = k.split(".")[-1]
+            assert last_part.startswith(
+                FLAT_PARAM
+            ), f"Expected key to contain flat_param, but key name is {k}"
+            _replace_by_prefix(state_dict, k, prefix + last_part)
 
 
 class ParamInfo(NamedTuple):
@@ -98,10 +144,13 @@ class FlatParameter(nn.Parameter):
     def __init__(self, params: Sequence[nn.Parameter], requires_grad: bool = True):
         self._is_sharded = False
         self._param_numels = [p.numel() for p in params]
-        assert self.numel() <= sum(self._param_numels), (
+        # The total element numbers. This is equal to the summation of the
+        # ``numel()`` of all the parameters.
+        self.full_numel = sum(self._param_numels)
+        assert self.numel() <= self.full_numel, (
             "Parameter numbers mismatched. "
             f"The number of elements in FlatParameter: {self.numel()} vs. "
-            f"the number of elements in original parameters: {sum(self._param_numels)}."
+            f"the number of elements in original parameters: {self.full_numel}."
         )
         # The shapes of each individual parameter.
         self._param_shapes = [p.size() for p in params]
@@ -124,7 +173,7 @@ class FlatParameter(nn.Parameter):
             (0, numel) for numel in self._param_numels
         ]
         # The number of padding elements.
-        self._num_padded = 0
+        self.num_padded = 0
 
     def shard_by_offsets(self, start: int, end: int, num_padded: int) -> None:
         assert self._is_sharded
@@ -133,8 +182,8 @@ class FlatParameter(nn.Parameter):
                 f"Shard the flatten parameter with an invalid offset pair {(start, end)}."
             )
         _shard_size = end - start + 1
-        self._num_padded = num_padded
-        if self._num_padded > _shard_size:
+        self.num_padded = num_padded
+        if self.num_padded > _shard_size:
             raise ValueError("The number of padding is larger than the shard size.")
         self._sharded_param_offsets.clear()
 
@@ -163,13 +212,13 @@ class FlatParameter(nn.Parameter):
     ) -> Iterator[Tensor]:
         """Return a generator of views that map to the original parameters."""
         # Note, self.data could be sharded, so its numel is <= to the sum.
-        assert self.data.numel() <= sum(
-            self._param_numels
-        ), f"Incorrect internal state {self.data.numel()} vs. {sum(self._param_numels)}"
+        assert (
+            self.data.numel() <= self.full_numel
+        ), f"Incorrect internal state {self.data.numel()} vs. {self.full_numel}"
         data = external_data if external_data is not None else self
-        if data.numel() != sum(self._param_numels):
+        if data.numel() != self.full_numel:
             raise ValueError(
-                f"Incorrect numel of supplied data: got {data.numel()} but expected {sum(self._param_numels)}"
+                f"Incorrect numel of supplied data: got {data.numel()} but expected {self.full_numel}"
             )
         return (
             t.view(s)
@@ -251,6 +300,15 @@ class FlattenParamsWrapper(nn.Module):
         # ``_orig_flat_param` is a list to avoid being tracked by ``state_dict()``.
         self._orig_flat_param: List[Optional[FlatParameter]] = [None]
         self._flatten_params()
+
+        # Sanity check for the string constants.
+        assert getattr(self, FPW_MODULE) is self._fpw_module
+        assert getattr(self, FLAT_PARAM) is self.flat_param
+
+        # Register hook to be called after state_dict() to remove the
+        # "_fpw_module." prefix and before load_state_dict() to add it back.
+        self._register_state_dict_hook(_post_state_dict_hook)
+        self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
 
     @property
     def module(self) -> Any:

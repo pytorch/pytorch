@@ -4111,45 +4111,6 @@ class TestQuantizedConv(TestCase):
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu, use_channelwise, False)
 
-    @given(batch_size=st.integers(1, 3),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           input_channels_per_group=st.sampled_from([16, 32]),
-           height=st.integers(10, 16),
-           width=st.integers(7, 14),
-           # only multiples of 16 are supported right now, might be fixed in
-           # next release of cudnn
-           # output_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
-           output_channels_per_group=st.sampled_from([16, 32]),
-           # groups=st.integers(1, 3),
-           groups=st.integers(1, 1),
-           kernel_h=st.integers(1, 7),
-           kernel_w=st.integers(1, 7),
-           stride_h=st.integers(1, 2),
-           stride_w=st.integers(1, 2),
-           pad_h=st.integers(0, 2),
-           pad_w=st.integers(0, 2),
-           # result for dilation == 2 is not correct
-           # dilation=st.integers(1, 2),
-           dilation=st.integers(1, 1),
-           X_scale=st.floats(1.2, 1.6),
-           X_zero_point=st.sampled_from([0]),
-           W_scale=st.lists(st.floats(0.2, 1.6), min_size=1, max_size=2),
-           W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
-           Y_scale=st.floats(4.2, 5.6),
-           Y_zero_point=st.sampled_from([0]),
-           # TODO: enable bias
-           use_bias=st.booleans(),
-           # TODO: enable relu
-           use_relu=st.sampled_from([False]),
-           # TODO: enable channelwise
-           use_channelwise=st.sampled_from([False]))
-    @skipIfNoFBGEMM
-    @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-                   "after it is built by default")
     def test_qconv2d_cudnn(
             self,
             batch_size,

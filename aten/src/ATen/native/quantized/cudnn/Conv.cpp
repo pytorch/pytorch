@@ -212,7 +212,7 @@ void raw_cudnn_convolution_forward_out(
   }
 
   Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  // TODO: compile empty & fill_ using full_like or full
+  // TODO: combine empty & fill_ using full_like or full
   Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
@@ -220,7 +220,11 @@ void raw_cudnn_convolution_forward_out(
   c10::optional<at::Tensor> after_add;
   c10::optional<at::Tensor> broadcasted_bias;
   if (bias.has_value()) {
-    std::vector<int64_t> new_size(quantized_output.sizes().size() - 1, 1);
+    // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
+    // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
+    // the number of trailling dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
+    // becomes quantized_output.dim() - 2 + 1. nothing needs to be done for the leading dimensions
+    std::vector<int64_t> new_size(quantized_output.dim() - 1, 1);
     new_size[0] = bias.value().size(0);
     broadcasted_bias = bias.value().reshape(new_size);
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
@@ -240,31 +244,32 @@ void raw_cudnn_convolution_forward_out(
   key.input_alignment = getAlignment(input);
   key.output_alignment = getAlignment(conv_output);
   key.weight_alignment = getAlignment(weight);
-  if (bias.has_value()) key.bias_alignment = getAlignment(broadcasted_bias.value());
-  else key.bias_alignment = -1;
+  if (bias.has_value()) {
+    key.bias_alignment = getAlignment(broadcasted_bias.value());
+  } else {
+    key.bias_alignment = -1;
+  }
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
     std::vector<void *> data_ptrs;
     std::vector<int64_t> uids;
+    data_ptrs.reserve(9);
+    uids.reserve(9);
+    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
+                                           reinterpret_cast<int8_t*>(weight.data_ptr()),
+                                           requantize_multiplier_tensor.data_ptr(),
+                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    uids = {'x', 'y', 'w', 's', 'r'};
     if (bias.has_value()) {
-      data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                  reinterpret_cast<int8_t*>(weight.data_ptr()),
-                                  requantize_multiplier_tensor.data_ptr(),
-                                  reinterpret_cast<int8_t*>(quantized_output.data_ptr()),
-                                  broadcasted_bias.value().data_ptr(),
-                                  bias_multiplier_tensor.value().data_ptr(),
-                                  after_scales_bias.value().data_ptr(),
-                                  after_add.value().data_ptr(),
-                                  };
-      uids = std::vector<int64_t>{'x', 'y', 'w', 's', 'r', 'b', 'c', 'd', 'e'};
-    } else {
-      uids = std::vector<int64_t>{'x', 'y', 'w', 's', 'r'};
-      data_ptrs = std::vector<void *>{reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                  reinterpret_cast<int8_t*>(weight.data_ptr()),
-                                  requantize_multiplier_tensor.data_ptr(),
-                                  reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+      void *ptrs2append[] = {broadcasted_bias.value().data_ptr(),
+                             bias_multiplier_tensor.value().data_ptr(),
+                             after_scales_bias.value().data_ptr(),
+                             after_add.value().data_ptr()};
+      int64_t ids2append[] = {'b', 'c', 'd', 'e'};
+      data_ptrs.insert(data_ptrs.end(), std::begin(ptrs2append), std::end(ptrs2append));
+      uids.insert(uids.end(), std::begin(ids2append), std::end(ids2append));
     }
     auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setWorkspacePointer(workspace.data_ptr())
@@ -320,10 +325,12 @@ void raw_cudnn_convolution_forward_out(
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
 
-  std::vector<cudnn_frontend::Operation const *> ops{bias.has_value() ?
-                                                  std::vector<cudnn_frontend::Operation const *>{&conv_op,
-                                                    &(bias_mult_op.value()), &(sum_conv_bias_op.value()), &requant_op}
-                                                  : std::vector<cudnn_frontend::Operation const *>{&conv_op, &requant_op}};
+  std::vector<cudnn_frontend::Operation const *> ops{&conv_op};
+  if (bias.has_value()) {
+    ops.emplace_back(&(bias_mult_op.value()));
+    ops.emplace_back(&(sum_conv_bias_op.value()));
+  }
+  ops.emplace_back(&requant_op);
 
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
@@ -366,7 +373,22 @@ void raw_cudnn_convolution_forward_out(
 //
 // output Tensor will be a clampped int8 Tensor
 // both act and weight will be int8 Tensor
-//
+/*
+Numerics:
+Operation:
+out_fp32 = conv_fp32(act_fp32, w_fp32, …)
+                    = act_fp32 * w_fp32 + bias_fp32
+act_int8 = act_fp32 / act_scale + act_zero_point
+w_int8 = w_fp32 / w_scale + w_zero_point
+out_int8 = out_fp32 / out_scale + out_zero_point
+out_int8 = (act_fp32 * w_fp32 + [bias_fp32]) / out_scale + out_zero_point
+              = (act_int8 - act_zero_point) * act_scale * (w_int8 - w_zero_point) * w_scale / out_scale + out_zero_point + [bias_fp32 / out_scale]
+             = (act_int8 * w_int8 - act_int8 * w_zero_point - act_zero_point * w_int8 + act_zero_point * w_zero_point) * act_scale * w_scale / out_scale + out_zero_point + [bias_fp32 / out_scale]
+             = (if both act and weight are symmetrically quantized, int8, then act_zero_point = w_zero_point = 0)
+             = (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]) * act_scale * w_scale / out_scale
+             = (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]) / (out_scale / (act_scale * w_scale))
+             = requantize((act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)]), out_scale / (act_scale * w_scale))
+*/
 template <int kSpatialDim>
 Tensor raw_cudnn_convolution_forward(
     const Tensor& act,
