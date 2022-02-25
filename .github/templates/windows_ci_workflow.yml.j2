@@ -104,6 +104,10 @@ jobs:
         run: |
           .circleci/scripts/windows_cudnn_install.sh
 {%- endif %}
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       !{{ common.parse_ref() }}
       - name: Build
         shell: bash
