@@ -34,6 +34,7 @@ on:
 {%- if not is_scheduled and not only_on_pr %}
     branches:
       - master
+      - main
       - release/*
 {%- endif %}
 {%- if is_scheduled and not only_on_pr %}
@@ -104,6 +105,10 @@ jobs:
         run: |
           .circleci/scripts/windows_cudnn_install.sh
 {%- endif %}
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       !{{ common.parse_ref() }}
       - name: Build
         shell: bash
