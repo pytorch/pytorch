@@ -821,11 +821,6 @@ from torch import profiler as profiler
 
 _C._init_names(list(torch._storage_classes))
 
-# attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
-del _torch_docs, _tensor_docs, _storage_docs
-
-
 def compiled_with_cxx11_abi():
     r"""Returns whether PyTorch was built with _GLIBCXX_USE_CXX11_ABI=1"""
     return _C._GLIBCXX_USE_CXX11_ABI
@@ -834,6 +829,10 @@ def compiled_with_cxx11_abi():
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+
+# attach docstrings to torch, tensor, storage, quantization functions
+from . import _torch_docs, _tensor_docs, _storage_docs, _quantization_docs
+del _torch_docs, _tensor_docs, _storage_docs, _quantization_docs
 
 # quantization depends on torch.fx
 # Import quantization

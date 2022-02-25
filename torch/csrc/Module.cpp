@@ -269,6 +269,17 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
           "Type '%s' already has a docstring", t->tp_name);
     }
     t->tp_doc = doc_str;
+  } else if (strcmp(Py_TYPE(obj)->tp_name, "OpOverloadPacket") == 0) {
+    const auto current_doc_str = PyObject_GetAttrString(obj, "__doc__");
+    if (current_doc_str != Py_None) {
+      const auto qual_op_name_obj = PyObject_GetAttrString(
+        obj, "qualified_op_name");
+      const auto qual_op_name_str = THPUtils_unpackString(
+        qual_op_name_obj);
+      return PyErr_Format(PyExc_RuntimeError,
+          "function '%s' already has a docstring", qual_op_name_str.c_str());
+    }
+    PyModule_SetDocString(obj, doc_str);
   } else {
     return PyErr_Format(PyExc_TypeError,
         "don't know how to add docstring to type '%s'", Py_TYPE(obj)->tp_name);
