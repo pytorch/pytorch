@@ -6,16 +6,16 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/resolver.h>
-#include <torch/csrc/jit/mobile/backport.h>
-#include <torch/csrc/jit/mobile/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/compatibility/runtime_compatibility.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
@@ -772,7 +772,7 @@ void testLiteModuleCompareResultTensors(
   AT_ASSERT(output.equal(outputref));
 }
 
-void testDefaultArgsPinv(int num_args) {
+static void testDefaultArgsPinv(int num_args) {
   Module m("m");
   if (num_args == 1) {
     m.define(R"(
@@ -798,68 +798,6 @@ void testDefaultArgsPinv(int num_args) {
   input = input.view({N, N});
   inputs.emplace_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
-}
-
-void testDefaultArgsPinvWithOutArg(int num_args) {
-  Module m("m");
-  if (num_args == 1) {
-    m.define(R"(
-      def forward(self, input):
-        return torch.linalg_pinv(input, out=input)
-    )");
-  } else if (num_args == 2) {
-    m.define(R"(
-      def forward(self, input):
-        return torch.linalg_pinv(input, 1e-5, out=input)
-    )");
-  } else if (num_args == 3) {
-    m.define(R"(
-      def forward(self, input):
-        return torch.linalg_pinv(input, 1e-5, True, out=input)
-    )");
-  }
-
-  const int N = 28;
-  auto input = torch::range(1, N * N, 1);
-  input[0] = 10000; // a more stable matrix
-  input = input.view({N, N});
-  auto ref = m.run_method("forward", input);
-  TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
-  TORCH_CHECK(input.equal(ref.toTensor()));
-}
-
-TEST(FlatbufferTest, DefaultArgsPinvWithOutArg) {
-  // Test with different number of specified arguments + out arg.
-  // Arguments not specified take default value.
-  for (int num_args = 1; num_args <= 3; ++num_args) {
-    testDefaultArgsPinvWithOutArg(num_args);
-  }
-}
-
-TEST(FlatbufferTest, DefaultArgsWithOutArg) {
-  Module m("m");
-  m.define(R"(
-    def forward(self, x, h):
-      torch.add(x, h, out=x)
-  )");
-
-  std::vector<IValue> inputs;
-  auto input_x = 2 * torch::ones({});
-  auto input_h = torch::ones({});
-  auto ref = m.run_method("forward", input_x, input_h);
-
-  CompilationOptions options;
-  mobile::Module bc = jitModuleToMobile(m, options);
-  bc.run_method("forward", input_x, input_h);
-  AT_ASSERT(input_x.equal(4 * torch::ones({})));
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  auto input_x2 = 2 * torch::ones({});
-  auto input_h2 = torch::ones({});
-  m.run_method("forward", input_x2, input_h2);
-  bc2.run_method("forward", input_x2, input_h2);
-  AT_ASSERT(input_x2.equal(4 * torch::ones({})));
 }
 } // namespace
 
@@ -960,6 +898,68 @@ TEST(FlatbufferTest, DefaultArgsTensorinvSpecifyDefault) {
   auto input = torch::rand({N, N, N, N});
   inputs.emplace_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
+}
+
+static void testDefaultArgsPinvWithOutArg(int num_args) {
+  Module m("m");
+  if (num_args == 1) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, out=input)
+    )");
+  } else if (num_args == 2) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, out=input)
+    )");
+  } else if (num_args == 3) {
+    m.define(R"(
+      def forward(self, input):
+        return torch.linalg_pinv(input, 1e-5, True, out=input)
+    )");
+  }
+
+  const int N = 28;
+  auto input = torch::range(1, N * N, 1);
+  input[0] = 10000; // a more stable matrix
+  input = input.view({N, N});
+  auto ref = m.run_method("forward", input);
+  TORCH_CHECK(!input.equal(torch::range(1, N * N, 1)));
+  TORCH_CHECK(input.equal(ref.toTensor()));
+}
+
+TEST(FlatbufferTest, DefaultArgsPinvWithOutArg) {
+  // Test with different number of specified arguments + out arg.
+  // Arguments not specified take default value.
+  for (int num_args = 1; num_args <= 3; ++num_args) {
+    testDefaultArgsPinvWithOutArg(num_args);
+  }
+}
+
+TEST(FlatbufferTest, DefaultArgsWithOutArg) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, x, h):
+      torch.add(x, h, out=x)
+  )");
+
+  std::vector<IValue> inputs;
+  auto input_x = 2 * torch::ones({});
+  auto input_h = torch::ones({});
+  auto ref = m.run_method("forward", input_x, input_h);
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  bc.run_method("forward", input_x, input_h);
+  AT_ASSERT(input_x.equal(4 * torch::ones({})));
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  auto input_x2 = 2 * torch::ones({});
+  auto input_h2 = torch::ones({});
+  m.run_method("forward", input_x2, input_h2);
+  bc2.run_method("forward", input_x2, input_h2);
+  AT_ASSERT(input_x2.equal(4 * torch::ones({})));
 }
 
 #endif // !defined(FB_XPLAT_BUILD)

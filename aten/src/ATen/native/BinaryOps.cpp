@@ -211,13 +211,13 @@ void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& 
   TORCH_META_FUNC2(func, Tensor)(const Tensor& self, const Tensor& other) { \
     const Tensor& result = maybe_get_output();                              \
     comparison_op_check(self, other, result);                               \
-    build_comparison_op(result, self, other);                               \
+    build_borrowing_comparison_op(result, self, other);                     \
   }                                                                         \
                                                                             \
   TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
     auto other_tensor =                                                     \
         native::wrapped_scalar_tensor_and_check_convert(other, self);       \
-    build_comparison_op(maybe_get_output(), self, other_tensor);            \
+    build_borrowing_except_last_argument_comparison_op(maybe_get_output(), self, other_tensor);  \
   }
 
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(eq);

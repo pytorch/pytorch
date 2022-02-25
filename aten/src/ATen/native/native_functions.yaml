@@ -6947,6 +6947,10 @@
   structured_delegate: triangular_solve.X
   variants: method, function
 
+- func: _linalg_check_errors(Tensor info, str api_name, *, bool is_matrix) -> ()
+  dispatch:
+    CompositeExplicitAutograd: _linalg_check_errors
+
 - func: linalg_solve_triangular.out(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   dispatch:

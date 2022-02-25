@@ -283,9 +283,7 @@ template <
 C10_LAUNCH_BOUNDS_2(1024, SEGREDUCE_MINBLOCKS)
 #endif
 __global__ void rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel(
-    const int N, // number of rows (hash size) of embedding table
     const int block_size, // embedding dimension size
-    const int num_lengths, // number of segments
     const int num_indices, // number of indices
     const float epsilon,
     TParam *const param,
@@ -1305,9 +1303,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                threads,
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,
@@ -1330,9 +1326,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                threads,
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,
@@ -1363,9 +1357,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                std::min(maxThreads, block_size),
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,
@@ -1388,9 +1380,7 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
                std::min(maxThreads, block_size),
                sm_size,
                context_.cuda_stream()>>>(
-                N,
                 block_size,
-                num_lengths,
                 num_indices,
                 epsilon_,
                 paramOut,

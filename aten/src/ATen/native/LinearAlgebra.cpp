@@ -2828,7 +2828,7 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
   // If the reshaped self is not invertible catch this error
   Tensor result, info;
   std::tie(result, info) = at::linalg_inv_ex(self.reshape({prod_ind_end, prod_ind_end}), /*check_errors=*/false);
-  singleCheckErrors(info.item<int64_t>(), "inv");
+  at::_linalg_check_errors(info, "inv", /*is_matrix*/true);
 
   return result.reshape(shape_ind_end);
 }

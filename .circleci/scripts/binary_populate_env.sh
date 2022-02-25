@@ -6,14 +6,15 @@ tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
   if [[ "$OSTYPE" == "msys" ]]; then
-    GIT_DESCRIBE="git --git-dir ${workdir}/p/.git describe"
+    GIT_DIR="${workdir}/p/.git"
   else
-    GIT_DESCRIBE="git --git-dir ${workdir}/pytorch/.git describe"
+    GIT_DIR="${workdir}/pytorch/.git"
   fi
+  GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
   if [[ -n "${CIRCLE_TAG:-}" ]]; then
     echo "${CIRCLE_TAG}"
-  elif ${GIT_DESCRIBE} --exact --tags >/dev/null; then
-    ${GIT_DESCRIBE} --tags
+  elif ${GIT_DESCRIBE} --exact >/dev/null; then
+    ${GIT_DESCRIBE}
   else
     return 1
   fi

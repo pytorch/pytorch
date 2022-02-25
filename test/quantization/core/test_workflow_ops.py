@@ -181,11 +181,11 @@ def _get_per_row_min_max(
     y = x.permute(*new_axis_list)
 
     y = torch.flatten(y, start_dim=1)
-    # min_vals, max_vals = torch._aminmax(y, 1)
+    # min_vals, max_vals = torch.aminmax(y, dim=1)
     if math.isinf(min_vals[0]) or math.isinf(max_vals[0]):
-        min_vals, max_vals = torch._aminmax(y, 1)
+        min_vals, max_vals = torch.aminmax(y, dim=1)
     else:
-        min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
+        min_vals_cur, max_vals_cur = torch.aminmax(y, dim=1)
         min_vals = min_vals + averaging_const * (min_vals_cur - min_vals)
         max_vals = max_vals + averaging_const * (max_vals_cur - max_vals)
     return min_vals, max_vals
