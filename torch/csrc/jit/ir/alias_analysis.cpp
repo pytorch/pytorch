@@ -972,7 +972,8 @@ void AliasDb::analyzeGradOf(Node* node) {
 
 void AliasDb::analyzeSubgraph(Node* node, std::shared_ptr<Graph> subgraph) {
   const auto subgraphBlock = subgraph->block();
-  // CallFunction nodes have an extra first parameter of the name of the function
+  // CallFunction nodes have an extra first parameter of the name of the
+  // function
   if (node->kind() == prim::CallFunction) {
     mapAliases(subgraphBlock->inputs(), node->inputs().slice(1));
   } else {
