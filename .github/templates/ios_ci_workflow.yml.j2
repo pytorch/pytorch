@@ -9,15 +9,16 @@ name: !{{ build_environment }}
 on:
 {%- if is_default %}
   pull_request:
-{%- endif -%}
-
+{%- endif %}
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
-{%- else %}
+{%- endif %}
   push:
+{%- if not is_scheduled %}
     branches:
       - master
+      - main
       - release/*
 {%- endif %}
 {%- for label in ciflow_config.labels | sort %}

@@ -53,7 +53,7 @@ def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
     """
     Generate code that falls back to eager conditioned on a predicate
     """
-    fallback_args = ",\n                ".join([arg.name for arg in schema.filtered_types()])
+    fallback_args = ",\n                ".join([str(arg.name) for arg in schema.filtered_types()])
     if len(overload_name):
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
@@ -78,9 +78,9 @@ def aten_symbol(schema: LazyIrSchema) -> str:
 class LazyIR(ABC):
     backend_index: BackendIndex
     node_base: str
-    lowering_function_type: str
-    lowering_context_type: str
-    lowering_return_type: str
+    lowering_function_type: str = ""
+    lowering_context_type: str = ""
+    lowering_return_type: str = ""
 
     @method_with_native_function
     def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -88,7 +88,7 @@ class LazyIR(ABC):
         return self.gen(f)
 
     @abstractmethod
-    def lowering_body(self, f):
+    def lowering_body(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
         pass
 
     def gen(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
@@ -170,7 +170,7 @@ class TSLazyIR(LazyIR):
     lowering_context_type: str = "torch::lazy::TSLoweringContext*"
     lowering_return_type: str = "torch::lazy::TSOpVector"
 
-    def lowering_body(self, f):
+    def lowering_body(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
         return ts_lowering_body(f)
 
 
@@ -203,7 +203,7 @@ class GenLazyNativeFuncDefinition:
     def __call__(self, func: NativeFunction) -> List[str]:
         sig = kernel_signature(func, self.backend_index)
         metadata = self.backend_index.get_kernel(func)
-        # Lazy IR stuff
+        assert metadata is not None
         schema = LazyIrSchema(func.func)
         all_types = schema.filtered_types()
         value_types = schema.filtered_types(values=True, scalars=False)
@@ -291,11 +291,11 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"std::vector<Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API std::vector<Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:
-        return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
+        return f"torch::lazy::compute_shape_{self.__call_suffix()}"
 
 
 @dataclass(frozen=True)
@@ -308,7 +308,7 @@ class GenLazyShapeInferenceDefinition:
     def __call__(self, f: NativeFunction) -> List[str]:
         sig = kernel_signature(f, self.backend_index)
         metadata = self.backend_index.get_kernel(f)
-        # Lazy IR stuff
+        assert metadata is not None
         schema = LazyIrSchema(f.func)
         value_types = schema.filtered_types(values=True, scalars=False)
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)

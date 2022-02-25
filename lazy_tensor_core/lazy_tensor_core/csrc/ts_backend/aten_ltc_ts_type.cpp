@@ -3,6 +3,7 @@
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/shape_inference.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/library.h>
@@ -19,15 +20,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 namespace torch_lazy_tensors {
-namespace ir {
-namespace ops {
-// TODO(whc) forward declare these since they aren't defined in the autogenned
-// header; this will be solved when moving cat() to codegen
-std::vector<torch::lazy::Shape> compute_shape_cat(at::TensorList tensors,
-                                                    int64_t dim);
-}  // namespace ops
-}  // namespace ir
-
 namespace {
 
 void CheckSubOperandTypes(at::ScalarType type1, at::ScalarType type2) {
@@ -175,8 +167,7 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
     values.emplace_back(tensor.GetIrValue());
   }
 
-  auto shapes =
-      torch_lazy_tensors::ir::ops::compute_shape_cat(tensors, dim);
+  auto shapes = torch::lazy::compute_shape_cat(tensors, dim);
   auto node =
       torch::lazy::MakeNode<ir::ops::Cat>(values, dim, std::move(shapes));
   auto result = torch::lazy::CreateAtenFromLtcTensor(
