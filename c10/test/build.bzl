@@ -37,8 +37,10 @@ def define_targets(rules):
 
     rules.cc_test(
         name = "util_base_tests",
-        srcs = rules.glob(["util/*.cpp"],
-                          exclude=["util/typeid_test.cpp"]),
+        srcs = rules.glob(
+            ["util/*.cpp"],
+            exclude = ["util/typeid_test.cpp"],
+        ),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
             ":Macros",
