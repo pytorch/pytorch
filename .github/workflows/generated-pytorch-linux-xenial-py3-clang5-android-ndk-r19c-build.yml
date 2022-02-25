@@ -176,8 +176,9 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build-arm-v7a
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
