@@ -33,17 +33,13 @@
 #define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                        \
   }                                                                            \
   catch (std::exception & err) {                                               \
-    throw c10::Error(                                                          \
-        std::string(                                                           \
-            "Exception Caught inside torch::deploy embedded library: \n") +    \
-            err.what(),                                                        \
-        "");                                                                   \
+        throw std::runtime_error(                                               \
+            "Exception Caught inside torch::deploy embedded library: \n"  +    \
+            std::string(err.what()));                                          \
   }                                                                            \
   catch (...) {                                                                \
-    throw c10::Error(                                                          \
-        std::string(                                                           \
-            "Unknown Exception Caught inside torch::deploy embedded library"), \
-        "");                                                                   \
+        throw std::runtime_error(                                               \
+            "Unknown Exception Caught inside torch::deploy embedded library"); \
   }
 namespace torch {
 namespace deploy {
