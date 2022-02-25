@@ -2,6 +2,7 @@ from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
 from collections import namedtuple
+from collections.abc import Iterable
 import itertools
 
 import torch
@@ -102,6 +103,7 @@ def broadcast_shapes(*shapes):
     """
     # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
+    """
     for shape in shapes:
         if isinstance(shape, int) and shape < 0:
             raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
@@ -113,18 +115,47 @@ def broadcast_shapes(*shapes):
     try:
         result = [1] * max(map(len, shapes))
     except Exception:
-        result = [max(shapes)]
+        result = max(shapes)
         for shape in shapes:
-            if shape == 1 or [shape] == result:
+            if shape == 1 or shape == result:
                 continue
             else:
                 raise RuntimeError("The size of shape a ({}) must match the "
                                    "size of shape b ({}) at non-singleton dimension"
                                    .format(shape, result))
-        return torch.Size(result)
+        return torch.Size([result])
 
     for shape in shapes:
         for i in range(-1, -1 - len(shape), -1):
+            if shape[i] == 1 or shape[i] == result[i]:
+                continue
+            if result[i] != 1:
+                raise RuntimeError("The size of shape a ({}) must match the "
+                                   "size of shape b ({}) at non-singleton dimension {}"
+                                   .format(result[i], shape[i], i))
+            result[i] = shape[i]
+    return torch.Size(result)"""
+    #for shape in shapes:
+    #    if not isinstance(shape, Iterable):
+    #        shape = (shape,)
+    for shape in shapes:
+        if 
+    result = [1] * max(map(len, shapes))
+    for shape in shapes:
+        #if not isinstance(shape, Iterable):
+        #    result = [max(shapes)]
+        #    if shape < 0:
+        #        RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
+        #    if shape == 1 or [shape] == result:
+        #        continue
+        #    else:
+        #        raise RuntimeError("The size of shape a {shape} must match the "
+        #                           "size of shape b {result} at non-singleton dimension")
+        #elif isinstance(shape, tuple):
+        for i in range(-1, -1 - len(shape), -1):
+            if shape[i] < 0:
+                raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
+                                   .format(shape[i], [shape[i]]))
             if shape[i] == 1 or shape[i] == result[i]:
                 continue
             if result[i] != 1:
