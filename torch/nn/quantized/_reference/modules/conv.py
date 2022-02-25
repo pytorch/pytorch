@@ -3,9 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any, List
 from torch.nn.common_types import _size_1_t
-from .utils import _quantize_weight, _quantize_and_dequantize_weight
-from .utils import _save_weight_qparams
-from .utils import _get_weight_qparam_keys
 from .utils import ReferenceQuantizedModule
 
 class _ConvNd(torch.nn.modules.conv._ConvNd, ReferenceQuantizedModule):
@@ -16,46 +13,6 @@ class _ConvNd(torch.nn.modules.conv._ConvNd, ReferenceQuantizedModule):
     """
     __annotations__ = {"bias": Optional[torch.Tensor]}
     _IS_REFERENCE = True
-
-    def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super()._save_to_state_dict(destination, prefix, keep_vars)
-        _save_weight_qparams(
-            destination, prefix, self.weight_qscheme, self.weight_dtype,
-            self.weight_scale, self.weight_zero_point, self.weight_axis)
-
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        for key in _get_weight_qparam_keys(state_dict, prefix):
-            setattr(self, key, state_dict[prefix + key])
-            state_dict.pop(prefix + key)
-
-        super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, False,
-            missing_keys, unexpected_keys, error_msgs)
-
-    def get_weight(self):
-        """
-        Fake quantize (quantize and dequantize) the weight with
-        the quantization parameters for weight, this is used to
-        simulate the numerics for the quantized weight in a quantized
-        model
-        """
-        # supress mypy warning
-        assert isinstance(self.weight_scale, torch.Tensor)
-        assert isinstance(self.weight_zero_point, torch.Tensor)
-        assert isinstance(self.weight_axis, torch.Tensor)
-        return _quantize_and_dequantize_weight(
-            self.weight, self.weight_qscheme,
-            self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)
-
-    def get_quantized_weight(self):
-        # suppress mypy warning
-        assert isinstance(self.weight_scale, torch.Tensor)
-        assert isinstance(self.weight_zero_point, torch.Tensor)
-        assert isinstance(self.weight_axis, torch.Tensor)
-        return _quantize_weight(
-            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
-            self.weight_zero_point, self.weight_axis)
 
     @staticmethod
     def from_float(cls, float_conv, weight_qparams):
