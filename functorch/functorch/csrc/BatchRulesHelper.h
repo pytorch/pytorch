@@ -112,14 +112,19 @@ void boxed_tensor_inputs_batch_rule(const c10::OperatorHandle& op, torch::jit::S
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
-  auto arguments = torch::jit::pop(*stack, num_arguments);
 
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
+  auto orig_arguments = torch::jit::last(*stack, num_arguments);
+  if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
+    op.callBoxed(stack);
+    return;
+  }
 
+  auto arguments = torch::jit::pop(*stack, num_arguments);
   std::vector<std::pair<Tensor, optional<int64_t>>> tensor_inputs;
   std::vector<int64_t> tensor_pos;
   for (const auto idx : c10::irange(0, num_arguments)) {
@@ -231,6 +236,12 @@ inline void boxed_existing_bdim_all_batch_rule(
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
+  const auto arguments = torch::jit::last(stack, num_arguments);
+  if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
+    op.callBoxed(stack);
+    return;
+  }
+
   int64_t args_begin = stack->size() - num_arguments;
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;
   SmallVector<int64_t, 5> tensor_pos;
@@ -280,6 +291,12 @@ inline void boxed_all_tensors_have_optional_bdim(
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+
+  const auto arguments = torch::jit::last(stack, num_arguments);
+  if (std::none_of(arguments.begin(), arguments.end(), ivalueParticipatesInCurrentLevel)) {
+    op.callBoxed(stack);
+    return;
+  }
 
   int64_t args_begin = stack->size() - num_arguments;
   SmallVector<UnpackedBatchedTensor, 5> tensor_inputs;

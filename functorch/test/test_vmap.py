@@ -1300,6 +1300,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
 
+    def test_weird_matmul_case(self):
+        # Check that this doesn't crash.
+        # https://github.com/pytorch/functorch/issues/417
+        x = torch.randn(5, 2, 2, 2)
+        y = torch.randn(5, 7, 2)
+
+        vmap(vmap(torch.matmul, in_dims=(None, 0)))(x, y)
+
     @parametrize("case",
                  (
                      (torch.clamp_min_, TensorFactory.randn),

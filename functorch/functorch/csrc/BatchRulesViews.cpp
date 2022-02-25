@@ -175,6 +175,10 @@ const Tensor& resize__plumbing(
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level)) {
+    c10::impl::ExcludeDispatchKeyGuard guard2(kBatchedKey);
+    return self.resize_(size, optional_memory_format);
+  }
 
   Tensor self_value;
   optional<int64_t> self_bdim;

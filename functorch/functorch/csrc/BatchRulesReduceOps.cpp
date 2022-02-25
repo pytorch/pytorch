@@ -69,13 +69,20 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
   const auto num_arguments = schema.arguments().size();
-  auto arguments = torch::jit::pop(*stack, num_arguments);
 
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
+  auto orig_arguments = torch::jit::last(*stack, num_arguments);
+  if (std::none_of(orig_arguments.begin(), orig_arguments.end(), ivalueParticipatesInCurrentLevel)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    op.callBoxed(stack);
+    return;
+  }
+
+  auto arguments = torch::jit::pop(*stack, num_arguments);
   std::vector<std::pair<Tensor, optional<int64_t>>> tensor_inputs;
   std::vector<int64_t> tensor_pos;
 

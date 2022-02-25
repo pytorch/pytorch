@@ -82,6 +82,13 @@ Tensor binary_cross_entropy_plumbing(
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(target, cur_level)
+      && !isBatchedAtLevel(weight, cur_level)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return at::binary_cross_entropy(self, target, weight, reduction);
+  }
+
   Tensor self_value;
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
@@ -115,6 +122,12 @@ Tensor binary_cross_entropy_backward_plumbing(
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+
+  if (!areAnyBatchedAtLevel({grad, input, target, weight_opt}, cur_level)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return at::binary_cross_entropy_backward(grad, input, target, weight_opt, reduction);
+  }
+
   Tensor grad_value;
   optional<int64_t> grad_bdim;
   std::tie(grad_value, grad_bdim) = unwrapTensorAtLevel(
