@@ -29,7 +29,7 @@ TORCH_META_FUNC(_s_where) (const Tensor& condition, const Tensor& self, const Te
       .check_all_same_dtype(false)
       .declare_static_dtype_and_device(self.scalar_type(), self.device())
       .add_output(maybe_get_output())
-      .add_input(cond_bool)
+      .add_owned_input(cond_bool)
       .add_input(self)
       .add_input(other));
 }
