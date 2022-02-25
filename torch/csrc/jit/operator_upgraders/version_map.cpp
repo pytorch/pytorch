@@ -16,8 +16,7 @@ static bool isVersionMapSorted = false;
 // Note for developers: The list of upgraders should be SORTED
 // by the version number where the upgrader is registered.
 static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
-    {
-     {"aten::stft",
+    {{"aten::stft",
       {{11,
         "stft_0_10",
         "aten::stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor"}}},
