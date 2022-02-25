@@ -2380,7 +2380,7 @@ Examples::
 """)
 
 trace = _add_docstr(_linalg.linalg_trace, r"""
-trace(input, *, offset=0, out=None) -> Tensor
+trace(A, *, offset=0, out=None) -> Tensor
 
 Computes the trace of a matrix.
 
