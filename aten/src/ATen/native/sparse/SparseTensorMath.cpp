@@ -27,6 +27,7 @@
 #include <ATen/ops/_sparse_sum.h>
 #include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/_sparse_sparse_matmul.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/addmm.h>
@@ -474,7 +475,7 @@ SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTensor& t, 
     auto r_indices_accessor = r_indices.accessor<int64_t, 2>();
     auto src_indices_accessor = src_indices.accessor<int64_t, 2>();
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
         commonDtype, "cadd_sparse", [&] {
           scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
           scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
@@ -899,7 +900,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   Tensor indices = sparse_._indices();
   Tensor values      = sparse_._values();
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "addmm_sparse_dense", [&] {
         s_addmm_out_sparse_dense_worker<scalar_t>(nnz, dim_i, dim_j, dim_k, r, beta, t, alpha, indices, values, dense);
       }
@@ -969,11 +970,14 @@ Tensor _sparse_addmm(
 }
 
 Tensor _sparse_mm(
-  const SparseTensor& sparse,
-  const Tensor& dense
+  const Tensor& mat1,
+  const Tensor& mat2
 ) {
-  Tensor t = at::zeros({}, dense.options());
-  return at::_sparse_addmm(t, sparse, dense, 0, 1);  // redispatch!
+  if (mat1.is_sparse() && mat2.is_sparse()) {
+    return at::_sparse_sparse_matmul(mat1, mat2);
+  }
+  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that

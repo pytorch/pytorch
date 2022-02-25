@@ -133,8 +133,6 @@ class TestSortAndSelect(TestCase):
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
         sizes = (100, 1000, 10000)
         for ncopies in sizes:
             x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=device)
@@ -228,8 +226,6 @@ class TestSortAndSelect(TestCase):
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
         if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float('inf')
             neg_inf = -float('inf')
@@ -293,9 +289,6 @@ class TestSortAndSelect(TestCase):
 
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_msort(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         def test(shape):
             tensor = make_tensor(shape, device, dtype, low=-9, high=9)
             if tensor.size() != torch.Size([]):
