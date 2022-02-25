@@ -204,19 +204,19 @@ struct LlgaTensorDesc {
   }
 
   void set_compute_inplace() {
-    compute_inplace = true;
+    compute_inplace_ = true;
   }
 
   void set_input_tensor_index(size_t index) {
-    input_tensor_index = index;
+    input_tensor_index_ = index;
   }
 
   bool reuses_input_tensor() {
-    return compute_inplace;
+    return compute_inplace_;
   }
 
   size_t get_input_tensor_index() {
-    return input_tensor_index;
+    return input_tensor_index_;
   }
 
  private:
@@ -235,8 +235,8 @@ struct LlgaTensorDesc {
   // determine that this tensor would reuse its input tensor, then
   // compute_inplace would be true, and input_tensor_index would be the index of
   // the corresponding input tensor in inputSpecs_ of the LlgaKernel object.
-  bool compute_inplace = false;
-  size_t input_tensor_index;
+  bool compute_inplace_ = false;
+  size_t input_tensor_index_;
 };
 
 struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {

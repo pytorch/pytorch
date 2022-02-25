@@ -27,7 +27,6 @@ class GraphRewriter {
         aliasDb_(aliasDb),
         llgaHelper_(graph_) {}
 
-  void run();
   void cleanupSubgraphs();
   void buildupSubgraphs();
 

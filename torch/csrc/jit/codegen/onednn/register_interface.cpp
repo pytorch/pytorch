@@ -29,6 +29,7 @@ bool canFuseNode(const Node* node) {
     case aten::matmul:
     case aten::mm:
     case aten::linear:
+    case aten::addmm:
       return true;
 
     default:

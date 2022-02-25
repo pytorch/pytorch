@@ -233,6 +233,19 @@ class TestOp(JitLlgaTestCase):
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
     @llga_test_env
+    def test_addmm(self):
+        def addmm(x, y, z):
+            # alpha and beta are 1, by default
+            return torch.addmm(z, x, y)
+
+        x = torch.rand(64, 32)
+        y = torch.rand(32, 32)
+        z = torch.rand(64, 32)
+        _, graph = self.checkTrace(addmm, [x, y, z])
+        # single-op partition should be created for matmul with bias.
+        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
+
+    @llga_test_env
     def test_mul(self):
         def forward_mul(x, y):
             return torch.mul(x, y) * 3

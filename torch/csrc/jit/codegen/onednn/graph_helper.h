@@ -11,19 +11,19 @@ namespace onednn {
 
 struct OpPartitionMap {
   void add(uint64_t opId, uint64_t partitionId) {
-    opmap[opId] = partitionId;
+    opmap_[opId] = partitionId;
   }
   void add(Node* n, uint64_t partitionId) {
     add(Operator::getId(n), partitionId);
   }
   bool has(uint64_t opId) {
-    return opmap.count(opId) > 0;
+    return opmap_.count(opId) > 0;
   }
   bool has(Node* n) {
     return has(Operator::getId(n));
   }
   uint64_t get(uint64_t opId) {
-    return opmap[opId];
+    return opmap_[opId];
   }
   uint64_t get(Node* n) {
     auto opId = Operator::getId(n);
@@ -36,7 +36,7 @@ struct OpPartitionMap {
   }
 
  private:
-  std::unordered_map<uint64_t, uint64_t> opmap;
+  std::unordered_map<uint64_t, uint64_t> opmap_;
 };
 
 class LlgaGraphHelper {
