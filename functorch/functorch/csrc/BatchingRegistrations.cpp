@@ -583,6 +583,12 @@ Tensor new_empty_strided_batching_rule(
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return self.new_empty_strided(
+        size, stride, dtype, layout, device, pin_memory);
+  }
+
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(self);
   auto physical_size = physical_view.getPhysicalShape(size);
 

@@ -95,6 +95,9 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level)) {
+    return at::index(self, indices);
+  }
   Tensor self_value;
   optional<int64_t> self_bdim;
   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
@@ -279,6 +282,9 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
+    return self.index_put_(indices, values, accumulate);
+  }
   Tensor self_value, values_value;
   optional<int64_t> self_bdim, values_bdim;
   std::vector<optional<Tensor>> indices_value;
@@ -315,6 +321,9 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
+    return at::_index_put_impl_(self, indices, values, accumulate, unsafe);
+  }
   Tensor self_value, values_value;
   optional<int64_t> self_bdim, values_bdim;
   std::vector<optional<Tensor>> indices_value;
@@ -362,6 +371,9 @@ Tensor index_put_plumbing(const Tensor & self, const List<optional<Tensor>> & in
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+  if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
+    return self.index_put(indices, values, accumulate);
+  }
   Tensor self_value, values_value;
   optional<int64_t> self_bdim, values_bdim;
   std::vector<optional<Tensor>> indices_value;

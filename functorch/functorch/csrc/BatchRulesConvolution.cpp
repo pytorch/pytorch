@@ -409,6 +409,14 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
   const auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
+
+  if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    return at::convolution_backward(
+        grad_output_, input_, weight_, bias_sizes_opt, stride, padding,
+        dilation, transposed, output_padding, groups, output_mask);
+  }
+
   Tensor grad_output;
   optional<int64_t> grad_output_bdim;
   std::tie(grad_output, grad_output_bdim) = unwrapTensorAtLevel(grad_output_, cur_level);

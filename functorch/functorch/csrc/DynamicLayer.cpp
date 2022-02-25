@@ -512,12 +512,6 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   DispatchKeySet hacky_include;
   // hack
   if (layer.key() == kBatchedKey) {
-    // Only enable dispatch on kBatchedKey if there are tensors batched
-    // at the current level.
-    const auto args = torch::jit::last(stack, op.schema().arguments().size());
-    if (allTensors(args, notBatchedAtCurrentLevel)) {
-      exclude = exclude.add(kBatchedKey);
-    }
     hacky_include = hacky_include.add(kVmapModeKey);
   }
   auto local_keyset = c10::impl::tls_local_dispatch_key_set();
