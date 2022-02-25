@@ -85,8 +85,6 @@ TEST(LiteInterpreterTest, Index) {
   //        a[1][1] = 3
   //        return a[index]
   Module bc = _load_for_mobile(testModelFile);
-  std::cout << "DEBUG, start\n";
-  std::cout << "DEBUG, forward\n";
   int64_t ind_1 = 0;
 
   const auto result_1 = bc.forward({at::tensor(ind_1)});
