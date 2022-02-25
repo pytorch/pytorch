@@ -740,6 +740,7 @@ class TestONNXRuntime(unittest.TestCase):
         dummy_input = torch.randn(1, 3, 224, 224)
         self.run_test(model, (dummy_input,))
 
+    @unittest.skip("Unstable loading pretrained quantized mobilenet v3: https://github.com/pytorch/vision/issues/5303")
     @skipIfUnsupportedMinOpsetVersion(10)
     @disableScriptTest()
     def test_mobilenet_v3_quant(self):
