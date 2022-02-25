@@ -305,7 +305,7 @@ size_t get_available_workspace() {
   return max_block_size;
 }
 
-void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, at::DataPtr& workspace_ptr) {
+void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, at::DataPtr& workspace_ptr, unsigned int max_plans = 0) {
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
   };
@@ -335,9 +335,14 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
   }
   if (remove_invalid) {
     cudnn_frontend::executionPlans_t new_valid_plans;
+    unsigned int plan_count = 0;
     for (auto &plan : valid_plans) {
       if (plan.getWorkspaceSize() <= max_workspace_size) {
         new_valid_plans.emplace_back(std::move(plan));
+        plan_count++;
+      }
+      if (max_plans && plan_count >= max_plans) {
+        break;
       }
     }
     valid_plans = std::move(new_valid_plans);
@@ -361,7 +366,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
       .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
       .build();
 
-  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
+  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
@@ -391,7 +396,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
       .setWorkspacePointer(workspace_ptr ? workspace_ptr.get() : nullptr)
       .build();
 
-  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
+  auto plans = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_ONCE>(handle, std::move(valid_plans), variantPack);
 
   cudnn_frontend::executionPlans_t sorted_plans;
   for (auto& plan : plans) {
