@@ -110,6 +110,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     tb-nightly \
     librosa>=0.6.2
 
+  echo `pwd`
   as_jenkins pip install --progress-bar off -r requirements-ci.txt
 
   # Install numba only on python-3.8 or below
