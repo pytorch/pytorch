@@ -28,8 +28,8 @@ mypy
 #mypy==0.812
 networkx
 #networkx==2.0
-ninja
-#ninja==1.10.0.post1
+#ninja
+ninja==1.10.0.post1
 numba
 #numba==0.54.1
 #numba==0.49.0
