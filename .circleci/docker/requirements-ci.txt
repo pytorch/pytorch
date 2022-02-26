@@ -58,7 +58,7 @@ six
 #six==1.16.0
 tabulate
 tb-nightly
-torch
+torch=1.10.2
 torchvision
 typing-extensions
 #typing_extensions
