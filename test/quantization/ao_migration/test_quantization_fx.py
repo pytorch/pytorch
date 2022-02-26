@@ -32,6 +32,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'prepare',
             'convert',
+            'fuse',
         ]
         self._test_function_import('fx', function_list)
 
