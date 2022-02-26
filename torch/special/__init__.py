@@ -196,7 +196,7 @@ Example::
 """.format(**common_args))
 
 logerfc = _add_docstr(_special.special_logerfc,
-                       r"""
+                      r"""
 logerfc(input, *, out=None) -> Tensor
 
 Computes the natural logarithm of the complementary error
