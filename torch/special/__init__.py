@@ -219,7 +219,7 @@ Keyword args:
 Example::
 
     >>> torch.special.logerfc(torch.tensor([-1., 0, 4., 10.]))
-        tensor([ 1.6112,  0.0000, -1.9878, -2.8799])
+        tensor([   0.6112,    0.0000,  -17.9878, -102.8799])
 """.format(**common_args))
 
 logerfcx = _add_docstr(_special.special_logerfcx,
