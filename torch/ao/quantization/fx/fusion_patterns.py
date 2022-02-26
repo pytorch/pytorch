@@ -24,6 +24,8 @@ class FuseHandler(ABC):
     @abstractmethod
     def fuse(self,
              load_arg: Callable,
+             named_modules: Dict[str, torch.nn.Module],
+             fused_graph: Graph,
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
@@ -73,7 +75,7 @@ class DefaultFuseHandler(FuseHandler):
              is_qat: bool) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
-        root_module = named_modules[root_node.target]
+        root_module = named_modules[str(root_node.target)]
         assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
         "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
         def get_modules(pattern):
