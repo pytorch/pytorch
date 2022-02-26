@@ -1,10 +1,15 @@
 import torch
 import torch.nn as nn
+from torch import Tensor
 from .utils import _quantize_and_dequantize_weight
+from typing import Optional, Dict, Any, Tuple
+from torch import _VF
+from torch.nn.utils.rnn import PackedSequence
 
 class RNNCellBase(nn.RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
                  device=None, dtype=None, weight_qparams_dict=None) -> None:
+        super().__init__(input_size, hidden_size, bias, num_chunks, device=device, dtype=dtype)
         if weight_qparams_dict is None:
             weight_qparams = {
                 "qscheme": torch.per_tensor_affine,
@@ -17,24 +22,26 @@ class RNNCellBase(nn.RNNCellBase):
                 "weight_hh": weight_qparams
             }
         assert len(weight_qparams_dict) == 2, "Expected length for weight_qparams_dict to be 2 for QuantizedRNNCellBase(Reference)"
-        super().__init__(input_size, hidden_size, bias, num_chunks, device=device, dtype=dtype)
-        self._init_weight_qparams_dict(weight_qparams_dict)
+        self._init_weight_qparams_dict(weight_qparams_dict, device)
 
-    def _init_weight_qparams_dict(self, weight_qparams_dict):
+    def _init_weight_qparams_dict(self, weight_qparams_dict, device):
         assert weight_qparams_dict is not None
-        for key, weight_qparams in weight_qparams_dict:
+        for key, weight_qparams in weight_qparams_dict.items():
             # TODO: refactor the duplicated code to utils.py
             weight_qscheme = weight_qparams["qscheme"]
+            weight_dtype = weight_qparams["dtype"]
+            setattr(self, key + "_qscheme", weight_qscheme)
+            setattr(self, key + "_dtype", weight_dtype)
             assert weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
                 Exception(f"qscheme: {weight_qscheme} is not support in {self._get_name()}")
-            if self.weight_qscheme is not None:
+            if weight_qscheme is not None:
                 self.register_buffer(
                     key + "_scale",
                     torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
                 self.register_buffer(
                     key + "_zero_point",
                     torch.tensor(weight_qparams["zero_point"], dtype=torch.int, device=device))
-                if self.weight_qscheme == torch.per_channel_affine:
+                if weight_qscheme == torch.per_channel_affine:
                     self.register_buffer(
                         key + "_axis",
                         torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
@@ -50,27 +57,35 @@ class RNNCellBase(nn.RNNCellBase):
         wn = "weight_ih"
         weight = self.weight_ih
         weight_qscheme = getattr(self, wn + "_qscheme")
+        weight_dtype = getattr(self, wn + "_dtype")
         weight_scale = getattr(self, wn + "_scale")
         weight_zero_point = getattr(self, wn + "_zero_point")
         weight_axis = getattr(self, wn + "_axis")
-        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_scale, weight_zero_point, weight_axis)
+        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
         return weight
 
     def get_weight_hh(self):
         wn = "weight_hh"
         weight = self.weight_hh
         weight_qscheme = getattr(self, wn + "_qscheme")
+        weight_dtype = getattr(self, wn + "_dtype")
         weight_scale = getattr(self, wn + "_scale")
         weight_zero_point = getattr(self, wn + "_zero_point")
         weight_axis = getattr(self, wn + "_axis")
-        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_scale, weight_zero_point, weight_axis)
+        weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
         return weight
 
 class RNNCell(RNNCellBase):
+    """
+    We'll store weight_qparams for all the weights (weight_ih and weight_hh),
+    we need to pass in a `weight_qparams_dict` that maps from weight name,
+    e.g. weight_ih, to the weight_qparams for that weight
+    """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_lis: Optional[Dict[Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
-        super().__init__(input_size, hidden_size, bias, nonlinearity=nonlinearity, num_chunks=1, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=1, **factory_kwargs)
+        self.nonlinearity = nonlinearity
 
     def _get_name(self):
         return "QuantizedRNNCell(Reference)"
@@ -78,7 +93,7 @@ class RNNCell(RNNCellBase):
     # TODO: refactor nn.RNNCell to have a _forward that takes weight_ih and weight_hh as input
     # and remove duplicated code, same for the other two Cell modules
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
-assert input.dim() in (1, 2), \
+        assert input.dim() in (1, 2), \
             f"RNNCell: Expected input to be 1-D or 2-D but received {input.dim()}-D tensor"
         is_batched = input.dim() == 2
         if not is_batched:
@@ -113,10 +128,16 @@ assert input.dim() in (1, 2), \
 
 
 class LSTMCell(RNNCellBase):
+    """
+    We'll store weight_qparams for all the weights (weight_ih and weight_hh),
+    we need to pass in a `weight_qparams_dict` that maps from weight name,
+    e.g. weight_ih, to the weight_qparams for that weight
+    """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_lis: Optional[Dict[Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
-        super().__init__(input_size, hidden_size, bias, nonlinearity=nonlinearity, num_chunks=4, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=4, **factory_kwargs)
+        self.nonlinearity = nonlinearity
 
     def _get_name(self):
         return "QuantizedLSTMCell(Reference)"
@@ -147,10 +168,16 @@ class LSTMCell(RNNCellBase):
 
 
 class GRUCell(RNNCellBase):
+    """
+    We'll store weight_qparams for all the weights (weight_ih and weight_hh),
+    we need to pass in a `weight_qparams_dict` that maps from weight name,
+    e.g. weight_ih, to the weight_qparams for that weight
+    """
     def __init__(self, input_size: int, hidden_size: int, bias: bool = True, nonlinearity: str = "tanh",
-                 device=None, dtype=None, weight_qparams_lis: Optional[Dict[Dict[str, Any]]] = None) -> None:
+                 device=None, dtype=None, weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype, 'weight_qparams_dict': weight_qparams_dict}
-        super().__init__(input_size, hidden_size, bias, nonlinearity=nonlinearity, num_chunks=3, **factory_kwargs)
+        super().__init__(input_size, hidden_size, bias, num_chunks=3, **factory_kwargs)
+        self.nonlinearity = nonlinearity
 
     def _get_name(self):
         return "QuantizedGRUCell(Reference)"
@@ -184,6 +211,10 @@ class RNNBase(nn.RNNBase):
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
                  device=None, dtype=None, weight_qparams_dict=None) -> None:
+        super().__init__(
+            mode, input_size, hidden_size, num_layers, bias, batch_first, dropout,
+            bidirectional, proj_size, device, dtype
+        )
         if weight_qparams_dict is None:
             weight_qparams = {
                 'qscheme': torch.per_tensor_affine,
@@ -191,17 +222,17 @@ class RNNBase(nn.RNNBase):
                 'scale': 1.0,
                 'zero_point': 0
             }
-            for layer in num_layers:
-                for direction in num_directions:
-                    suffix = '_reverse' if direction == 1 else ''
-                    weight_qparams_dict['weight_ih_l{}{}'.format(layer, suffix)] = weight_qparams
-                    weight_qparams_dict['weight_hh_l{}{}'.format(layer, suffix)] = weight_qparams
+            for wn in self._flat_weights_names:
+                weight_qparams_dict[wn] = weight_qparams
 
-        self._init_weight_qparams_dict(weight_qparams_dict)
+        self._init_weight_qparams_dict(weight_qparams_dict, device)
 
-    def _init_weight_qparams_dict(self, weight_qparams_dict):
+    def _init_weight_qparams_dict(self, weight_qparams_dict, device):
         for key, weight_qparams in weight_qparams_dict.items():
             weight_qscheme = weight_qparams["qscheme"]
+            weight_dtype = weight_qparams["dtype"]
+            setattr(self, key + "_qscheme", weight_qscheme)
+            setattr(self, key + "_dtype", weight_dtype)
             assert weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
                 Exception(f"qscheme: {weight_qscheme} is not support in {self._get_name()}")
             if weight_qscheme is not None:
@@ -211,9 +242,9 @@ class RNNBase(nn.RNNBase):
                 self.register_buffer(
                     key + "_zero_point",
                     torch.tensor(weight_qparams["zero_point"], dtype=torch.int, device=device))
-                if self.weight_qscheme == torch.per_channel_affine:
+                if weight_qscheme == torch.per_channel_affine:
                     self.register_buffer(
-                        key + "_axis"
+                        key + "_axis",
                         torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
                 else:
                     # added for TorchScriptability, not used
@@ -221,23 +252,52 @@ class RNNBase(nn.RNNBase):
                         key + "_axis", torch.tensor(0, dtype=torch.int, device=device))
 
 class LSTM(RNNBase):
+    """ Reference Quantized LSTM Module
+    We'll store weight_qparams for all the weights in _flat_weights, we need to pass in
+    a `weight_qparams_dict` that maps from weight name, e.g. weight_ih_l0,
+    to the weight_qparams for that weight
+    """
     def __init__(self, *args, **kwargs):
+        assert "weight_qparams_dict" in kwargs
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
+
+    def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
+        if batch_sizes is not None:
+            mini_batch = int(batch_sizes[0])
+        else:
+            mini_batch = input.size(0) if self.batch_first else input.size(1)
+        num_directions = 2 if self.bidirectional else 1
+        expected_hidden_size = (self.num_layers * num_directions,
+                                mini_batch, self.hidden_size)
+        return expected_hidden_size
+
+    # In the future, we should prevent mypy from applying contravariance rules here.
+    # See torch/nn/modules/module.py::_forward_unimplemented
+    def check_forward_args(self,  # type: ignore[override]
+                           input: Tensor,
+                           hidden: Tuple[Tensor, Tensor],
+                           batch_sizes: Optional[Tensor],
+                           ):
+        self.check_input(input, batch_sizes)
+        self.check_hidden_size(hidden[0], self.get_expected_hidden_size(input, batch_sizes),
+                               'Expected hidden[0] size {}, got {}')
+        self.check_hidden_size(hidden[1], self.get_expected_cell_size(input, batch_sizes),
+                               'Expected hidden[1] size {}, got {}')
 
     def get_flat_weights(self):
         flat_weights = []
-        flat_weights_params = []
         for wn in self._flat_weights_names:
             if hasattr(self, wn):
                 weight = getattr(self, wn)
                 weight_qscheme = getattr(self, wn + "_qscheme")
+                weight_dtype = getattr(self, wn + "_dtype")
                 weight_scale = getattr(self, wn + "_scale")
                 weight_zero_point = getattr(self, wn + "_zero_point")
                 weight_axis = getattr(self, wn + "_axis")
-                weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_scale, weight_zero_point, weight_axis)
+                weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
             else:
                 weight = None
-            flat_weights_qparams.append(weight)
+            flat_weights.append(weight)
         return flat_weights
 
     def forward(self, input, hx=None):  # noqa: F811
@@ -307,5 +367,3 @@ class LSTM(RNNBase):
 
     def _get_name(self):
         return "QuantizedLSTM(Reference)"
-
-     def forward(self, input, hx=None):  # noqa: F811
