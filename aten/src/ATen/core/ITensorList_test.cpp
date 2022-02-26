@@ -14,9 +14,10 @@ static std::vector<at::Tensor> get_tensor_vector() {
 }
 
 template <typename T>
-void check_elements_same(ITensorList list, const T& thing) {
+void check_elements_same(ITensorList list, const T& thing, int use_count) {
   EXPECT_EQ(thing.size(), list.size());
   for (size_t i = 0; i < thing.size(); i++) {
+    EXPECT_EQ(thing[i].use_count(), use_count);
     EXPECT_TRUE(thing[i].is_same(list[i]));
   }
 }
@@ -64,7 +65,11 @@ TEST(ITensorListTest, CtorTemp_IsUnboxed) {
 
 TEST(ITensorListTest, Boxed_GetConstRefTensor) {
   auto vec = get_tensor_vector();
-  List<at::Tensor> boxed(vec);
+  // We need 'boxed' to be 'const' here (and some other tests below)
+  // because 'List<Tensor>::operator[]' returns a 'ListElementReference'
+  // instead of returning a 'Tensor'. On the other hand,
+  // 'List<Tensor>::operator[] const' returns a 'const Tensor &'.
+  const List<at::Tensor> boxed(vec);
   ITensorList list(boxed);
   static_assert(
       std::is_same<decltype(list[0]), const at::Tensor&>::value,
@@ -86,20 +91,20 @@ TEST(ITensorListTest, Unboxed_GetConstRefTensor) {
 TEST(ITensorListTest, Boxed_Equal) {
   auto vec = get_tensor_vector();
   List<at::Tensor> boxed(vec);
-  check_elements_same(boxed, vec);
+  check_elements_same(boxed, vec, /* use_count= */ 2);
 }
 
 TEST(ITensorListTest, Unboxed_Equal) {
   auto vec = get_tensor_vector();
-  check_elements_same(at::ArrayRef<at::Tensor>(vec), vec);
+  check_elements_same(at::ArrayRef<at::Tensor>(vec), vec, /* use_count= */ 1);
 }
 
 TEST(ITensorListTest, UnboxedIndirect_Equal) {
   auto vec = get_tensor_vector();
-  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]});
-  check_elements_same({vec.data(), vec.size()}, vec);
-  check_elements_same({&*vec.begin(), &*vec.end()}, vec);
-  check_elements_same(vec, vec);
+  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 3);
+  check_elements_same({vec.data(), vec.size()}, vec, /* use_count= */ 1);
+  check_elements_same({&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
+  check_elements_same(vec, vec, /* use_count= */ 1);
 }
 
 TEST(ITensorListIteratorTest, CtorEmpty_ThrowsError) {
@@ -110,7 +115,7 @@ TEST(ITensorListIteratorTest, CtorEmpty_ThrowsError) {
 
 TEST(ITensorListIteratorTest, Boxed_GetFirstElement) {
   auto vec = get_tensor_vector();
-  List<at::Tensor> boxed(vec);
+  const List<at::Tensor> boxed(vec);
   ITensorList list(boxed);
   EXPECT_TRUE(boxed[0].is_same(*list.begin()));
 }
@@ -142,7 +147,7 @@ TEST(ITensorListIteratorTest, Unboxed_Equality) {
 
 TEST(ITensorListIteratorTest, Boxed_Iterate) {
   auto vec = get_tensor_vector();
-  List<at::Tensor> boxed(vec);
+  const List<at::Tensor> boxed(vec);
   ITensorList list(boxed);
   size_t i = 0;
   for (auto it = list.begin(); it != list.end(); ++it) {
