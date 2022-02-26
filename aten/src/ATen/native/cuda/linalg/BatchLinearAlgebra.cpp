@@ -41,6 +41,12 @@ const bool use_magma_ = false;
 
 namespace at {
 namespace native {
+#if defined(BUILD_LAZY_CUDA_LINALG)
+// All registrations with PyTorch runtime should be done dynamically
+// so if library is lazy loaded it must not export anything, otherwise
+// it can result in symbol clashes
+namespace lazy_linalg {
+#endif
 
 #if AT_MAGMA_ENABLED()
 template<class scalar_t>
@@ -3250,7 +3256,6 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
-namespace {
 struct DispatchInitializer {
   DispatchInitializer() {
     cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
@@ -3262,7 +3267,8 @@ struct DispatchInitializer {
     cuda::detail::registerLinalgDispatch(disp);
   };
 } initializer;
-}  // namespace (anonymous)
+
+}  // namespace lazy_linalg
 #endif
 }}  // namespace at::native
 
