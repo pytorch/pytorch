@@ -239,14 +239,7 @@ class mask_layouts(_TestParametrizer):
                                               kwargs=sample_input_kwargs)
                         if layout != torch.sparse_coo and op.supports_sparse:
                             sample_input_kwargs = sample_input.kwargs.copy()
-                            if mask.layout == torch.sparse_csr:
-                                # TODO: remove this if-block when sparse csr supports to_sparse
-                                mask = torch.sparse_coo_tensor(
-                                    torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
-                                    mask.values(), mask.shape)._coalesced_(True)
-                                sample_input_kwargs.update(mask=mask)
-                            else:
-                                sample_input_kwargs.update(mask=mask.to_sparse())
+                            sample_input_kwargs.update(mask=mask.to_sparse())
                             yield SampleInput(sample_input.input.clone(),
                                               args=sample_input.args,
                                               kwargs=sample_input_kwargs)

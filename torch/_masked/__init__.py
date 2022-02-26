@@ -437,10 +437,7 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
             assert mask.layout == torch.sparse_csr
             # Broadcasting of CSR tensors is not implemented. Working
             # around by using COO layout.
-            coo_mask = torch.sparse_coo_tensor(
-                torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
-                mask.values())._coalesced_(True)
-            mask = torch._sparse_broadcast_to(coo_mask, input.shape).to_sparse_csr()
+            mask = torch._sparse_broadcast_to(mask.to_sparse(), input.shape).to_sparse_csr()
 
     # mask layout must match with input layout
     #
@@ -455,11 +452,6 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
         elif input.layout == torch.sparse_coo:
             if mask.layout == torch.strided:
                 mask = mask.to_sparse(input.sparse_dim())
-            elif mask.layout == torch.sparse_csr:
-                # TODO: remove this elif-block when sparse csr supports to_sparse
-                mask = torch.sparse_coo_tensor(
-                    torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
-                    mask.values(), mask.shape)._coalesced_(True)
             else:
                 mask = mask.to_sparse()
         else:
@@ -575,13 +567,7 @@ def sum(input: Tensor,
             # Elementwise multiplication of sparse tensors is not
             # implemented yet. Here we workaround this by using COO
             # mul support:
-            coo_input = torch.sparse_coo_tensor(
-                torch._convert_indices_from_csr_to_coo(input.crow_indices(), input.col_indices()),
-                input.values(), input.shape)._coalesced_(True)
-            coo_mask = torch.sparse_coo_tensor(
-                torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
-                mask.values(), mask.shape)._coalesced_(True)
-            mask_input = (coo_input * coo_mask).to_sparse_csr()
+            mask_input = (input.to_sparse() * mask.to_sparse()).to_sparse_csr()
         result = torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
         return result
     else:
