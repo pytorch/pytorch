@@ -58,8 +58,8 @@ six
 #six==1.16.0
 tabulate
 tb-nightly
-torch
-torchvision
+#torch
+#torchvision
 typing-extensions
 #typing_extensions
 virtualenv
