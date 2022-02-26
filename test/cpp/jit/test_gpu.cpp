@@ -21185,6 +21185,49 @@ TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
+// Vectorized reset test for double buffered registers
+TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = sum(tv1, {0});
+  auto tv2c = tv2->cache_before();
+
+  fusion.addOutput(tv2);
+
+  auto tv1cw = tv1->cache_after();
+  auto tv1cr = tv1cw->cache_after();
+
+  tv1cw->split(-1, 32);
+  tv1cr->split(-1, 32);
+  tv1cr->split(-1, 4);
+  tv1cr->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv1cw->computeAt(tv1cr, 1);
+  tv0->computeAt(tv1cw, -1);
+  tv2c->split(-1, 32);
+  tv2c->split(-1, 4);
+  tv1cr->computeAt(tv2c, 2);
+
+  tv1cw->setMemoryType(MemoryType::Shared);
+  tv1cr->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+  auto t0 = at::randn({200}, options);
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  auto ref = (t0 + 1).sum({0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

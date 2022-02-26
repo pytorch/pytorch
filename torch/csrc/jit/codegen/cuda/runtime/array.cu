@@ -17,7 +17,7 @@ struct alignas(sizeof(scalar_t) * align_size) Array {
 
 // Used for vectorized allocations that are not in registers
 template <typename scalar_t, int vec_size>
-void arraySet(scalar_t* buff, scalar_t val) {
+__device__ void arraySet(scalar_t* buff, scalar_t val) {
 #pragma unroll
   for (int i = 0; i < vec_size; ++i) {
     buff[i] = val;
