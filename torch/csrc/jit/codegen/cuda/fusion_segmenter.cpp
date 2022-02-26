@@ -2715,8 +2715,8 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
-  auto reduction_ops =
-      ir_utils::getReductionOps(segmented_fusion_->completeFusion());
+  auto reduction_ops = ir_utils::getReductionOps(
+      segmented_fusion_->completeFusion(), true /* ignore_trivial */);
   auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
 
   if (options_.run_translate_welford &&

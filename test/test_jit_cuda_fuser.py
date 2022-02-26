@@ -1568,6 +1568,25 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_layer_norm_trivial_reduce_dim(self):
+        def t_wb(shapes: List[int], x, w, b, eps: float, cudnn: bool):
+            o = torch.layer_norm(x, shapes, w, b, eps, cudnn)
+            o = torch.relu(o)
+            return o
+
+        batch = [1]
+        shapes = [2, 7, 3]
+
+        grad = torch.randn(batch + shapes, dtype=torch.float32, device="cuda")
+        args = [torch.randn(batch + shapes, dtype=torch.float32, device="cuda").requires_grad_()]
+        args.append(torch.randn(shapes, dtype=torch.float32, device="cuda").requires_grad_())
+        args.append(torch.randn(shapes, dtype=torch.float32, device="cuda").requires_grad_())
+        self._layer_norm_autodiff_helper(t_wb, grad, shapes, args)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_norm_half_layer(self):
         size = [2, 4, 2, 2]
 

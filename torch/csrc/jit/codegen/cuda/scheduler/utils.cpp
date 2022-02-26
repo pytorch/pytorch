@@ -437,7 +437,7 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   }
 
   // Find projectable persistent buffers
-  auto reduction_tvs = getReductionTvs(fusion);
+  auto reduction_tvs = getReductionTvs(fusion /*, ignore_trivial=true */);
   for (auto persistent_buffer : persistent_buffer_info.persistent_buffers) {
     // Inputs marked as persistent buffers can't be projected any further back
     if (persistent_buffer->isFusionInput()) {
@@ -935,7 +935,7 @@ std::pair<bool, bool> canonicalDimReduction(
   }
 }
 
-std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
+std::vector<TensorView*> getReductionTvs(Fusion* fusion, bool ignore_trivial) {
   auto all_tvs = ir_utils::allTvs(fusion);
   std::vector<TensorView*> reduction_tvs;
   for (auto tv : all_tvs) {
@@ -943,8 +943,9 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
         std::any_of(
             tv->domain()->domain().begin(),
             tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       reduction_tvs.emplace_back(tv);
     }

@@ -178,7 +178,9 @@ TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
-TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(Fusion* fusion);
+TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
+    Fusion* fusion,
+    bool ignore_trivial = true);
 
 } // namespace ir_utils
 } // namespace cuda

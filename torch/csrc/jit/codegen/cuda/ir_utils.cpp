@@ -449,7 +449,7 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
-std::vector<Expr*> getReductionOps(Fusion* fusion) {
+std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   std::vector<Expr*> red_ops;
   for (auto expr : fusion->exprs()) {
     const Val* out_val = nullptr;
@@ -467,8 +467,9 @@ std::vector<Expr*> getReductionOps(Fusion* fusion) {
     if (std::any_of(
             out_tv->getRootDomain().begin(),
             out_tv->getRootDomain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       red_ops.push_back(expr);
     }

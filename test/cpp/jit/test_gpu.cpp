@@ -10764,7 +10764,7 @@ TEST_F(NVFuserTest, FusionTrivialReduction_CUDA) {
   fusion.addOutput(tv1);
 
   TORCH_CHECK(
-      ir_utils::getReductionOps(&fusion).empty(),
+      ir_utils::getReductionOps(&fusion, true /* ignore_trivial */).empty(),
       "Trivial reduction picked up by fusion");
 
   const auto options =
