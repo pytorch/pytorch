@@ -2126,3 +2126,15 @@ calc_logerfcx(T x)
     return std::log(calc_erfcx(x));
   }
 }
+
+template <typename T>
+C10_HOST_DEVICE static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_logerfc(T x)
+{
+  if (x > 0.0) {
+    return std::log(calc_erfcx(x)) - std::pow(x, 2);
+  }
+  else {
+    return std::log(std::erfc(x));
+  }
+}

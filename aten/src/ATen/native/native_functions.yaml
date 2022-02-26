@@ -10320,6 +10320,18 @@
   dispatch:
     CPU, CUDA: special_logerfcx_out
 
+- func: special_logerfc(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+  structured_delegate: special_logerfc.out
+
+- func: special_logerfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_logerfc_out
+
 - func: special_ndtr(Tensor self) -> Tensor
   python_module: special
   variants: function

@@ -3,7 +3,7 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
-           'erfcx', 'logerfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py',
+           'erfcx', 'logerfc', 'logerfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py',
            'xlogy', 'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round',
            'log_softmax', 'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
@@ -193,6 +193,33 @@ Example::
 
     >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 5.0090, 0.0561])
+""".format(**common_args))
+
+logerfc = _add_docstr(_special.special_logerfc,
+                       r"""
+logerfc(input, *, out=None) -> Tensor
+
+Computes the natural logarithm of the complementary error
+function of :attr:`input`. The natural logarithm of the complementary
+error function is defined as follows:
+
+.. math::
+    \mathrm{logerfc}(x) = \ln(\mathrm{erfc}(x))
+
+""" + r"""
+
+""" + r"""
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.logerfc(torch.tensor([-1., 0, 4., 10.]))
+        tensor([ 1.6112,  0.0000, -1.9878, -2.8799])
 """.format(**common_args))
 
 logerfcx = _add_docstr(_special.special_logerfcx,

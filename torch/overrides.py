@@ -958,6 +958,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.i0e: lambda input: -1,
         torch.special.i1: lambda input: -1,
         torch.special.i1e: lambda input: -1,
+        torch.special.logerfc: lambda input: -1,
         torch.special.logerfcx: lambda input: -1,
         torch.special.logit: lambda input: -1,
         torch.special.logsumexp: lambda input, dim, keepdim=False, out=None: -1,

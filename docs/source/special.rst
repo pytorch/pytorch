@@ -32,6 +32,7 @@ Functions
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e
+.. autofunction:: logerfc
 .. autofunction:: logerfcx
 .. autofunction:: logit
 .. autofunction:: logsumexp

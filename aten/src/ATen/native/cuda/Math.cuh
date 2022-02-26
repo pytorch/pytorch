@@ -536,6 +536,13 @@ const auto logerfcx_string = jiterator_stringify(
   }
 ); // logerfcx_string
 
+const auto logerfc_string = jiterator_stringify(
+  template <typename T>
+  T logerfc_kernel(T a) {
+    return logerfc(a);
+  }
+); // logerfc_string
+
 const auto erfinv_string = jiterator_stringify(
   template <typename T>
   T erfinv_kernel(T a) {

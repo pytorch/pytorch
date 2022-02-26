@@ -582,6 +582,10 @@
   self: 1.0 / at::special_erfcx(self) * (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
   result: auto_element_wise
 
+- name: special_logerfc(Tensor self) -> Tensor
+  self: 1.0 / at::erfc(self) * (-2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad)
+  result: auto_element_wise
+
 - name: erfinv(Tensor self) -> Tensor
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
   result: auto_element_wise

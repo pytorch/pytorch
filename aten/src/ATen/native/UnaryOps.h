@@ -48,6 +48,7 @@ DECLARE_DISPATCH(unary_fn, special_i0e_stub);
 DECLARE_DISPATCH(unary_fn, special_i1_stub);
 DECLARE_DISPATCH(unary_fn, special_i1e_stub);
 DECLARE_DISPATCH(unary_fn, special_logerfcx_stub);
+DECLARE_DISPATCH(unary_fn, special_logerfc_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
