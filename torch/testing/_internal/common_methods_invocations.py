@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import \
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like,
      freeze_rng_state)
-import torch.testing._internal.opinfo_helper as opinfo_helpertest_neg_view_addcmul_cpu_float64
+import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from distutils.version import LooseVersion
 
