@@ -231,7 +231,7 @@ class TestShapeOps(TestCase):
     @dtypesIfCUDA(*all_types_and(torch.half))
     def test_trace(self, device, dtype):
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 

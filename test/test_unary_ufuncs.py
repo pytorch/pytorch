@@ -403,7 +403,7 @@ class TestUnaryUfuncs(TestCase):
     def test_non_contig(self, device, dtype, op):
         shapes = [(5, 7), (1024,)]
         for shape in shapes:
-            contig = make_tensor(shape, device, dtype,
+            contig = make_tensor(shape, dtype=dtype, device=device,
                                  low=op.domain[0], high=op.domain[1])
             non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
             non_contig.copy_(contig)
@@ -416,7 +416,7 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_non_contig_index(self, device, dtype, op):
-        contig = make_tensor((2, 2, 1, 2), device, dtype,
+        contig = make_tensor((2, 2, 1, 2), dtype=dtype, device=device,
                              low=op.domain[0], high=op.domain[1])
         non_contig = contig[:, 1, ...]
         contig = non_contig.contiguous()
@@ -431,7 +431,7 @@ class TestUnaryUfuncs(TestCase):
     def test_non_contig_expand(self, device, dtype, op):
         shapes = [(1, 3), (1, 7), (5, 7)]
         for shape in shapes:
-            contig = make_tensor(shape, device, dtype,
+            contig = make_tensor(shape, dtype=dtype, device=device,
                                  low=op.domain[0], high=op.domain[1])
             non_contig = contig.clone().expand(3, -1, -1)
 
@@ -447,7 +447,7 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_contig_size1(self, device, dtype, op):
-        contig = make_tensor((5, 100), device, dtype,
+        contig = make_tensor((5, 100), dtype=dtype, device=device,
                              low=op.domain[0], high=op.domain[1])
         contig = contig[:1, :50]
         contig2 = torch.empty(contig.size(), device=device, dtype=dtype)
@@ -461,7 +461,7 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_contig_size1_large_dim(self, device, dtype, op):
-        contig = make_tensor((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), device, dtype,
+        contig = make_tensor((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype, device=device,
                              low=op.domain[0], high=op.domain[1])
         contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
         contig2 = torch.empty(contig.size(), device=device, dtype=dtype)
@@ -594,7 +594,7 @@ class TestUnaryUfuncs(TestCase):
     @skipCUDAIfRocm
     @dtypes(*floating_types_and(torch.half))
     def test_frexp(self, device, dtype):
-        input = make_tensor((50, 50), device, dtype)
+        input = make_tensor((50, 50), dtype=dtype, device=device)
         mantissa, exponent = torch.frexp(input)
         np_mantissa, np_exponent = np.frexp(input.cpu().numpy())
 
@@ -609,12 +609,12 @@ class TestUnaryUfuncs(TestCase):
     def test_frexp_assert_raises(self, device):
         invalid_input_dtypes = integral_types_and(torch.bool) + complex_types()
         for dtype in invalid_input_dtypes:
-            input = make_tensor((50, 50), device, dtype)
+            input = make_tensor((50, 50), dtype=dtype, device=device)
             with self.assertRaisesRegex(RuntimeError, r"torch\.frexp\(\) only supports floating-point dtypes"):
                 torch.frexp(input)
 
         for dtype in floating_types_and(torch.half):
-            input = make_tensor((50, 50), device, dtype)
+            input = make_tensor((50, 50), device, dtype, device=device)
 
             dtypes = list(all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
             dtypes.remove(dtype)

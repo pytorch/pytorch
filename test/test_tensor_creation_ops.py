@@ -891,7 +891,7 @@ class TestTensorCreation(TestCase):
             bound = dim + 2 * (dim == 0) + (dim == 2)
             error_expected = len(shape) < bound or (not isinstance(arg, list) and shape[direction] % arg != 0)
 
-            t = make_tensor(shape, device, dtype)
+            t = make_tensor(shape, dtype=dtype, device=device)
             t_np = t.cpu().numpy()
 
             if not error_expected:
@@ -3669,7 +3669,7 @@ class TestBufferProtocol(TestCase):
         if offset is None:
             offset = first * get_dtype_size(dtype)
 
-        numpy_original = make_tensor(shape, torch.device("cpu"), dtype).numpy()
+        numpy_original = make_tensor(shape, dtype=dtype, device="cpu").numpy()
         original = memoryview(numpy_original)
         # First call PyTorch's version in case of errors.
         # If this call exits successfully, the NumPy version must also do so.
@@ -3771,7 +3771,7 @@ class TestBufferProtocol(TestCase):
 
     @dtypes(*torch_to_numpy_dtype_dict.keys())
     def test_shared_buffer(self, device, dtype):
-        x = make_tensor((1,), device, dtype)
+        x = make_tensor((1,), dtype=dtype, device=device)
         # Modify the whole tensor
         arr, tensor = self._run_test(SHAPE, dtype)
         tensor[:] = x
@@ -3804,7 +3804,7 @@ class TestBufferProtocol(TestCase):
 
     @dtypes(*torch_to_numpy_dtype_dict.keys())
     def test_non_writable_buffer(self, device, dtype):
-        numpy_arr = make_tensor((1,), device, dtype).numpy()
+        numpy_arr = make_tensor((1,), dtype=dtype, device=device).numpy()
         byte_arr = numpy_arr.tobytes()
         with self.assertWarnsOnceRegex(UserWarning,
                                        r"The given buffer is not writable."):
@@ -3881,7 +3881,7 @@ class TestAsArray(TestCase):
         self.assertEqual(result.requires_grad, kwargs.get("requires_grad", False))
 
     def _test_alias_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
-        original = make_tensor(shape, device, dtype)
+        original = make_tensor(shape, dtype=dtype, device=device)
 
         def check(**kwargs):
             self._check(original, cvt=cvt, **kwargs)
@@ -3923,7 +3923,7 @@ class TestAsArray(TestCase):
         self._test_alias_with_cvt(to_memview, device, dtype, shape=(5,), only_with_dtype=True)
 
     def _test_copy_with_cvt(self, cvt, device, dtype, shape=(5, 5), only_with_dtype=False):
-        original = make_tensor(shape, device, dtype)
+        original = make_tensor(shape, dtype=dtype, device=device)
 
         def check(**kwargs):
             self._check(original, cvt=cvt, is_alias=False, **kwargs)
@@ -3973,7 +3973,7 @@ class TestAsArray(TestCase):
     def _test_copy_mult_devices(self, devices, dtype, cvt):
         cuda1 = devices[0]
         cuda2 = devices[1]
-        original = make_tensor((5, 5), cuda1, dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=cuda1)
 
         def check(**kwargs):
             self._check(original, cvt, is_alias=False, same_device=False, device=cuda2, **kwargs)
@@ -3996,7 +3996,7 @@ class TestAsArray(TestCase):
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_copy_list(self, device, dtype):
-        original = make_tensor((5, 5), torch.device("cpu"), dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=torch.device("cpu"))
 
         def check(**kwargs):
             self._check(original, torch.Tensor.tolist, is_alias=False, **kwargs)
@@ -4009,7 +4009,7 @@ class TestAsArray(TestCase):
 
     @dtypes(torch.float32)
     def test_unsupported_alias(self, device, dtype):
-        original = make_tensor((5, 5), device, dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=device)
 
         if torch.cuda.is_available():
             other_device = get_another_device(device)
@@ -4030,14 +4030,14 @@ class TestAsArray(TestCase):
     @dtypes(torch.float32)
     def test_unsupported_alias_mult_devices(self, devices, dtype):
         dev1, dev2 = devices[:2]
-        original = make_tensor((5, 5), dev1, dtype)
+        original = make_tensor((5, 5), dtype=dtype, device=dev1)
         with self.assertRaisesRegex(ValueError,
                                     f"from device '{dev1}' to '{dev2}'"):
             torch.asarray(original, device=dev2, copy=False)
 
     @dtypes(torch.float32, torch.complex64)
     def test_retain_autograd_history(self, device, dtype):
-        original = make_tensor((5, 5), device, dtype, requires_grad=True)
+        original = make_tensor((5, 5), dtype=dtype, device=device, requires_grad=True)
         # 'cloned' has 'grad_fn=<CloneBackwards>'
         cloned = original.clone()
 
