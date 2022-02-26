@@ -11,13 +11,27 @@ from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_
 from .match_utils import is_match
 from .match_utils import MatchAllNode
 from .quantization_types import Pattern
-from ..utils import _parent_name, check_node
+from ..utils import _parent_name
 from ..qconfig import QConfigAny
+from ..quantization_mappings import get_quantized_operator
 from .utils import create_node_from_old_node_preserve_meta
 from typing import Dict, Tuple, Type, List, Callable, Any, Union
 from torch.fx import Node
 import operator
 
+QOP_TO_ARG_NAMES_TO_SKIP = {
+    torch._ops.ops.quantized.hardswish: ['inplace'],
+    torch._ops.ops.quantized.elu: ['inplace'],
+    torch._ops.ops.quantized.dropout: ['inplace'],
+    torch._ops.ops.quantized.instance_norm:
+    ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
+}
+
+def _is_node_in_list(node, modules, func_list, method_list, module_type_list):
+    is_call_function = node.op == "call_function" and node.target in func_list
+    is_call_method = node.op == "call_method" and node.target in method_list
+    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
+    return is_call_function, is_call_method, is_call_module
 
 def is_fixed_qparams_node(node, modules):
     func_list = [
@@ -27,22 +41,135 @@ def is_fixed_qparams_node(node, modules):
         torch.tanh,
     ]
     method_list = [
-        'hardsigmoid',
-        'hardsigmoid_',
-        'sigmoid',
-        'sigmoid_',
-        'tanh',
-        'tanh_',
+        "hardsigmoid",
+        "hardsigmoid_",
+        "sigmoid",
+        "sigmoid_",
+        "tanh",
+        "tanh_",
     ]
     module_type_list = [
         torch.nn.Hardsigmoid,
         torch.nn.Sigmoid,
         torch.nn.Tanh,
     ]
-    is_call_function = node.op == "call_function" and node.target in func_list
-    is_call_method = node.op == "call_method" and node.target in method_list
-    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
-    return is_call_function, is_call_method, is_call_module
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+
+def is_default_node(node, modules):
+    func_list = [
+        torch.nn.functional.elu,
+        torch.nn.functional.hardswish,
+        torch.nn.functional.instance_norm,
+        torch.nn.functional.layer_norm,
+        torch.nn.functional.leaky_relu,
+        torch.nn.functional.dropout,
+    ]
+    method_list: List[Any] = []
+    module_type_list = [
+        nnqr.ConvTranspose1d,
+        nnqr.ConvTranspose2d,
+        torch.nn.ELU,
+        torch.nn.LeakyReLU,
+        torch.nn.Hardswish,
+        torch.nn.InstanceNorm1d,
+        torch.nn.InstanceNorm2d,
+        torch.nn.InstanceNorm3d,
+        torch.nn.LayerNorm,
+        torch.nn.Dropout,
+    ]
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+
+def is_copy_node(node, modules):
+    func_list = [
+        torch.adaptive_avg_pool1d,
+        torch.nn.functional.adaptive_avg_pool2d,
+        torch.nn.functional.adaptive_avg_pool3d,
+        torch.nn.functional.hardtanh,
+        torch.nn.functional.hardtanh_,
+        torch.nn.functional.interpolate,
+        torch.nn.functional.max_pool1d,
+        torch.nn.functional.max_pool2d,
+        torch.nn.functional.max_pool3d,
+        torch.nn.functional.relu,
+        torch.nn.functional.relu6,
+        torch.avg_pool1d,
+        torch._C._nn.avg_pool2d,
+        torch._C._nn.avg_pool3d,
+        torch.clamp,
+        torch.flatten,
+        torch.mean,
+        operator.floordiv,
+    ]
+    method_list = [
+        "clamp",
+        "mean",
+        "relu",
+        "relu_",
+    ]
+    module_type_list = [
+        torch.nn.AdaptiveAvgPool1d,
+        torch.nn.AdaptiveAvgPool2d,
+        torch.nn.AdaptiveAvgPool3d,
+        torch.nn.AvgPool1d,
+        torch.nn.AvgPool2d,
+        torch.nn.AvgPool3d,
+        torch.nn.Hardtanh,
+        torch.nn.MaxPool1d,
+        torch.nn.MaxPool2d,
+        torch.nn.MaxPool3d,
+        torch.nn.ReLU,
+        torch.nn.ReLU6,
+    ]
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+
+def is_general_tensor_shape_node(node, modules):
+    func_list = [
+        torch.transpose,
+        torch.repeat_interleave,
+        torch.squeeze,
+        torch.stack,
+        torch.unsqueeze,
+    ]
+    method_list = [
+        "contiguous",
+        "detach",
+        "detach_",
+        "permute",
+        "repeat",
+        "repeat_interleave",
+        "reshape",
+        "resize_",
+        "shape",
+        "size",
+        "squeeze",
+        "squeeze_",
+        "transpose",
+        "unsqueeze",
+        "unsqueeze_",
+        "view",
+    ]
+    module_type_list = [
+        torch.nn.Identity,
+    ]
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+
+def is_other_node(node, modules):
+    func_list = [
+        torch.cat,
+    ]
+    method_list: List[Any] = []
+    module_type_list: List[Any] = []
+    return _is_node_in_list(node, modules, func_list, method_list, module_type_list)
+
+def is_special_pattern_node(node, modules):
+    res_function, res_method, res_module = False, False, False
+    for checker in [is_fixed_qparams_node, is_default_node, is_copy_node, is_general_tensor_shape_node, is_other_node]:
+        is_call_function, is_call_method, is_call_module = checker(node, modules)
+        res_function = res_function or is_call_function
+        res_method = res_method or is_call_method
+        res_module = res_module or is_call_module
+    return res_function, res_method, res_module
+
 
 def is_dequantize_node(node):
     return isinstance(node, Node) and node.op == 'call_method' and node.target == 'dequantize'
@@ -61,6 +188,16 @@ LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]
 SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
+    nnqr.ConvTranspose1d: nnq.ConvTranspose1d,
+    nnqr.ConvTranspose2d: nnq.ConvTranspose2d,
+    nn.ELU: nnq.ELU,
+    nn.LeakyReLU: nnq.LeakyReLU,
+    nn.Hardswish: nnq.Hardswish,
+    nn.InstanceNorm1d: nnq.InstanceNorm1d,
+    nn.InstanceNorm2d: nnq.InstanceNorm2d,
+    nn.InstanceNorm3d: nnq.InstanceNorm3d,
+    nn.LayerNorm: nnq.LayerNorm,
+    nn.Dropout: nnq.Dropout,
 }
 
 # Mapping from fused module class to a 2-tuple of:
@@ -279,13 +416,21 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
         # get output scale/zero_point/dtype from the quantize node
         # ref_node, scale_node, zero_point_node, dtype = q_node.args
         # TODO: add safety checks that users for the ref_node and dq_node needs to be one
-
         is_call_function, is_call_method, is_call_module = is_fixed_qparams_node(ref_node, modules)
+        if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
+            # TODO: add a warning or error out here? (bc-breaking if error out)
+            # warnings.warn(
+            #     "Only reference patterns are currently supported for {dtype} dtype with {op} op"
+            #     "".format(dtype=dtypes, op=ref_node))
+            continue
+
+        is_call_function, is_call_method, is_call_module = is_default_node(ref_node, modules)
         if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
             # TODO: add a warning or error out here? (bc-breaking if error out)
             continue
 
-        is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
+        # This check includes all supported ops
+        is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
             continue
         dq_node_or_nodes = ref_node.args[0]
@@ -330,17 +475,39 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             model.graph.erase_node(dq_node)
 
         # store q node args
-        q_node_args = list(q_node.args)[1:]
-
+        qnode_qparams = list(q_node.args)[1:]
         # replace uses of q node with input and remove q node
         q_node_input = q_node.args[0]
         q_node.replace_all_uses_with(q_node_input)
         model.graph.erase_node(q_node)
 
-        # remove q node args
-        for n in q_node_args:
-            if isinstance(n, Node):
-                model.graph.erase_node(n)
+        is_call_function, is_call_method, is_call_module = is_default_node(ref_node, modules)
+        if is_call_function:
+            # pass scale/zer_point arguments from quantize_per_tensor to the default node operator
+            # insert an op after the zero_point node so that the scale/zero_point
+            # nodes are is available
+            qop = get_quantized_operator(ref_node.target)
+            args = list(ref_node.args)
+            kwargs = dict(ref_node.kwargs)
+            if qop in QOP_TO_ARG_NAMES_TO_SKIP:
+                args_to_skip = QOP_TO_ARG_NAMES_TO_SKIP[qop]
+                for arg in args_to_skip:
+                    if arg in kwargs:
+                        kwargs.pop(arg)
+            kwargs["output_scale"] = qnode_qparams[0]
+            kwargs["output_zero_point"] = qnode_qparams[1]
+            with model.graph.inserting_after(qnode_qparams[1]):
+                qop_node = create_node_from_old_node_preserve_meta(
+                    model.graph,
+                    ("call_function", qop, tuple(args), kwargs),
+                    ref_node)
+                ref_node.replace_all_uses_with(qop_node)
+                model.graph.erase_node(ref_node)
+        else:
+            # remove scale/zero_point node for quantize node
+            for n in qnode_qparams:
+                if isinstance(n, Node):
+                    model.graph.erase_node(n)
 
 
     model.recompile()
