@@ -495,8 +495,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} name={} device_type={} node_id={} cpu_time={} start_us={} end_us={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={} '
-            'is_async={} is_remote={} seq_nr={} is_legacy={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={} is_legacy={}>'.format(
                 self.id,
                 self.name,
                 self.device_type,

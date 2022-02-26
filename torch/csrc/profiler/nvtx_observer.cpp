@@ -30,30 +30,42 @@ struct NVTXThreadLocalState : ProfilerThreadLocalStateBase {
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
   }
+  std::pair<at::RecordFunctionHandle, int> getOpIdFromInput(const at::Tensor& tensor);
+
+  void setProducerTensorMap(at::TensorImpl *tensor, at::RecordFunctionHandle op_id, int output_nr){
+    producer_tensor_map_[(void*)tensor] = std::pair<at::RecordFunctionHandle, int> {op_id, output_nr};
+  }
+
+ protected:
+  // Maps the address of an output Tensor to a unique op id and output
+  // index of the tensor.
+  // at::TensorImpl* is the actual type of the key, but using void*
+  // to indicate the pointer is just being used as a key
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::unordered_map<void*, std::pair<at::RecordFunctionHandle, int>> producer_tensor_map_;
 };
 
-std::pair<int, int> getOpIdFromInput(const c10::IValue& input_item) {
-  std::pair<int, int> producer_op_pair(-1, -1);
-  const at::Tensor& tensor = input_item.toTensor();
-  auto state_ptr = NVTXThreadLocalState::getTLS();
-  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
+std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(const at::Tensor& tensor) {
+  std::pair<at::RecordFunctionHandle, int> producer_op_pair(0, -1);
   if (tensor.defined()) {
-    auto ten_addr =  tensor.unsafeGetTensorImpl();
+    at::TensorImpl *ten_addr =  tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
-    auto op_id_tensor_map = state_ptr->producerTensorMap();
-    if (op_id_tensor_map.count(ten_addr) > 0) {
-      producer_op_pair  =  op_id_tensor_map[ten_addr];
+    if (producer_tensor_map_.count((void*)ten_addr) > 0) {
+      producer_op_pair  =  producer_tensor_map_[(void*)ten_addr];
     }
   }
   return producer_op_pair;
 }
 
-std::vector<std::pair<int, int>> flattenOpIdList(c10::List<c10::IValue> list, std::string fn_name) {
-  std::pair<int, int> default_pair(-1, -1);
-  std::vector<std::pair<int, int>> input_op_id_list;
+std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(c10::List<c10::IValue> list, std::string fn_name) {
+  std::pair<at::RecordFunctionHandle, int> default_pair(0, -1);
+  std::list<std::pair<at::RecordFunctionHandle, int>> input_op_id_list;
+  auto state_ptr = NVTXThreadLocalState::getTLS();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   for (const c10::IValue input : list) {
     if (input.isTensor()) {
-      auto producer_op_pair = getOpIdFromInput(input);
+      const at::Tensor& tensor = input.toTensor();
+      auto producer_op_pair = state_ptr->getOpIdFromInput(tensor);
       input_op_id_list.push_back(producer_op_pair);
     }
     else {
@@ -63,24 +75,23 @@ std::vector<std::pair<int, int>> flattenOpIdList(c10::List<c10::IValue> list, st
   return input_op_id_list;
 }
 
-std::vector<std::pair<int, int>> getInputTensorOpIds(const at::RecordFunction& fn) {
+std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(const at::RecordFunction& fn) {
   int num_inputs = fn.inputs().size();
-  std::pair<int, int> undefined_op_pair(-1,-1);
-  std::vector<std::pair<int, int>> input_producer_ops_;
-  input_producer_ops_.reserve(num_inputs);
-  int idx = 0;
+  std::pair<at::RecordFunctionHandle, int> undefined_op_pair(0,-1);
+  std::list<std::pair<at::RecordFunctionHandle, int>> input_producer_ops_;
+  auto state_ptr = NVTXThreadLocalState::getTLS();
+  TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   for (const c10::IValue& input_item : fn.inputs()) {
-    bool tensor_valid = false;
     if(input_item.isTensor()) {
       const at::Tensor& tensor = input_item.toTensor();
-      auto producer_pair = getOpIdFromInput(input_item);
+      auto producer_pair = state_ptr->getOpIdFromInput(tensor);
       input_producer_ops_.push_back(producer_pair);
     } else {
       if (input_item.isList()) {
-        std::vector<std::pair<int, int>> tmp_op_ids = flattenOpIdList(input_item.toList(), std::string(fn.name()));
+        std::list<std::pair<at::RecordFunctionHandle, int>> tmp_op_ids = flattenOpIdList(input_item.toList(), std::string(fn.name()));
         // Extend the current sizes array by the array returned from input sizes
         if (!tmp_op_ids.empty()) {
-          input_producer_ops_.insert(input_producer_ops_.end(), tmp_op_ids.begin(), tmp_op_ids.end());
+          input_producer_ops_.splice(input_producer_ops_.end(), tmp_op_ids);
         } else {
           input_producer_ops_.emplace_back(undefined_op_pair);
         }
@@ -88,23 +99,20 @@ std::vector<std::pair<int, int>> getInputTensorOpIds(const at::RecordFunction& f
           input_producer_ops_.emplace_back(undefined_op_pair);
       }
     }
-    idx++;
   }
   return input_producer_ops_;
 }
 
 void updateOutputTensorTracker(const at::RecordFunction& fn) {
-  int producer_op_id = int(fn.handle());
   int output_nr = 0;
   auto state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   for (const c10::IValue& s_tensor : fn.outputs()){
-    bool tensor_valid = false;
     if(s_tensor.isTensor()) {
       const at::Tensor& tensor = s_tensor.toTensor();
       if (tensor.defined()) {
         auto ten_addr =  tensor.unsafeGetTensorImpl();
-        state_ptr->setProducerTensorMap(ten_addr, producer_op_id, output_nr);
+        state_ptr->setProducerTensorMap(ten_addr, fn.handle(), output_nr);
       }
     }
     output_nr++;
@@ -119,11 +127,11 @@ std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
         torch::profiler::impl::getNvtxStr(
             fn.name(),
             fn.seqNr(),
-            report_input_shapes ? torch::profiler::impl::inputSizes(fn)
+            report_input_shapes ? torch::profiler::impl::inputSizes(fn, true)
                                 : std::vector<std::vector<int64_t>>(),
-            int(fn.handle()),
+            fn.handle(),
             report_input_shapes ? input_op_ids
-                                : std::vector<std::pair<int, int>>())
+                                : std::list<std::pair<at::RecordFunctionHandle, int>>())
             .c_str());
   }
   return nullptr;
@@ -148,7 +156,7 @@ void pushNVTXCallbacks(
           state_ptr->config().report_input_shapes
               ? &enterNVTX</*report_input_shapes=*/true>
               : &enterNVTX</*report_input_shapes=*/false>,
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx) {
+          [](const at::RecordFunction& fn, at::ObserverContext *ctx) {
             torch::profiler::impl::cudaStubs()->nvtxRangePop();
             updateOutputTensorTracker(fn);
           })

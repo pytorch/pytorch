@@ -80,14 +80,6 @@ struct TORCH_API ProfilerThreadLocalStateBase
     return config_;
   }
 
-  const std::unordered_map<at::TensorImpl*, std::pair<at::RecordFunctionHandle, int>>& producerTensorMap() const {
-    return producer_tensor_map_;
-  }
-
-  void setProducerTensorMap(at::TensorImpl *tensor, int op_id, int output_nr){
-    producer_tensor_map_[tensor] = std::pair<int, int> {op_id, output_nr};
-  }
-
   void setCallbackHandle(at::CallbackHandle handle) {
     handle_ = handle;
   }
@@ -113,9 +105,6 @@ struct TORCH_API ProfilerThreadLocalStateBase
   ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::CallbackHandle handle_ = 0;
-  // Maps the address of an output Tensor to a unique op id and output index of the tensor
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::unordered_map<at::TensorImpl*, std::pair<at::RecordFunctionHandle, int>> producer_tensor_map_;
 };
 
 // Returns if the profiler is currently enabled in the current thread.
