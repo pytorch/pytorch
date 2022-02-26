@@ -4653,8 +4653,9 @@ See :func:`torch.dsplit`
 """)
 
 add_docstr_all('stft',
+               "stft(n_fft, hop_length=None, win_length=None, window=None, center=True, "
+               "pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor"
                r"""
-stft(n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor
 
 See :func:`torch.stft`
 
@@ -4664,8 +4665,9 @@ See :func:`torch.stft`
 """)
 
 add_docstr_all('istft',
+               "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
+               "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor"
                r"""
-istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False) -> Tensor
 
 See :func:`torch.istft`
 """)

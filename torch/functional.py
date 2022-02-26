@@ -5,7 +5,7 @@ from collections import namedtuple
 import itertools
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional
 from torch._C import _add_docstr
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (

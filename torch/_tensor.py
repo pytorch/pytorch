@@ -2,7 +2,7 @@ from collections import OrderedDict
 import enum
 import functools
 from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 import warnings
 import copyreg
 from copy import deepcopy
