@@ -10,7 +10,10 @@ from ..utils import (
 from .graph_module import (
     FusedGraphModule
 )
-from .match_utils import is_match
+from .match_utils import (
+    is_match,
+    MatchAllNode,
+)
 from .pattern_utils import (
     get_default_fusion_patterns,
 )
@@ -63,8 +66,13 @@ class Fuser:
             return node_pattern[-1]
 
         for node in input_graph.nodes:
-            maybe_last_node, pattern, matched_node_pattern, obj = \
-                fusion_pairs.get(node.name, (None, None, None, None))
+            maybe_last_node, pattern, matched_node_pattern, obj, node_to_subpattern = \
+                fusion_pairs.get(node.name, (None, None, None, None, None))
+            # get the corresponding subpattern for the current node
+            if node_to_subpattern is not None:
+                node_subpattern = node_to_subpattern.get(node, None)
+            else:
+                node_subpattern = None
             if maybe_last_node is node:
                 assert obj is not None
                 # TODO: currently we hard code the root node, which only works for
@@ -74,7 +82,7 @@ class Fuser:
                 env[node.name] = obj.fuse(
                     self, load_arg, root_node, matched_node_pattern,  # type: ignore[arg-type]
                     fuse_custom_config_dict, fuser_method_mapping, is_qat)
-            elif maybe_last_node is None:
+            elif maybe_last_node is None or node_subpattern is MatchAllNode:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
@@ -85,30 +93,35 @@ class Fuser:
     def _find_matches(
             self, root: GraphModule, graph: Graph,
             patterns: Dict[Pattern, Callable]
-    ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler]]:
+    ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]]:
         modules = dict(root.named_modules())
-        match_map : Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler]] = {}  # node name -> (root_node, match_value)
+        # node name -> (root_node, match_value)
+        match_map : Dict[
+            str, Tuple[Node, Pattern, NodePattern, FuseHandler, Dict[Node, Any]]] = {}
+        # a map from node to the matched subpattern
+        node_to_subpattern: Dict[Node, Any] = {}
 
-        def apply_match(pattern, node, match, matched_node_pattern):
+        def apply_match(pattern, node, match, matched_node_pattern, node_to_subpattern):
             if isinstance(pattern, tuple):
                 s, *args = pattern
                 current_node_pattern: List[Node] = []
-                apply_match(s, node, match, current_node_pattern)
+                apply_match(s, node, match, current_node_pattern, node_to_subpattern)
                 for subpattern, arg in zip(args, node.args):
-                    apply_match(subpattern, arg, match, current_node_pattern)
+                    apply_match(subpattern, arg, match, current_node_pattern, node_to_subpattern)
                 matched_node_pattern.append(tuple(current_node_pattern))
             else:
                 # the first pattern matches will take precedence
                 if node.name not in match_map:
+                    node_to_subpattern[node] = pattern
                     matched_node_pattern.append(node)
                     root_node, pattern, handler = match
-                    match_map[node.name] = (root_node, pattern, matched_node_pattern, handler)
+                    match_map[node.name] = (root_node, pattern, matched_node_pattern, handler, node_to_subpattern)
 
         for node in reversed(graph.nodes):
             if node.name not in match_map:
                 for pattern, value in patterns.items():
                     matched_node_pattern: List[Node] = []
                     if is_match(modules, node, pattern):
-                        apply_match(pattern, node, (node, pattern, value(self, node)), matched_node_pattern)
+                        apply_match(pattern, node, (node, pattern, value(self, node)), matched_node_pattern, node_to_subpattern)
 
         return match_map
