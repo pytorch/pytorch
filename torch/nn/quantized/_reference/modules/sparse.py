@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 from .utils import ReferenceQuantizedModule
+from typing import Optional, Tuple, Dict, Any
 
 class Embedding(nn.Embedding, ReferenceQuantizedModule):
     """ A reference quantized Embedding module that fits into the
@@ -49,7 +51,7 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
     def _get_name(self):
         return "QuantizedEmbedding(Reference)"
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None) -> Tensor:
         weight_quant_dequant = self.get_weight()
         return F.embedding_bag(input, weight_quant_dequant, offsets,
                                self.max_norm, self.norm_type,
