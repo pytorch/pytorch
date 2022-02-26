@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
+    input: "onnx::Pad_0"
     output: "1"
     name: "Pad_0"
     op_type: "Pad"
@@ -27,7 +27,7 @@ graph {
   }
   name: "torch-jit-export"
   input {
-    name: "input"
+    name: "onnx::Pad_0"
     type {
       tensor_type {
         elem_type: 1
