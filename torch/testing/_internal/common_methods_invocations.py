@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import \
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like,
      freeze_rng_state)
-import torch.testing._internal.opinfo_helper as opinfo_helper
+import torch.testing._internal.opinfo_helper as opinfo_helpertest_neg_view_addcmul_cpu_float64
 
 from distutils.version import LooseVersion
 
@@ -2271,7 +2271,7 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
     sample_inputs = []
     for input_args, broadcasts_input in test_cases:
-        args = tuple(make_tensor(arg, dype=dtype, device=device, requires_grad=requires_grad,
+        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad,
                      exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         sample_inputs.append(SampleInput(
