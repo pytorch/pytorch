@@ -20,7 +20,7 @@ template <typename scalar_t, int vec_size>
 void arraySet(scalar_t* buff, scalar_t val) {
 #pragma unroll
   for (int i = 0; i < vec_size; ++i) {
-    buff[i] = v;
+    buff[i] = val;
   }
 }
 

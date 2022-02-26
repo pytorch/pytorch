@@ -28,19 +28,19 @@ __device__ constexpr int64_t ceilDiv(int a, int64_t b) {
 }
 
 __device__ constexpr int max(int a, int b) {
-  return ::max(a, b);
+  return a > b ? a : b;
 }
 
 __device__ constexpr int64_t max(int64_t a, int b) {
-  return ::max(a, (int64_t)b);
+  return a > (int64_t)b ? a : (int64_t)b;
 }
 
 __device__ constexpr int64_t max(int a, int64_t b) {
-  return ::max((int64_t)a, b);
+  return (int64_t)a > b ? (int64_t)a : b;
 }
 
 __device__ constexpr int64_t max(int64_t a, int64_t b) {
-  return ::max(a, b);
+  return a > b ? a : b;
 }
 
 __device__ double fmax(double a, double b) {
@@ -50,7 +50,7 @@ __device__ double fmax(double a, double b) {
   } else if (b != b) {
     return b;
   } else {
-    return ::fmax(a, b);
+    return a > b ? a : b;
   }
 }
 
@@ -61,24 +61,24 @@ __device__ float fmax(float a, float b) {
   } else if (b != b) {
     return b;
   } else {
-    return ::fmax(a, b);
+    return a > b ? a : b;
   }
 }
 
 __device__ constexpr int min(int a, int b) {
-  return ::min(a, b);
+  return a > b ? b : a;
 }
 
 __device__ constexpr int64_t min(int64_t a, int b) {
-  return ::min(a, (int64_t)b);
+  return (int64_t)a > b ? b : (int64_t)a;
 }
 
 __device__ constexpr int64_t min(int a, int64_t b) {
-  return ::min((int64_t)a, b);
+  return a > (int64_t)b ? (int64_t)b : a;
 }
 
 __device__ constexpr int64_t min(int64_t a, int64_t b) {
-  return ::min(a, b);
+  return a > b ? b : a;
 }
 
 __device__ double fmin(double a, double b) {
@@ -88,7 +88,7 @@ __device__ double fmin(double a, double b) {
   } else if (b != b) {
     return b;
   } else {
-    return ::fmin(a, b);
+    return a > b ? b : a;
   }
 }
 
@@ -99,7 +99,7 @@ __device__ float fmin(float a, float b) {
   } else if (b != b) {
     return b;
   } else {
-    return ::fmin(a, b);
+    return a > b ? b : a;
   }
 }
 
@@ -325,32 +325,32 @@ __device__ T pow(T a, T b) {
   }
 }
 
-template int pow<int>(int a, int b);
-template int64_t pow<int64_t>(int64_t a, int64_t b);
+template __device__ int pow<int>(int a, int b);
+template __device__ int64_t pow<int64_t>(int64_t a, int64_t b);
 
 template <>
-float pow<float>(float a, float b) {
+__device__ float pow<float>(float a, float b) {
   return ::pow(a, b);
 }
 
 template <>
-double pow<double>(double a, double b) {
+__device__ double pow<double>(double a, double b) {
   return ::pow(a, b);
 }
 
-float pow(float a, int b) {
+__device__ float pow(float a, int b) {
   return pow(a, (float)b);
 }
 
-double pow(double a, int b) {
+__device__ double pow(double a, int b) {
   return pow(a, (double)b);
 }
 
-float pow(float a, int64_t b) {
+__device__ float pow(float a, int64_t b) {
   return pow(a, (float)b);
 }
 
-double pow(double a, int64_t b) {
+__device__ double pow(double a, int64_t b) {
   return pow(a, (double)b);
 }
 

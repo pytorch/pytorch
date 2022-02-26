@@ -366,6 +366,3 @@ __device__ void gridWelford(
 }
 
 } // namespace welford
-
-#undef isize
-#undef ioffset
