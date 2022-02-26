@@ -49,6 +49,7 @@ PyYAML
 requests
 rich
 #rich==10.9.0
+scikit-image
 scikit-learn
 #scikit-learn==0.20.3
 scipy
@@ -56,12 +57,13 @@ scipy
 six
 #six==1.16.0
 tabulate
+tb-nightly
 torch
 torchvision
 typing-extensions
 #typing_extensions
 virtualenv
-unittest-xml-reporting
+unittest-xml-reporting<=3.2.0,>=2.0.0
 
 #torchelastic
 #jinja2
