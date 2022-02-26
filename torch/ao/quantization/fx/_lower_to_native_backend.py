@@ -19,7 +19,7 @@ from typing import Dict, Tuple, Type, List, Callable, Any, Union
 from torch.fx import Node
 import operator
 
-qop_to_arg_names_to_skip = {
+QOP_TO_ARG_NAMES_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.elu: ['inplace'],
     torch._ops.ops.quantized.dropout: ['inplace'],
@@ -489,8 +489,8 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             qop = get_quantized_operator(ref_node.target)
             args = list(ref_node.args)
             kwargs = dict(ref_node.kwargs)
-            if qop in qop_to_arg_names_to_skip:
-                args_to_skip = qop_to_arg_names_to_skip[qop]
+            if qop in QOP_TO_ARG_NAMES_TO_SKIP:
+                args_to_skip = QOP_TO_ARG_NAMES_TO_SKIP[qop]
                 for arg in args_to_skip:
                     if arg in kwargs:
                         kwargs.pop(arg)
