@@ -199,6 +199,11 @@ class ITensorListIterator
  * This container wraps around these two, without incurring in extra overhead
  * for converting from one to another.
  *
+ * Note that `ITensorList` is a view type. Meaning that it won't own the
+ * tensors it holds. If you need it to last longer, make sure that there is
+ * actually a non-temporary list of tensors (e.g. `vector<Tensor>`) that owns
+ * them and outlives the `ITensorList` instance.
+ *
  * (see https://github.com/pytorch/pytorch/issues/66328)
  */
 class ITensorList {
