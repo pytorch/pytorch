@@ -11,9 +11,9 @@
 namespace c10d {
 
 enum class DebugLevel {
-  Off,
-  Info,
-  Detail
+  Off = 0,
+  Info = 1,
+  Detail = 2
 };
 
 TORCH_API void setDebugLevel(DebugLevel level);
