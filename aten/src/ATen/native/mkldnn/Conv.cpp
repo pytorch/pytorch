@@ -2,6 +2,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/native/utils/ParamUtils.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -93,6 +94,35 @@ Tensor mkldnn_convolution(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups) {
+  const int64_t k = input.ndimension();
+  const int64_t dims = k - 2;
+  auto padding_vec = expand_param_if_needed(padding, "padding", dims);
+  auto stride_vec = expand_param_if_needed(stride, "stride", dims);
+  auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
+  bool padding_is_neg = false, stride_is_nonpos = false, dilation_is_nonpos = false;
+  for (auto idex = 0; idex < dims; idex++) {
+    padding_is_neg |= (padding_vec[idex] < 0);
+    stride_is_nonpos |= (stride_vec[idex] <= 0);
+    dilation_is_nonpos |= (dilation_vec[idex] <= 0);
+  }
+  TORCH_CHECK(!padding_is_neg, "negative padding is not supported");
+  TORCH_CHECK(!stride_is_nonpos, "non-positive stride is not supported");
+  TORCH_CHECK(!dilation_is_nonpos, "non-positive dilation is not supported");
+  TORCH_CHECK(groups > 0, "non-positive groups is not supported");
+
+  auto weight_sizes = weight.sizes();
+  int64_t weight_dim = weight_sizes.size();
+  TORCH_CHECK(weight_dim == k,
+           "Expected ", weight_dim, "-dimensional input for ", weight_dim,
+           "-dimensional weight ", weight_sizes, ", but got ", k, "-dimensional input of size ",
+           input.sizes(), " instead");
+  TORCH_CHECK(weight_sizes[0] >= groups,
+           "Given groups=", groups, ", expected weight to be at least ", groups,
+           " at dimension 0, but got weight of size ", weight_sizes, " instead");
+  TORCH_CHECK(weight_sizes[0] % groups == 0,
+           "Given groups=", groups, ", expected weight to be divisible by ",
+           groups, " at dimension 0, but got weight of size [", weight_sizes,
+           "] instead");
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -112,9 +142,9 @@ Tensor mkldnn_convolution(
       mkldnn_input,
       mkldnn_weight,
       mkldnn_bias,
-      padding,
-      stride,
-      dilation,
+      padding_vec,
+      stride_vec,
+      dilation_vec,
       groups);
 
   if (input.is_mkldnn()) {
