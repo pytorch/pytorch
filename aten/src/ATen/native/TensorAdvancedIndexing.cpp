@@ -284,12 +284,30 @@ static void build_index_op(
   iter.build(config);
 }
 
+void check_indices_on_cpu_or_selfdevice(
+    const Tensor& self,
+    at::IOptTensorRefList indices) {
+  auto dev = self.device();
+  bool indices_on_cpu_or_dev = std::all_of(
+      indices.begin(), indices.end(), [=](const at::OptionalTensorRef& opt) {
+        return opt.has_value() ? (opt->is_cpu() || opt->device() == dev) : true;
+      });
+  TORCH_CHECK(
+      indices_on_cpu_or_dev,
+      "indices should be either on ", kCPU,
+      " or on the same device as the indexed tensor (", dev, ")");
+}
+
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
 (const Tensor& self, const at::IOptTensorRefList& indices) {
   TORCH_CHECK_INDEX(
       indices.size() <= (size_t)self.dim(),
       "too many indices for tensor of dimension ",
       self.dim(), " (got ", indices.size(), ")");
+
+  // Only allow: `dev_tensor[{cpu,dev}_tensor]`.
+  // See: https://github.com/pytorch/pytorch/pull/69607
+  check_indices_on_cpu_or_selfdevice(self, indices);
 
   const auto& result = maybe_get_output();
 

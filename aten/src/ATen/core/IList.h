@@ -346,6 +346,11 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
  * - `IList<at::Tensor>`
  * - `IList<at::OptionalTensorRef>`
  *
+ * Note that `ITensorList` is a view type. Meaning that it won't own the
+ * tensors it holds. If you need it to last longer, make sure that there is
+ * actually a non-temporary list of tensors (e.g. `vector<Tensor>`) that owns
+ * them and outlives the `ITensorList` instance.
+ *
  * What is this for?
  * =================
  * Historically, PyTorch has maintained 2 different APIs: the unboxed

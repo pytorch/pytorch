@@ -316,7 +316,7 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     unsorted_indices = sequence.unsorted_indices
     if unsorted_indices is not None:
         batch_dim = 0 if batch_first else 1
-        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices]
+        return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices.cpu()]
     return padded_output, lengths
 
 
