@@ -1,4 +1,3 @@
-
 #pragma once
 
 #include <ATen/detail/FunctionTraits.h>
@@ -6,14 +5,12 @@
 #include <ATen/native/TensorIteratorDynamicCasting.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/OpMathType.h>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 
-constexpr int num_threads() { return C10_WARP_SIZE * 4; }
-constexpr int thread_work_size() { return 4; }
-constexpr int block_work_size() { return thread_work_size() * num_threads(); }
-
 #include <ATen/native/cuda/MemoryAccess.cuh>
+
 
 namespace at { namespace native {
 
@@ -78,9 +75,9 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 // memory access introduce regression on ROCm.
 
 #if !defined(USE_ROCM)
-#include <ATen/native/cuda/CUDALoops.cuh>
+  #include <ATen/native/cuda/CUDALoops.cuh>
 #else
-#include <ATen/native/cuda/ROCmLoops.cuh>
+  #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
 namespace at { namespace native {

@@ -1,4 +1,5 @@
 #include <benchmark/benchmark.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
@@ -78,7 +79,7 @@ static void reduce1d_naive(at::Tensor& A, at::Tensor& B) {
   int size = A.numel();
   TORCH_CHECK(B.numel() == 1);
   *pB = 0.;
-  for (int i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     *pB += pA[i];
   }
 }
@@ -101,18 +102,18 @@ static void reduce1d_native_rfactor(at::Tensor& A, at::Tensor& B) {
   TORCH_CHECK(size % kChunkSize == 0);
   *pB = 0.;
   float temp[kChunkSize];
-  for (int j = 0; j < kChunkSize; j++) {
+  for (const auto j : c10::irange(kChunkSize)) {
     temp[j] = 0;
   }
 
   int chunk_count = size / kChunkSize;
-  for (int i = 0; i < chunk_count; i++) {
-    for (int j = 0; j < kChunkSize; j++) {
+  for (const auto i : c10::irange(chunk_count)) {
+    for (const auto j : c10::irange(kChunkSize)) {
       temp[j] += pA[i * kChunkSize + j];
     }
   }
 
-  for (int j = 0; j < kChunkSize; j++) {
+  for (const auto j : c10::irange(kChunkSize)) {
     *pB += temp[j];
   }
 }
@@ -163,7 +164,7 @@ static void reduce1d_native_vector(at::Tensor& A, at::Tensor& B) {
   temp = _mm256_setzero_ps();
 
   int tile_count = size / kChunkSize;
-  for (int i = 0; i < tile_count; i++) {
+  for (const auto i : c10::irange(tile_count)) {
     __m256 data = _mm256_load_ps(pA + i * kChunkSize);
     temp = _mm256_add_ps(temp, data);
   }
@@ -196,7 +197,7 @@ static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
       kChunkSize,
       " ! = 0");
   __m256 t[kTileSize];
-  for (int j = 0; j < kTileSize; j++) {
+  for (const auto j : c10::irange(kTileSize)) {
     t[j] = _mm256_setzero_ps();
   }
 
@@ -211,7 +212,7 @@ static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
   }
 
   float result = sum_f32x8(t[0]);
-  for (int j = 1; j < kTileSize; j++) {
+  for (const auto j : c10::irange(1, kTileSize)) {
     result += sum_f32x8(t[j]);
   }
   *pB = result;
@@ -234,12 +235,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
   te::BufHandle AP("A", {M}, te::kFloat);
   te::Tensor BT = te::Reduce(
       "reduce_full",
-      {{1, "N"}},
+      {1},
       te::Sum(),
       [&](const te::ExprHandle& n, const te::ExprHandle& m) {
         return AP.load(m);
       },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   loop.prepareForCodegen();
@@ -265,12 +266,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
   te::BufHandle AP("A", {M}, te::kFloat);
   te::Tensor BT = te::Reduce(
       "reduce_full",
-      {{1, "N"}},
+      {1},
       te::Sum(),
       [&](const te::ExprHandle& n, const te::ExprHandle& m) {
         return AP.load(m);
       },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   const int kChunkSize = 8;
@@ -304,12 +305,12 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
   te::BufHandle AP("A", {M}, te::kFloat);
   te::Tensor BT = te::Reduce(
       "reduce_full",
-      {{1, "N"}},
+      {1},
       te::Sum(),
       [&](const te::ExprHandle& n, const te::ExprHandle& m) {
         return AP.load(m);
       },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   const int kChunkSize = 8;
@@ -348,7 +349,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
       {},
       te::Sum(),
       [&](const te::ExprHandle& m) { return AP.load(m); },
-      {{M, "M"}});
+      {M});
 
   te::LoopNest loop({BT});
   te::BufPtr rfac_buf;
@@ -540,16 +541,16 @@ BENCHMARK_DEFINE_F(Reduce2DRow, Hand)(benchmark::State& state) {
     for (int m_outer = 0; m_outer < M; m_outer += Mb) {
       float bregs[Mb][Nb] = {0.0f};
       for (int n_outer = 0; n_outer < N; n_outer += Nb) {
-        for (int m_inner = 0; m_inner < Mb; m_inner++) {
-          for (int n_inner = 0; n_inner < Nb; n_inner++) {
+        for (const auto m_inner : c10::irange(Mb)) {
+          for (const auto n_inner : c10::irange(Nb)) {
             bregs[m_inner][n_inner] +=
                 a[(m_outer + m_inner) * N + n_outer + n_inner];
           }
         }
       }
-      for (int m_inner = 0; m_inner < Mb; m_inner++) {
+      for (const auto m_inner : c10::irange(Mb)) {
         b[m_outer + m_inner] = 0.f;
-        for (int n_inner = 0; n_inner < Nb; n_inner++) {
+        for (const auto n_inner : c10::irange(Nb)) {
           b[m_outer + m_inner] += bregs[m_inner][n_inner];
         }
       }

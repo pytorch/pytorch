@@ -163,7 +163,7 @@ if is_available():
         # finishing handshaking. To avoid that issue, we make it global to
         # keep it alive.
         global rendezvous_iterator
-        rendezvous_iterator = torch.distributed.rendezvous(
+        rendezvous_iterator = dist.rendezvous(
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)

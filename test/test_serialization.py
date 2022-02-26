@@ -14,6 +14,7 @@ import pickle
 import shutil
 import pathlib
 from copy import deepcopy
+from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
@@ -22,6 +23,7 @@ from torch.serialization import check_module_version_greater_or_equal
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -95,7 +97,7 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
         self.assertEqual(c[4].dtype, torch.float)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
@@ -278,14 +280,17 @@ class SerializationMixin(object):
         self.assertEqual(i, j)
 
     def test_serialization_sparse(self):
-        x = torch.zeros(3, 3)
-        x[1][1] = 1
-        x = x.to_sparse()
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save({"tensor": x}, f)
-            f.seek(0)
-            y = torch.load(f)
-            self.assertEqual(x, y["tensor"])
+        def _test_serialization(conversion):
+            x = torch.zeros(3, 3)
+            x[1][1] = 1
+            x = conversion(x)
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save({"tensor": x}, f)
+                f.seek(0)
+                y = torch.load(f)
+                self.assertEqual(x, y["tensor"])
+        _test_serialization(lambda x: x.to_sparse())
+        _test_serialization(lambda x: x.to_sparse_csr())
 
     def test_serialization_sparse_invalid(self):
         x = torch.zeros(3, 3)
@@ -316,6 +321,36 @@ class SerializationMixin(object):
                     "size is inconsistent with indices"):
                 y = torch.load(f)
 
+    def test_serialization_sparse_csr_invalid(self):
+        x = torch.zeros(3, 3)
+        x[1][1] = 1
+        x = x.to_sparse_csr()
+
+        class TensorSerializationSpoofer(object):
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __reduce_ex__(self, proto):
+                invalid_crow_indices = self.tensor.crow_indices().clone()
+                invalid_crow_indices[0] = 3
+                return (
+                    torch._utils._rebuild_sparse_tensor,
+                    (
+                        self.tensor.layout,
+                        (
+                            invalid_crow_indices,
+                            self.tensor.col_indices(),
+                            self.tensor.values(),
+                            self.tensor.size())))
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save({"spoofed": TensorSerializationSpoofer(x)}, f)
+            f.seek(0)
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "rebuilding sparse tensor for layout torch.sparse_csr"):
+                y = torch.load(f)
+
     def test_serialize_device(self):
         device_str = ['cpu', 'cpu:0', 'cuda', 'cuda:0']
         device_obj = [torch.device(d) for d in device_str]
@@ -335,7 +370,7 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
         self.assertEqual(c[4].dtype, torch.float32)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
@@ -568,6 +603,64 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    def test_save_different_dtype_unallocated(self):
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        def save_load_check(a, b):
+            with io.BytesIO() as f:
+                torch.save([a, b], f)
+                f.seek(0)
+                a_loaded, b_loaded = torch.load(f)
+            self.assertEqual(a, a_loaded)
+            self.assertEqual(b, b_loaded)
+
+        for device, dtype in product(devices, get_all_dtypes()):
+            a = torch.tensor([], dtype=dtype, device=device)
+
+            for other_dtype in get_all_dtypes():
+                s = torch._TypedStorage(
+                    wrap_storage=a.storage()._untyped(),
+                    dtype=other_dtype)
+                save_load_check(a, s)
+                save_load_check(a.storage(), s)
+                b = torch.tensor([], dtype=other_dtype, device=device)
+                save_load_check(a, b)
+
+    def test_save_different_dtype_error(self):
+        error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"
+
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for device in devices:
+            a = torch.randn(10, dtype=torch.complex128, device=device)
+            f = io.BytesIO()
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a, a.imag], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a.storage(), a.imag], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a, a.imag.storage()], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a.storage(), a.imag.storage()], f)
+
+            a = torch.randn(10, device=device)
+            s_bytes = torch._TypedStorage(
+                wrap_storage=a.storage()._untyped(),
+                dtype=torch.uint8)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a, s_bytes], f)
+
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                torch.save([a.storage(), s_bytes], f)
 
 class serialization_method(object):
     def __init__(self, use_zip):
@@ -775,6 +868,9 @@ class TestWrapperSubclass(torch.Tensor):
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         return r
+
+    def clone(self):
+        return type(self)(self.elem.clone())
 
 
 class TestGetStateSubclass(torch.Tensor):

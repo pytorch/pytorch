@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - main
   pull_request:
 
 jobs:
@@ -14,7 +15,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: '3.6 - 3.9'
+          python-version: 3.8
           architecture: x64
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -25,11 +26,13 @@ jobs:
         # .circleci/docker/common/install_conda.sh
         run: |
           set -eux
-          pip install -r requirements.txt
-          pip install boto3==1.16.34
+          python3 -mpip install -r requirements.txt
+          python3 -mpip install boto3==1.16.34
           make setup_lint
       - name: Test tools
-        run: python -m unittest discover -vs tools/test -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -vs tools/test -p 'test_*.py'
+          python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
 
 concurrency:
   group: test-tools-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

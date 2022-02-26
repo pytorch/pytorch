@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 
+#include <ATen/code_template.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 #include <torch/csrc/jit/backends/backend_debug_info.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 
 #include <memory>
 #include <stack>
@@ -107,9 +107,16 @@ Module codegen_backend_module(
   // functional.
   auto cloned_module = orig_module.clone();
   auto module_name = orig_module.type()->name()->qualifiedName();
+
   // Generate LoweredModule.
   Module loweredModule(
       "torch.jit.LoweredModule." + backend_name + "." + module_name,
+      std::make_shared<CompilationUnit>(),
+      /*shouldMangle=*/true);
+
+  // Generate WrapperModule.
+  Module wrapper(
+      "torch.jit.LoweredWrapper." + backend_name + "." + module_name,
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
@@ -164,11 +171,11 @@ Module codegen_backend_module(
 
   // This is a helper function for creating a new instance of the
   // backend class.
-  static const auto create_backend_ct = CodeTemplate(R"(
+  static const auto create_backend_ct = at::jit::CodeTemplate(R"(
             def __create_backend(self):
                 self.__backend = $name()
             )");
-  TemplateEnv create_backend_te;
+  at::jit::TemplateEnv create_backend_te;
   create_backend_te.s("name", qual_backend_name.qualifiedName());
   loweredModule.define(
       create_backend_ct.format(create_backend_te), loweredModuleResolver());
@@ -209,11 +216,11 @@ Module codegen_backend_module(
       "__backend_debug_info",
       OptionalType::create(debug_info_cls),
       IValue::make_capsule(backend_debug_info_class));
-  static const auto create_backend_debug_info_ct = CodeTemplate(R"(
+  static const auto create_backend_debug_info_ct = at::jit::CodeTemplate(R"(
             def __create_backend_debug_info(self):
                 self.__backend_debug_info = $backend_debug_info()
             )");
-  TemplateEnv create_backend_debug_info_te;
+  at::jit::TemplateEnv create_backend_debug_info_te;
   create_backend_debug_info_te.s(
       "backend_debug_info", backend_debug_info_class_name.qualifiedName());
   loweredModule.define(
@@ -254,9 +261,10 @@ Module codegen_backend_module(
 
   // This loop generates one method on the LoweredModule for every key
   // in method_compile_spec.
+  std::vector<std::string> wrapper_methods;
   for (auto& e : method_compile_spec) {
     std::string method_name = e.key().toStringRef();
-    static const auto method_ct = CodeTemplate(R"(
+    static const auto method_ct = at::jit::CodeTemplate(R"(
             def $method(self${,def_inputs}):
                 typed_inputs: List[Any] = [${fwd_inputs,}]
                 if self.__backend.is_available() :
@@ -266,9 +274,14 @@ Module codegen_backend_module(
                 else:
                   raise Exception("Backend is not available.")
             )");
+    static const auto wrapper_method_ct = at::jit::CodeTemplate(R"(
+            def $method(self${,def_inputs}):
+                return self.__loweredModule__.$method(${fwd_inputs})
+            )");
 
-    TemplateEnv method_te;
+    at::jit::TemplateEnv method_te, wrapper_method_te;
     method_te.s("method", method_name);
+    wrapper_method_te.s("method", method_name);
     auto method = orig_module.get_method(method_name);
     auto& function = method.function();
     auto& schema = function.getSchema();
@@ -346,6 +359,10 @@ Module codegen_backend_module(
     method_te.v("refine", type_checks);
     method_te.s("unpack", out_ss.str());
 
+    wrapper_method_te.v("def_inputs", def_inputs);
+    wrapper_method_te.v("fwd_inputs", fwd_inputs);
+    wrapper_methods.push_back(wrapper_method_ct.format(wrapper_method_te));
+
     // If the output type is a single element tuple then add an extra comma
     // to ensure the final output maintains this type.
     if (out_tuple_ty && out_tuple_ty->elements().size() == 1) {
@@ -383,7 +400,13 @@ Module codegen_backend_module(
                                 .toCustomClass<PyTorchBackendDebugInfo>();
   backend_debug_info->setDebugInfoMap(std::move(debug_info_map));
 
-  return loweredModule;
+  // Wrap lowered module to obfuscate custom serialization logic
+  wrapper.register_module("__loweredModule__", loweredModule);
+  for (auto& method : wrapper_methods) {
+    wrapper.define(method);
+  }
+
+  return wrapper;
 }
 } // namespace detail
 } // namespace jit

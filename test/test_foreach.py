@@ -8,6 +8,7 @@ import torch
 import unittest
 
 from torch.testing import make_tensor
+from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
@@ -124,7 +125,7 @@ class TestForeach(TestCase):
             else:
                 expected = ref(ref_inputs, **kwargs)
                 if dtype in (torch.float16, torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(expected, actual, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                    self.assertEqual(expected, actual, atol=1.e-3, rtol=default_tolerances(dtype)[0])
                 else:
                     self.assertEqual(expected, actual)
 
@@ -373,8 +374,7 @@ class TestForeach(TestCase):
         for N in N_values:
             self._test_unary(device, dtype, op, N, is_fastpath=True)
 
-    @dtypes(*get_all_dtypes())
-    @ops(foreach_unary_op_db)
+    @ops(foreach_unary_op_db, dtypes=get_all_dtypes())
     def test_unary_slowpath(self, device, dtype, op):
         for N in N_values:
             self._test_unary(device, dtype, op, N, is_fastpath=False)
@@ -384,15 +384,14 @@ class TestForeach(TestCase):
         self.assertEqual(ref(inputs), op(inputs, self.is_cuda, is_fastpath))
 
     # note(mkozuki): in-place of foreach_minimum and foreach_maximum aren't implemented.
-    # @dtypes(*get_all_dtypes(include_bfloat16=False, include_complex=False))
     @ops(foreach_minmax_op_db)
     def test_minmax_fastpath(self, device, dtype, op):
         for N in N_values:
             inputs = tuple(op.sample_inputs(device, dtype, N) for _ in range(2))
             self._minmax_test(op, inputs, True, N if dtype == torch.bool else 1)
 
-    @dtypes(*get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
-    @ops(foreach_minmax_op_db)
+    @ops(foreach_minmax_op_db,
+         dtypes=get_all_dtypes(include_half=True, include_bfloat16=True, include_complex=False))
     def test_minmax_slowpath(self, device, dtype, op):
         for N in N_values:
             inputs = tuple(op.sample_inputs(device, dtype, N, noncontiguous=True) for _ in range(2))
@@ -400,8 +399,7 @@ class TestForeach(TestCase):
 
     # note(mkozuki): ForeachFuncInfo's of both `_foreach_maximum` and `_foreach_minimum` include integer types.
     # so, manually limit dtypes to fp types for inf&nan tests.
-    @dtypes(*get_all_fp_dtypes(include_bfloat16=True, include_half=True))
-    @ops(foreach_minmax_op_db)
+    @ops(foreach_minmax_op_db, dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True))
     def test_minmax_float_inf_nan(self, device, dtype, op):
         inputs = (
             [
@@ -449,8 +447,7 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors, 1)
             self.assertEqual(res, tensors)
 
-    @dtypes(*get_all_dtypes())
-    @ops(foreach_binary_op_db)
+    @ops(foreach_binary_op_db, dtypes=get_all_dtypes())
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
         foreach_op, ref = op.method_variant, op.ref
         tensors = [torch.ones(1, 1, device=device, dtype=dtype).expand(2, 1, 3)]
@@ -470,8 +467,7 @@ class TestForeach(TestCase):
     # The message was
     # `AssertionError: NotImplementedError("Could not run 'aten::_foreach_add.Scalar' with arguments from the 'Meta' backend.`
     @skipMeta
-    @dtypes(torch.float)
-    @ops(foreach_binary_op_db)
+    @ops(foreach_binary_op_db, allowed_dtypes=[torch.float])
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
         foreach_op = op.method_variant
         tensors = [torch.tensor([1.1], dtype=torch.float, device=device),
@@ -483,8 +479,7 @@ class TestForeach(TestCase):
             runtime_error = e
         self.assertIsNone(runtime_error)
 
-    @dtypes(*get_all_dtypes())
-    @ops(foreach_binary_op_db)
+    @ops(foreach_binary_op_db, dtypes=get_all_dtypes())
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace
         tensors1 = []
@@ -548,8 +543,7 @@ class TestForeach(TestCase):
 
     @skipMeta
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
-    @dtypes(*get_all_dtypes())
-    @ops(foreach_binary_op_db)
+    @ops(foreach_binary_op_db, dtypes=get_all_dtypes())
     def test_binary_op_list_slow_path(self, device, dtype, op):
         # note(mkozuki): why `n_expected_cudaLaunchKernels=0`?
         # In this test, foreach functions don't go through fast path,
@@ -641,8 +635,7 @@ class TestForeach(TestCase):
             self.assertEqual(actual, tensors1)
 
     @onlyCUDA
-    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
-    @ops(foreach_pointwise_op_db)
+    @ops(foreach_pointwise_op_db, allowed_dtypes=get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     def test_pointwise_op_tensors_on_different_devices(self, device, dtype, op):
         # tensors1: ['cuda', 'cpu]
         # tensors2: ['cuda', 'cpu]

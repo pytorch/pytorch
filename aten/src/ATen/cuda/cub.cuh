@@ -45,17 +45,23 @@
 
 #ifdef USE_ROCM
 #define NO_ROCM(x)
+#define ROCM_HIPCUB(x) ::hipcub
 #else
 #define NO_ROCM(x) x
+#define ROCM_HIPCUB(x) x
 #endif
 
-#if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
+     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
+#if !defined(USE_ROCM)
 namespace at_cuda_detail {
+#endif
+
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
 template <>
-struct cub::FpLimits<c10::BFloat16>
+struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 {
     static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
         unsigned short max_word = 0x7F7F;
@@ -68,8 +74,14 @@ struct cub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-}
+template <>
+struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
+       ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+#if !defined(USE_ROCM)
+} // namespace at_cuda_detail
+#endif
+
 #endif
 
 #if !defined(USE_ROCM)
@@ -93,11 +105,18 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if CUB_SUPPORTS_NV_BFLOAT16()
+#if !defined(USE_ROCM) && CUB_SUPPORTS_NV_BFLOAT16()
 
 template<>
 struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
+};
+
+#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = hip_bfloat16;
 };
 
 #endif
@@ -152,6 +171,7 @@ __global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputItera
   *out = scan_op(static_cast<acc_t>(*a), static_cast<acc_t>(*b));
 }
 
+#if !CUB_SUPPORTS_FUTURE_VALUE()
 template<typename ValueT, typename InputIteratorT>
 struct chained_iterator {
   using iterator_category = std::random_access_iterator_tag;
@@ -179,15 +199,31 @@ struct chained_iterator {
     return (*this)[0];
   }
 };
+#endif
 
+// even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+// so split at int_max/2
+constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
 }
 
-template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT>
+// non synchronizing cub call
+// even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+// so split at int_max/2
+template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, int max_cub_size=impl::max_cub_size>
 inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+  //For ROCm, use hipCUB chained iterators
+  CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::InclusiveScan,
+      input,
+      output,
+      scan_op,
+      num_items,
+      at::cuda::getCurrentCUDAStream());
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
-  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
       input,
@@ -209,6 +245,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+#if !CUB_SUPPORTS_FUTURE_VALUE()
     using ArgIndexInputIterator = NO_ROCM(at_cuda_detail)::cub::ArgIndexInputIterator<InputIteratorT>;
     using tuple = typename ArgIndexInputIterator::value_type;
     auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
@@ -226,15 +263,35 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         scan_op,
         size_cub,
         at::cuda::getCurrentCUDAStream());
+#else
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
+        input + i + 1,
+        output + i,
+        scan_op,
+        ::at_cuda_detail::cub::FutureValue<input_t>(first_elem_ptr),
+        size_cub,
+        at::cuda::getCurrentCUDAStream());
+#endif
   }
+#endif
 }
 
-template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT>
+template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+  //For ROCm, use hipCUB chained iterators
+  CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::ExclusiveScan,
+      input,
+      output,
+      scan_op,
+      init_value,
+      num_items,
+      at::cuda::getCurrentCUDAStream());
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
-  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
       input,
@@ -256,6 +313,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+#if !CUB_SUPPORTS_FUTURE_VALUE()
     auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
       input + i, first_elem_ptr};
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
@@ -264,7 +322,37 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         scan_op,
         size_cub,
         at::cuda::getCurrentCUDAStream());
+#else
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
+        input + i,
+        output + i,
+        scan_op,
+        ::at_cuda_detail::cub::FutureValue<InitValueT>(first_elem_ptr),
+        size_cub,
+        at::cuda::getCurrentCUDAStream());
+#endif
   }
+#endif
 }
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
+inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
+      keys, input, output, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename ScanOpT>
+inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
+      keys, input, output, scan_op, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+#endif
 
 }}}  // namespace at::cuda::cub

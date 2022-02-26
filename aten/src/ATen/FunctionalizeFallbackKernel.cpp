@@ -2,6 +2,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <torch/library.h>
+#include <c10/util/irange.h>
 
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
@@ -33,7 +34,7 @@ namespace {
     const auto returns_begin = stack->size() - num_returns;
     auto returns = torch::jit::last(stack, num_returns);
 
-    for (int64_t idx = 0; idx < num_returns; ++idx) {
+    for (const auto idx : c10::irange(num_returns)) {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor()) {
         auto t = ivalue.toTensor();

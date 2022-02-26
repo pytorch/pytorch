@@ -26,16 +26,21 @@ TEST(PermutationUtilTest, TestIsPermutation) {
 
 TEST(PermutationUtilTest, TestPermute) {
   EXPECT_EQ(
-      Permute({0}, std::vector<int64_t>({224})), std::vector<int64_t>({224}));
+      PermuteDimensions({0}, std::vector<int64_t>({224})),
+      std::vector<int64_t>({224}));
   EXPECT_EQ(
-      Permute({1, 2, 0}, std::vector<int64_t>({3, 224, 224})),
+      PermuteDimensions({1, 2, 0}, std::vector<int64_t>({3, 224, 224})),
       std::vector<int64_t>({224, 224, 3}));
   // Not a valid permutation
-  EXPECT_THROW(Permute({-1}, std::vector<int64_t>({244})), c10::Error);
-  EXPECT_THROW(Permute({3, 2}, std::vector<int64_t>({244})), c10::Error);
+  EXPECT_THROW(
+      PermuteDimensions({-1}, std::vector<int64_t>({244})), c10::Error);
+  EXPECT_THROW(
+      PermuteDimensions({3, 2}, std::vector<int64_t>({244})), c10::Error);
   // Permutation size is different from the to-be-permuted vector size
-  EXPECT_THROW(Permute({0, 1}, std::vector<int64_t>({244})), c10::Error);
-  EXPECT_THROW(Permute({0}, std::vector<int64_t>({3, 244, 244})), c10::Error);
+  EXPECT_THROW(
+      PermuteDimensions({0, 1}, std::vector<int64_t>({244})), c10::Error);
+  EXPECT_THROW(
+      PermuteDimensions({0}, std::vector<int64_t>({3, 244, 244})), c10::Error);
 }
 
 } // namespace lazy

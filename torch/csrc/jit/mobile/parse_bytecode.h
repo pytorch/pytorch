@@ -17,6 +17,9 @@ TORCH_API void parseTypes(
     const c10::ivalue::TupleElements& types_list,
     mobile::Function* function);
 TORCH_API void parseRegisterSize(size_t rsize, mobile::Function* function);
+TORCH_API void applyUpgrader(
+    mobile::Function* function,
+    uint64_t operator_version);
 } // namespace mobile
 } // namespace jit
 } // namespace torch

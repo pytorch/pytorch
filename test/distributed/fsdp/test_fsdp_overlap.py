@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.cuda import Event
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
@@ -190,11 +190,11 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
         # wait should be long, except when there is no real work on GPU.
         #
         # If the assertions fail below, we likely have a cpu-gpu wait in the forward/backward pass.
+        # e4["cpu_iter"] may not be short as cpu may take some time to queue both compute and all-gather.
         short = [
             e1["cpu_iter"],
             e2["cpu_iter"],
             e3["cpu_iter"],
-            e4["cpu_iter"],
             e1["cpu_wait"],
         ]
         long = [e3["cpu_wait"], e4["cpu_wait"]]

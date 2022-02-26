@@ -698,20 +698,33 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
         except OSError:
             pass
 
-    def test_distributed_debug_mode(self):
+    def test_debug_level(self):
+        try:
+            del os.environ["TORCH_DISTRIBUTED_DEBUG"]
+        except KeyError:
+            pass
+
+        dist.set_debug_level_from_env()
         # Default should be off
-        default_debug_mode = dist._get_debug_mode()
-        self.assertEqual(default_debug_mode, dist._DistributedDebugLevel.OFF)
+        default_debug_mode = dist.get_debug_level()
+        self.assertEqual(default_debug_mode, dist.DebugLevel.OFF)
         mapping = {
-            "OFF": dist._DistributedDebugLevel.OFF,
-            "INFO": dist._DistributedDebugLevel.INFO,
-            "DETAIL": dist._DistributedDebugLevel.DETAIL,
+            "OFF": dist.DebugLevel.OFF,
+            "off": dist.DebugLevel.OFF,
+            "oFf": dist.DebugLevel.OFF,
+            "INFO": dist.DebugLevel.INFO,
+            "info": dist.DebugLevel.INFO,
+            "INfO": dist.DebugLevel.INFO,
+            "DETAIL": dist.DebugLevel.DETAIL,
+            "detail": dist.DebugLevel.DETAIL,
+            "DeTaIl": dist.DebugLevel.DETAIL,
         }
         invalid_debug_modes = ["foo", 0, 1, -1]
 
         for mode in mapping.keys():
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            set_debug_mode = dist._get_debug_mode()
+            dist.set_debug_level_from_env()
+            set_debug_mode = dist.get_debug_level()
             self.assertEqual(
                 set_debug_mode,
                 mapping[mode],
@@ -720,8 +733,8 @@ class CommTest(AbstractCommTest, MultiProcessTestCase):
 
         for mode in invalid_debug_modes:
             os.environ["TORCH_DISTRIBUTED_DEBUG"] = str(mode)
-            with self.assertRaisesRegex(RuntimeError, "to be one of"):
-                dist._get_debug_mode()
+            with self.assertRaisesRegex(RuntimeError, "The value of TORCH_DISTRIBUTED_DEBUG must"):
+                dist.set_debug_level_from_env()
 
 
 class DummyWork(dist._Work):
@@ -792,13 +805,13 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
 
-class PythonProcessGroupTest(MultiProcessTestCase):
+class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupTest, self).setUp()
+        super(PythonProcessGroupExtensionTest, self).setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupTest, self).tearDown()
+        super(PythonProcessGroupExtensionTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -811,12 +824,12 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def test_backend_class_attr(self):
         dist.Backend.register_backend(
             "dummy",
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"],
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
 
     @staticmethod
@@ -824,7 +837,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         return DummyProcessGroup(rank, size)
 
     def test_collectives(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'
@@ -858,7 +871,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def test_send_recv(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'

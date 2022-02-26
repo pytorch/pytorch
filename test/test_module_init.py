@@ -175,6 +175,9 @@ def build_constructor_arg_db():
         torch.nn.qat.Linear: ((5, 2), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
+        torch.nn.qat.Embedding: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
+        }),
         torch.nn.qat.EmbeddingBag: ((10, 12), {
             'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
@@ -183,6 +186,7 @@ def build_constructor_arg_db():
         torch.nn.quantizable.MultiheadAttention: ((10, 2), {}),
         torch.nn.quantized.BatchNorm2d: ((2,), {}),
         torch.nn.quantized.BatchNorm3d: ((2,), {}),
+        torch.nn.quantized.Dropout: ((), {}),
         torch.nn.quantized.Conv1d: ((3, 3, 3), {}),
         torch.nn.quantized.Conv2d: ((3, 3, 3), {}),
         torch.nn.quantized.Conv3d: ((3, 3, 3), {}),

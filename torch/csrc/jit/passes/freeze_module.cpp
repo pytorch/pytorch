@@ -649,6 +649,7 @@ class AttributePropagator {
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
       removeExtraWaitCalls(graph->block());
+      toGraphFunction(*function).clear_optimized_graphs();
     }
     removeUnusedAttrs();
   }
@@ -881,7 +882,7 @@ Module freeze_module(
   return moduleClone;
 }
 
-void freeze_module(
+void freeze_module_inplace(
     Module* module,
     std::vector<std::string> preservedAttrs,
     bool freezeInterfaces,

@@ -35,9 +35,9 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   void compileFusion(
       Fusion* fusion,
-      CompileOptions options = CompileOptions(),
       const at::ArrayRef<IValue>& inputs = {},
-      const LaunchParams& launch_constraints = LaunchParams());
+      const LaunchParams& launch_constraints = LaunchParams(),
+      CompileOptions options = CompileOptions());
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
@@ -55,7 +55,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // function to query whether a `FusionExecutor` has a compiled kernel to
   // execute
   bool compiled() const {
-    return fusion_id_ != -1;
+    return fusion_id_ != -1 && lowered_;
   };
 
   void evictCache(size_t cache_id) {
@@ -81,8 +81,12 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     uint64_t rand_offset;
   };
 
+  using ExecutorCompileTimeInfoCache =
+      executor_utils::caching::ExecutorCompileTimeInfoCache;
+
   kir::Kernel* kernel() const {
-    return lowered_.kernel();
+    TORCH_INTERNAL_ASSERT(lowered_);
+    return lowered_->kernel();
   }
 
   //! Internal knob used for debugging/profiling only
@@ -117,6 +121,11 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       const LaunchParams& launch_params,
       const std::vector<at::Tensor>& args);
 
+  //! Internal knob used for debugging/profiling only
+  void disableLaunchParamCache() {
+    disable_parameter_cache_ = true;
+  }
+
  private:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
@@ -139,7 +148,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   LaunchParams computeLaunchParams(
       const LaunchParams& launch_constraints,
-      kir::ExpressionEvaluator& expr_eval);
+      kir::ExpressionEvaluator& expr_eval,
+      const int warp_size);
 
   uint64_t computeSharedMemory(
       kir::ExpressionEvaluator& expr_eval,
@@ -164,11 +174,14 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     return used_tvs_;
   };
 
- private:
-  Fusion fusion_;
+  ExecutorCompileTimeInfoCache* compileTimeDataCache() {
+    return &compile_time_info_cache_;
+  }
 
+ private:
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
+  int warp_size_ = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 
   // TensorViews actually used in the kernel.
@@ -178,13 +191,19 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   int fusion_id_ = -1;
   static int fusion_id_counter_;
 
-  GpuLower lowered_;
+  std::unique_ptr<GpuLower> lowered_;
+  // Copy of lowered_->kernel()
+  Fusion* fusion_ = nullptr;
+
+  // Track the block size this kernel was compiled with. If the block size
+  // increases, recompile to adjust maxregister count.
+  int64_t block_size_high_water_mark = 1;
 
   // lookup table to take short cut to retrieve recorded information in order to
   // launch kernels without re-inference parameters.
   std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
 
-  // Profiling support: knob to control whether we actually execute the
+  // Profiling support: knob to control wheter we actually execute the
   // kernel on the GPU or not
   bool execute_kernel_ = true;
 
@@ -193,6 +212,19 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
 
   // The last kernel execution time, if measure_kernel_time_ is true
   float kernel_time_ms_ = 0;
+
+  // Profiling support: knob to disable caching of launch params
+  bool disable_parameter_cache_ = false;
+
+  // Compile time information caching. This is used for shape inference
+  //  support. The cache stores graph information that are available
+  //  without shape information so that each shape inference call will
+  //  not need to re-compute them.
+  ExecutorCompileTimeInfoCache compile_time_info_cache_;
+
+  // Cached expr eval
+  std::unique_ptr<KernelPrecomputedIntegers> evaluator_precomputed_integers_ =
+      nullptr;
 };
 
 } // namespace cuda

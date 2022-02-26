@@ -1,8 +1,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/symbol.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -302,7 +302,7 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   }
 
   ProfilingRecord::removeProfileCounter(pr->profiled_graph_->block());
-  RemoveProfilingNodes(pr->profiled_graph_);
+  ProfilingRecord::removeProfilingNodes(pr->profiled_graph_->block());
   insertTracingNodes(pr->profiled_graph_->block(), pr.get(), td);
   GRAPH_DUMP("Profiling Graph:", pr->profiled_graph_);
   Code cd(pr->profiled_graph_, "");
@@ -311,7 +311,6 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   for (auto out : pr->profiled_graph_->outputs()) {
     td.traced_graph_->block()->registerOutput(td.old_to_new_.at(out));
   }
-
 
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
   return td.traced_graph_;
