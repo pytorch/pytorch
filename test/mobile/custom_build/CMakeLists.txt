@@ -3,8 +3,6 @@ cmake_minimum_required(VERSION 3.1)
 project(custom_build_project)
 
 set(CMAKE_CXX_STANDARD 14)
-set(TORCH_ROOT ${CMAKE_CURRENT_LIST_DIR}/../../..)
-set(TEST_ROOT ${TORCH_ROOT}/test/mobile/custom_build)
 
 # Find torch library
 find_package(Torch REQUIRED)

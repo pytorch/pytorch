@@ -12,7 +12,6 @@ target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})
 
 target_compile_definitions(test_codegen_unboxing PRIVATE USE_GTEST)
 
-# set(TEST_UNBOXING_DEPENDENCIES ${TORCH_LIBRARIES})
 set(TEST_UNBOXING_DEPENDENCIES torch gtest gtest_main ${TORCH_LIBRARIES})
 
 # Avoid linker flags on Mac

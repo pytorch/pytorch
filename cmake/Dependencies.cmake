@@ -690,7 +690,6 @@ if(USE_GLOG)
 endif()
 
 
-message("DEBUG: googletest BUILD_TEST = ${BUILD_TEST}")
 # ---[ Googletest and benchmark
 if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # Preserve build options.

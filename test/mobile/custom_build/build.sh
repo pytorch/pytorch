@@ -104,4 +104,3 @@ fi
 if [ -n "${TEST_CUSTOM_BUILD_STATIC}" ]; then
   test_custom_build_with_static_dispatch
 fi
-
