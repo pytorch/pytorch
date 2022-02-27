@@ -2122,13 +2122,7 @@ class TestTensorCreation(TestCase):
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.float32))
 
         # don't allow passing dtype to set_default_dtype
-        for t in get_all_dtypes(
-                include_half=True,
-                include_bfloat16=True,
-                include_bool=True,
-                include_complex=True,
-                include_complex32=True,
-                include_qint=True):
+        for t in all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.qint8):
             # only floating-point types are supported as the default type
             if t in (
                     torch.half,

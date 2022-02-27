@@ -614,7 +614,7 @@ class TestUnaryUfuncs(TestCase):
                 torch.frexp(input)
 
         for dtype in floating_types_and(torch.half):
-            input = make_tensor((50, 50), device, dtype, device=device)
+            input = make_tensor((50, 50), dtype=dtype, device=device)
 
             dtypes = list(all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
             dtypes.remove(dtype)
