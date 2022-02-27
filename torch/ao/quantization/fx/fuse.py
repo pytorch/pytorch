@@ -20,6 +20,7 @@ from .pattern_utils import (
 
 from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
 from .backend_config.utils import get_fuser_method_mapping
+from .backend_config.utils import get_fusion_pattern_to_root_node_getter
 
 from .fusion_patterns import *  # noqa: F401,F403
 
@@ -42,15 +43,19 @@ class Fuser:
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
+        # TODO: remove this branch after we define the configurations for the
+        # default/native backend
         if backend_config_dict is None:
             additional_fusion_patterns = \
                 fuse_custom_config_dict.get("additional_fusion_pattern", {})
             fusion_pattern_to_fuse_handler_cls = get_combined_dict(
                 get_default_fusion_patterns(), additional_fusion_patterns)
             fuser_method_mapping = None
+            fusion_pattern_to_root_node_getter = {}
         else:
             fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
             fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
+            fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
         # find fusion
         fusion_pairs = self._find_matches(
             input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
@@ -60,7 +65,7 @@ class Fuser:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
-        def get_root_node(node_pattern):
+        def default_root_node_getter(node_pattern):
             while not isinstance(node_pattern[-1], Node):
                 node_pattern = node_pattern[-1]
             return node_pattern[-1]
@@ -75,10 +80,10 @@ class Fuser:
                 node_subpattern = None
             if maybe_last_node is node:
                 assert obj is not None
-                # TODO: currently we hard code the root node, which only works for
-                # a sequence of ops and assume the root node is the last node,
-                # we want to make this more general to support more complex patterns
-                root_node = get_root_node(matched_node_pattern)  # type: ignore[index]
+                root_node_getter = fusion_pattern_to_root_node_getter.get(pattern, default_root_node_getter)
+                root_node = root_node_getter(matched_node_pattern)  # type: ignore[index]
+                # TODO: add validation that root_node is a module and has the same type
+                # as the root_module in the configuration
                 env[node.name] = obj.fuse(
                     self, load_arg, root_node, matched_node_pattern,  # type: ignore[arg-type]
                     fuse_custom_config_dict, fuser_method_mapping, is_qat)
