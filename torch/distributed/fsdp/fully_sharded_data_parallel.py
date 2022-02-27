@@ -776,6 +776,23 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: "OrderedDict[str, torch.Tensor]",
         prefix: str,
     ) -> "OrderedDict[str, torch.Tensor]":
+        """
+        Hook that runs after model.state_dict() is called before returning result to
+        user. For FSDP, we may have to clone the tensors in state_dict as params go
+        back to sharded version after summon_full_params ends, and also remove
+        "_fsdp_wrapped_module" prefix.
+        """
+        self._assert_state([TrainingState_.SUMMON_FULL_PARAMS])
+        for key in state_dict.keys():
+            # Due to recursive call of summon_full_params, avoid unnecessasry
+            # reclone of tensors in case they have already been cloned.
+            if (
+                not getattr(state_dict[key], "_has_been_cloned", False)
+            ):
+                state_dict[key] = state_dict[key].clone().detach()
+                state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
+
+        _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
         return state_dict
 
     def _local_post_state_dict_hook(
@@ -845,8 +862,18 @@ class FullyShardedDataParallel(nn.Module):
         """
         if torch.cuda.is_available():
             torch.cuda.synchronize()
+
+        self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            return super().state_dict(*args, **kwargs)
+            if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
+                with self._summon_full_params(recurse=False, writeback=False):
+                    state_dict = super().state_dict(*args, **kwargs)
+            else:
+                state_dict = super().state_dict(*args, **kwargs)
+
+            # TODO: support offload to CPU in post state dict hook.
+            return state_dict
+
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             assert getattr(self.module, FLAT_PARAM, None) is not None
             assert isinstance(self.module.flat_param, FlatParameter)
@@ -870,7 +897,7 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
         prefix: str,
     ) -> None:
-        return
+        _replace_by_prefix(state_dict, prefix, prefix + f"{FSDP_WRAPPED_MODULE}.")
 
     def _local_pre_load_state_dict_hook(
         self,
@@ -942,7 +969,10 @@ class FullyShardedDataParallel(nn.Module):
         """
         torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            return super().load_state_dict(state_dict, *args)
+            # Note that it needs writeback=True to persist
+            with self._summon_full_params():
+                return super().load_state_dict(state_dict, *args)
+
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
