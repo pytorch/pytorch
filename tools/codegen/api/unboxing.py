@@ -113,9 +113,10 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
         if not isinstance(arg.argument, Argument):
             raise Exception(f"Unexpected argument type, expecting `Argument` but got {arg}")
         argument: Argument = arg.argument
-        unboxed_name, _, code = argumenttype_ivalue_convert(
+        unboxed_name, _, code, decl = argumenttype_ivalue_convert(
             argument.type, argument.name, mutable=argument.is_write
         )
+        code_list.extend(decl)
         code_list.extend(code)
         binding_list.append(arg.with_name(unboxed_name))
     return binding_list, code_list
@@ -124,30 +125,30 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
 # Takes in the type, name and mutability corresponding to an argument, and generates a tuple of:
 # (1) the C++ code necessary to unbox the argument
 # (2) A Binding corresponding to the newly created unboxed variable, including variable name and its CType
-def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[str, CType, List[str]]:
+def argumenttype_ivalue_convert(t: Type, arg_name: str, *, mutable: bool = False) -> Tuple[str, CType, List[str], List[str]]:
     ctype = cpp.argumenttype_type(t=t, mutable=mutable, binds=arg_name).type
 
     if isinstance(t, BaseType):
         out_name = f"{arg_name}_base"
-        code = _gen_code_base_type(arg_name=arg_name, out_name=out_name, ctype=ctype)
+        code, decl = _gen_code_base_type(arg_name=arg_name, out_name=out_name, ctype=ctype)
     elif isinstance(t, OptionalType):
         out_name = f"{arg_name}_opt_out"
-        code = _gen_code_optional_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
+        code, decl = _gen_code_optional_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
     elif isinstance(t, ListType):
         out_name = f"{arg_name}_list_out"
-        code = _gen_code_list_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
+        code, decl = _gen_code_list_type(arg_name=arg_name, out_name=out_name, t=t, ctype=ctype)
     else:
         raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
-    return out_name, ctype, code
+    return out_name, ctype, code, decl
 
 
-def _gen_code_base_type(arg_name: str, out_name: str, ctype: CType) -> List[str]:
-    return [f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"]
+def _gen_code_base_type(arg_name: str, out_name: str, ctype: CType) -> Tuple[List[str], List[str]]:
+    return [f"{ctype.cpp_type(strip_ref=True)} {out_name} = {arg_name}.to<{ctype.cpp_type(strip_ref=True)}>();"], []
 
 
-def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: CType) -> List[str]:
+def _gen_code_optional_type(arg_name: str, out_name: str, t: OptionalType, ctype: CType) -> Tuple[List[str], List[str]]:
     in_name = f"{arg_name}_opt_in"
-    res_name, _, res_code = argumenttype_ivalue_convert(t.elem, in_name)
+    res_name, _, res_code, decl = argumenttype_ivalue_convert(t.elem, in_name)
     return f"""
 c10::optional<c10::IValue> {arg_name}_opt = {arg_name}.toOptional<c10::IValue>();
 {ctype.cpp_type(strip_ref=True)} {out_name};
@@ -158,14 +159,14 @@ if ({arg_name}_opt.has_value()) {{
 }} else {{
     {out_name} = {ctype.cpp_type(strip_ref=True)}();
 }}
-        """.split("\n")
+        """.split("\n"), decl
 
 
-def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType) -> List[str]:
+def _gen_code_list_type(arg_name: str, out_name: str, t: ListType, ctype: CType) -> Tuple[List[str], List[str]]:
     in_name = f"{arg_name}_list_in"
     elem_name = f"{arg_name}_elem"
     code = [f"const c10::List<c10::IValue> {in_name} = {arg_name}.toList();"]
-    res_name, res_ctype, res_code = argumenttype_ivalue_convert(t.elem, elem_name)
+    res_name, res_ctype, res_code, decl = argumenttype_ivalue_convert(t.elem, elem_name)
     # handle list type with size, e.g., bool[4]
     if isinstance(t.elem, BaseType) and t.elem.name == BaseTy.bool and t.size:
         code.extend(
@@ -191,9 +192,10 @@ for (c10::IValue {elem_name}: {in_name}) {{
     else:
         # use ArrayRef as default.
         vec_name = arg_name + "_vec"
+        # need to bring vector instantiation out of scope so that ArrayRef has valid data
+        decl.append(f"std::vector<{res_ctype.cpp_type(strip_ref=True)}> {vec_name};")
         code.extend(
             f"""
-std::vector<{res_ctype.cpp_type(strip_ref=True)}> {vec_name};
 for (c10::IValue {elem_name}: {in_name}) {{
     {connector.join(res_code)}
     {vec_name}.push_back({res_name});
@@ -203,4 +205,4 @@ for (c10::IValue {elem_name}: {in_name}) {{
                 "\n"
             )
         )
-    return code
+    return code, decl
