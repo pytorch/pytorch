@@ -67,7 +67,9 @@ class IDeepFetcher : public BlobFetcherBase {
         "since ideep memory usually only do float and double.");
     itensor::dims dims;
     bool need_reorder = atensor.need_reorder();
-    if (atensor.get_data_type() == idtype::f32) {
+    if (atensor.get_data_type() == idtype::f32 && !atensor.has_scale()) {
+      // For FP32 path, only support NCHW format input, so if atensor
+      // has NHWC format, we need reorder it to NCHW format.
       dims = atensor.get_dims();
       need_reorder = need_reorder || atensor.get_desc().is_nhwc();
     } else {
@@ -93,7 +95,7 @@ class IDeepFetcher : public BlobFetcherBase {
       CAFFE_THROW("We don't support strings.");
     }
     if (result.copied) {
-      if (atensor.get_data_type() == idtype::f32) {
+      if (atensor.get_data_type() == idtype::f32 && !atensor.has_scale()) {
         itensor temp_ten(atensor.get_desc().to_default_format(), outPtr);
         atensor.reorder_to(temp_ten);
       } else {
