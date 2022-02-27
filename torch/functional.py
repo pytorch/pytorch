@@ -135,12 +135,21 @@ def broadcast_shapes(*shapes):
                                    .format(result[i], shape[i], i))
             result[i] = shape[i]
     return torch.Size(result)"""
+    num_int, num_tup, max_len = 0, 0, 0
     #for shape in shapes:
     #    if not isinstance(shape, Iterable):
     #        shape = (shape,)
     for shape in shapes:
-        if 
-    result = [1] * max(map(len, shapes))
+        if isinstance(shape, int):
+            num_int += 1
+            #if max_len < num_int:
+            #    max_len = num_int
+        elif isinstance(shape, tuple):
+            num_tup += len(shape)
+            if max_len < num_tup:
+                max_len = len(shape)
+    result = [1] * max_len
+    #result = [1] * max(map(len, shapes))
     for shape in shapes:
         #if not isinstance(shape, Iterable):
         #    result = [max(shapes)]
@@ -153,9 +162,9 @@ def broadcast_shapes(*shapes):
         #                           "size of shape b {result} at non-singleton dimension")
         #elif isinstance(shape, tuple):
         for i in range(-1, -1 - len(shape), -1):
-            if shape[i] < 0:
-                raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
-                                   .format(shape[i], [shape[i]]))
+            #if shape[i] < 0:
+            #    raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
+            #                       .format(shape[i], [shape[i]]))
             if shape[i] == 1 or shape[i] == result[i]:
                 continue
             if result[i] != 1:
