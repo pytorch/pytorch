@@ -110,6 +110,11 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   #   tb-nightly \
   #   librosa>=0.6.2
 
+  # FIXME
+  # installing packages from the requirements-ci.txt causes checks to fail
+  # (with massive logs) for some non docker platforms Ex.
+  # linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)
+  # linux-bionic-py3.7-clang9 / test (default, 2, 2, linux.2xlarge) (pull_request)
   #as_jenkins pip install --progress-bar off -r /opt/conda/requirements-ci.txt
 
   # Install numba only on python-3.8 or below
