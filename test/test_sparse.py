@@ -43,6 +43,8 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
 class TestSparse(TestCase):
 
     def setUp(self):
+        TestCase.setUp(self)
+
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
         def sparse_empty_factory(*args, **kwargs):
@@ -661,10 +663,8 @@ class TestSparse(TestCase):
         test_shape(3, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
-    # TODO: remove skipIf when https://github.com/pytorch/pytorch/pull/73428 lands
     @coalescedonoff
     @skipIfRocm
-    @unittest.skipIf(IS_LINUX, "See https://github.com/pytorch/pytorch/issues/72892")
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
