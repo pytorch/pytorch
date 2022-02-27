@@ -835,7 +835,7 @@ class FullyShardedDataParallel(nn.Module):
         self = cast(FullyShardedDataParallel, module)
         return self._post_state_dict_hook_fn[self._state_dict_type](state_dict, prefix)
 
-    def state_dict(self, destination=None, prefix="", keep_vars=False):
+    def state_dict(self, *args, **kwargs):
         """
         The entry point of all three FSDP state_dict APIs.
         ``self._state_dict_type`` decides which code path to execute.
@@ -846,11 +846,11 @@ class FullyShardedDataParallel(nn.Module):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            return super().state_dict(destination, prefix, keep_vars)
+            return super().state_dict(*args, **kwargs)
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             assert getattr(self.module, FLAT_PARAM, None) is not None
             assert isinstance(self.module.flat_param, FlatParameter)
-            return super().state_dict(destination, prefix, keep_vars)
+            return super().state_dict(*args, **kwargs)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
             raise NotImplementedError("Will be implemented in the next PRs.")
         else:
@@ -931,7 +931,7 @@ class FullyShardedDataParallel(nn.Module):
     def load_state_dict(
         self,
         state_dict: "OrderedDict[str, torch.Tensor]",
-        strict: bool = True,
+        *args,
     ) -> NamedTuple:
         """
         The entry point of all three FSDP load_state_dict APIs.
@@ -942,9 +942,9 @@ class FullyShardedDataParallel(nn.Module):
         """
         torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
-            return super().load_state_dict(state_dict, strict)
+            return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
-            return super().load_state_dict(state_dict, strict)
+            return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
             raise NotImplementedError("Will be implemented in the next PRs.")
         else:
