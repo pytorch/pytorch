@@ -579,7 +579,7 @@ def convert(model: GraphModule, is_reference: bool = False,
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
         model = duplicate_dequantize_node(model)
-        model = lower_to_fbgemm(model, node_name_to_scope)
+        model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
     return model

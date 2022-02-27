@@ -244,7 +244,8 @@ Tensor embedding_backward_cuda_kernel(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
-    const int stride_warped = ceil_div(stride, C10_WARP_SIZE)*C10_WARP_SIZE;
+    const int warp_size = at::cuda::warp_size();
+    const int stride_warped = ceil_div(stride, warp_size)*warp_size;
     const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
     const int grid = ceil_div(num_of_partial_segments*stride_warped, block);
 
