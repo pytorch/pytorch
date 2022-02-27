@@ -71,6 +71,33 @@ T = TypeVar('T')
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+class NamespaceHelper():
+    """ A helper for constructing the namespace open and close strings for a nested set of namespaces.
+
+        e.g. for namespace_str torch::lazy,
+
+        prologue:
+        namespace torch {
+        namespace lazy {
+
+        epilogue:
+        } // namespace lazy
+        } // namespace torch
+    """
+    def __init__(self, namespace_str: str):
+        # cpp_namespace can be a colon joined string such as torch::lazy
+        cpp_namespaces = namespace_str.split("::")
+        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
+        self.epilogue_ = "\n".join([f"}} // namespace {n}" for n in reversed(cpp_namespaces)])
+
+    @property
+    def prologue(self) -> str:
+        return self.prologue_
+
+    @property
+    def epilogue(self) -> str:
+        return self.epilogue_
+
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
 class LineLoader(YamlLoader):

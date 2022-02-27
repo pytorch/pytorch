@@ -93,9 +93,14 @@ jobs:
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         shell: bash
         env:
@@ -256,8 +261,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -412,8 +418,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -568,8 +575,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:

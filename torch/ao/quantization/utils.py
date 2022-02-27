@@ -12,6 +12,13 @@ from typing import Tuple, Any, Union, Callable
 # TODO: not sure if typing supports recursive data types
 Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
 
+# TODO: maybe rename this to MatchInputNode
+class MatchAllNode:
+    """ A node pattern that matches all nodes, used in defining
+    fusion patterns in FX Graph Mode Quantization
+    """
+    pass
+
 module_type_list = {
     torch.nn.ReLU,
     torch.nn.ReLU6,
@@ -33,6 +40,14 @@ func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
     torch.nn.functional.adaptive_avg_pool2d,
     torch.nn.functional.adaptive_avg_pool3d,
+    torch.nn.functional.elu,
+    torch.nn.functional.hardswish,
+    torch.nn.functional.instance_norm,
+    torch.nn.functional.layer_norm,
+    torch.nn.functional.leaky_relu,
+    torch.nn.functional.silu,
+    torch.nn.functional.mish,
+    torch.nn.functional.dropout,
     torch.nn.functional.max_pool1d,
     torch.nn.functional.max_pool2d,
     torch.nn.functional.max_pool3d,
@@ -46,6 +61,7 @@ func_list = {
     torch.sigmoid,
     torch.squeeze,
     torch.stack,
+    torch.sum,
     torch.tanh,
     torch.unsqueeze,
     torch.cat,
