@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
