@@ -33,6 +33,26 @@ class FSDPInitMode(Enum):
     # Don't move model to CUDA at all.
     CUDA_NEVER = 3
 
+def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
+    with fsdp_model._summon_full_params():
+        params = list(p.clone().detach_() for p in fsdp_model.parameters())
+
+    return params
+
+def _zero_model(fsdp_model: FullyShardedDataParallel):
+    with fsdp_model._summon_full_params():
+        for param in fsdp_model.parameters():
+            with torch.no_grad():
+                param.zero_()
+
+def _get_state_dict(model, cpu_offload=False, half=False):
+    if not cpu_offload:
+        model = model.cuda()
+    if half:
+        model.half()
+
+    return model.state_dict()
+
 # get full params of a model recursively. Note that if CPU offloading, it will
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
