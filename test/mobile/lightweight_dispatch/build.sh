@@ -1,8 +1,11 @@
+#!/bin/bash
 # This script should be called from .jenkins/pytorch/build.sh. Assuming we are at pytorch source root directory.
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
+
+set -ex -o pipefail
 
 # shellcheck disable=SC2034
 echo "Build lite interpreter with lightweight dispatch."

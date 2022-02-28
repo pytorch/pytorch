@@ -14,14 +14,10 @@ target_compile_definitions(test_codegen_unboxing PRIVATE USE_GTEST)
 
 set(TEST_UNBOXING_DEPENDENCIES torch gtest gtest_main ${TORCH_LIBRARIES})
 
-# Avoid linker flags on Mac
-if(${APPLE})
-  set(LINKER_OPTIONS "")
-else()
-  set(LINKER_OPTIONS "-Wl,-s -Wl,--gc-sections -Wl,--whole-archive -Wl,--no-whole-archive")
-endif()
-
 target_link_libraries(test_codegen_unboxing
+  -Wl,-s
+  -Wl,--gc-sections
+  -Wl,--whole-archive
   ${LINKER_OPTIONS}
   ${TEST_UNBOXING_DEPENDENCIES}
 )
