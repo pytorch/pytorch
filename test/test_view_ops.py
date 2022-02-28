@@ -1497,7 +1497,9 @@ class TestOldViewOps(TestCase):
         for s0 in diff_input_types:
             res1 = torch.broadcast_shapes(*s0)
             res2 = torch.broadcast_tensors(*map(torch.empty, s0))[0].shape
+            res3_numpy = np.broadcast_shapes(*s0)
             self.assertEqual(res1, res2)
+            self.assertEqual(res1, res3_numpy)
 
     # Skip BFloat16 since numpy does not support it
     @dtypes(*get_all_dtypes(include_bfloat16=False))
