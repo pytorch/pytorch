@@ -37,7 +37,7 @@ class _GradAccConfig(NamedTuple):
     Each instance of this class represents ``num_iters``-many consecutive
     iterations, where the ``no_sync()`` context manager is used or not as given
     by ``use_no_sync``.
-    
+
     Attributes:
         use_no_sync (bool): Indicates whether to use the ``no_sync()`` context
             manager as the way to accumulate gradients.
@@ -61,8 +61,8 @@ class TestGradAcc(FSDPTest):
         """
         Tests gradient accumulation by comparing a run that trains sequentially
         through some batches while accumulating gradients with a run that
-        trains on the concatenation of those batches in a single iteration. 
-        
+        trains on the concatenation of those batches in a single iteration.
+
         The last iteration always synchronizes gradients regardless of what is
         specified by the last element of ``configs``.
 
@@ -186,7 +186,7 @@ class TestGradAcc(FSDPTest):
     ):
         """
         Tests gradient accumulation.
-        
+
         This exercises gradient accumulation using the ``no_sync()`` context
         manager, without using the ``no_sync()`` context manager, and
         interleaving using and not using the ``no_sync()`` context manager. It
