@@ -2977,6 +2977,24 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         output = vmap(grad(sum_grad_trace))(x)
         self.assertEqual(output, torch.zeros_like(output))
 
+    def test_where(self, device):
+        x = torch.randn(3, 2, device=device)
+        y = torch.ones(3, 2, device=device)
+
+        def f(x, y):
+            return torch.where(x > 0, x, y)
+
+        # Check that there is no runtime error, exactness tests are done with opinfo
+        vmap(f)(x, y)
+
+        x = torch.randint(0, 2, size=(4, 3), dtype=torch.float)
+
+        def f(t):
+            return torch.where(t)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to vmap over aten::where"):
+            vmap(f)(x)
+
     @skipCUDAIfNoMagma
     @allowVmapFallbackUsage
     def test_symeig(self, device):
