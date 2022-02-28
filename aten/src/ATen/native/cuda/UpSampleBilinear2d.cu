@@ -471,7 +471,6 @@ C10_LAUNCH_BOUNDS_1(256) // 256 performs better then 1024
 __global__ void upsample_gen2d_aa_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
-    const bool align_corners,
     const PackedTensorAccessor64<scalar_t, 4> idata,
     PackedTensorAccessor64<scalar_t, 4> odata,
     const InterpFilter & interp_filter) {
@@ -565,7 +564,6 @@ C10_LAUNCH_BOUNDS_1(256) // 256 performs better then 1024
 __global__ void upsample_gen2d_aa_backward_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
-    const bool align_corners,
     PackedTensorAccessor64<scalar_t, 4> idata,
     const PackedTensorAccessor64<scalar_t, 4> odata,
     const InterpFilter & interp_filter) {
@@ -687,8 +685,6 @@ static void upsample_gen2d_aa_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_height = input.size(2);
   int input_width = input.size(3);
 
@@ -750,7 +746,7 @@ static void upsample_gen2d_aa_out_cuda_template(
             <<<grid,
                block,
                shmem_size,
-               stream>>>(height_scale, width_scale, align_corners, idata, odata, interp_filter);
+               stream>>>(height_scale, width_scale, idata, odata, interp_filter);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 
@@ -781,8 +777,6 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
   int output_height = output_size[0];
   int output_width = output_size[1];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_height = input_size[2];
   int input_width = input_size[3];
 
@@ -834,7 +828,7 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
             <<<grid,
                block,
                shmem_size,
-               stream>>>(height_scale, width_scale, align_corners, idata, odata, interp_filter);
+               stream>>>(height_scale, width_scale, idata, odata, interp_filter);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
