@@ -112,7 +112,6 @@ def broadcast_shapes(*shapes):
             if max_len < s:
                 max_len = s
     result = [1] * max_len
-    max_num = 0
     for shape in shapes:
         if isinstance(shape, int):
             if shape < 0:
@@ -128,10 +127,6 @@ def broadcast_shapes(*shapes):
                 if result[i] != 1:
                     raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
                 result[i] = shape[i]
-    if len(result) == 1:
-        for i in range(len(result)):
-            if result[i] < max_num:
-                result[i] = max_num
     return torch.Size(result)
 
 def split(tensor, split_size_or_sections, dim=0):
