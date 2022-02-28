@@ -49,6 +49,18 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
         parital_tensor = _PartialTensor(torch.cat(results), pg, reduce_op=reduce_op)
         local_sharded_result = parital_tensor.reshard(reshard_spec)
         local_shards = local_sharded_result.local_shards()
+        if pg.size() > world_size:
+            chunk_mode_res = (input_size[0] * world_size) % pg.size()
+            padding = [0] * (len(input_size) * 2)
+            padding[-1] = pg.size() - chunk_mode_res
+            results_compare = list(
+                torch.nn.functional.pad(
+                    torch.cat(results_compare),
+                    tuple(padding),
+                    "constant",
+                    0,
+                ).chunk(pg.size())
+            )
         local_result_compare = torch.empty_like(results_compare[0])
         dist.reduce_scatter(local_result_compare, results_compare, op=reduce_op)
         self.assertEqual(1, len(local_shards))
@@ -62,6 +74,8 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
         spec = specs[0]
         self._run_partial_tensor_n_reshard(spec, [13, 21], 4, dist.ReduceOp.SUM)
         self._run_partial_tensor_n_reshard(spec, [12, 22], 4, dist.ReduceOp.MAX)
+        self._run_partial_tensor_n_reshard(spec, [13, 21], 3, dist.ReduceOp.SUM)
+        self._run_partial_tensor_n_reshard(spec, [17, 21], 2, dist.ReduceOp.MAX)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
@@ -100,12 +114,6 @@ class TestPartialTensorReshard(ShardedTensorTestBase):
             )
             self._run_partial_tensor_n_reshard(
                 spec, [12, 22], 4, dist.ReduceOp.MAX, dtype=torch.cfloat
-            )
-        with self.assertRaisesRegex(
-            ValueError, "World size need to divide the length of the dimension."
-        ):
-            self._run_partial_tensor_n_reshard(
-                spec, [13, 21], 3, dist.ReduceOp.SUM, dtype=torch.cfloat
             )
 
 
