@@ -1310,7 +1310,7 @@ class FullyShardedDataParallel(nn.Module):
                     p_assert(
                         param._saved_grad_shard.shape == output.shape,
                         "Shape mismatch when accumulating gradients: "
-                        f"existing shape={param._saved_grad_shard.shape} "  
+                        f"existing shape={param._saved_grad_shard.shape} "
                         f"new shape={output.shape}"  # type: ignore[attr-defined]
                     )
                     param._saved_grad_shard.data += output.data  # type: ignore[attr-defined]
