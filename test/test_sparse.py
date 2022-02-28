@@ -664,9 +664,9 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
     @skipIfRocm
-    @unittest.skipIf(IS_LINUX, "See https://github.com/pytorch/pytorch/issues/72892")
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
