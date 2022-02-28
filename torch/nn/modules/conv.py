@@ -506,7 +506,7 @@ class Conv3d(_ConvNd):
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or :math:`(C_{out}, D_{out}, H_{out}, W_{out})`,
-            where
+          where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
@@ -897,7 +897,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         output_padding: _size_2_t = 0,
         groups: int = 1,
         bias: bool = True,
-        dilation: int = 1,
+        dilation: _size_2_t = 1,
         padding_mode: str = 'zeros',
         device=None,
         dtype=None
@@ -994,7 +994,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     Shape:
         - Input: :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})` or :math:`(C_{in}, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` or
-            :math:`(C_{out}, D_{out}, H_{out}, W_{out})`, where
+          :math:`(C_{out}, D_{out}, H_{out}, W_{out})`, where
 
         .. math::
               D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{dilation}[0]

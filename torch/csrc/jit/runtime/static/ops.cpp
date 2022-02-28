@@ -29,6 +29,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/processed_node_wrapper.h>
 #include <torch/csrc/jit/runtime/static/te_wrapper.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -361,39 +362,6 @@ Tensor& c2_argmin_out(
   return output;
 }
 
-void where_out(
-    const at::Tensor& cond,
-    const at::Tensor& x,
-    const at::Tensor& y,
-    at::Tensor& out) {
-  TORCH_CHECK(x.scalar_type() == y.scalar_type());
-  TORCH_CHECK(out.scalar_type() == x.scalar_type());
-  TORCH_CHECK(cond.scalar_type() == at::ScalarType::Bool);
-  TORCH_CHECK(x.sizes() == y.sizes());
-
-  at::native::resize_(out, x.sizes(), c10::nullopt);
-  TORCH_CHECK(out.is_contiguous());
-
-  const auto num_elems = x.numel();
-  AT_DISPATCH_ALL_TYPES(x.scalar_type(), "where_out_x", [&] {
-    const auto cond_contig = cond.expect_contiguous();
-    const auto x_contig = x.expect_contiguous();
-    const auto y_contig = y.expect_contiguous();
-
-    const auto* data_cond = cond_contig->data_ptr<bool>();
-    const auto* data_x = x_contig->data_ptr<scalar_t>();
-    const auto* data_y = y_contig->data_ptr<scalar_t>();
-    auto* data_out = out.data_ptr<scalar_t>();
-    for (const auto i : c10::irange(num_elems)) {
-      if (data_cond[i]) {
-        data_out[i] = data_x[i];
-      } else {
-        data_out[i] = data_y[i];
-      }
-    }
-  });
-}
-
 at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   if (C10_UNLIKELY(!self.is_quantized())) {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
@@ -490,61 +458,90 @@ bool isOptimizableContainerType(
   return is_supported_type && inputsCanRunOutOfPlace(n, node_has_out_variant);
 }
 
+static inline void listConstructSlowPath(
+    const ListType& list_type,
+    const size_t size,
+    ProcessedNode* p_node) {
+  c10::List<IValue> vals(list_type.getElementType());
+  vals.reserve(size);
+  for (const auto i : c10::irange(size)) {
+    vals.push_back(p_node->Input(i));
+  }
+  p_node->Output(0) = vals;
+}
+
 REGISTER_OPERATOR_FUNCTOR(
     prim::ListConstruct,
     prim_ListConstruct,
     [](Node* n) -> SROperator {
+      const bool can_optimize =
+          isOptimizableContainerType(n, FastMap<Node*, bool>());
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
-      return [can_optimize, &type](ProcessedNode* p_node) {
+      const size_t size = n->inputs().size();
+      if (!can_optimize) {
+        return [&type, size](ProcessedNode* p_node) {
+          DCHECK(p_node->num_inputs() == size);
+          listConstructSlowPath(type, size, p_node);
+        };
+      }
+      return [&type, size](ProcessedNode* p_node) {
+        DCHECK(p_node->num_inputs() == size);
         const auto& out_l = p_node->Output(0);
-        if (!out_l.isNone() && can_optimize) {
+        if (!out_l.isNone()) {
           return;
         }
-        const size_t size = p_node->num_inputs();
-        c10::List<IValue> vals(type.getElementType());
-        vals.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          vals.push_back(p_node->Input(i));
-        }
-        p_node->Output(0) = std::move(vals);
+        listConstructSlowPath(type, size, p_node);
       };
     });
+
+static inline void tupleConstructSlowPath(
+    const size_t size,
+    ProcessedNode* p_node) {
+  // prepare inputs
+  switch (size) {
+    case 1:
+      p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
+      break;
+    case 2:
+      p_node->Output(0) =
+          c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
+      break;
+    case 3:
+      p_node->Output(0) = c10::ivalue::Tuple::create(
+          p_node->Input(0), p_node->Input(1), p_node->Input(2));
+      break;
+    default: {
+      std::vector<IValue> vals;
+      vals.reserve(size);
+      for (const auto i : c10::irange(size)) {
+        vals.push_back(p_node->Input(i));
+      }
+      p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
+      break;
+    }
+  }
+}
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
-      return [can_optimize](ProcessedNode* p_node) {
+      const bool can_optimize =
+          isOptimizableContainerType(n, FastMap<Node*, bool>());
+      const size_t size = n->inputs().size();
+      if (!can_optimize) {
+        return [size](ProcessedNode* p_node) {
+          DCHECK(p_node->num_inputs() == size);
+          tupleConstructSlowPath(size, p_node);
+        };
+      }
+      return [size](ProcessedNode* p_node) {
+        DCHECK(p_node->num_inputs() == size);
         const auto& out_l = p_node->Output(0);
-        if (!out_l.isNone() && can_optimize) {
+        if (!out_l.isNone()) {
           return;
         }
-        // prepare inputs
-        const size_t size = p_node->num_inputs();
-        switch (size) {
-          case 1:
-            p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
-            break;
-          case 2:
-            p_node->Output(0) =
-                c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
-            break;
-          case 3:
-            p_node->Output(0) = c10::ivalue::Tuple::create(
-                p_node->Input(0), p_node->Input(1), p_node->Input(2));
-            break;
-          default: {
-            std::vector<IValue> vals;
-            vals.reserve(size);
-            for (const auto i : c10::irange(size)) {
-              vals.push_back(p_node->Input(i));
-            }
-            p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
-            break;
-          }
-        }
+        tupleConstructSlowPath(size, p_node);
       };
     });
 
@@ -681,126 +678,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
 
 namespace {
 
-class VarStackNodeWrapper {
- public:
-  class VarStackNodeWrapperIter {
-   public:
-    using iterator_category = std::forward_iterator_tag;
-    using value_type = at::Tensor;
-    using difference_type = size_t;
-    using pointer = const at::Tensor*;
-    using reference = const at::Tensor&;
-
-    VarStackNodeWrapperIter() = default;
-
-    VarStackNodeWrapperIter(
-        const VarStackNodeWrapper* container,
-        size_t start_idx)
-        : container_(container), idx_(start_idx) {}
-
-    VarStackNodeWrapperIter& operator++() {
-      DCHECK_NE(idx_, container_->size());
-      ++idx_;
-      return *this;
-    }
-
-    VarStackNodeWrapperIter operator++(int) {
-      VarStackNodeWrapperIter old = *this;
-      ++(*this);
-      return old;
-    }
-
-    reference operator*() const {
-      TORCH_CHECK(container_ != nullptr);
-      return (*container_)[idx_];
-    }
-
-    pointer operator->() const {
-      TORCH_CHECK(container_ != nullptr);
-      return &(*container_)[idx_];
-    }
-
-    friend bool operator==(
-        VarStackNodeWrapperIter lhs,
-        VarStackNodeWrapperIter rhs) {
-      DCHECK_EQ(lhs.container_, rhs.container_);
-      return lhs.idx_ == rhs.idx_;
-    }
-
-    friend bool operator!=(
-        VarStackNodeWrapperIter lhs,
-        VarStackNodeWrapperIter rhs) {
-      return !(lhs == rhs);
-    }
-
-   private:
-    const VarStackNodeWrapper* container_ = nullptr;
-    size_t idx_ = 0;
-  };
-
-  // NB: to mimic the behavior of at::ArrayRef, both iterators are
-  // the const version.
-  using iterator = VarStackNodeWrapperIter;
-  using const_iterator = VarStackNodeWrapperIter;
-  using size_type = size_t;
-  using value_type = at::Tensor;
-
-  explicit VarStackNodeWrapper(const ProcessedNode& pnode) : pnode_(pnode) {}
-
-  const at::Tensor& operator[](size_t idx) const {
-    TORCH_CHECK(idx < size());
-    return pnode_.Input(idx).toTensor();
-  }
-
-  size_t size() const {
-    return pnode_.num_inputs() - 1;
-  }
-
-  iterator begin() {
-    return VarStackNodeWrapperIter(this, 0);
-  }
-  iterator end() {
-    return VarStackNodeWrapperIter(this, size());
-  }
-
-  const_iterator begin() const {
-    return VarStackNodeWrapperIter(this, 0);
-  }
-  const_iterator end() const {
-    return VarStackNodeWrapperIter(this, size());
-  }
-
-  const_iterator cbegin() const {
-    return VarStackNodeWrapperIter(this, 0);
-  }
-  const_iterator cend() const {
-    return VarStackNodeWrapperIter(this, size());
-  }
-
-  bool empty() const {
-    return size() == 0;
-  }
-
-  const at::Tensor& front() const {
-    TORCH_CHECK(
-        !empty(), "Attempted to access front() of empty VarStackNodeWrapper");
-    return pnode_.Input(0).toTensor();
-  }
-
-  const at::Tensor& back() const {
-    TORCH_CHECK(
-        !empty(), "Attempted to access back() of empty VarStackNodeWrapper");
-    return pnode_.Input(size() - 1).toTensor();
-  }
-
- private:
-  const ProcessedNode& pnode_;
-};
-
 void varStackSerialOut(
     at::Tensor& result,
     int64_t dim,
-    const VarStackNodeWrapper& inputs) {
+    const ProcessedNodeInputWrapper& inputs) {
   auto result_sizes = inputs[0].sizes().vec();
   result_sizes.insert(result_sizes.begin() + dim, inputs.size());
   at::native::resize_(result, result_sizes);
@@ -808,13 +689,13 @@ void varStackSerialOut(
   AT_DISPATCH_FLOATING_TYPES(
       result.scalar_type(), "varstack_serial_kernel", [&]() {
         at::native::detail::
-            stack_serial_kernel_impl<scalar_t, VarStackNodeWrapper>(
+            stack_serial_kernel_impl<scalar_t, ProcessedNodeInputWrapper>(
                 result, inputs, dim);
       });
 }
 
 std::vector<at::Tensor> unsqueezeVarStackInputs(
-    const VarStackNodeWrapper& inputs,
+    const ProcessedNodeInputWrapper& inputs,
     const int64_t dim) {
   std::vector<at::Tensor> result;
   result.reserve(inputs.size());
@@ -827,7 +708,7 @@ std::vector<at::Tensor> unsqueezeVarStackInputs(
 void varstackNonserialOut(
     at::Tensor& result,
     const int64_t dim,
-    const VarStackNodeWrapper& inputs) {
+    const ProcessedNodeInputWrapper& inputs) {
   std::vector<at::Tensor> inputs_unsqueezed =
       unsqueezeVarStackInputs(inputs, dim);
   fastResizeToZero(result);
@@ -837,7 +718,7 @@ void varstackNonserialOut(
 void varStackFastOut(
     at::Tensor& out,
     int64_t dim,
-    const VarStackNodeWrapper& inputs) {
+    const ProcessedNodeInputWrapper& inputs) {
   DCHECK(out.is_contiguous());
   const auto num_inputs = static_cast<int64_t>(inputs.size());
   TORCH_CHECK(num_inputs > 0, "stack expects a non-empty list of tensors");
@@ -871,7 +752,7 @@ void varStackFastOut(
   });
 }
 
-bool inputsAreScalars(const VarStackNodeWrapper& inputs) {
+bool inputsAreScalars(const ProcessedNodeInputWrapper& inputs) {
   // All stack inputs should have the same size, so we only check
   // the first one. If this isn't true, an exception will be thrown
   // in the VarStack implementation
@@ -884,7 +765,7 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
   TORCH_CHECK(num_inputs > 1, "stack expects a non-empty list of tensors");
   dim = c10::maybe_wrap_dim(dim, pnode.Input(0).toTensor().dim() + 1);
 
-  auto inputs = VarStackNodeWrapper(pnode);
+  auto inputs = ProcessedNodeInputWrapper(pnode);
   auto& output = pnode.Output(0).toTensor();
 
   if (output.is_contiguous() && inputsAreScalars(inputs)) {
@@ -893,7 +774,7 @@ void varStackOut(ProcessedNode& pnode, int64_t dim) {
   }
 
   bool can_use_serial = at::native::detail::CanUseNativeSerialStack<
-      VarStackNodeWrapper,
+      ProcessedNodeInputWrapper,
       /*skip_overlap_check*/ true>::call(output, inputs, dim);
 
   if (can_use_serial) {
@@ -2269,6 +2150,69 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+namespace {
+
+template <bool has_relu>
+void apply_dynamic_out_functor(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
+    const at::Tensor& input,
+    at::Tensor& out,
+    bool reduce_range);
+
+template <>
+void apply_dynamic_out_functor<false>(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
+    const at::Tensor& input,
+    at::Tensor& out,
+    bool reduce_range) {
+  packed_weight->apply_dynamic_out(input, out, reduce_range);
+}
+
+template <>
+void apply_dynamic_out_functor<true>(
+    c10::intrusive_ptr<LinearPackedParamsBase> packed_weight,
+    const at::Tensor& input,
+    at::Tensor& out,
+    bool reduce_range) {
+  packed_weight->apply_dynamic_relu_out(input, out, reduce_range);
+}
+
+template <bool has_relu>
+SROperator quantized_linear_dynamic_fp16_impl(Node* n) {
+  const auto weight = toIValue(n->inputs()[1]);
+  c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+  if (weight) {
+    packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
+  }
+  if (packed_weight) {
+    return [packed_weight](ProcessedNode* p_node) {
+      const auto& input = p_node->Input(0).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(input, at::kFloat);
+      }
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      apply_dynamic_out_functor<has_relu>(packed_weight, input, out_t, false);
+    };
+  } else {
+    return [](ProcessedNode* p_node) {
+      const auto& input = p_node->Input(0).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(input, at::kFloat);
+      }
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      // Weights could be quantized on the fly
+      auto packed_weight_tmp =
+          p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+      apply_dynamic_out_functor<has_relu>(
+          packed_weight_tmp, input, out_t, false);
+    };
+  }
+}
+
+} // namespace
+
 REGISTER_OPERATOR_FUNCTOR(
     quantized::linear_dynamic_fp16,
     quantized_linear_dynamic_fp16,
@@ -2279,35 +2223,20 @@ REGISTER_OPERATOR_FUNCTOR(
         LogAndDumpSchema(n);
         return nullptr;
       }
-      const auto weight = toIValue(n->inputs()[1]);
-      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
-      if (weight) {
-        packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
+      return quantized_linear_dynamic_fp16_impl<false>(n);
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::linear_relu_dynamic_fp16,
+    quantized_linear_relu_dynamic_fp16,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "quantized::linear_relu_dynamic_fp16(Tensor X, __torch__.torch.classes."
+              "quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
       }
-      if (packed_weight) {
-        return [packed_weight](ProcessedNode* p_node) {
-          const auto& input = p_node->Input(0).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = create_empty_from(input, at::kFloat);
-          }
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          packed_weight->apply_dynamic_out(input, out_t, false);
-        };
-      } else {
-        return [](ProcessedNode* p_node) {
-          const auto& input = p_node->Input(0).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = create_empty_from(input, at::kFloat);
-          }
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          // Weights could be quantized on the fly
-          auto packed_weight_tmp =
-              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
-          packed_weight_tmp->apply_dynamic_out(input, out_t, false);
-        };
-      }
+      return quantized_linear_dynamic_fp16_impl<true>(n);
     });
 
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
@@ -2618,40 +2547,31 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+/*
+
+TODO(T112769635): Fix broadcasting for this out variant
+
 REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"))) {
-    auto te = createWhere();
-    return [te = std::move(te)](ProcessedNode* p_node) {
-      const auto& cond = p_node->Input(0).toTensor();
-      const auto& self = p_node->Input(1).toTensor();
+          "aten::where.self(Tensor condition, Tensor self, Tensor other) ->
+Tensor"))) { return [](ProcessedNode* p_node) { const auto& cond =
+p_node->Input(0).toTensor(); const auto& self = p_node->Input(1).toTensor();
       const auto& other = p_node->Input(2).toTensor();
 
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = create_empty_from(self);
       }
       auto& out = p_node->Output(0).toTensor();
-
-      if (!te || !te->checkInput<bool>(cond) ||
-          !te->checkInput<int64_t>(self) || !te->checkInput<int64_t>(other)) {
-        fastResizeToZero(out);
-        at::native::where_out(cond, self, other, out);
-      } else {
-        at::native::resize_(out, self.sizes(), c10::nullopt);
-        auto num_elems = self.numel();
-        te->call(
-            {out.data_ptr(),
-             cond.data_ptr(),
-             self.data_ptr(),
-             other.data_ptr(),
-             &num_elems});
-      }
+      fastResizeToZero(out);
+      at::native::where_out(cond, self, other, out);
     };
   }
 
   LogAndDumpSchema(n);
   return nullptr;
 });
+
+*/
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::NumToTensor,
