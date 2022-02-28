@@ -970,8 +970,7 @@ run_ops = set()
 
 class TestDecompositionOpInfo(TestCase):
 
-    # @unittest.skip("dispatcher bug")
-    # @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
+    @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     @ops(
         functorch_lagging_op_db + additional_op_db,
         allowed_dtypes=[torch.float32, torch.float64, torch.float16, torch.bfloat16] + [*integral_types()]
