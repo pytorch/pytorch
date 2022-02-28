@@ -2160,7 +2160,7 @@ TEST(StaticRuntime, Where) {
   )JIT";
 
   std::vector<IValue> args1 = {at::randn({2, 2}), at::randn({2, 2})};
-  std::vector<IValue> args2 = {at::randn({3, 6}), at::randn({3, 6})};
+  std::vector<IValue> args2 = {at::randn({8, 10}), at::randn({8, 10})};
 
   testStaticRuntime(where_script, args1);
   testStaticRuntime(where_script, args1, args2);
