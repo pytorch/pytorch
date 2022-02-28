@@ -512,12 +512,13 @@ namespace {
       TensorInfo<scalar_t, index_t> grad_output,
       TensorInfo<scalar_t, index_t> input,
       TensorInfo<scalar_t, index_t> grid,
-      TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros
+      TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros (or unused if input_requires_grad is false)
       TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners,
-      const index_t grad_input_memory_span) {
+      const index_t grad_input_memory_span,
+      const bool input_requires_grad) {
 
     index_t C = input.sizes[1];
     index_t inp_D = input.sizes[2];
@@ -541,11 +542,19 @@ namespace {
     index_t gOut_sD = grad_output.strides[2];
     index_t gOut_sH = grad_output.strides[3];
     index_t gOut_sW = grad_output.strides[4];
-    index_t gInp_sN = grad_input.strides[0];
-    index_t gInp_sC = grad_input.strides[1];
-    index_t gInp_sD = grad_input.strides[2];
-    index_t gInp_sH = grad_input.strides[3];
-    index_t gInp_sW = grad_input.strides[4];
+    // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
+    int64_t gInp_sN = 0;
+    int64_t gInp_sC = 0;
+    int64_t gInp_sD = 0;
+    int64_t gInp_sH = 0;
+    int64_t gInp_sW = 0;
+    if (input_requires_grad) {
+      gInp_sN = grad_input.strides[0];
+      gInp_sC = grad_input.strides[1];
+      gInp_sD = grad_input.strides[2];
+      gInp_sH = grad_input.strides[3];
+      gInp_sW = grad_input.strides[4];
+    }
     index_t gGrid_sW = grad_grid.strides[3];
 
     CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
@@ -614,30 +623,34 @@ namespace {
 
         scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0), giz = static_cast<scalar_t>(0);
         scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
+        index_t NC_offset;
+        if (input_requires_grad) {
+          NC_offset = n * gInp_sN;
+        }
         scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         // calculate bilinear weighted pixel value and set output pixel
         for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC += inp_sC) {
           scalar_t gOut = *gOut_ptr_NCDHW;
 
           // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
-          safe_add_3d(grad_input.data, iz_tnw, iy_tnw, ix_tnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tnw * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_tne, iy_tne, ix_tne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tne * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_tsw, iy_tsw, ix_tsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tsw * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_tse, iy_tse, ix_tse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tse * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_bnw, iy_bnw, ix_bnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bnw * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_bne, iy_bne, ix_bne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bne * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_bsw, iy_bsw, ix_bsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bsw * gOut,
-                      NC_offset, grad_input_memory_span);
-          safe_add_3d(grad_input.data, iz_bse, iy_bse, ix_bse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bse * gOut,
-                      NC_offset, grad_input_memory_span);
-
+          if (input_requires_grad) {
+            safe_add_3d(grad_input.data, iz_tnw, iy_tnw, ix_tnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tnw * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_tne, iy_tne, ix_tne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tne * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_tsw, iy_tsw, ix_tsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tsw * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_tse, iy_tse, ix_tse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, tse * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_bnw, iy_bnw, ix_bnw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bnw * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_bne, iy_bne, ix_bne, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bne * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_bsw, iy_bsw, ix_bsw, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bsw * gOut,
+                        NC_offset, grad_input_memory_span);
+            safe_add_3d(grad_input.data, iz_bse, iy_bse, ix_bse, gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, bse * gOut,
+                        NC_offset, grad_input_memory_span);
+          }
           // calculate grad_grid
           if (within_bounds_3d(iz_tnw, iy_tnw, ix_tnw, inp_D, inp_H, inp_W)) {
             scalar_t tnw_val = inp_ptr_NC[iz_tnw * inp_sD + iy_tnw * inp_sH + ix_tnw * inp_sW];
@@ -698,20 +711,21 @@ namespace {
         gGrid_ptr_NDHW[1] = giy_mult * giy;
         gGrid_ptr_NDHW[2] = giz_mult * giz;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        auto ix_nearest = static_cast<index_t>(::round(ix));
-        auto iy_nearest = static_cast<index_t>(::round(iy));
-        auto iz_nearest = static_cast<index_t>(::round(iz));
+        if (input_requires_grad) {
+          auto ix_nearest = static_cast<index_t>(::round(ix));
+          auto iy_nearest = static_cast<index_t>(::round(iy));
+          auto iz_nearest = static_cast<index_t>(::round(iz));
 
-        // assign nearest neighor pixel value to output pixel
-        scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
-        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC) {
-          // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
-          safe_add_3d(grad_input.data, iz_nearest, iy_nearest, ix_nearest,
-                      gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW,
-                      NC_offset, grad_input_memory_span);
+          // assign nearest neighor pixel value to output pixel
+          scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+          index_t NC_offset = n * gInp_sN;
+          for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC) {
+            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
+            safe_add_3d(grad_input.data, iz_nearest, iy_nearest, ix_nearest,
+                        gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW,
+                        NC_offset, grad_input_memory_span);
+          }
         }
-
         // assuming grad_grid is contiguous
         // thus we can
         //   1. use index with gGrid_sW to directly compute gGrid_ptr_NDHW
@@ -864,7 +878,7 @@ void launch_grid_sampler_3d_backward_kernel(
     const TensorBase &grad_input, const TensorBase &grad_grid,
     const TensorBase& grad_output, const TensorBase& input,
     const TensorBase& grid, int64_t interpolation_mode, int64_t padding_mode,
-    bool align_corners) {
+    bool align_corners, std::array<bool,2> output_mask) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("grid_sampler_3d_backward_cuda");
@@ -873,6 +887,7 @@ void launch_grid_sampler_3d_backward_kernel(
   auto H = grid.size(2);
   auto W = grid.size(3);
   int64_t count = N * D * H * W;
+  auto input_requires_grad = output_mask[0];
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
@@ -883,12 +898,13 @@ void launch_grid_sampler_3d_backward_kernel(
             getTensorInfo<scalar_t, int>(grad_output),
             getTensorInfo<scalar_t, int>(input),
             getTensorInfo<scalar_t, int>(grid),
-            getTensorInfo<scalar_t, int>(grad_input),
+            input_requires_grad ? getTensorInfo<scalar_t, int>(grad_input) : TensorInfo<scalar_t, int>(),
             getTensorInfo<scalar_t, int>(grad_grid),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners,
-            /*grad_input_memory_span =*/static_cast<int>(grad_input.numel()));
+            /*grad_input_memory_span =*/input_requires_grad ? static_cast<int>(grad_input.numel()) : 0,
+            input_requires_grad);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_backward_kernel<scalar_t>
@@ -897,12 +913,13 @@ void launch_grid_sampler_3d_backward_kernel(
             getTensorInfo<scalar_t, int64_t>(grad_output),
             getTensorInfo<scalar_t, int64_t>(input),
             getTensorInfo<scalar_t, int64_t>(grid),
-            getTensorInfo<scalar_t, int64_t>(grad_input),
+            input_requires_grad ? getTensorInfo<scalar_t, int64_t>(grad_input) : TensorInfo<scalar_t, int64_t>(),
             getTensorInfo<scalar_t, int64_t>(grad_grid),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
             align_corners,
-            /*grad_input_memory_span =*/grad_input.numel());
+            /*grad_input_memory_span =*/input_requires_grad ? grad_input.numel() : 0,
+            input_requires_grad);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     });
