@@ -571,8 +571,9 @@ def _meshgrid(*tensors, indexing: Optional[str]):
 
 stft = _add_docstr(
     torch.stft,
+    "stft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
+    "pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor"
     r"""
-stft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor
 
 Short-time Fourier transform (STFT).
 

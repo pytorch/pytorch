@@ -552,7 +552,8 @@ class TestSaveLoadForOpVersion(JitTestCase):
                 [torch.float32, torch.complex64], repeat=2):
             input = torch.rand((100,), dtype=in_dtype)
             window = torch.rand((10,), dtype=window_dtype)
-            output = v10_mobile_module(input, n_fft=10, window=window)
-            output_expected = torch.stft(input, n_fft=10, window=window,
+            n_fft = 10
+            output = v10_mobile_module(input, n_fft, window)
+            output_expected = torch.stft(input, n_fft=n_fft, window=window,
                                          center=False, return_complex=True)
             self.assertEqual(output, output_expected)

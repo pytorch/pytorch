@@ -64,4 +64,4 @@ class TestVersionedStftV10(torch.nn.Module):
 
     def forward(self, x, n_fft: int, window):
         # calling aten::stft direct instead of torch.functional.stft
-        return torch._VF.stft(x, n_fft=n_fft, window=window, return_complex=True)
+        return torch.ops.aten.stft(x, n_fft=n_fft, window=window, return_complex=True)
