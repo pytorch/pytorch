@@ -2262,7 +2262,10 @@
     CPU: grid_sampler_3d_cpu
     CUDA: grid_sampler_3d_cuda
 
-- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> (Tensor, Tensor)
+# `grid_sampler_3d_backward` takes in `output_mask` to optimize performance for
+# the case where `input` doesn't require gradient. Gradient for `grid` is always
+# computed (only `output_mask[0]` is checked by the implementations).
+- func: grid_sampler_3d_backward(Tensor grad_output, Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners, bool[2] output_mask) -> (Tensor, Tensor)
   dispatch:
     CPU: grid_sampler_3d_backward_cpu
     CUDA: grid_sampler_3d_backward_cuda
@@ -3136,6 +3139,7 @@
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
+  python_module: sparse
 
 - func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
   dispatch:
@@ -4235,11 +4239,11 @@
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
 # Overload without center & pad mode, needed for forward-compatibility
-- func: stft.legacy(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
   cpp_no_default_args: ['hop_length', 'win_length', 'window', 'normalized']
 
-- func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
+- func: stft.center(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, str pad_mode="reflect", bool normalized=False, bool? onesided=None, bool? return_complex=None) -> Tensor
   variants: function, method
 
 - func: istft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool center=True, bool normalized=False, bool? onesided=None, int? length=None, bool return_complex=False) -> Tensor
@@ -5043,6 +5047,7 @@
     CPU, CUDA: zero_
     Meta: zero_meta_
     SparseCPU, SparseCUDA: zero_sparse_
+    SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
