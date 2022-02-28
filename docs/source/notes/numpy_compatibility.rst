@@ -58,8 +58,12 @@ function can be created locally to return a NumPy array, for say, visualizations
 
    # Possibly lossy function for visualizations
    def uncond_numpy(torch_tensor):
-        if torch_tensor.is_cuda:
+        if torch_tensor.device != torch.device(type="cpu"):
            torch_tensor = torch_tensor.cpu()
+        if torch_tensor.is_conj() == True:
+           torch_tensor = torch_tensor.resolve_conj()
+        if torch_tensor.is_neg() == True:
+           torch_tensor = torch_tensor.resolve_neg()
         if torch_tensor.requires_grad == False:
             return torch_tensor.numpy()
         else:
@@ -142,8 +146,8 @@ they are more forgiving than their PyTorch equivalents.
 Conversions
 -----------
 
-Only a small subset of data type (``dtype``) objects defined in NumPy have an
-equivalent in PyTorch, namely:
+A subset of data type (``dtype``) objects defined in NumPy have
+equivalents in PyTorch, namely:
 
 .. csv-table:: $ indicates the sizes supported, e.g. ``uint8``
    :header: ``np.dtype``, ``torch.dtype``, sizes
@@ -159,12 +163,12 @@ To ``numpy``
 
 The restrictions on a PyTorch tensor becoming a NumPy ``ndarray`` are:
 
-- It must be a dense tensor
+- It must be a strided tensor
 - It must be on the CPU
-- It must not have a computational graph
+- It must not require gradients
 - It must not have the conjugate bit set
 - It must not have the negative bit set
-- It must not be a subclass
+- It must not be a tensor-subclass
 
 Essentially these can be expressed as:
 
@@ -210,10 +214,11 @@ From ``numpy``
 For a NumPy ``ndarray`` to be convertible to a PyTorch tensor:
 
 - It must have only native byte order
-- Must not be read only
 - Array strides must be multiples of the Torch element byte size
 - Must have a ``dtype`` which is one of ``float64 float32 float16 complex64
   complex128 int64 int32 int16 int8 uint8 and bool``
+ - Non-writable arrays will result in undefined behavior, and should be avoided
+   + Copies should be made instead
 
 Concretely, these may be expressed as:
 
