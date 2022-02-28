@@ -10,7 +10,7 @@ REGISTER_CPU_OPERATOR(Int8FC, int8::Int8FCOp);
 
 using namespace std::placeholders;
 OPERATOR_SCHEMA(Int8FC)
-    .NumInputs(3, 4)
+    .NumInputs(3, 5)
     .NumOutputs(1, 4)
     // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
@@ -50,6 +50,11 @@ will throw errors.
         "Qparam",
         "Optional Qparam blob that contains quant param computed on activation histogram data"
         "Will overwrite Y_scale and Y_zero_point argument if specified")
+    .Input(
+        4,
+        "in_Qparam",
+        "Optional Qparam blob that contains quant param computed on activation histogram data"
+        "Will overwrite X_scale and X_zero_point argument if specified")
     .Output(0, "Y", "2D output tensor");
 
 } // namespace caffe2
