@@ -11,7 +11,7 @@ class _ParameterTag(object):
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
-    def __instancecheck__(cls, instance):
+    def __instancecheck__(self, instance):
         return super().__instancecheck__(instance) or (
             hasattr(instance, '_is_param') and isinstance(instance._is_param, _ParameterTag))
 
