@@ -379,7 +379,6 @@ class Quantized:
     def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
         input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
         weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
-        # Preserve bias quantization step in ONNX graph
         q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
         bias, _, _ = sym_help.dequantize_helper(g, q_bias)
 
@@ -417,7 +416,6 @@ class Quantized:
     def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
         input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
         weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
-        # Preserve bias quantization step in ONNX graph
         q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
         bias, _, _ = sym_help.dequantize_helper(g, q_bias)
 
@@ -430,7 +428,6 @@ class Quantized:
     def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
         input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
         weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
-        # Preserve bias quantization step in ONNX graph
         q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
         bias, _, _ = sym_help.dequantize_helper(g, q_bias)
 

@@ -939,9 +939,10 @@ def quantize_helper(g, tensor, scale, zero_point):
     output = g.op("QuantizeLinear", tensor, scale, zero_point)
     return g.op("prim::TupleConstruct", output, scale, zero_point)
 
-# NOTE: Original `bias` is float in PyTorch. Quantization is applied in kernel.
-#       To mimic behavior in ONNX, perform the `bias` quantization step here.
 def requantize_bias_helper(g, bias, input_scale, weight_scale):
+    # In PyTorch, bias is float and is quantized implicitly inside the quantized ATen op kernel.
+    # In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
+    # Since int32 is not supported by ONNX operator `QuantizeLinear`, quantization is exported using regular operators.
     bias_scale = g.op("Mul", weight_scale, input_scale)
     bias_zero_point = g.op("Constant", value_t=torch.tensor([0], dtype=torch.int))
     q_bias = g.op("Cast",
