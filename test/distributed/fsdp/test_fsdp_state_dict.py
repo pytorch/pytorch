@@ -46,7 +46,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 INNER_SHAPE = [4, 4]
 OUTER_SHAPE = [4, 5]
 
-_SUPPORTED_STATE_DICT_IMPLS = ["full_state_dict", "local_state_dict"]
+_SUPPORTED_STATE_DICT_IMPLS = ["state_dict", "local_state_dict"]
 
 
 class Model(Module):
@@ -90,9 +90,9 @@ class TestFSDPStateDict(FSDPTest):
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
     )
     @parametrize("fp16", [True, False])
-    def test_basic_save_and_load_full_state_dict(self, cpu_offload, fp16):
+    def test_basic_save_and_load_state_dict(self, cpu_offload, fp16):
         """
-        Tests that we can save a full_state_dict and load it into a blank model
+        Tests that we can save a state_dict and load it into a blank model
         with various configs such as fp16 and cpu offload and parameters
         match as expected.
         """
@@ -133,7 +133,7 @@ class TestFSDPStateDict(FSDPTest):
                             self.assertEqual(tensor.dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
-    def test_save_and_load_after_forward_full_state_dict(self):
+    def test_save_and_load_after_forward_state_dict(self):
         """
         Test that saving after some training results in params being updated as
         expected.
@@ -201,7 +201,7 @@ class TestFSDPStateDict(FSDPTest):
             _zero_model(blank_model)
             if with_context:
                 state_dict_type = {
-                    "full_state_dict": StateDictType.FULL_STATE_DICT,
+                    "state_dict": StateDictType.FULL_STATE_DICT,
                     "local_state_dict": StateDictType.LOCAL_STATE_DICT,
                     "sharded_state_dict": StateDictType.SHARDED_STATE_DICT,
                 }[state_dict_type]
@@ -233,7 +233,7 @@ class TestFSDPStateDict(FSDPTest):
         state_dict = self._state_dict(self._initialize_model(True), state_dict_type)
         if state_dict_type == "local_state_dict":
             self.assertEqual(set(["flat_param", "inner.flat_param"]), state_dict.keys())
-        elif state_dict_type == "full_state_dict":
+        elif state_dict_type == "state_dict":
             # Keys should match local model.
             local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
             local_keys = local_model.state_dict().keys()
@@ -242,9 +242,9 @@ class TestFSDPStateDict(FSDPTest):
             raise NotImplementedError(f"No test for {state_dict_type}!")
 
     @skip_if_lt_x_gpu(2)
-    def test_full_state_dict_load_into_local_module(self):
+    def test_state_dict_load_into_local_module(self):
         """
-        Tests that FSDP's full_state_dict can be loaded into a local model.
+        Tests that FSDP's state_dict can be loaded into a local model.
         """
         model = self._initialize_model(wrap_fsdp=True)
         optim = SGD(model.parameters(), lr=0.1)
@@ -258,7 +258,7 @@ class TestFSDPStateDict(FSDPTest):
         with model._summon_full_params():
             fsdp_params = deepcopy(list(model.parameters()))
 
-        # get FSDP state_dict. Note that by default we return full_state_dict.
+        # get FSDP state_dict. Note that by default we return state_dict.
         fsdp_state_dict = model.state_dict()
         # Create zeroed local model
         blank_local_model = self._initialize_model(wrap_fsdp=False, wrap_ddp=False)
