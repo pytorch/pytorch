@@ -8,7 +8,10 @@ import torch
 import torch.fx
 from .mappings import conv_ops
 from .quantization_state import AutoQuantizationState
-from .utils import get_packable_arg_idxs
+from .utils import (
+    get_packable_arg_idxs,
+    AutoQuantizationStateModuleDict,
+)
 
 class AllModuleTracer(torch.fx.Tracer):
     """
@@ -207,7 +210,7 @@ class AllModuleTracer(torch.fx.Tracer):
     # class.
     # TODO(future): remove the hack
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
-        if isinstance(m, AutoQuantizationState):
+        if isinstance(m, AutoQuantizationStateModuleDict):
             return args[0]
         return super().call_module(m, forward, args, kwargs)
 

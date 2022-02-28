@@ -115,11 +115,13 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  torchscript constant table. Also update tensor storage schema adapting to
 //  the unify format, the root key of tensor storage is updated from {index} to
 //  {the_pointer_value_the_tensor.storage}, for example:
-//  `140245072983168.storage` Forward-compatibility change. 0x6L: Implicit
-//  opereator versioning using number of specified argument. Refer to the
-//  summary of https://github.com/pytorch/pytorch/pull/56845 for details. 0x7L:
-//  Enable support for operators with default arguments plus out arguments.
-//  0x8L: Emit promoted operators as instructions
+//  `140245072983168.storage` Forward-compatibility change.
+//  0x6L: Implicit opereator versioning using number of specified argument.
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845 for details.
+//  0x7L: Enable support for operators with default arguments plus out arguments.
+//  Refer. See https://github.com/pytorch/pytorch/pull/63651 for details
+//  0x8L: Emit promoted operators as instructions.
+//  See https://github.com/pytorch/pytorch/pull/71662 for details
 constexpr uint64_t kProducedBytecodeVersion = 0x8L;
 
 // static_assert(

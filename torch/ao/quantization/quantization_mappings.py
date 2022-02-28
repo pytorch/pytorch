@@ -30,6 +30,9 @@ DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv1d: nnqr.Conv1d,
     nn.Conv2d: nnqr.Conv2d,
     nn.Conv3d: nnqr.Conv3d,
+    nn.ConvTranspose1d: nnqr.ConvTranspose1d,
+    nn.ConvTranspose2d: nnqr.ConvTranspose2d,
+    nn.ConvTranspose3d: nnqr.ConvTranspose3d,
 }
 
 # Default map for swapping float module to quantized ones
