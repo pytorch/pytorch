@@ -441,16 +441,42 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
     int max_concrete_count = -1;
     int max_broadcast_count = -1;
     IterDomain* concrete_id = nullptr;
+
+    // Prefer domains appearing after rfactor domains. This matters
+    // when view merges domains to create a new domain, which becomes
+    // an rfactor domain. Suppose a broadcast follows the view
+    // operation and the broadcast domain is merged with the domain
+    // matching with the rfactor domain, that domain should be chosen
+    // as the concrete domain as it has the broadcast domain and the
+    // domain matching with the rfactor domain. The concrete domain
+    // does not have a history of merge/shift further up from the
+    // rfactor domain in pre-view tensors, but that should be fine as
+    // IndexCompute with those pre-view tensors should be able to
+    // compute indices from their leaf domains.
+    // See issue #1493
+
+    // Indicate if the previous ID was an rfactor domain
+    bool rf_detected = false;
     for (auto id : *set) {
-      int concrete_count = n_concrete_ids_.at(id);
-      if (concrete_count >= max_concrete_count) {
-        int broadcast_count = n_broadcast_ids_.at(id);
-        if (concrete_count > max_concrete_count ||
-            broadcast_count > max_broadcast_count) {
-          max_concrete_count = concrete_count;
-          max_broadcast_count = broadcast_count;
-          concrete_id = id;
+      // If the previous ID is an rfactor, reset the concrete ID with
+      // this ID no matter how many IDs the previous concrete ID has.
+      if (rf_detected) {
+        concrete_id = id;
+        max_concrete_count = n_concrete_ids_.at(id);
+        max_broadcast_count = n_broadcast_ids_.at(id);
+        rf_detected = id->isRFactorProduct();
+      } else {
+        int concrete_count = n_concrete_ids_.at(id);
+        if (concrete_count >= max_concrete_count) {
+          int broadcast_count = n_broadcast_ids_.at(id);
+          if (concrete_count > max_concrete_count ||
+              broadcast_count > max_broadcast_count) {
+            max_concrete_count = concrete_count;
+            max_broadcast_count = broadcast_count;
+            concrete_id = id;
+          }
         }
+        rf_detected = id->isRFactorProduct();
       }
     }
 
