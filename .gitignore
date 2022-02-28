@@ -255,6 +255,9 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
+# Downloaded bazel
+tools/bazel
+
 # Visual Studio Code files
 .vs
 /.vscode/*
