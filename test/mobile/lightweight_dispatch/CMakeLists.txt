@@ -16,6 +16,8 @@ set(TEST_UNBOXING_DEPENDENCIES torch gtest gtest_main ${TORCH_LIBRARIES})
 
 target_link_libraries(test_codegen_unboxing
   -Wl,-s
+  -Wl,--gc-sections
+  -Wl,--whole-archive
   ${TEST_UNBOXING_DEPENDENCIES}
 )
 

@@ -40,7 +40,7 @@ fi
 # run test
 if ! build/bin/test_codegen_unboxing; then
   echo "test_codegen_unboxing has failure!"
-  exit "$?"
+  exit 1
 fi
 
 # shutdown test
@@ -49,7 +49,7 @@ python "$TEST_SRC_ROOT/tests_setup.py" shutdown
 # run lite interpreter tests
 if ! build/bin/test_lite_interpreter_runtime; then
   echo "test_lite_interpreter_runtime has failure!"
-  exit "$?"
+  exit 1
 fi
 
 popd
