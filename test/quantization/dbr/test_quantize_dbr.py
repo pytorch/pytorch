@@ -248,9 +248,9 @@ class TestQuantizeDBRIndividualOps(QuantizeDBRTestCase):
                 x = torch.cat([x, x], dim=1)
                 return x
 
-        m = M().eval()
         qconfig = torch.quantization.default_qconfig
         for dtype in (torch.int32, torch.int64):
+            m = M().eval()
             self._test_auto_tracing(
                 m, qconfig, (torch.zeros(1, 1, 1, 1, dtype=dtype),),
                 # FX graph mode quant does not support this yet
@@ -422,6 +422,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         """
         Tests that fusion works if the modules to fuse get called multiple
         times in the same forward.
+
+        Currently, observers are not shared between successive calls of
+        the same module.
+        TODO(future PR): make them shared (this is easy to detect)
         """
         class M(torch.nn.Module):
             def __init__(self):
@@ -553,6 +557,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         # test backprop does not crash
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
+        m = M(torch.randn(1, 1, 1, 1), torch.randn(1)).eval()
         mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
