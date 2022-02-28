@@ -35,6 +35,9 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   LITE_INTERPRETER,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
+  // Scopes for static runtime, a specialized TorchScript interpreter
+  STATIC_RUNTIME_OP,
+  STATIC_RUNTIME_MODEL,
   NUM_SCOPES, // must be the last in the list
 };
 

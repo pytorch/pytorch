@@ -39,6 +39,7 @@ endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
+  ${JIT_TEST_ROOT}/test_add_if_then_else.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
