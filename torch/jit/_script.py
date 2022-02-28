@@ -535,16 +535,8 @@ if _enabled:
             Returns method to load the ScriptModule from a ``torch.package.PackageImporter``'s
             Pickler's ``persistent_load`` function.
             """
-            print("I asm here")
             script_module_id = exporter.get_unique_id()
-            serializer = torch._C.ScriptModuleSerializer(exporter.zip_file, exporter.storage_context)
-            print("I am about to serialize")
-            print(exporter.storage_context == serializer.storage_context())
-            serializer.serialize(self._c, int(script_module_id))
-            print('id ', script_module_id)
-            serializer.write_files(code_dir = f".data/ts_code/code/{script_module_id}/")
-            # print(serializer.getAllWrittenRecords())
-            print("I am about to return")
+            exporter.script_module_serializer.serialize(self._c, int(script_module_id))
             return (unpackage_script_module, (script_module_id,))
 
     class RecursiveScriptModule(ScriptModule):
@@ -901,6 +893,7 @@ if _enabled:
         "double",
         "half",
         "state_dict",
+        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -1315,6 +1308,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        # some functions are explicitly marked as not supported in script mode
+        if hasattr(obj, "__script_unsupported"):
+            raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)

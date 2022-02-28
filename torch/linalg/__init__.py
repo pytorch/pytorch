@@ -234,7 +234,7 @@ then the output has the same batch dimensions.
     Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
     the inverse, as::
 
-        torch.linalg.solve(A, B) == A.inv() @ B
+        linalg.solve(A, B) == linalg.inv(A) @ B  # When B is a matrix
 
     It is always prefered to use :func:`~solve` when possible, as it is faster and more
     numerically stable than computing the inverse explicitly.
@@ -451,7 +451,13 @@ the output has the same batch dimensions.
              by :math:`e^{i \phi}, \phi \in \mathbb{R}` produces another set of valid eigenvectors
              of the matrix.  For this reason, the loss function shall not depend on the phase of the
              eigenvectors, as this quantity is not well-defined.
-             This is checked when computing the gradients of this function.
+             This is checked when computing the gradients of this function. As such,
+             when inputs are on a CUDA device, this function synchronizes that device with the CPU
+             when computing the gradients.
+             This is checked when computing the gradients of this function. As such,
+             when inputs are on a CUDA device, the computation of the gradients
+             of this function synchronizes that device with the CPU.
+
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
@@ -605,7 +611,9 @@ The eigenvalues are returned in ascending order.
              case produces another set of valid eigenvectors of the matrix.
              For this reason, the loss function shall not depend on the phase of the eigenvectors, as
              this quantity is not well-defined.
-             This is checked for complex inputs when computing the gradients of this function.
+             This is checked for complex inputs when computing the gradients of this function. As such,
+             when inputs are complex and are on a CUDA device, the computation of the gradients
+             of this function synchronizes that device with the CPU.
 
 .. warning:: Gradients computed using the `eigenvectors` tensor will only be finite when
              :attr:`A` has distinct eigenvalues.
@@ -1006,15 +1014,15 @@ If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than
 :attr:`rtol` is set to zero.
 
 If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
-of the singular values of :attr:`A` as returned by :func:`torch.svd`.
+of the singular values of :attr:`A` as returned by :func:`torch.linalg.svdvals`.
 
 .. note::
     This function has NumPy compatible variant `linalg.matrix_rank(A, tol, hermitian=False)`.
     However, use of the positional argument :attr:`tol` is deprecated in favor of :attr:`atol` and :attr:`rtol`.
 
 """ + fr"""
-.. note:: The matrix rank is computed using singular value decomposition
-          :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` (default) and the eigenvalue
+.. note:: The matrix rank is computed using a singular value decomposition
+          :func:`torch.linalg.svdvals` if :attr:`hermitian`\ `= False` (default) and the eigenvalue
           decomposition :func:`torch.linalg.eigvalsh` when :attr:`hermitian`\ `= True`.
           {common_notes["sync_note"]}
 """ + r"""
@@ -1353,6 +1361,12 @@ linalg.matmul(input, other, *, out=None) -> Tensor
 Alias for :func:`torch.matmul`
 """)
 
+diagonal = _add_docstr(_linalg.linalg_diagonal, r"""
+linalg.diagonal(A, *, offset=0, dim1=-2, dim2=-1) -> Tensor
+
+Alias for :func:`torch.diagonal` with defaults :attr:`dim1`\ `= -2`, :attr:`dim2`\ `= -1`.
+""")
+
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
 linalg.multi_dot(tensors, *, out=None)
 
@@ -1479,18 +1493,22 @@ Differences with `numpy.linalg.svd`:
              vectors :math:`u_k, v_k` by `-1` in the real case or by
              :math:`e^{i \phi}, \phi \in \mathbb{R}` in the complex case produces another two
              valid singular vectors of the matrix.
-             This non-uniqueness problem is even worse when the matrix has repeated singular values.
-             In this case, one may multiply the associated singular vectors of `U` and `V` spanning
-             the subspace by a rotation matrix and `the resulting vectors will span the same subspace`_.
+             For this reason, the loss function shall not depend on this :math:`e^{i \phi}` quantity,
+             as it is not well-defined.
+             This is checked for complex inputs when computing the gradients of this function. As such,
+             when inputs are complex and are on a CUDA device, the computation of the gradients
+             of this function synchronizes that device with the CPU.
 
 .. warning:: Gradients computed using `U` or `Vh` will only be finite when
-             :attr:`A` does not have zero as a singular value or repeated singular values.
+             :attr:`A` does not have repeated singular values. If :attr:`A` is rectangular,
+             additionally, zero must also not be one of its singular values.
              Furthermore, if the distance between any two singular values is close to zero,
              the gradient will be numerically unstable, as it depends on the singular values
              :math:`\sigma_i` through the computation of
              :math:`\frac{1}{\min_{i \neq j} \sigma_i^2 - \sigma_j^2}`.
-             The gradient will also be numerically unstable when :attr:`A` has small singular
-             values, as it also depends on the computaiton of :math:`\frac{1}{\sigma_i}`.
+             In the rectangular case, the gradient will also be numerically unstable when
+             :attr:`A` has small singular values, as it also depends on the computation of
+             :math:`\frac{1}{\sigma_i}`.
 
 .. seealso::
 
@@ -1641,7 +1659,7 @@ For :attr:`p` in `(2, -2)`, this function can be computed in terms of the singul
 
     \kappa_2(A) = \frac{\sigma_1}{\sigma_n}\qquad \kappa_{-2}(A) = \frac{\sigma_n}{\sigma_1}
 
-In these cases, it is computed using :func:`torch.linalg.svd`. For these norms, the matrix
+In these cases, it is computed using :func:`torch.linalg.svdvals`. For these norms, the matrix
 (or every matrix in the batch) :attr:`A` may have any shape.
 
 .. note :: When inputs are on a CUDA device, this function synchronizes that device with the CPU
@@ -1734,7 +1752,7 @@ If :attr:`rtol` is not specified and :attr:`atol` is specified to be larger than
 :attr:`rtol` is set to zero.
 
 If :attr:`atol` or :attr:`rtol` is a :class:`torch.Tensor`, its shape must be broadcastable to that
-of the singular values of :attr:`A` as returned by :func:`torch.svd`.
+of the singular values of :attr:`A` as returned by :func:`torch.linalg.svd`.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
@@ -2156,7 +2174,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
     Consider using :func:`torch.linalg.tensorsolve` if possible for multiplying a tensor on the left
     by the tensor inverse, as::
 
-        tensorsolve(A, B) == torch.tensordot(tensorinv(A), B)
+        linalg.tensorsolve(A, B) == torch.tensordot(linalg.tensorinv(A), B)  # When B is a tensor with shape A.shape[:B.ndim]
 
     It is always prefered to use :func:`~tensorsolve` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
@@ -2225,7 +2243,7 @@ Args:
     A (Tensor): tensor to solve for. Its shape must satisfy
                     `prod(\ `:attr:`A`\ `.shape[:\ `:attr:`B`\ `.ndim]) ==
                     prod(\ `:attr:`A`\ `.shape[\ `:attr:`B`\ `.ndim:])`.
-    B (Tensor): tensor of shape :attr:`A`\ `.shape[\ `:attr:`B`\ `.ndim]`.
+    B (Tensor): tensor of shape :attr:`A`\ `.shape[:\ `:attr:`B`\ `.ndim]`.
     dims (Tuple[int], optional): dimensions of :attr:`A` to be moved.
         If `None`, no dimensions are moved. Default: `None`.
 

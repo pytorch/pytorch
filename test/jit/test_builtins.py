@@ -150,8 +150,6 @@ class TestTensorBuiltins(JitTestCase):
         # real and imag are only implemented for complex tensors.
         self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'imag'))
         keys.remove('imag')
-        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'real'))
-        keys.remove('real')
 
         properties = [p for p in keys if should_keep(tensor, p)]
 
