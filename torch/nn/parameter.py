@@ -3,18 +3,20 @@ from torch._C import _disabled_torch_function_impl
 from collections import OrderedDict
 
 
-class ParameterMeta(type):
-    # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
-    def __instancecheck__(cls, instance):
-        return super().__instancecheck__(instance) or (hasattr(instance, '_is_param') and instance._is_param)
-
-
-# Metaclass to combine _TensorMeta and the instance check override for Parameter.
-class TensorParameterMeta(torch._C._TensorMeta, ParameterMeta):
+# Class used to tag a tensor (subclass) as a parameter.
+class _ParameterTag(object):
     pass
 
 
-class Parameter(torch.Tensor, metaclass=TensorParameterMeta):
+# Metaclass to combine _TensorMeta and the instance check override for Parameter.
+class _ParameterMeta(torch._C._TensorMeta):
+    # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
+    def __instancecheck__(cls, instance):
+        return super().__instancecheck__(instance) or (
+            hasattr(instance, '_is_param') and isinstance(instance._is_param, _ParameterTag))
+
+
+class Parameter(torch.Tensor, metaclass=_ParameterMeta):
     r"""A kind of Tensor that is to be considered a module parameter.
 
     Parameters are :class:`~torch.Tensor` subclasses, that have a
@@ -41,7 +43,7 @@ class Parameter(torch.Tensor, metaclass=TensorParameterMeta):
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
-        t._is_param = True
+        t._is_param = _ParameterTag()
         return t
 
     # Note: the 3 methods below only apply to standard Tensor. Parameters of custom tensor types
