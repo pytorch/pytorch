@@ -112,7 +112,6 @@ class SparseTensor(WrapperTensor):
 
     def __repr__(self):
         return super().__repr__(tensor_contents=f"values={self.values}, indices={self.indices}")
-        #return f"{self.__class__.__name__}(values={self.values}, indices={self.indices})"
 
     def sparse_to_dense(self):
         res = torch.zeros(self.size(), dtype=self.values.dtype)
@@ -211,6 +210,9 @@ class NonWrapperTensor(torch.Tensor):
 
 # Class used to store info about subclass tensors used in testing.
 class SubclassInfo:
+
+    __slots__ = ['name', 'create_fn']
+
     def __init__(self, name, create_fn):
         self.name = name
         self.create_fn = create_fn  # create_fn(shape) -> tensor instance

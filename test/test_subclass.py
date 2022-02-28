@@ -4,11 +4,9 @@ from copy import deepcopy
 from torch import nn
 from torch.nn.utils.parametrize import register_parametrization
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.testing._internal.common_utils import (TestCase, run_tests, parametrize,
-    subtest, instantiate_parametrized_tests)
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
 from torch.testing._internal.common_subclass import subclass_db
-from torch.utils._pytree import tree_map
 from unittest import expectedFailure
 
 
@@ -79,7 +77,8 @@ class TestSubclass(TestCase):
 
     @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
     def test_module_optimization(self, tensor_cls):
-        create_fn = lambda: self._create_tensor(tensor_cls)
+        def create_fn():
+            return self._create_tensor(tensor_cls)
 
         class MyModule(nn.Module):
             def __init__(self):
@@ -121,7 +120,8 @@ class TestSubclass(TestCase):
 
     @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
     def test_parametrization(self, tensor_cls):
-        create_fn = lambda: self._create_tensor(tensor_cls)
+        def create_fn():
+            return self._create_tensor(tensor_cls)
 
         class MyModule(nn.Module):
             def __init__(self):
@@ -146,7 +146,6 @@ class TestSubclass(TestCase):
     @expectedFailure
     @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
     def test_lazy_module(self, tensor_cls):
-        create_fn = lambda: self._create_tensor(tensor_cls)
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
             def __init__(self):
@@ -164,7 +163,7 @@ class TestSubclass(TestCase):
 
         m = MyLazyModule()
         self.assertTrue(m.has_uninitialized_params())
-        output = m(create_fn())
+        output = m(self._create_tensor(tensor_cls))
         self.assertFalse(m.has_uninitialized_params())
         self.assertIs(type(m.param), tensor_cls)
 

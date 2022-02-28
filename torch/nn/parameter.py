@@ -5,7 +5,7 @@ from collections import OrderedDict
 
 class ParameterMeta(type):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
-    def __instancecheck__(self, instance):
+    def __instancecheck__(cls, instance):
         return super().__instancecheck__(instance) or (hasattr(instance, '_is_param') and instance._is_param)
 
 
@@ -41,7 +41,7 @@ class Parameter(torch.Tensor, metaclass=TensorParameterMeta):
 
         # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
-        setattr(t, '_is_param', True)
+        t._is_param = True
         return t
 
     # Note: the 3 methods below only apply to standard Tensor. Parameters of custom tensor types
