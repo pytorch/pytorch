@@ -7,6 +7,7 @@ from torch.distributed._shard.sharded_tensor import (
 from .sharding_spec import (
     ShardingSpec,
 )
+from .replicated_tensor import ReplicatedTensor
 
 def _shard_tensor(
     tensor: torch.Tensor, sharding_spec: ShardingSpec, src_rank=0, process_group=None
@@ -118,3 +119,15 @@ def shard_parameter(
 
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
+
+
+def _replicate_tensor(tensor: torch.Tensor) -> ReplicatedTensor:
+    """
+    Given a :class:`torch.Tensor`, mark it as a ReplicatedTensore where all
+    ranks have the same value.
+
+    Returns:
+        A :class:`ReplicatedTensor` from the given tensor.
+
+    """
+    return ReplicatedTensor(tensor)
