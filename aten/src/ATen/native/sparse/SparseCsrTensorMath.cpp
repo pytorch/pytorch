@@ -92,6 +92,7 @@
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zeros.h>
+#include <ATen/ops/zero_native.h>
 #endif
 
 #include <algorithm>
@@ -198,7 +199,7 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
   output_t* data_out = row0.data_ptr<output_t>();
   row1.copy_(*col_indices.expect_contiguous());
   at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
     }
   });
@@ -309,6 +310,8 @@ CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
 
+CREATE_UNARY_UFUNC_INPLACE(zero);
+
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
 Tensor& round_sparse_csr_out(const Tensor& self, Tensor& result) {
@@ -346,7 +349,7 @@ void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, 
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  scalar_t cast_beta = beta.to<scalar_t>();
+  r.mul_(beta);
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
     auto csr_accessor = csr.accessor<index_t, 1>();
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
@@ -470,7 +473,7 @@ Tensor& addmm_out_sparse_csr_cpu(
           "Please use PyTorch built with MKL on Linux.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
-    AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
         addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, alpha, beta);
     });
 #else
