@@ -61,7 +61,9 @@ export_onnx(
 TORCH_API std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto);
 
-TORCH_API void check_onnx_proto(const std::string& proto_string);
+TORCH_API void check_onnx_proto(
+    const std::string& proto_string,
+    bool full_check = false);
 
 // Serializer for both oldsyle and unified format TorchScript serialization
 class TORCH_API ScriptModuleSerializer {
@@ -69,10 +71,6 @@ class TORCH_API ScriptModuleSerializer {
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
       : writer_(export_writer), current_source_range_tag_(0) {}
-    explicit ScriptModuleSerializer(
-      caffe2::serialize::PyTorchStreamWriter& export_writer, std::shared_ptr<SerializationStorageContext> storage_context)
-      : writer_(export_writer), storage_context_(storage_context), current_source_range_tag_(0){
-      }
 
   void writeFiles(const std::string& code_dir);
   void serialize(
@@ -81,7 +79,7 @@ class TORCH_API ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
-  std::shared_ptr<SerializationStorageContext> storage_context();
+  SerializationStorageContext& storage_context();
 
   ~ScriptModuleSerializer() = default;
 
@@ -89,9 +87,6 @@ class TORCH_API ScriptModuleSerializer {
   void convertNamedType(const c10::NamedTypePtr& class_type);
   void convertTypes(const at::NamedTypePtr& root_type);
   void writeExtraFiles(const Module& module, const ExtraFilesMap& extra_files);
-  void writeMobileMetadata(
-      const Module& module,
-      const ExtraFilesMap& extra_files);
   void writeByteCode(const Module& module, bool save_mobile_debug_info);
   void writeArchive(
       const IValue& value,
@@ -114,7 +109,7 @@ class TORCH_API ScriptModuleSerializer {
   // for ABA memory reuse problem hit when storages are created/destroyed
   // during serialization process. Also used to coordinate sharing of storages
   // between Script and eager modules in torch.package.
-  std::shared_ptr<SerializationStorageContext> storage_context_;
+  SerializationStorageContext storage_context_;
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
@@ -205,6 +200,9 @@ struct TORCH_API BytecodeEmitMode {
 
   static bool is_default_args_before_out_args_enabled();
   static void set_default_args_before_out_args_enabled(bool enabled);
+
+  static bool is_emit_promoted_ops_enabled();
+  static void set_default_emit_promoted_ops_enabled(bool enabled);
 };
 
 // RAII guard to switch the way JIT emits the bytecode for inputs.
@@ -220,24 +218,32 @@ struct TORCH_API BytecodeEmitMode {
 struct TORCH_API BytecodeEmitModeGuard {
   BytecodeEmitModeGuard(
       bool enable_default_value_for_unspecified_arg,
-      bool enable_default_args_before_out_args)
+      bool enable_default_args_before_out_args,
+      bool enable_emit_promoted_ops)
       : prev_default_value_for_unspecified_arg_mode(
             BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()),
         prev_default_args_before_out_args(
-            BytecodeEmitMode::is_default_args_before_out_args_enabled()) {
+            BytecodeEmitMode::is_default_args_before_out_args_enabled()),
+        prev_default_emit_promoted_ops(
+            BytecodeEmitMode::is_emit_promoted_ops_enabled()) {
     BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
         enable_default_value_for_unspecified_arg);
     BytecodeEmitMode::set_default_args_before_out_args_enabled(
         enable_default_args_before_out_args);
+    BytecodeEmitMode::set_default_emit_promoted_ops_enabled(
+        enable_emit_promoted_ops);
   }
   ~BytecodeEmitModeGuard() {
     BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
         prev_default_value_for_unspecified_arg_mode);
     BytecodeEmitMode::set_default_args_before_out_args_enabled(
         prev_default_args_before_out_args);
+    BytecodeEmitMode::set_default_emit_promoted_ops_enabled(
+        prev_default_emit_promoted_ops);
   }
   bool prev_default_value_for_unspecified_arg_mode;
   bool prev_default_args_before_out_args;
+  bool prev_default_emit_promoted_ops;
 };
 
 TORCH_API IValue to_tuple(std::vector<IValue> ivalues);

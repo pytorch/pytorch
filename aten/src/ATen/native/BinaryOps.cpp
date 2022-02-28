@@ -446,7 +446,7 @@ Tensor& add_relu_impl(
     max_val = std::numeric_limits<double>::max();
   } else {
     TORCH_INTERNAL_ASSERT(
-        "Unsupported datatype for add_relu:", self.dtype().name());
+        false, "Unsupported datatype for add_relu:", self.dtype().name());
   }
 
   result = iter.output();
@@ -640,6 +640,36 @@ Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto device_ = Device(DeviceType::Meta);
   auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+}
+
+Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT(self._is_zerotensor() || other._is_zerotensor());
+
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::div(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+
+  if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      // 0/0, return full NAN
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::quiet_NaN(), meta_out.options().device(out_device));
+    }
+    else {
+      // 0/x, return zero tensor
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+  }
+  else {
+    if (other._is_zerotensor()) {
+      // x/0, return full INF
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::infinity(), meta_out.options().device(out_device));
+    }
+    else {
+      // x/y -- unreachable, see TORCH_INTERNAL_ASSERT above
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+  }
 }
 
 Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {

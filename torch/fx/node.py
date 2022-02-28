@@ -49,11 +49,7 @@ def _type_repr(obj):
     typically enough to uniquely identify a type.  For everything
     else, we fall back on repr(obj).
     """
-    # HACK: In Python 3.6, type aliases from ``typing`` are instances of ``type``, but in
-    # later Python versions, type aliases are not instances of ``type``!! We want
-    # all type aliases to fall through to ``repr``, so if we have a type that is
-    # in the module typing, don't go down this path.
-    if isinstance(obj, type) and obj.__module__ != 'typing':
+    if isinstance(obj, type):
         if obj.__module__ == 'builtins':
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
@@ -72,14 +68,18 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     return f'{module}.{name}'
 
-def _format_arg(arg) -> str:
-    if isinstance(arg, list):
-        items = ', '.join(_format_arg(a) for a in arg)
-        return f'[{items}]'
+def _format_arg(arg, max_list_len=float('inf')) -> str:
+    if hasattr(arg, '_custom_fx_repr_fn'):
+        return arg._custom_fx_repr_fn()
+    elif isinstance(arg, list):
+        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
+        maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
+        return f'[{items}{maybe_len}]'
     elif isinstance(arg, tuple):
-        items = ', '.join(_format_arg(a) for a in arg)
+        items = ', '.join(_format_arg(a) for idx, a in enumerate(arg) if idx < max_list_len)
+        maybe_len = '' if len(arg) < max_list_len + 1 else f', ...[total_len={len(arg)}]'
         maybe_comma = ',' if len(arg) == 1 else ''
-        return f'({items}{maybe_comma})'
+        return f'({items}{maybe_comma}{maybe_len})'
     elif isinstance(arg, dict):
         items_str = ', '.join(f'{k}: {_format_arg(v)}' for k, v in arg.items())
         return f'{{{items_str}}}'
@@ -244,8 +244,8 @@ class Node:
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
         """
-        Insert x after this node in the list of nodes in the graph.
-        Equvalent to ``self.next.prepend(x)``
+        Insert ``x`` after this node in the list of nodes in the graph.
+        Equivalent to ``self.next.prepend(x)``
 
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
@@ -591,7 +591,9 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
     """
     if isinstance(a, tuple):
-        return tuple(map_aggregate(elem, fn) for elem in a)
+        t = tuple(map_aggregate(elem, fn) for elem in a)
+        # Support NamedTuple (if it has `_fields`) by repacking into original type.
+        return t if not hasattr(a, '_fields') else type(a)(*t)
     elif isinstance(a, list):
         return immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):

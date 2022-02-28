@@ -16,7 +16,7 @@ graph {
     }
   }
   node {
-    input: "x"
+    input: "onnx::Div_0"
     input: "onnx::Div_1"
     output: "onnx::Erf_2"
     name: "Div_1"
@@ -49,7 +49,7 @@ graph {
     op_type: "Add"
   }
   node {
-    input: "x"
+    input: "onnx::Div_0"
     input: "onnx::Mul_5"
     output: "onnx::Mul_6"
     name: "Mul_5"
@@ -75,9 +75,9 @@ graph {
     name: "Mul_7"
     op_type: "Mul"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "x"
+    name: "onnx::Div_0"
     type {
       tensor_type {
         elem_type: 1

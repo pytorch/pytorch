@@ -129,10 +129,10 @@ bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
 }
 
 std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
-    StaticRuntime* runtime,
+    BlockRunner* block_runner,
     const FastSet<const Value*>& managed_output_tensor_values) {
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors;
-  for (auto& pnode : runtime->nodes()) {
+  for (auto& pnode : block_runner->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
@@ -151,19 +151,20 @@ std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
 } // namespace
 
 MemoryPlanner::MemoryPlanner(
-    StaticRuntime* runtime,
-    const ValueGroup& value_group,
-    const FastSet<const Value*>& managed_tensor_values,
-    const FastSet<const Value*>& managed_output_tensor_values,
-    const FastSet<const Value*>& leaked_values,
-    const ManagedTensorRanges& ranges,
+    BlockRunner* block_runner,
+    const BlockInfo& block_info,
     bool enable_out_variant,
     bool manage_output_tensors,
     bool optimize_memory) {
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
+  const auto& managed_output_tensor_values =
+      block_info.managed_output_tensor_values();
+  const auto& leaked_values = block_info.leaked_values();
+
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;
   FastSet<IValue*> unmanaged_borrowed_ivalues;
-  for (ProcessedNode& pnode : runtime->nodes()) {
+  for (ProcessedNode& pnode : block_runner->nodes()) {
     const auto borrows_outputs = borrowsOutputs(pnode.node()->kind());
     for (const auto i : c10::irange(pnode.outputs().size())) {
       const Value* out_v = pnode.node()->outputs()[i];
@@ -189,7 +190,7 @@ MemoryPlanner::MemoryPlanner(
       }
     }
   }
-  for (IValue* output : runtime->outputs()) {
+  for (IValue* output : block_runner->outputs()) {
     auto it = unmanaged_borrowed_ivalues.find(output);
     if (it != unmanaged_borrowed_ivalues.end()) {
       borrowed_ivalues_needing_incref_.push_back(output);
@@ -213,10 +214,12 @@ MemoryPlanner::MemoryPlanner(
 
   if (enable_out_variant) {
     const auto tensor_value_to_tensor =
-        tensorValueToTensor(runtime->nodes(), managed_tensor_values);
+        tensorValueToTensor(block_runner->nodes(), managed_tensor_values);
     if (optimize_memory) {
       managed_tensors_ = assignStorageToManagedTensors(
-          runtime->node_ptrs(), ranges, tensor_value_to_tensor);
+          block_info.node_ptrs(),
+          block_info.managed_tensor_ranges(),
+          tensor_value_to_tensor);
     } else {
       for (auto& tensor : tensor_value_to_tensor) {
         managed_tensors_.emplace_back(tensor.second);
@@ -225,8 +228,8 @@ MemoryPlanner::MemoryPlanner(
   }
 
   if (enable_out_variant && manage_output_tensors) {
-    managed_output_tensors_ =
-        assignStorageToOutputTensors(runtime, managed_output_tensor_values);
+    managed_output_tensors_ = assignStorageToOutputTensors(
+        block_runner, managed_output_tensor_values);
   }
 
   num_managed_tensors_ = 0;
