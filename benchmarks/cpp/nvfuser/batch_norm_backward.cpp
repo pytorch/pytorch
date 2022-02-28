@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -49,7 +50,7 @@ static void setupBatchNorm_BWD(Fusion* fusion, DataType dtype) {
     grad_output = castOp(DataType::Float, grad_output);
   }
 
-  auto eps_ptr = new Double(kEps);
+  auto eps_ptr = IrBuilder::create<Double>(kEps);
 
   auto result = batch_norm_backward(
       input,
