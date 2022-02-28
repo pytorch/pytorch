@@ -60,9 +60,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
         totalCount
       }
       changedFiles
-      files(last: 100) {
+      files(first: 100) {
         nodes {
           path
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
         }
       }
       reviews(last: 100) {
@@ -84,6 +88,24 @@ query ($owner: String!, $name: String!, $number: Int!) {
           editor {
             login
           }
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_NEXT_FILES_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      files(first: 100, after: $cursor) {
+        nodes {
+          path
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
         }
       }
     }
@@ -172,6 +194,7 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
+        self.changed_files: Optional[List[str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -198,10 +221,24 @@ class GitHubPR:
         return int(self.info["changedFiles"])
 
     def get_changed_files(self) -> List[str]:
-        rc = [x["path"] for x in self.info["files"]["nodes"]]
-        if len(rc) != self.get_changed_files_count():
+        if self.changed_files is None:
+            info = self.info
+            self.changed_files = []
+            # Do not try to fetch more than 10K files
+            for _ in range(100):
+                self.changed_files += [x["path"] for x in info["files"]["nodes"]]
+                if not info["files"]["pageInfo"]["hasNextPage"]:
+                    break
+                rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
+                                name=self.project,
+                                owner=self.org,
+                                number=self.pr_num,
+                                cursor=info["files"]["pageInfo"]["endCursor"])
+                info = rc["data"]["repository"]["pullRequest"]
+
+        if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
-        return rc
+        return self.changed_files
 
     def _get_reviewers(self) -> List[Tuple[str, str]]:
         reviews_count = int(self.info["reviews"]["totalCount"])

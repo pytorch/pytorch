@@ -513,7 +513,7 @@ def pad(g, input, pad, mode, value):
     elif mode == "circular":
         return _pad_circular(g, input, pad)
     else:
-        assert False, f"Unrecognized padding mode {mode}"
+        raise RuntimeError(f"Unrecognized padding mode {mode}")
 
 
 def linalg_det(g, self):
