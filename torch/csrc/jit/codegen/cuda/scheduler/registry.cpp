@@ -772,6 +772,11 @@ class ReductionScheduler : public SchedulerEntry {
       return false;
     }
 
+    // Needs at least one non-trivial reduction to consider.
+    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      return false;
+    }
+
     auto reduction_tvs =
         scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
 
@@ -929,6 +934,11 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
+    // Needs at least one non-trivial reduction to consider.
+    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      return false;
+    }
+
     auto reduction_ops =
         ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
     auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
