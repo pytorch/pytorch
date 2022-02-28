@@ -790,7 +790,7 @@ class FullyShardedDataParallel(nn.Module):
                 not getattr(state_dict[key], "_has_been_cloned", False)
             ):
                 state_dict[key] = state_dict[key].clone().detach()
-                state_dict[key]._has_been_cloned = True
+                state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
 
         _replace_by_prefix(state_dict, prefix + f"{FSDP_WRAPPED_MODULE}.", prefix)
         return state_dict
@@ -855,15 +855,15 @@ class FullyShardedDataParallel(nn.Module):
     def state_dict(self, *args, **kwargs):
         """
         The entry point of all three FSDP state_dict APIs. By default, calling
-        `state_dict` on an FSDP module will result in FSDP attempting to bring
+        ``state_dict`` on an FSDP module will result in FSDP attempting to bring
         the entire (nested) model into memory and taking the local model's
-        `state_dict` on every rank, which could result in OOM if the model
+        ``state_dict`` on every rank, which could result in OOM if the model
         cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
         available to configure between `state_dict` implementations. User can
         thus use `with self.state_dict_type(StateDictType.LOCAL_STATE_DICT)`
         context manager to perform a local checkpoint that will store only local
         shards of the module. Currently, the only supported implementations are
-        `StateDictType.LOCAL_STATE_DICT` and `StateDictType.FULL_STATE_DICT`
+        ``StateDictType.LOCAL_STATE_DICT`` and ``StateDictType.FULL_STATE_DICT``
         (default).
 
         Example::
@@ -872,7 +872,7 @@ class FullyShardedDataParallel(nn.Module):
         >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         >>> from torch.distributed.fsdp import StateDictType
         >>> torch.cuda.set_device(device_id)
-        >> my_module = nn.Linear(...)
+        >>> my_module = nn.Linear(...)
         >>> sharded_module = FSDP(my_module)
         >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
         >>>     full_dict = sharded_module.state_dict()
@@ -918,21 +918,6 @@ class FullyShardedDataParallel(nn.Module):
         has been wrapped with FSDP.
         """
         with self.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-            return self.state_dict(*args, **kwargs)
-
-    def full_state_dict(self, *args: Any, **kwargs: Any) -> Any:
-        r"""
-        Returns a dictionary mapping original wrapped model's layers to its
-        parameter tensor. Note that :class:`FullyShardedDataParallel` will
-        perform all-gather communication to rebuild full model parameters on
-        each rank when calling this method. As a result, saving/loading of model
-        will happen on each rank and thus consume additional GPU memory. If the
-        model cannot fit on a single GPU this can also result in a GPU OOM. The
-        implementation works by gathering all model paramters across all
-        ranks to rebuild the full model, and then calling into the original
-        module's `state_dict` implementation.
-        """
-        with self.state_dict_type(StateDictType.FULL_STATE_DICT):
             return self.state_dict(*args, **kwargs)
 
     def _full_pre_load_state_dict_hook(
@@ -1005,17 +990,17 @@ class FullyShardedDataParallel(nn.Module):
     ) -> NamedTuple:
         """
         The entry point of all three FSDP load_state_dict APIs. By default,
-        calling `load_state_dict` on an FSDP module will result in FSDP
+        calling ``load_state_dict`` on an FSDP module will result in FSDP
         attempting to load a "full" state_dict, i.e. a state_dict consisting of
         full, unsharded, unflattened original module parameters. This requires
         FSDP to load the full parameter context on each rank which could result
         in GPU OOM. As a result, :func:`state_dict_type` API is available to
         configure between `load_state_dict` implementations. User can thus use
-        `with self.state_dict_type(StateDictType.LOCAL_STATE_DICT)` context
+        ``with self.state_dict_type(StateDictType.LOCAL_STATE_DICT)`` context
         manager to load a local state dict checkpoint that will restore only
         local shards of the module. Currently, the only supported
-        implementations are `StateDictType.LOLCAT_STATE_DICT` and
-        `StateDictType.FULL_STATE_DICT` (default). Please see :func:`state_dict`
+        implementations are ``StateDictType.LOCAL_STATE_DICT`` and
+        ``StateDictType.FULL_STATE_DICT`` (default). Please see :func:`state_dict`
         for documentation around creating an FSDP checkpoint.
 
         Example::
@@ -1024,7 +1009,7 @@ class FullyShardedDataParallel(nn.Module):
         >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
         >>> from torch.distributed.fsdp import StateDictType
         >>> torch.cuda.set_device(device_id)
-        >> my_module = nn.Linear(...)
+        >>> my_module = nn.Linear(...)
         >>> sharded_module = FSDP(my_module)
         >>> checkpoint = torch.load(PATH)
         >>> full_state_dict = checkpoint['full_state_dict']
@@ -1033,7 +1018,7 @@ class FullyShardedDataParallel(nn.Module):
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
-        >> local_state_dict = checkpoint['local_state_dict]
+        >>> local_state_dict = checkpoint['local_state_dict]
         >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
         >>>     sharded_module.load_state_dict(local_state_dict)
         >>> local_dict.keys()
@@ -1065,14 +1050,6 @@ class FullyShardedDataParallel(nn.Module):
         """
         with self.state_dict_type(StateDictType.LOCAL_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
-
-    def load_full_state_dict(
-        self,
-        state_dict: "OrderedDict[str, torch.Tensor]",
-        *args,
-    ) -> NamedTuple:
-        with self.state_dict_type(StateDictType.FULL_STATE_DICT):
-            return self.load_state_dict(state_dict, *args)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         self._lazy_init()
