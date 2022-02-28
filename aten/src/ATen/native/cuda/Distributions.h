@@ -1,7 +1,7 @@
 #pragma once
 
 namespace at {
-class CUDAGeneratorImpl;
+struct CUDAGeneratorImpl;
 struct TensorIteratorBase;
 class TensorBase;
 
