@@ -58,6 +58,7 @@ Creation Ops
     as_tensor
     as_strided
     from_numpy
+    from_dlpack
     frombuffer
     zeros
     zeros_like
@@ -101,6 +102,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hsplit
     hstack
     index_add
+    index_copy
     index_select
     masked_select
     movedim
@@ -116,6 +118,7 @@ Indexing, Slicing, Joining, Mutating Ops
     select_scatter
     slice_scatter
     scatter_add
+    scatter_reduce
     split
     squeeze
     stack

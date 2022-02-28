@@ -872,6 +872,24 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
   return result;
 }
 
+// This is an overloaded function similar to
+// Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_)
+// and is currently not available through the dispatcher. The additional
+// input, quantizer, is called by the select & slice methods.
+// TODO: Make this function compatible with the dispatcher
+Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_,
+  QuantizerPtr quantizer) {
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+  TORCH_CHECK(
+      (quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE) ||
+      (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE),
+      "Setting strides is possible only on uniformly or per channel quantized tensors");
+  auto result = at::detail::make_tensor<QTensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), quantizer);
+  setStrided(result, size, stride, storage_offset);
+  return result;
+}
+
 const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   setStrided(self, size, stride, storage_offset);
@@ -1110,15 +1128,21 @@ Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
+  //caller should make sure that sizes and strides are valid for self
+  //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
   if (self.is_quantized()) {
     self_ = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
-    setStrided(self_, sizes, strides, self.storage_offset());
+    auto* self_tmp_ = self_.unsafeGetTensorImpl();
+    self_tmp_->set_storage_offset(self.storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
     self_ = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-    setStrided(self_, sizes, strides, self.storage_offset());
+    auto* self_tmp_ = self_.unsafeGetTensorImpl();
+    self_tmp_->set_storage_offset(self.storage_offset());
+    self_tmp_->set_sizes_and_strides(sizes, strides);
   }
   namedinference::propagate_names(self_, self);
   return self_;
@@ -1216,6 +1240,39 @@ static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
   }
 }
 
+// this is an auxiliary function, called by the select&slice methods, that
+// creates a new quantizer from the given input
+// is_select is true if calling function is select()
+QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int64_t start,
+  int64_t end, int64_t dim, int64_t step) {
+  auto quantizer_prev = get_qtensorimpl(self)->quantizer();
+  if (quantizer_prev->qscheme() == QScheme::PER_TENSOR_AFFINE) {
+    return quantizer_prev;
+  }
+  QuantizerPtr quantizer;
+  auto temp = static_cast<PerChannelAffineQuantizer*>(quantizer_prev.get());
+  auto axis = temp->axis();
+  auto scales = temp->scales();
+  auto zero_points = temp->zero_points();
+  if (dim == axis) {
+    // Compute scales&zps for sub-tensor
+    // *.select(0, start) could alternatively be replaced with *.slice(0, start, end, step), but
+    // select has less overhead
+    scales = is_select ? scales.select(0, start) : scales.slice(0, start, end, step);
+    zero_points = is_select ? zero_points.select(0, start) : zero_points.slice(0, start, end, step);
+  }
+  if (scales.numel() > 1) {
+    // Axis only needs to be adjusted if the calling function is select(), since select() reduces
+    // the number of dimensions of the tensor by 1, and remains unchanged if calling function is slice()
+    quantizer = make_per_channel_affine_quantizer(scales, zero_points, (is_select ? axis - 1 : axis),
+                                                  quantizer_prev->scalar_type());
+  } else {
+    quantizer = make_per_tensor_affine_quantizer(scales.item().to<double>(), zero_points.item().to<int64_t>(),
+                                                 quantizer_prev->scalar_type());
+  }
+  return quantizer;
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -1242,7 +1299,14 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   auto storage_offset = self.storage_offset() + index * strides[dim];
   sizes.erase(sizes.begin() + dim);
   strides.erase(strides.begin() + dim);
-  auto result = self.as_strided(sizes, strides, storage_offset);
+
+  Tensor result;
+  if (self.is_quantized()) {
+    auto quantizer = create_subtensor_quantizer(self, true, index, index + 1, dim, 1);
+    result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
+  } else {
+    result = self.as_strided(sizes, strides, storage_offset);
+  }
   namedinference::propagate_names_except(result, self, {dim});
   return result;
 }
@@ -1306,7 +1370,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
     int64_t new_nnz = 0;
-    for (int64_t i = 0; i < new_sizes[dim]; i++) {
+    for (const auto i : c10::irange(new_sizes[dim])) {
       int64_t idx = cpu_index_ptr[i];
       if (idx < -size || idx >= size) {
         TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
@@ -1315,7 +1379,7 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (int64_t j = 0; j < nnz; j++) {
+      for (const auto j : c10::irange(nnz)) {
         int64_t jdx = cpu_dim_indices_ptr[j];
         if (idx == jdx) {
           new_nnz++;
@@ -1358,7 +1422,6 @@ Tensor slice(
   dim = maybe_wrap_dim(dim, ndim);
   DimVector sizes(self.sizes().begin(), self.sizes().end());
   DimVector strides(self.strides().begin(), self.strides().end());
-
   // handle optional parameters
   int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
@@ -1390,7 +1453,14 @@ Tensor slice(
   auto len = end_val - start_val;
   sizes[dim] = (len + step - 1) / step; // round-up
   strides[dim] *= step;
-  auto result = self.as_strided(sizes, strides, storage_offset);
+
+  Tensor result;
+  if (self.is_quantized()) {
+    auto quantizer = create_subtensor_quantizer(self, false, start_val, end_val, dim, step);
+    result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
+  } else {
+    result = self.as_strided(sizes, strides, storage_offset);
+  }
   namedinference::propagate_names(result, self);
   return result;
 }
@@ -2028,8 +2098,22 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
 //
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
+
+inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+
+  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
+  auto stride = at::detail::computeStride(self.sizes(),
+                                          self.strides(),
+                                          inferred_size);
+  TORCH_CHECK(stride.has_value(), "view size is "
+    "not compatible with input tensor's size and stride (at least one dimension"
+    " spans across two contiguous subspaces). Use .reshape(...) instead.");
+  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+
+}
+
 Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
-  return self.view(size);
+  return view_impl(self, size);
 }
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
@@ -2382,16 +2466,7 @@ Tensor adjoint(const Tensor &self) {
 
 Tensor view(const Tensor& self,
             IntArrayRef size) {
-
-  at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
-  auto stride = at::detail::computeStride(self.sizes(),
-                                        self.strides(),
-                                        inferred_size);
-  TORCH_CHECK(stride.has_value(), "view size is "
-    "not compatible with input tensor's size and stride (at least one dimension"
-    " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  auto stride_value = *stride;
-  return alias_with_sizes_and_strides(self, inferred_size, stride_value);
+  return view_impl(self, size);
 }
 
 Tensor alias(const Tensor& self) {

@@ -53,7 +53,6 @@ class TestXNNPACKOps(TestCase):
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
         torch.testing.assert_close(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
-
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
            height=st.integers(5, 64),
