@@ -1,48 +1,54 @@
 [
    {
-    "name": "ONNX exporter",
-    "patterns": [
-       "torch/onnx/**",
-       "torch/csrc/jit/passes/onnx/**",
-       "torch/csrc/jit/passes/onnx.*",
-       "test/onnx/**",
-       "docs/source/onnx.rst",
-       "torch/csrc/jit/serialization/export.*",
-       "torch/csrc/jit/serialization/onnx.*",
-       "torch/_C/__init__.pyi.in",
-       "torch/csrc/onnx/**"
+      "name": "ONNX exporter",
+      "patterns": [
+         "torch/onnx/**",
+         "torch/csrc/jit/passes/onnx/**",
+         "torch/csrc/jit/passes/onnx.*",
+         "test/onnx/**",
+         "docs/source/onnx.rst",
+         "torch/csrc/jit/serialization/export.*",
+         "torch/csrc/jit/serialization/onnx.*",
+         "torch/_C/__init__.pyi.in",
+         "torch/csrc/onnx/**"
       ],
-    "approved_by": ["BowenBao", "garymm"],
-    "mandatory_app_id": 12274
+      "approved_by": ["BowenBao", "garymm"],
+      "mandatory_app_id": 12274
    },
    {
-    "name": "NVFuser",
-    "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
-    "approved_by": ["csarofeen", "ngimel"],
-    "mandatory_app_id": 12274
+      "name": "NVFuser",
+      "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+      "approved_by": ["csarofeen", "ngimel"],
+      "mandatory_app_id": 12274
    },
    {
-    "name": "OSS CI",
-    "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
-    "approved_by": ["seemethere", "malfet", "suo", "janeyx99", "ezyang"],
-    "mandatory_app_id": 12274
+      "name": "OSS CI",
+      "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
+      "approved_by": ["janeyx99", "ezyang"],
+      "mandatory_app_id": 12274
    },
    {
       "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
-      "approved_by": ["mruberry", "ngimel", "albanD", "janeyx99"],
+      "approved_by": ["mruberry", "ngimel", "janeyx99"],
       "mandatory_app_id": 12274
    },
    {
       "name": "Android",
       "patterns": ["android/**"],
-      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev", "malfet"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
       "mandatory_app_id": 12274
    },
    {
       "name": "iOS",
       "patterns": ["ios/**"],
-      "approved_by": ["linbinyu", "kit1980", "xta0", "malfet", "hanton"],
+      "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
+      "mandatory_app_id": 12274
+   },
+   {
+      "name": "superuser",
+      "patterns": ["*"],
+      "approved_by": ["albanD", "jbschlosser", "suo", "osalpekar", "malfet", "seemethere"],
       "mandatory_app_id": 12274
    }
 ]
