@@ -402,7 +402,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
     if (!first) {
       os() << ", ";
     }
-    os() << d->name_hint();
+    os() << *d;
     first = false;
   }
   os() << "})";

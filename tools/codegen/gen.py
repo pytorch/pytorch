@@ -71,6 +71,33 @@ T = TypeVar('T')
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+class NamespaceHelper():
+    """ A helper for constructing the namespace open and close strings for a nested set of namespaces.
+
+        e.g. for namespace_str torch::lazy,
+
+        prologue:
+        namespace torch {
+        namespace lazy {
+
+        epilogue:
+        } // namespace lazy
+        } // namespace torch
+    """
+    def __init__(self, namespace_str: str):
+        # cpp_namespace can be a colon joined string such as torch::lazy
+        cpp_namespaces = namespace_str.split("::")
+        self.prologue_ = "\n".join([f"namespace {n} {{" for n in cpp_namespaces])
+        self.epilogue_ = "\n".join([f"}} // namespace {n}" for n in reversed(cpp_namespaces)])
+
+    @property
+    def prologue(self) -> str:
+        return self.prologue_
+
+    @property
+    def epilogue(self) -> str:
+        return self.epilogue_
+
 # A custom loader for YAML to let us also keep track of line numbers
 # of each entry in the YAML file
 class LineLoader(YamlLoader):
@@ -508,7 +535,8 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             # Generate the template declaration with one bool parameter for each
             # precomputed element. Each parameter is true if the corresponding (in
             # terms of position) precomputed element has been set.
-            precomputed_elements = [elem for replace_list in precomputed.replace.values() for elem in replace_list]
+            precomputed_values = [*precomputed.replace.values(), precomputed.add]
+            precomputed_elements = [elem for replace_list in precomputed_values for elem in replace_list]
             precomputed_template_parameters = [elem.name.upper() for elem in precomputed_elements]
             precomputed_template_params_str = ", ".join(f"bool {param} = false" for param in precomputed_template_parameters)
             precompute_template_decl = f"template <{precomputed_template_params_str}>"
@@ -1382,7 +1410,7 @@ def gen_source_files(
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'external_backend_headers': '',
-            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers),
+            'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers, rocm),
             'ops_headers': operator_headers(),
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
@@ -1619,23 +1647,8 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
 
-    dispatch_keys = [
-        DispatchKey.CPU,
-        DispatchKey.SparseCPU,
-        DispatchKey.SparseCsrCPU,
-        DispatchKey.MkldnnCPU,
-        DispatchKey.CUDA,
-        DispatchKey.SparseCUDA,
-        DispatchKey.SparseCsrCUDA,
-        DispatchKey.QuantizedCPU,
-        DispatchKey.QuantizedCUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeExplicitAutograd,
-        # Meta is a magic key: it is automatically generated for structured
-        # kernels
-        DispatchKey.Meta,
-        DispatchKey.ZeroTensor,
-    ]
+    from tools.codegen.model import dispatch_keys
+
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
     functions_keys = {
