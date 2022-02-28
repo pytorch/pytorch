@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
@@ -40,10 +40,20 @@ struct AnalyzeViewResult {
   std::vector<std::shared_ptr<ViewTransform>> transforms;
 };
 
+struct AnalyzeViewConstraint {
+  std::vector<int64_t> original_constraint;
+  std::vector<int64_t> new_constraint;
+};
+
 // Find the transformations necessary to convert TensorView
 // from original size to new size.
 AnalyzeViewResult analyzeView(
     const TensorView* tv,
+    const std::vector<int64_t>& original_sizes,
+    const std::vector<int64_t>& new_sizes);
+
+// Find the constraints derived from the view transformations
+AnalyzeViewConstraint analyzeViewConstraint(
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes);
 

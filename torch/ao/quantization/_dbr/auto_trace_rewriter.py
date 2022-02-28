@@ -6,9 +6,12 @@ from typing import Callable, Any, Tuple, Dict
 
 import torch
 import torch.fx
-import torch.nn.functional as F
+from .mappings import conv_ops
 from .quantization_state import AutoQuantizationState
-from .utils import get_packable_arg_idxs
+from .utils import (
+    get_packable_arg_idxs,
+    AutoQuantizationStateModuleDict,
+)
 
 class AllModuleTracer(torch.fx.Tracer):
     """
@@ -153,7 +156,7 @@ class AllModuleTracer(torch.fx.Tracer):
                                 additional_kwargs['zero_point'])
                     args = linear_rewrite_args(*args, **kwargs)
                     kwargs = {}
-                elif old_target != F.conv2d or target is F.conv2d:
+                elif old_target not in conv_ops or target in conv_ops:
                     kwargs.update(**additional_kwargs)
                 else:
                     new_args = [*args]
@@ -207,7 +210,7 @@ class AllModuleTracer(torch.fx.Tracer):
     # class.
     # TODO(future): remove the hack
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
-        if isinstance(m, AutoQuantizationState):
+        if isinstance(m, AutoQuantizationStateModuleDict):
             return args[0]
         return super().call_module(m, forward, args, kwargs)
 
