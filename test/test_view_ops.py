@@ -1484,6 +1484,11 @@ class TestOldViewOps(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
                 torch.broadcast_shapes(*integral_inputs_with_neg_vals)
 
+        integral_inputs_error_case = [(3, 5), (2, 4, 1)]
+        for error_input in integral_inputs_error_case:
+            with self.assertRaisesRegex(RuntimeError, "Shape mismatch: objects cannot be broadcast to a single shape"):
+                torch.broadcast_shapes(*error_input)
+
         negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
         for s0 in negative_inputs:
             with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):

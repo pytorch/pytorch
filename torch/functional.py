@@ -117,14 +117,8 @@ def broadcast_shapes(*shapes):
         if isinstance(shape, int):
             if shape < 0:
                 raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
-            if max_num < shape:
-                max_num = shape
-            if shape == 1 or shape == max_num:
-                continue
-            else:
-                raise RuntimeError(rf"The size of shape a {shape} must match the size "
-                                   "of shape b {result} at non-singleton dimension")
-        elif isinstance(shape, tuple) or isinstance(shape, list):
+            shape = (shape,)
+        if isinstance(shape, tuple) or isinstance(shape, list):
             for i in range(-1, -1 - len(shape), -1):
                 if shape[i] < 0:
                     raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
@@ -132,9 +126,7 @@ def broadcast_shapes(*shapes):
                 if shape[i] == 1 or shape[i] == result[i]:
                     continue
                 if result[i] != 1:
-                    raise RuntimeError("The size of shape a ({}) must match the "
-                                       "size of shape b ({}) at non-singleton dimension {}"
-                                       .format(result[i], shape[i], i))
+                    raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
                 result[i] = shape[i]
     if len(result) == 1:
         for i in range(len(result)):
