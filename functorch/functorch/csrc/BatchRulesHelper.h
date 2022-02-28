@@ -34,6 +34,9 @@ void vmapIncompatibleInplaceError(const char* schema_name);
 
 Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, int64_t logical_rank);
 
+void check_randomness(RandomnessType randomness);
+void check_randomness(RandomnessType randomness, bool any_tensor_bdim);
+
 inline Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
   if (has_bdim) {
     return tensor;

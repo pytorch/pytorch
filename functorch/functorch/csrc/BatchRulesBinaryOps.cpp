@@ -88,6 +88,48 @@ struct BinaryPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
+template <typename A, A a, typename C>
+struct BinaryRandomPointwiseBatchRuleHelper;
+
+template <typename F, F Func, typename T1, typename T2, typename... T>
+struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
+  static Tensor apply(const Tensor& tensor, const Tensor& other, T... extra_args) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    auto cur_level = maybe_layer->layerId();
+    RandomnessType randomness = maybe_layer->randomness();
+
+    Tensor tensor_value;
+    optional<int64_t> tensor_bdim;
+    std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+
+    Tensor other_value;
+    optional<int64_t> other_bdim;
+    std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+
+    check_randomness(randomness, (tensor_bdim || other_bdim));
+    if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
+      auto shape = tensor_value.sizes();
+      VmapDimVector shapeVec(shape.begin(), shape.end());
+      shapeVec.insert(shapeVec.begin(), maybe_layer->batchSize());
+      tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
+      tensor_bdim = 0;
+    } else if (randomness == RandomnessType::Same && !tensor_bdim && !other_bdim) {
+      return Func(tensor_value, other_value, std::forward<T>(extra_args)...);
+    }
+    auto res = _binary_pointwise_batch_rule<F, Func, T...>(
+      tensor_value, tensor_bdim, other_value, other_bdim,
+      std::forward<T>(extra_args)...);
+    return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+  }
+};
+
+#define BINARY_RANDOM_POINTWISE_BATCH_RULE(fn) SINGLE_ARG(\
+    BinaryRandomPointwiseBatchRuleHelper<\
+      decltype(&fn),\
+      &fn,\
+      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
+
 template <typename M, M Meth, typename... ExtraArgs>
 void binary_pointwise_inplace_batch_rule(
     Tensor& tensor, optional<int64_t> tensor_batch_dim,
@@ -219,6 +261,12 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
   return std::make_tuple(out, out_bdim);
 }
 
+TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
+#define BINARY_RANDOM_POINTWISE2(op, overload) \
+  m.impl(#op"."#overload, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
+
+  BINARY_RANDOM_POINTWISE2(normal, Tensor_Tensor);
+}
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE2(op, overload) \
