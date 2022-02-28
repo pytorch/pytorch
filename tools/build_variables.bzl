@@ -384,6 +384,7 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
+    "torch/csrc/jit/runtime/static/generated_ops.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/memory_planner.cpp",
     "torch/csrc/jit/runtime/static/native_ops.cpp",
@@ -1354,7 +1355,6 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
     "aten/src/ATen/native/cuda/Activation.cpp",
-    "aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp",
     "aten/src/ATen/native/cuda/Blas.cpp",
     "aten/src/ATen/native/cuda/Equal.cpp",
     "aten/src/ATen/native/cuda/GridSampler.cpp",
