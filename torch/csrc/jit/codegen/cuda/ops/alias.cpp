@@ -82,7 +82,9 @@ TensorView* view(
     TensorView* x,
     const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
-  TORCH_INTERNAL_ASSERT(x->nDims() == original_sizes.size());
+  TORCH_INTERNAL_ASSERT(
+      TensorDomain::noReductions(x->getMaybeRFactorDomain()).size() ==
+      original_sizes.size());
 
   auto analyze_view = analyzeView(x, original_sizes, new_sizes);
 

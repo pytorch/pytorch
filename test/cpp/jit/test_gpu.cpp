@@ -14625,35 +14625,112 @@ TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
-TEST_F(NVFuserTest, FusionViewFailReduction_CUDA) {
-  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-  Fusion& fusion = *fusion_ptr.get();
-  FusionGuard fg(&fusion);
+void reductionViewAddFusion(
+    std::vector<int64_t>& input_shape,
+    std::vector<int64_t>& output_shape,
+    bool view_before_reduction) {
+  constexpr int kReductionAxis = -1;
 
-  // View is only supported by the pointwise scheduler,
-  // so it should fail with any reduction operations
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, 10, 2, 20};
+  // Drop size for reduction axis from view_shape
+  std::vector<int64_t> view_shape;
+  {
+    const auto kAxis = (kReductionAxis < 0)
+        ? (kReductionAxis + input_shape.size())
+        : kReductionAxis;
+    for (auto i : c10::irange(input_shape.size())) {
+      if (view_before_reduction || i != kAxis) {
+        view_shape.push_back(input_shape[i]);
+      }
+    }
+  }
 
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
+  auto bias_shape = (view_before_reduction) ? input_shape : output_shape;
+  for (auto has_implicit_broadcast : {false, true}) {
+    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+    Fusion& fusion = *fusion_ptr.get();
+    FusionGuard fg(&fusion);
 
-  auto x_add_bias = add(x, bias);
-  auto x_view = view(x_add_bias, input_shape, output_shape);
-  auto x_sum = sum(x_view, {-1});
+    TensorView* x = (has_implicit_broadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    TensorView* bias = (has_implicit_broadcast)
+        ? makeConcreteTensor(bias_shape)
+        : makeSymbolicTensor(bias_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
 
-  fusion.addOutput(x_sum);
+    auto tv1 =
+        (view_before_reduction) ? add(x, bias) : sum(x, {kReductionAxis});
+    auto x_view = view(tv1, view_shape, output_shape);
+    auto y = (view_before_reduction) ? sum(x_view, {kReductionAxis})
+                                     : add(x_view, bias);
+    fusion.addOutput(y);
 
-  const auto options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(bias_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
 
-  at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_bias = at::randn(input_shape, options);
+    FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
+    auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
 
-  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
-  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
+    auto at_tv1 = (view_before_reduction) ? (at_x + at_bias)
+                                          : at::sum(at_x, kReductionAxis);
+    auto at_x_view = at::native::view(at_tv1, output_shape);
+    auto at_y = (view_before_reduction) ? at::sum(at_x_view, kReductionAxis)
+                                        : at::add(at_x_view, at_bias);
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> view_before_examples = {
+      {{19, 12, 7, 99}, {19, 3, 2772}},
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
+      // Incorrect Result - Broadcast Issue - Pointwise
+      // {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
+      // {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
+      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
+      {{22, 22, 2}, {22, 11, 1, 1, 4}},
+      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
+      {{1, 1, 333, 1}, {1, 1, 333, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
+      {{1, 333, 1}, {1, 37, 9, 1}},
+      {{1, 333}, {1, 1, 1, 111, 1, 3}},
+      {{22, 1, 22, 1}, {484}},
+      {{1, 333, 1}, {333}},
+      // Incorrect Result - Broadcast Issue - Reduction
+      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
+      {{1, 7844, 1, 7}, {1, 27454, 2}}};
+
+  for (auto e : view_before_examples) {
+    reductionViewAddFusion(e.first, e.second, true /* view_before_reduction */);
+  }
+
+  std::vector<view_example> view_after_examples = {
+      {{19, 12, 7, 99}, {19, 3, 28}},
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 28}},
+      {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
+      {{3, 17, 80, 1, 9}, {51, 1, 2, 4, 10}},
+      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 1}},
+      {{22, 22, 2}, {22, 11, 1, 1, 2}},
+      {{37, 9, 7, 6, 10}, {333, 2, 21}},
+      {{1, 1, 333, 1}, {1, 1, 333, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1}},
+      {{1, 333, 1}, {1, 37, 9, 1}},
+      {{22, 1, 22, 1}, {484}},
+      {{1, 333, 1}, {333}},
+      {{1, 27454, 1, 2}, {1, 3922, 1, 7}},
+      {{1, 7844, 1, 7}, {1, 1961, 4}}};
+
+  for (auto e : view_after_examples) {
+    reductionViewAddFusion(
+        e.first, e.second, false /* view_before_reduction */);
+  }
 }
 
 TEST_F(NVFuserTest, FusionViewFailPersistent_CUDA) {
@@ -14690,14 +14767,14 @@ TEST_F(NVFuserTest, FusionViewFailPersistent_CUDA) {
 void addViewGeluFusion(
     std::vector<int64_t>& input_shape,
     std::vector<int64_t>& output_shape) {
-  for (auto hasImplicitBroadcast : {false, true}) {
+  for (auto has_implicit_broadcast : {false, true}) {
     Fusion fusion;
     FusionGuard fg(&fusion);
 
-    TensorView* x = (hasImplicitBroadcast)
+    TensorView* x = (has_implicit_broadcast)
         ? makeConcreteTensor(input_shape)
         : makeSymbolicTensor(input_shape.size());
-    TensorView* bias = (hasImplicitBroadcast)
+    TensorView* bias = (has_implicit_broadcast)
         ? makeConcreteTensor(input_shape)
         : makeSymbolicTensor(input_shape.size());
     fusion.addInput(x);

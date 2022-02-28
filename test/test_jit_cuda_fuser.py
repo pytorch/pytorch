@@ -1711,7 +1711,7 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y)
 
         if gradient_check:
-            gradcheck(t_jit.forward, [x, y])
+            gradcheck(t_jit.forward, [x, y], nondet_tol=1e-5)
         else:
             o = t(x, y)
             self.assertEqual(o.dtype, jit_o.dtype)
@@ -3224,7 +3224,7 @@ class TestCudaFuser(JitTestCase):
             jit_o = jitted_bias(inp, weight, bias)
 
         graph = jitted_bias.graph_for(inp)
-        self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+        self.assertGraphContains(graph, FUSION_GROUP, True)
         self.assertGraphContains(graph, 'prim::add_optional', True)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
@@ -3444,27 +3444,28 @@ class TestCudaFuser(JitTestCase):
                 with torch.no_grad():
                     self.bias.fill_(10)
 
-            def forward(self, inputs : torch.Tensor, view_shape : List[int]):
+            def forward(self, inputs : torch.Tensor, bias : torch.Tensor, view_shape : List[int]):
                 o = inputs.view(view_shape)
-                inputs = inputs * self.bias
+                inputs.add_(bias)
                 return torch.relu(o)
 
         t = BiasViewRelu()
         x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
         t_jit = torch.jit.script(t)
 
         # profiling
-        jit_o = t_jit(x, output_shape)
+        jit_o = t_jit(x.clone(), bias, output_shape)
         # optimization
-        jit_o = t_jit(x, output_shape)
+        jit_o = t_jit(x.clone(), bias, output_shape)
         # final
-        jit_o = t_jit(x, output_shape)
+        jit_o = t_jit(x.clone(), bias, output_shape)
         # eager - baseline
-        o = t(x, output_shape)
+        o = t(x.clone(), bias, output_shape)
 
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
-        graph = t_jit.graph_for(x, output_shape)
+        graph = t_jit.graph_for(x, bias, output_shape)
         self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
         self.assertGraphContainsExactly(graph, 'prim::view_copy', 0)
 
@@ -3584,6 +3585,41 @@ class TestCudaFuser(JitTestCase):
             self._view_test_generator(ndims, self._bias_view_relu_helper)
         self._alias_bias_view_relu_helper([2, 3, 4, 5], [1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
 
+    def _ltc_helper(self, shape, dtype, device, error, approximate=True):
+        # modeled after LTC linear layer
+        class LTC(torch.nn.Module):
+            def __init__(self):
+                super(LTC, self).__init__()
+                self.weight = torch.nn.Parameter(torch.randn([1024, 1024], dtype=dtype, device=device), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.randn([1, 1024], dtype=dtype, device=device), requires_grad=False)
+
+            def forward(self, inputs : torch.Tensor):
+                o = inputs.view([32768, 1024])
+                o = torch.mm(o, self.weight)
+                o = o.view([256, 128, 1024])
+                o = o + self.bias
+                o = o.view([32768, 1024])
+                o = o.view([256, 128, 1024])
+                return torch.nn.functional.gelu(o)
+
+        t = LTC()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        # profile/optimization runs
+        for i in range(3):
+            jit_o = t_jit(x)
+        o = t(x)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x)
+        self.assertGraphContains(graph, FUSION_GUARD)
+        self.assertGraphContains(graph, 'prim::view_copy', True)
+
+    def test_nested_view(self):
+        self._ltc_helper([256, 128, 1024], torch.float, 'cuda', 1e-6)
+
     def _bias_squeeze_relu_helper(self, shape, dtype, device, error):
         class BiasSqueezeRelu(torch.nn.Module):
             def __init__(self):
@@ -3606,7 +3642,7 @@ class TestCudaFuser(JitTestCase):
 
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
-        graph = t_jit.graph_for(x)
+        graph = t_jit.graph_for(x, bias)
         self.assertGraphContains(graph, FUSION_GUARD)
         self.assertGraphContains(graph, 'prim::squeeze_copy', True)
 
@@ -3617,7 +3653,7 @@ class TestCudaFuser(JitTestCase):
 
             def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
                 o = torch.squeeze(inputs)
-                inputs = inputs * bias
+                inputs.add_(bias)
                 return torch.relu(o)
 
         t = BiasSqueezeRelu()
@@ -3625,10 +3661,10 @@ class TestCudaFuser(JitTestCase):
         bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
         t_jit = torch.jit.script(t)
 
-        jit_o = t_jit(x, bias)
-        jit_o = t_jit(x, bias)
-        jit_o = t_jit(x, bias)
-        o = t(x, bias)
+        jit_o = t_jit(x.clone(), bias)
+        jit_o = t_jit(x.clone(), bias)
+        jit_o = t_jit(x.clone(), bias)
+        o = t(x.clone(), bias)
 
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
@@ -3689,7 +3725,7 @@ class TestCudaFuser(JitTestCase):
 
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
-        graph = t_jit.graph_for(x)
+        graph = t_jit.graph_for(x, bias)
         self.assertGraphContains(graph, FUSION_GUARD)
         self.assertGraphContains(graph, 'prim::unsqueeze_copy', True)
 
@@ -3699,9 +3735,8 @@ class TestCudaFuser(JitTestCase):
                 super(BiasUnsqueezeRelu, self).__init__()
 
             def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
-                o = torch.squeeze(inputs)
                 o = torch.unsqueeze(inputs, 0)
-                inputs = inputs * bias
+                inputs.add_(bias)
                 return torch.relu(o)
 
         t = BiasUnsqueezeRelu()
@@ -3709,14 +3744,14 @@ class TestCudaFuser(JitTestCase):
         bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
         t_jit = torch.jit.script(t)
 
-        jit_o = t_jit(x, bias)
-        jit_o = t_jit(x, bias)
-        jit_o = t_jit(x, bias)
-        o = t(x, bias)
+        jit_o = t_jit(x.clone(), bias)
+        jit_o = t_jit(x.clone(), bias)
+        jit_o = t_jit(x.clone(), bias)
+        o = t(x.clone(), bias)
 
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
-        graph = t_jit.graph_for(x)
+        graph = t_jit.graph_for(x, bias)
         self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
         self.assertGraphContainsExactly(graph, 'prim::unsqueeze_copy', 0)
 

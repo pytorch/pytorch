@@ -683,7 +683,7 @@ TensorView* reductionOp(
   IrBuilder::create<ReductionOp>(reduction_op_type, init, out, tv);
 
   if (keep_dim) {
-    auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+    auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
     std::vector<bool> is_broadcast(tv_root.size(), false);
     for (auto axis : uint_axes) {
       is_broadcast.at(axis) = true;
@@ -818,7 +818,12 @@ TensorView* broadcast(
           ParallelType::Serial,
           IterType::BroadcastWithoutStride));
     } else {
-      out_domain.push_back(inp_domain[iinp]->clone());
+      out_domain.push_back(IrBuilder::create<IterDomain>(
+          inp_domain[iinp]->start(),
+          inp_domain[iinp]->extent(),
+          inp_domain[iinp]->stopOffset(),
+          inp_domain[iinp]->getParallelType(),
+          inp_domain[iinp]->getIterType()));
       iinp++;
     }
     ibdim++;
@@ -928,7 +933,7 @@ WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
 TensorView* transpose(
     TensorView* inp,
     const std::unordered_map<int, int>& old2new) {
-  auto inp_domain = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   std::vector<IterDomain*> out_domain(inp_domain.size());
 
   auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
@@ -1148,7 +1153,7 @@ TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
 // sum_to operator
 
 TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
-  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+  const auto& root = TensorDomain::noReductions(in->getMaybeRFactorDomain());
 
   TORCH_CHECK(
       root.size() >= sum_to_size.size(),
@@ -1194,7 +1199,7 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
 }
 
 TensorView* sum_to(TensorView* in, const std::vector<int64_t>& sum_to_size) {
-  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+  const auto& root = TensorDomain::noReductions(in->getMaybeRFactorDomain());
 
   TORCH_CHECK(
       root.size() >= sum_to_size.size(),

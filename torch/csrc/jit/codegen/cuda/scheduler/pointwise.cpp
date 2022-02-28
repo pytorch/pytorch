@@ -432,8 +432,9 @@ class DomainMap {
     }
 
     // Erase all input concrete IDs mapped to the output domain
+    // Ignore unresolved broadcast dimensions
     for (auto out_id : output_tv->getMaybeRFactorDomain()) {
-      if (!out_id->isBroadcast() && !out_id->isReduction()) {
+      if (!out_id->isBroadcast()) {
         if (!eraseIfMapped(in_concrete_ids, out_id)) {
           eraseIfMappedThroughView(in_concrete_ids, out_id);
         }

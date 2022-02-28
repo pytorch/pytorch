@@ -126,9 +126,9 @@ bool validateKernelArgTensor(
   size_t arg_dim = arg.dim();
   // Note: This requires current Fusion to be active.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t param_dim =
-      TensorDomain::noReductions(param->as<TensorView>()->getRootDomain())
-          .size();
+  size_t param_dim = TensorDomain::noReductions(
+                         param->as<TensorView>()->getMaybeRFactorDomain())
+                         .size();
   // see [Note - broadcast support in integration]
   // Because of broadcasting support handled in integration, we relax the rank
   // check as necessary.
@@ -699,8 +699,8 @@ kir::ExpressionEvaluator bindKernelInputs(
           i);
 
       const auto aten_tensor = aten_inputs[i].toTensor();
-      const auto root_domain =
-          TensorDomain::noReductions(tensor_input->domain()->getRootDomain());
+      const auto root_domain = TensorDomain::noReductions(
+          tensor_input->domain()->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
           "Something went wrong configuring launch. Inputs no longer match.");
@@ -768,7 +768,8 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs do not match.");
 
       auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
+      auto root_dom =
+          TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs do not match.");

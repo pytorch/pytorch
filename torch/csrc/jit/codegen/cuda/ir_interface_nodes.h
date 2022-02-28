@@ -209,6 +209,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return domain_;
   }
 
+  //! This is for a TensorView with an rFactor domain that is an input to a
+  //! fusion segment. We convert the rfactor domain into a new root domain.
+  //! Any dynamic-sized rfactor iterDomains are given a new symbolic extent.
+  //! Concrete integer extents are kept. Output TensorViews of any subsequent
+  //! expressions that use this TensorView are also updated.
+  void convertRfactorToRootDomain();
+
   void setContiguity(const std::vector<bool>& contig) {
     domain()->setContiguity(contig);
   }
@@ -448,6 +455,11 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   void setComputeAt(unsigned int this_pos, bool decrease = false);
 
   void setMaxProducer(unsigned int this_pos, bool decrease = false);
+
+  //! Create a new root domain and replacement TensorDomain.
+  //! If a new symbolic extent exists for the original iterDomain,
+  //! we create a new iterDomain.
+  void createReplacementDomain(const std::vector<Val*>& domain_extents);
 
  private:
   int normalizeAxisPos(int pos) const {

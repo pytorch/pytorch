@@ -2579,13 +2579,26 @@ class IrParser {
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {
+              auto self_value = node->inputs()[0];
+              auto tensor_type = self_value->type()->cast<c10::TensorType>();
+              if (tensor_type == nullptr) {
+                return false;
+              }
+              if (!tensor_type->sizes().concrete_sizes().has_value()) {
+                // Shape information for input tensor is required.
+                return false;
+              }
+
               if (!isInputNonSizeZeroTensor(node)) {
                 return false;
               }
               // Reject fusing node if view_sizes contains an inferred dimension
               auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
-              TORCH_INTERNAL_ASSERT(
-                  view_sizes.has_value(), "The size parameter is required.");
+              if (!view_sizes.has_value()) {
+                // The size parameter is required.
+                return false;
+              }
+
               for (auto axis_size : view_sizes->vec()) {
                 if (axis_size == -1) {
                   return false;
@@ -2618,7 +2631,18 @@ class IrParser {
             auto output = squeeze(self, self_sizes);
             value_map.emplace(node->output()->unique(), output);
           },
-          isInputNonSizeZeroTensor,
+          [](const Node* node) -> bool {
+            // Shape information for input tensor is required.
+            auto self_value = node->inputs()[0];
+            auto tensor_type = self_value->type()->cast<c10::TensorType>();
+            if (tensor_type == nullptr) {
+              return false;
+            }
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            return tensor_type->sizes().concrete_sizes().has_value();
+          },
           nullptr);
     }
 
@@ -2654,7 +2678,19 @@ class IrParser {
               }
               value_map.emplace(node->output()->unique(), output);
             },
-            isInputNonSizeZeroTensor,
+            [](const Node* node) -> bool {
+              // Shape information for input tensor is required.
+              auto self_value = node->inputs()[0];
+              auto tensor_type = self_value->type()->cast<c10::TensorType>();
+              if (tensor_type == nullptr) {
+                return false;
+              }
+              if (!isInputNonSizeZeroTensor(node)) {
+                return false;
+              }
+              auto optional_sizes = tensor_type->sizes().concrete_sizes();
+              return tensor_type->sizes().concrete_sizes().has_value();
+            },
             nullptr);
       }
     }
