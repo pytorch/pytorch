@@ -3204,14 +3204,14 @@ See :func:`torch.rot90`
 
 add_docstr_all('round',
                r"""
-round() -> Tensor
+round(decimals=0) -> Tensor
 
 See :func:`torch.round`
 """)
 
 add_docstr_all('round_',
                r"""
-round_() -> Tensor
+round_(decimals=0) -> Tensor
 
 In-place version of :meth:`~Tensor.round`
 """)
@@ -3373,6 +3373,12 @@ Example::
             [0., 0., 2., 1., 1.]])
 
 """.format(**reproducibility_notes))
+
+add_docstr_all('scatter_reduce', r"""
+scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
+
+See :func:`torch.scatter_reduce`
+""")
 
 add_docstr_all('select',
                r"""
@@ -4945,11 +4951,10 @@ Alias for :func:`adjoint`
 
 add_docstr_all('real',
                r"""
-Returns a new tensor containing real values of the :attr:`self` tensor.
+Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
 
 Example::
     >>> x=torch.randn(4, dtype=torch.cfloat)

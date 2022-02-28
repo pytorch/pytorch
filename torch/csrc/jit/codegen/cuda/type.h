@@ -3,7 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <array>
 #include <cstdint>
@@ -32,6 +32,8 @@ enum class ValType {
   TensorView,
   Scalar,
   NamedScalar,
+  Predicate,
+  TensorIndex,
 };
 
 // Manual - The user provides the Bool value. Predicate generation is bypassed.
@@ -73,6 +75,15 @@ enum class ExprType {
   ViewOp,
   Split,
   Merge,
+  Allocate,
+  Sync,
+  InitMagicZero,
+  UpdateMagicZero,
+  ForLoop,
+  IfThenElse,
+  GridReduction,
+  GridBroadcast,
+  GridWelford,
 };
 
 enum class UnaryOpType {
@@ -257,8 +268,11 @@ std::string stringifyThread(const ParallelType);
 std::string typePrefix(const DataType);
 
 // TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
+// Returns if parallel type is TID[x, y, z]
 TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
+// Returns if parallel type is BID[x, y, z]
 TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
+// Returns if parallel type is a grid or block parallelization dimension
 TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
 
 TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
