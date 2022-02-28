@@ -138,7 +138,7 @@ jobs:
           rm -rf ./*
   test_force_on_cpu_1_1:
     name: test (force_on_cpu, 1, 1, windows.4xlarge)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-test
       SHARD_NUMBER: 1
@@ -201,7 +201,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -287,7 +287,7 @@ jobs:
           rm -rf ./*
   test_default_1_2:
     name: test (default, 1, 2, windows.8xlarge.nvidia.gpu)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-test
       SHARD_NUMBER: 1
@@ -358,7 +358,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -444,7 +444,7 @@ jobs:
           rm -rf ./*
   test_default_2_2:
     name: test (default, 2, 2, windows.8xlarge.nvidia.gpu)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-test
       SHARD_NUMBER: 2
@@ -515,7 +515,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
