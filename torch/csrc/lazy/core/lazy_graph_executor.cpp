@@ -946,6 +946,10 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
               << " on device " << async->device << " done!";
 
+      TORCH_CHECK(async->tensors_data.size() == results.size(),
+        "Expected number of outputs does not match TorchScript Stack size: ",
+        async->tensors_data.size(), " != ", results.size());
+
       for (const auto i : c10::irange(results.size())) {
         if (async->tensors_data[i] != nullptr) {
           async->tensors_data[i]->Assign(*results[i]);
