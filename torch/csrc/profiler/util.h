@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <list>
 
 #include <c10/macros/Macros.h>
 #include <ATen/record_function.h>
