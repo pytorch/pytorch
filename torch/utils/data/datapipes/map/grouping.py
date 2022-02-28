@@ -7,16 +7,22 @@ T = TypeVar('T')
 
 @functional_datapipe('batch')
 class BatcherMapDataPipe(MapDataPipe[DataChunk]):
-    r""" :class:`BatcherMapDataPipe`.
-
-    Map DataPipe to create mini-batches of data. An outer dimension will be added as
-    `batch_size` if `drop_last` is set to `True`, or `length % batch_size` for the
-    last batch if `drop_last` is set to `False`.
+    r"""
+    Create mini-batches of data (functional name: ``batch``). An outer dimension will be added as
+    ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
+    last batch if ``drop_last`` is set to ``False``.
 
     Args:
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper
+        >>> dp = SequenceWrapper(range(10))
+        >>> batch_dp = dp.batch(batch_size=2)
+        >>> list(batch_dp)
+        [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
     """
     datapipe: MapDataPipe
     batch_size: int
