@@ -189,7 +189,8 @@ void launch(
 
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
-    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
+    int warp_size = at::cuda::warp_size();
+    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
     gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
@@ -472,7 +473,8 @@ void launch(
   {
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
-    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
+    int warp_size = at::cuda::warp_size();
+    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
     sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
