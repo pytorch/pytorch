@@ -153,7 +153,6 @@ coverage_ignore_classes = [
     "LongTensor",
     "ShortStorage",
     "ShortTensor",
-    "UntypedStorage",
     "cudaStatus",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
@@ -181,6 +180,7 @@ coverage_ignore_classes = [
     "ReshapeTransform",
     "SigmoidTransform",
     "SoftmaxTransform",
+    "SoftplusTransform",
     "StackTransform",
     "StickBreakingTransform",
     "TanhTransform",
