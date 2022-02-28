@@ -18,6 +18,7 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/TensorUtils.h>
 #include <torch/library.h>
+#include <ATen/native/quantized/packed_params.h>
 
 #include <unordered_map>
 #include <iostream>
@@ -485,22 +486,30 @@ class QConvInt8 final {
  public:
   static Tensor run(
       Tensor act,
-      Tensor weight,
-      c10::optional<Tensor> bias,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
-      int64_t groups,
+      // Tensor weight,
+      // c10::optional<Tensor> bias,
+      // torch::List<int64_t> stride,
+      // torch::List<int64_t> padding,
+      // torch::List<int64_t> dilation,
+      // int64_t groups,
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
     act = act.contiguous(c10::MemoryFormat::ChannelsLast);
+    // we need to put this in the packed weight thing i think
     weight = weight.contiguous(c10::MemoryFormat::ChannelsLast);
     // requantization
     // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
     auto act_scale = act.q_scale();
-    auto weight_scale = weight.q_scale();
+    auto weight_scale = packed_weight->w_scale();
     auto requantize_multiplier = act_scale * weight_scale / output_scale;
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
+
+    if (kReluFused) {
+      return packed_weight->apply_relu(act, output_scale, output_zero_point)
+    } else {
+      return packed_weight->apply_relu(act, output_scale, output_zero_point)
+    }
 
     // TODO: check all zero_points are zero/all tensors are symmetrically quantized
     return raw_cudnn_convolution_forward<kSpatialDim, kReluFused>(
