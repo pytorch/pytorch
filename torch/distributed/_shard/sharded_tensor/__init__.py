@@ -2,32 +2,24 @@
 
 import copy
 import functools
-import torch
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-    ShardingSpec,
-)
-from torch.distributed._shard.sharding_spec._internals import (
-    get_chunked_dim_size,
-    get_split_size,
-)
 from typing import List
+
+import torch
+import torch.distributed._shard.sharding_spec as shard_spec
 
 from .api import (
     _register_sharded_op,
     Shard,
-    ShardMetadata,
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
-    _PartialTensor,
 )
+from .metadata import ShardMetadata  # noqa: F401
+from .partial_tensor import _PartialTensor
 from .utils import load_with_process_group
-import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 
-def empty(sharding_spec: ShardingSpec,
+def empty(sharding_spec: shard_spec.ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -79,7 +71,7 @@ def empty(sharding_spec: ShardingSpec,
         init_rrefs=init_rrefs,
     )
 
-def ones(sharding_spec: ShardingSpec,
+def ones(sharding_spec: shard_spec.ShardingSpec,
          *size,
          dtype=None,
          layout=torch.strided,
@@ -130,7 +122,7 @@ def ones(sharding_spec: ShardingSpec,
         init_rrefs=init_rrefs
     )
 
-def zeros(sharding_spec: ShardingSpec,
+def zeros(sharding_spec: shard_spec.ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -181,7 +173,7 @@ def zeros(sharding_spec: ShardingSpec,
         init_rrefs=init_rrefs
     )
 
-def full(sharding_spec: ShardingSpec,
+def full(sharding_spec: shard_spec.ShardingSpec,
          size,
          fill_value=torch.types.Number,
          dtype=None,
@@ -233,7 +225,7 @@ def full(sharding_spec: ShardingSpec,
     torch.nn.init.constant_(sharded_tensor, fill_value)  # type: ignore[arg-type]
     return sharded_tensor
 
-def rand(sharding_spec: ShardingSpec,
+def rand(sharding_spec: shard_spec.ShardingSpec,
          *size,
          dtype=None,
          layout=torch.strided,
@@ -409,7 +401,7 @@ from ._ops import *  # noqa: F403
 
 def _reshard_output(
         module: torch.nn.Module,
-        resharding_spec: ShardingSpec) -> torch.nn.Module:
+        resharding_spec: shard_spec.ShardingSpec) -> torch.nn.Module:
     """
     Hook a module with local shards collection in the forward pass according
     to the given ``resharding_spec``.
