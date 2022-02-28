@@ -12,7 +12,7 @@ from torch.nn.quantized.modules.utils import ReferenceableQuantizedModule
 from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
-from .match_utils import is_match
+from .match_utils import is_match, MatchAllNode
 from .quantization_types import Pattern
 from .utils import (
     collect_producer_nodes,
@@ -20,7 +20,7 @@ from .utils import (
     get_new_attr_name_with_prefix,
     graph_module_from_producer_nodes,
 )
-from ..utils import _parent_name, check_node, MatchAllNode
+from ..utils import _parent_name
 from ..qconfig import QConfigAny
 from ..quantization_mappings import get_quantized_operator
 from .utils import create_node_from_old_node_preserve_meta
@@ -182,6 +182,15 @@ def is_special_pattern_node(node, modules):
 
 def is_dequantize_node(node):
     return isinstance(node, Node) and node.op == 'call_method' and node.target == 'dequantize'
+
+def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigAny]):
+    """
+    Return True if the op is configured with a None qconfig, False otherwise.
+    Note: maybe need to generalize this to also check for the dtype, and we
+    only lower when dtype matches, but right now fbgemm/qnnpack only support
+    a single dtype, so it is OK for now.
+    """
+    return op.name in qconfig_map and qconfig_map[op.name] is None
 
 # Mapping from reference module class to the replacement quantized module class for lowering
 # TODO: fix typing, the key is reference module
@@ -353,7 +362,10 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
             model.graph.erase_node(zero_point_node)
     return model
 
-def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_weighted_ref_functional(
+    model: QuantizedGraphModule,
+    qconfig_map: Dict[str, QConfigAny]
+) -> QuantizedGraphModule:
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
@@ -394,6 +406,9 @@ def _lower_weighted_ref_functional(model: QuantizedGraphModule) -> QuantizedGrap
                     relu_node = None
                 input_dq_node = func_node.args[0]
                 weight_dq_node = func_node.args[1]
+
+                if should_skip_lowering(func_node, qconfig_map):
+                    continue
 
                 # Step 1: Replace quantized weights with packed weights, which will be folded later
                 quantized_weight = weight_dq_node.args[0]
@@ -502,11 +517,7 @@ def _lower_quantized_binary_op(
                bop_node.target not in set([torch.add, operator.add, torch.mul, operator.mul, torch.matmul]):
                 continue
 
-            # skip lowering for ops that is configured with None qconfig
-            # Note: maybe need to generalize this to also check for the dtype, and we
-            # only lower when dtype matches, but right now fbgemm/qnnpack only support
-            # a single dtype, so it is OK for now
-            if bop_node.name in qconfig_map and qconfig_map[bop_node.name] is None:
+            if should_skip_lowering(bop_node, qconfig_map):
                 continue
 
             # remove dequant node
@@ -674,7 +685,7 @@ def _lower_to_native_backend(
     operator signature so they can be lowered with the same function
     """
     model = _lower_weighted_ref_module(model)
-    model = _lower_weighted_ref_functional(model)
+    model = _lower_weighted_ref_functional(model, qconfig_map)
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
     _lower_quantized_binary_op(model, qconfig_map)

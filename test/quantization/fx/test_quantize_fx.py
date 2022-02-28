@@ -3397,8 +3397,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # checking result match
             self.assertTrue(torch.equal(out_ref, out))
 
-    # TODO(andrew): fix this test after https://github.com/pytorch/pytorch/pull/72953 lands
-    def skip_test_convert_qconfig_dict(self):
+    def test_convert_qconfig_dict(self):
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
