@@ -60,8 +60,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>     module, device_ids=[rank], output_device=rank
         >>>  )
         >>>  # Register a post-localSGD communication hook.
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
