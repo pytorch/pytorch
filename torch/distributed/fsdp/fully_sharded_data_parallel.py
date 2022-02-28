@@ -1308,15 +1308,15 @@ class FullyShardedDataParallel(nn.Module):
                 accumulate_grad = getattr(param, "_saved_grad_shard", None) is not None
                 if accumulate_grad:
                     p_assert(
-                        param._saved_grad_shard.shape == output.shape,
+                        param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
                         "Shape mismatch when accumulating gradients: "
-                        f"existing shape={param._saved_grad_shard.shape} "
+                        f"existing shape={param._saved_grad_shard.shape} "  # type: ignore[attr-defined]
                         f"new shape={output.shape}"
                     )
-                    param._saved_grad_shard.data += output.data
+                    param._saved_grad_shard.data += output.data  # type: ignore[attr-defined]
                 else:
-                    param._saved_grad_shard = output.data
-                param.grad.data = param._saved_grad_shard.data
+                    param._saved_grad_shard = output.data  # type: ignore[attr-defined]
+                param.grad.data = param._saved_grad_shard.data  # type: ignore[attr-defined]
             else:
                 # Currently the only way for _is_sharded to be False is if
                 # world_size == 1. This could be relaxed in the future, e.g,
@@ -1345,7 +1345,7 @@ class FullyShardedDataParallel(nn.Module):
                 param.grad.data = param._cpu_grad  # type: ignore[attr-defined]
                 # Ensure the postcondition that `param._saved_grad_shard` is on
                 # the same device as `param.grad` (to avoid autograd issues)
-                param._saved_grad_shard = param._cpu_grad
+                param._saved_grad_shard = param._cpu_grad  # type: ignore[attr-defined]
 
             # After _post_backward_hook returns, orig_grad_data will eventually
             # go out of scope, at which point it could otherwise be freed for
@@ -1413,7 +1413,7 @@ class FullyShardedDataParallel(nn.Module):
                         # iteration.
                         continue
                     if hasattr(p, "_saved_grad_shard"):
-                        p.grad = p._saved_grad_shard
+                        p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                         delattr(p, "_saved_grad_shard")
 
         # Update root and nested FSDP's hooks and flags.
@@ -1511,9 +1511,9 @@ class FullyShardedDataParallel(nn.Module):
                 or p.grad.device != p.device
             ):
                 can_accumulate_grad = p.grad.device == p.data.device and \
-                    p.grad.size() == p._local_shard.shape
+                    p.grad.size() == p._local_shard.shape  # type: ignore[attr-defined]
                 if can_accumulate_grad:
-                    p._saved_grad_shard = p.grad.data
+                    p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
                 p.grad = None
 
     @torch.no_grad()
