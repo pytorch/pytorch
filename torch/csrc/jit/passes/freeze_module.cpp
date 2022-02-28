@@ -882,7 +882,7 @@ Module freeze_module(
   return moduleClone;
 }
 
-void freeze_module(
+void freeze_module_inplace(
     Module* module,
     std::vector<std::string> preservedAttrs,
     bool freezeInterfaces,

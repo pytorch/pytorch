@@ -463,7 +463,7 @@ struct TORCH_API Type {
     return kind_;
   }
 
-  bool isUnionType() const {
+  virtual bool isUnionType() const {
     return false;
   }
 
@@ -557,6 +557,9 @@ struct TORCH_API Type {
   }
   virtual TypePtr containedType(size_t i) const {
     return containedTypes().at(i);
+  }
+  virtual size_t containedTypeSize() const {
+    return containedTypes().size();
   }
   // create a new version of this type, replacing its contained types with
   // contained_types
