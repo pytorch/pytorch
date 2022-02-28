@@ -22,6 +22,14 @@ def no_dispatch() -> Iterator[None]:
 # 3. Enter dispatcher, wind your way through Autograd
 # 4. Hit Python dispatch key, call __torch_dispatch__
 
+# This Tensor can work with autograd in two ways:
+#  - The wrapped Tensor does not require gradients. In that case, the LoggingTensor
+#    can require gradients if the user asks for it as a constructor kwarg.
+#  - The wrapped Tensor can require gradients. In that case autograd will be tracked
+#    for the wrapped Tensor and the LoggingTensor itself cannot require gradients.
+# WARNING: We allow these two possibilities for testing purposes. You should NEVER use both in a single
+# test or you might get surprising behavior.
+
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
@@ -38,10 +46,10 @@ class LoggingTensor(torch.Tensor):
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing
             dtype=elem.dtype, layout=elem.layout,
-            device=elem.device, requires_grad=elem.requires_grad
+            device=elem.device, requires_grad=kwargs.get("requires_grad", False)
         )
         # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
+        r.elem = elem.detach() if r.requires_grad else elem
         return r
 
     def __repr__(self):
