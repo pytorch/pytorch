@@ -189,6 +189,7 @@ Node* transformToONNXConcatNode(
 
     Node* unsqueezed_node =
         createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
+    unsqueezed_node->copyMetadata(lc_node);
     unsqueezed.emplace_back(unsqueezed_node->output());
   }
 

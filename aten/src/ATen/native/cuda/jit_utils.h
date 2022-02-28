@@ -6,14 +6,8 @@
 #include <vector>
 
 #include <c10/util/irange.h>
+#include <ATen/jit_macros.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
-
-#ifdef __HIP_PLATFORM_HCC__
-    // pass -- jiterator not supported on HIP platforms
-    #define jiterator_stringify(...) std::string("USE_JITERATOR is undefined");
-#else
-    #define jiterator_stringify(...) std::string(#__VA_ARGS__);
-#endif
 
 namespace at { namespace cuda { namespace jit {
 
@@ -59,7 +53,7 @@ struct delayed_false : std::false_type {
 template <typename T>
 inline std::string typeName() {
   // we can't use static_assert(false) directly as the
-  // program will be not compile even if the template is not
+  // program will be not compiled even if the template is not
   // instantiated, so we use `delayed_false`
   // to make sure compiler doesn't eagerly raise
   // fail this assertion.
@@ -72,6 +66,22 @@ template <> inline std::string typeName<ctype>(){ \
     return std::string(#ctype);    \
 }
 
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(TYPE_NAME_FN)
+AT_FORALL_SCALAR_TYPES(TYPE_NAME_FN)
+#undef TYPE_NAME_FN
+// JIT uses std::complex directly, because nvRTC compile programs
+// with -default-device, so there is no such issue like:
+//   "std::sin(complex) is __host__ only"
+template <> inline std::string typeName<c10::complex<float>>(){
+    return "std::complex<float>";
+}
+template <> inline std::string typeName<c10::complex<double>>(){
+    return "std::complex<double>";
+}
+template <> inline std::string typeName<at::Half>(){
+    return "at::Half";
+}
+template <> inline std::string typeName<at::BFloat16>(){
+    return "at::BFloat16";
+}
 
 }}}  // namespace at::cuda::jit
