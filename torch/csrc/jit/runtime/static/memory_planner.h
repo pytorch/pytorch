@@ -171,7 +171,8 @@ class MemoryPlanner {
     const auto start =
         reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
     const auto end = reinterpret_cast<uintptr_t>(
-        &managed_tensor_storage_impls_[managed_tensor_storage_impls_.size()]);
+        managed_tensor_storage_impls_.data() +
+        managed_tensor_storage_impls_.size());
     return impl_p >= start && impl_p < end;
   }
 
