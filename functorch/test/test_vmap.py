@@ -2610,7 +2610,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (torch.bernoulli, (torch.rand(B0, 1),)),
             (lambda t: torch.bernoulli(t, p=0.5), (torch.rand(B0, 1),)),
             (lambda t: torch.multinomial(t, 2), (torch.rand(B0, 3),)),
-            (torch.normal, (torch.randn(B0, 1), torch.randn(B0, 1))),
             (torch.poisson, (torch.rand(B0, 1),)),
             # (torch.rand_like, (torch.rand(B0, 1),)),
             # (torch.randn_like, (torch.rand(B0, 1),)),
@@ -2621,7 +2620,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: torch.bernoulli(captured), (torch.rand(B0),)),
             (lambda t: torch.bernoulli(captured, p=0.5), (torch.rand(B0),)),
             (lambda t: torch.multinomial(captured, 2), (torch.rand(B0),)),
-            (lambda t: torch.normal(captured, captured), (torch.randn(B0),)),
             (lambda t: torch.poisson(captured), (torch.rand(B0),)),
             # (lambda t: torch.rand_like(captured), (torch.rand(B0),)),
             # (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
@@ -3442,6 +3440,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             lambda _, shape: torch.randint(5, 100, shape, **kwargs),
             lambda t, _: t.random_(**only_gen_kwarg),
             lambda _, shape: torch.normal(0., 1., shape, **kwargs),
+            lambda t, _: t.normal_(**only_gen_kwarg),
         ]
 
         B0 = 4
@@ -3546,6 +3545,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         supported_ops = [
             lambda _, t: torch.normal(t, 1., **kwargs),
             lambda _, t: torch.normal(0., torch.abs(t), **kwargs),
+            lambda _, t: torch.normal(t, torch.abs(t), **kwargs),
         ]
 
         B0 = 4
