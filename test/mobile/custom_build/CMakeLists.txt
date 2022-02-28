@@ -13,16 +13,12 @@ target_include_directories(Predictor PUBLIC ${TORCH_INCLUDE_DIRS})
 
 find_package(Threads REQUIRED)
 
-# Avoid linker flags on Mac
-if(${APPLE})
-  set(LINKER_OPTIONS "")
-else()
-  set(LINKER_OPTIONS "-Wl,-s -Wl,--gc-sections -Wl,--whole-archive -Wl,--no-whole-archive")
-endif()
-
 target_link_libraries(Predictor
-  ${LINKER_OPTIONS}
+  -Wl,-s
+  -Wl,--gc-sections
+  -Wl,--whole-archive
   ${TORCH_LIBRARIES}
+  -Wl,--no-whole-archive
   Threads::Threads
   ${CMAKE_DL_LIBS}
 )
