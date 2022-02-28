@@ -1048,8 +1048,8 @@ def _pad_circular(g, input, pad):
 
     cur = input
     for idx in range(ndim):
-        pad_l = padding[-(2*idx + 1)]
-        pad_r = padding[-(2*idx + 2)]
+        pad_l = padding[-(2 * idx + 1)]
+        pad_r = padding[-(2 * idx + 2)]
 
         tensors = []
         if pad_l > 0:
@@ -1119,7 +1119,7 @@ def pad(g, input, pad, mode, value):
     elif mode == "circular":
         return _pad_circular(g, input, pad)
     else:
-        assert False, f"Unrecognized padding mode {mode}"
+        raise RuntimeError(f"Unrecognized padding mode {mode}")
 
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
