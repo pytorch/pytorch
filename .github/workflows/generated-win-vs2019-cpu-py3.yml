@@ -13,6 +13,7 @@ on:
       - 'ciflow/win/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -86,9 +87,14 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         shell: bash
         env:
@@ -126,7 +132,7 @@ jobs:
           rm -rf ./*
   test_default_1_2:
     name: test (default, 1, 2, windows.4xlarge)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
       SHARD_NUMBER: 1
@@ -189,7 +195,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -249,8 +255,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -274,7 +281,7 @@ jobs:
           rm -rf ./*
   test_default_2_2:
     name: test (default, 2, 2, windows.4xlarge)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
       SHARD_NUMBER: 2
@@ -337,7 +344,7 @@ jobs:
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -397,8 +404,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
