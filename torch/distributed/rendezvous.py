@@ -147,6 +147,9 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
     and port are correctly passed via ``hostname`` and ``port``. All
     non-zero ranks will create and return a TCPStore client.
     """
+    # check if port is uint16_t
+    if not 0 <= port < 2**16:
+        raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
     if _torchelastic_use_agent_store():
         attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]

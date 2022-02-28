@@ -30,6 +30,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
 
     Supported `prepare_custom_config_dict` keys:
       * `non_traceable_module_class` - same meaning as in prepare_fx
+      * `output_dtypes` - expected dtypes of model outputs, must match actual
+        output structure.
 
     TODO(future PR): better docblock
     """
@@ -39,9 +41,10 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         prepare_custom_config_dict = {}
 
     for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
-        assert qconfig_dict_option not in qconfig_dict, \
-            f'{qconfig_dict_option} option of qconfig_dict is not ' + \
-            'implemented yet in define-by-run quantization'
+        if qconfig_dict_option in qconfig_dict:
+            assert len(qconfig_dict[qconfig_dict_option]) == 0, \
+                f'{qconfig_dict_option} option of qconfig_dict is not ' + \
+                'implemented yet in define-by-run quantization'
 
     normalize_object_types(qconfig_dict)
     convert_dict_to_ordered_dict(qconfig_dict)
@@ -78,6 +81,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
                 parents_to_delete_auto_quant_state.append(v)
         for v in parents_to_delete_auto_quant_state:
             del v._auto_quant_state
+
+        del model._fqn_to_auto_quant_state_map
 
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types

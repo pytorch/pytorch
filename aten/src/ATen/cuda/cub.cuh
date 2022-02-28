@@ -45,17 +45,23 @@
 
 #ifdef USE_ROCM
 #define NO_ROCM(x)
+#define ROCM_HIPCUB(x) ::hipcub
 #else
 #define NO_ROCM(x) x
+#define ROCM_HIPCUB(x) x
 #endif
 
-#if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
+     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
+#if !defined(USE_ROCM)
 namespace at_cuda_detail {
+#endif
+
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
 template <>
-struct cub::FpLimits<c10::BFloat16>
+struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 {
     static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
         unsigned short max_word = 0x7F7F;
@@ -68,8 +74,14 @@ struct cub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-}
+template <>
+struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
+       ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+#if !defined(USE_ROCM)
+} // namespace at_cuda_detail
+#endif
+
 #endif
 
 #if !defined(USE_ROCM)
@@ -93,11 +105,18 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if CUB_SUPPORTS_NV_BFLOAT16()
+#if !defined(USE_ROCM) && CUB_SUPPORTS_NV_BFLOAT16()
 
 template<>
 struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
+};
+
+#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = hip_bfloat16;
 };
 
 #endif
@@ -315,5 +334,25 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   }
 #endif
 }
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
+inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
+      keys, input, output, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename ScanOpT>
+inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
+      keys, input, output, scan_op, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+#endif
 
 }}}  // namespace at::cuda::cub
