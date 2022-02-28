@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/WrapDimUtils.h>
 #include <ATen/core/IList.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
