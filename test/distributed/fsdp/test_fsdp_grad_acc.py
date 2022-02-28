@@ -1,8 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import itertools
 import sys
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, NamedTuple
 
 import torch
 from torch import distributed as dist
@@ -30,31 +31,51 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestNoSync(FSDPTest):
-    """Tests ``FullyShardedDataParallel``'s gradient accumulation via its
-    ``no_sync()`` context manager."""
+class _GradAccConfig(NamedTuple):
+    """
+    This configures how gradients are accumulated in :meth:`_test_grad_acc`.
+    Each instance of this class represents ``num_iters``-many consecutive
+    iterations, where the ``no_sync()`` context manager is used or not as given
+    by ``use_no_sync``.
+    
+    Attributes:
+        use_no_sync (bool): Indicates whether to use the ``no_sync()`` context
+            manager as the way to accumulate gradients.
+        num_iters (int): Number of iterations to accumulate gradients.
+    """
+    use_no_sync: bool
+    num_iters: int
 
-    def _test_no_sync(
+
+class TestGradAcc(FSDPTest):
+    """Tests ``FullyShardedDataParallel``'s gradient accumulation via both its
+    ``no_sync()`` context manager and without the context manager."""
+
+    def _test_grad_acc(
         self,
         batch_dim: int,
-        num_iters_to_acc: int,
+        configs: List[_GradAccConfig],
         cpu_offload: CPUOffload,
         backward_prefetch: Optional[BackwardPrefetch],
     ):
         """
-        Tests ``no_sync()`` by comparing a run that trains sequentially through
-        some batches while accumulating gradients with a run that trains on the
-        concatenation of those batches in a single iteration. The number of
-        batches, i.e. the number of iterations for which to accumulate
-        gradients, is given by ``num_iters_to_acc``.
+        Tests gradient accumulation by comparing a run that trains sequentially
+        through some batches while accumulating gradients with a run that
+        trains on the concatenation of those batches in a single iteration. 
+        
+        The last iteration always synchronizes gradients regardless of what is
+        specified by the last element of ``configs``.
 
         Arguments:
             batch_dim (int): Batch dimension in the input tensor to be passed
                 into the model for the forward pass.
-            num_iters_to_acc (int): Number of iterations for which to
-                accumulate gradients; all but the last iteration are run using
-                the ``no_sync()`` context manager so that gradients are not
-                synchronized until the final iteration.
+            configs (List[_GradAccConfig]): :class:`list` of configurations
+                specifying how gradients are accumulated; for example, a list
+                corresponding to [(False, 2), (True, 2), (False, 2)] indicates
+                to accumulate over 2 + 2 + 2 = 6 total iterations, where the
+                first two do not use ``no_sync()``, the middle two do use
+                ``no_sync()``, and the final two again do not use
+                ``no_sync()``.
             cpu_offload (CPUOffload): Configures CPU offloading.
             backward_prefetch (Optional[BackwardPrefetch]): Specifies at which
                 point to prefetch the next layer's full parameters during the
@@ -82,6 +103,7 @@ class TestNoSync(FSDPTest):
 
             batch: Tuple[torch.Tensor, ...] = fsdp_model.module.get_input(device)
             batches: List[Tuple[torch.Tensor, ...]] = [batch]
+            num_iters_to_acc = sum(config.num_iters for config in configs)
             for _ in range(num_iters_to_acc - 1):
                 batches.append(tuple(permute_tensor(t) for t in batch))
             for (batch1, batch2) in itertools.combinations(batches, r=2):
@@ -100,15 +122,23 @@ class TestNoSync(FSDPTest):
             ref_loss.backward()
             ref_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
 
-            # Compute the gradients by accumulating via `no_sync()`
+            # Compute and accumulate the gradients
             fsdp_model.zero_grad()
             losses = []
-            with fsdp_model.no_sync():
-                for batch in batches[:-1]:  # accumulate for all but the last batch
-                    output = fsdp_model(*batch)
-                    loss = fsdp_model.module.get_loss(batch, output)
-                    loss.backward()
-                    losses.append(loss)
+            batch_idx = 0
+            for config in configs:
+                context = fsdp_model.no_sync() if config.use_no_sync \
+                    else contextlib.suppress()
+                with context:
+                    for _ in range(config.num_iters):
+                        if batch_idx == num_iters_to_acc - 1:
+                            break  # always sync on the last iteration
+                        batch = batches[batch_idx]
+                        batch_idx += 1
+                        output = fsdp_model(*batch)
+                        loss = fsdp_model.module.get_loss(batch, output)
+                        loss.backward()
+                        losses.append(loss)
             output = fsdp_model(*batches[-1])
             loss = fsdp_model.module.get_loss(batches[-1], output)
             loss.backward()
@@ -117,13 +147,13 @@ class TestNoSync(FSDPTest):
             acc_grads = [p.grad.detach().clone() for p in fsdp_model.parameters()]
 
             # Compare the losses and gradients
-            torch.testing.assert_allclose(ref_loss, acc_loss)
+            torch.testing.assert_close(ref_loss, acc_loss)
             assert len(ref_grads) == len(acc_grads)
             for ref_grad, acc_grad in zip(ref_grads, acc_grads):
                 assert ref_grad.device == acc_grad.device
                 assert ref_grad.size() == acc_grad.size()
                 assert ref_grad.dtype == acc_grad.dtype
-                torch.testing.assert_allclose(ref_grad, acc_grad)
+                torch.testing.assert_close(ref_grad, acc_grad)
 
             # Check that the optimizer step does not error
             optim.step()
@@ -132,8 +162,13 @@ class TestNoSync(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
-        "num_iters_to_acc",
-        [2, 4],
+        "configs",
+        [
+            [_GradAccConfig(True, 4)],
+            [_GradAccConfig(False, 4)],
+            [_GradAccConfig(True, 2), _GradAccConfig(False, 2), _GradAccConfig(True, 2)],
+            [_GradAccConfig(False, 2), _GradAccConfig(True, 2), _GradAccConfig(False, 2)],
+        ]
     )
     @parametrize(
         "cpu_offload",
@@ -143,24 +178,30 @@ class TestNoSync(FSDPTest):
         "backward_prefetch",
         [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
-    def test_no_sync(
+    def test_grad_acc(
         self,
-        num_iters_to_acc: int,
+        configs: List[_GradAccConfig],
         cpu_offload: CPUOffload,
         backward_prefetch: Optional[BackwardPrefetch],
     ):
-        """Tests the ``no_sync()`` context manager."""
-        assert num_iters_to_acc >= 2, \
-            "Accumulate for at least 2 iterations to be nontrivial"
-        self._test_no_sync(
+        """
+        Tests gradient accumulation.
+        
+        This exercises gradient accumulation using the ``no_sync()`` context
+        manager, without using the ``no_sync()`` context manager, and
+        interleaving using and not using the ``no_sync()`` context manager. It
+        also checks for compatibility with the CPU offload and backward
+        prefetch options.
+        """
+        self._test_grad_acc(
             batch_dim=1,
-            num_iters_to_acc=num_iters_to_acc,
+            configs=configs,
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
         )
 
 
-instantiate_parametrized_tests(TestNoSync)
+instantiate_parametrized_tests(TestGradAcc)
 
 if __name__ == "__main__":
     run_tests()
