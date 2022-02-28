@@ -49,6 +49,7 @@ from torch.ao.quantization import (
     get_default_qconfig,
     get_default_qat_qconfig,
     get_default_qconfig_dict,
+    get_default_qat_qconfig_dict,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -475,6 +476,101 @@ class TestFuseFx(QuantizationTestCase):
             }
         })
         self.checkGraphModuleNodes(m, expected_node=ns.call_module(MyConvReLU))
+
+    def test_fuse_custom_pattern(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_torch_add=True):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(3)
+                if use_torch_add:
+                    self.add = torch.add
+                else:
+                    self.add = operator.add
+
+            def forward(self, x):
+                y = x
+                y = self.maxpool(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.add(y, x)
+                x = self.relu(x)
+                return x
+
+        for use_torch_add in [True, False]:
+            m = M(use_torch_add).eval()
+
+            def fuse_conv_bn_relu(is_qat, relu, add_pattern):
+                _, _, bn_pattern = add_pattern
+                bn, conv = bn_pattern
+                return conv
+
+            conv_bn_res_relu_config1 = {
+                "pattern": (nn.ReLU, (torch.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
+                "fuser_method": fuse_conv_bn_relu,
+            }
+
+            conv_bn_res_relu_config2 = {
+                "pattern": (nn.ReLU, (operator.add, MatchAllNode, (nn.BatchNorm2d, nn.Conv2d))),
+                "fuser_method": fuse_conv_bn_relu,
+            }
+
+            backend_config_dict = {
+                "configs": [conv_bn_res_relu_config1, conv_bn_res_relu_config2]
+            }
+            m = fuse_fx(m, backend_config_dict=backend_config_dict)
+            self.assertEqual(type(m.conv), torch.nn.Conv2d)
+            # check bn and relu are gone since we replaced the whole pattern to conv
+            self.assertFalse(hasattr(m, "bn"))
+            self.assertFalse(hasattr(m, "relu"))
+
+    def test_root_node_getter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.bn = torch.nn.BatchNorm2d(3)
+                self.relu = torch.nn.ReLU()
+                self.maxpool = torch.nn.MaxPool2d(3)
+
+            def forward(self, x):
+                y = x
+                y = self.maxpool(x)
+                x = self.conv(x)
+                x = self.bn(x)
+                x = torch.add(x, y)
+                x = self.relu(x)
+                return x
+
+        m = M().eval()
+
+        def fuse_conv_bn_relu(is_qat, relu, add_pattern):
+            _, bn_pattern, _ = add_pattern
+            bn, conv = bn_pattern
+            return conv
+
+        def conv_bn_res_relu_root_node_getter(pattern):
+            relu, add_pattern = pattern
+            _, bn_pattern, _ = add_pattern
+            bn, conv = bn_pattern
+            return conv
+
+        conv_bn_res_relu_config = {
+            "pattern": (nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode)),
+            "fuser_method": fuse_conv_bn_relu,
+            "root_node_getter": conv_bn_res_relu_root_node_getter,
+        }
+
+        backend_config_dict = {
+            "configs": [conv_bn_res_relu_config],
+        }
+        m = fuse_fx(m, backend_config_dict=backend_config_dict)
+        self.assertEqual(type(m.conv), torch.nn.Conv2d)
+        # check bn and relu are gone since we replaced the whole pattern to conv
+        self.assertFalse(hasattr(m, "bn"))
+        self.assertFalse(hasattr(m, "relu"))
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
@@ -1771,7 +1867,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         def assertAttrPreserved(m):
             self.assertTrue(hasattr(m, "preserved_attr"))
-            self.assertTrue(m.preserved_attr, 3)
+            self.assertEqual(m.preserved_attr, 3)
 
         assertAttrPreserved(m)
         convert_custom_config_dict = {
@@ -3563,39 +3659,44 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.Linear = torch.nn.Linear(1, 1, 1)
 
             def forward(self, x):
-                # x = self.Conv1d(x)
-                # x = self.Conv2d(x)
-                # x = self.Conv3d(x)
-                # x = self.ConvTranspose1d(x)
-                # x = self.ConvTranspose2d(x)
-                # x = self.ConvTranspose3d(x)
-                # x = self.Linear(x)
-                x = torch.nn.functional.conv1d(x, torch.rand(2, 2, 2))
+                x = self.Conv1d(x)
+                x = self.Conv2d(x)
+                x = self.Conv3d(x)
+                x = self.ConvTranspose1d(x)
+                x = self.ConvTranspose2d(x)
+                x = self.ConvTranspose3d(x)
+                x = self.Linear(x)
+                x = torch.nn.functional.conv1d(x, torch.rand(2, 2))
+                x = torch.nn.functional.conv2d(x, torch.rand(2, 2))
+                x = torch.nn.functional.conv3d(x, torch.rand(2, 2))
+                x = torch.nn.functional.linear(x, torch.rand(2, 2))
                 return x
 
-        backends = ["qnnpack", "fbgemm"]
-        for backend in backends:
-            m = M().eval()
-            qconfig_dict = get_default_qconfig_dict(backend)
-            m = prepare_fx(m, qconfig_dict)
-            for name, mod in m.named_modules():
-                if is_activation_post_process(mod):
-                    if mod.dtype == torch.qint8:
-                        if backend=="fbgemm":
-                            self.assertEqual(mod.quant_min, -64)
-                            self.assertEqual(mod.quant_max, 63)
-                        else:
-                            self.assertEqual(mod.quant_min, -128)
-                            self.assertEqual(mod.quant_max, 127)
-                    elif mod.dtype == torch.quint8:
-                        if backend=="fbgemm":
-                            self.assertEqual(mod.quant_min, 0)
-                            self.assertEqual(mod.quant_max, 127)
-                        else:
-                            self.assertEqual(mod.quant_min, 0)
-                            self.assertEqual(mod.quant_max, 255)
-                    else:
-                        raise ValueError("Observer dtype, ", dtype,  "is not currently supported")
+        backends = ["fbgemm"]
+        i = 0
+        for func in [get_default_qconfig_dict, get_default_qat_qconfig_dict]:
+            for backend in backends:
+                m = M().eval()
+                qconfig_dict = func(backend)
+                m = prepare_fx(m, qconfig_dict)
+                for name, mod in m.named_modules():
+                    i += 1
+                    print(i)
+                    if is_activation_post_process(mod) and mod.dtype == torch.quint8:
+                        if mod.dtype == torch.qint8:
+                            if backend=="fbgemm":
+                                self.assertEqual(mod.quant_min, -64)
+                                self.assertEqual(mod.quant_max, 63)
+                            else:
+                                self.assertEqual(mod.quant_min, -128)
+                                self.assertEqual(mod.quant_max, 127)
+                        elif mod.dtype == torch.quint8:
+                            if backend=="fbgemm":
+                                self.assertEqual(mod.quant_min, 0)
+                                self.assertEqual(mod.quant_max, 127)
+                            else:
+                                self.assertEqual(mod.quant_min, 0)
+                                self.assertEqual(mod.quant_max, 255)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -4220,6 +4321,39 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
         self._test_binary_op_relu_float16_impl(
             operator.add, operator.iadd)
+
+    @skipIfNoFBGEMM
+    def test_add_relu_multiple_uses_of_relu(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU(inplace=True)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+
+            def forward(self, x, y):
+                x = x + y
+                x = self.sub.relu(x)
+                x = x + y
+                x = self.sub.relu(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized.add_relu): 2,
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        # check the model is scriptable
+        m = torch.jit.script(m)
+        # check the model is runnable
+        m(torch.randn(3), torch.randn(3))
 
     @skipIfNoFBGEMM
     def test_mul_relu(self):
@@ -5026,7 +5160,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        # check exact counts of quantize and dequantiz
+        # check exact counts of quantize and dequantize
         count_check = {
             # input of conv and two outputs of getitem
             ns.call_function(torch.quantize_per_tensor) : 2,
@@ -5681,7 +5815,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return z
 
         m = M().eval()
-        qconfig_dict = {"": torch.quantization.default_qconfig}
+        qconfig_dict = {"": torch.ao.quantization.default_qconfig}
         mp = prepare_fx(m, qconfig_dict)
         mp(torch.randn(2, 2), torch.randn(2, 2))
         mq = convert_fx(mp)
