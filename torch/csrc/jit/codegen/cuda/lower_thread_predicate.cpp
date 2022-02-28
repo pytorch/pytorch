@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
@@ -17,55 +16,49 @@ namespace cuda {
 
 namespace {
 
-kir::Bool* getPredicatePerParallelType(
+Bool* getPredicatePerParallelType(
     ParallelType pt,
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   auto pt_dim = GpuLower::current()->parallelDimensionMap().get(pt);
 
   // If pt is not used or is proven to be one, no need to predicate.
   if (pt_dim == nullptr || pt_dim->isOneInt()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
-
   // When BID needs to be predicated, that means it's an output of a grid
   // reduction and only the last block index in that dimension has the right
   // value from the grid reduce.
   if (isParallelTypeBlockDim(pt) && pred_info.limited_types.get(pt)) {
-    return ir_builder
-        .eqExpr(
-            kir::NamedScalar::getParallelIndex(pt),
-            ir_builder.subExpr(
-                kir::NamedScalar::getParallelDim(pt), ir_builder.oneVal()))
-        ->as<kir::Bool>();
+    return SimplifyingIrBuilder::eqExpr(
+               NamedScalar::getParallelIndex(pt),
+               SimplifyingIrBuilder::subExpr(
+                   NamedScalar::getParallelDim(pt),
+                   GpuLower::current()->kernel()->oneVal()))
+        ->as<Bool>();
   }
 
   // Otherwise, only thread of index 0 executes the computation
-  return ir_builder
-      .eqExpr(kir::NamedScalar::getParallelIndex(pt), ir_builder.zeroVal())
-      ->as<kir::Bool>();
+  return SimplifyingIrBuilder::eqExpr(
+             NamedScalar::getParallelIndex(pt),
+             GpuLower::current()->kernel()->zeroVal())
+      ->as<Bool>();
 }
 
 } // namespace
 
-kir::Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
+Bool* ThreadPredicateMap::getPredicateFromPredicateInfo(
     const ThreadPredicateMap::PredicateInfo& pred_info) {
-  kir::SimplifyingIrBuilder ir_builder(GpuLower::current()->kernel());
-
   const auto pred_types = pred_info.limited_types | pred_info.redundant_types;
 
   if (pred_types.none()) {
-    return ir_builder.trueVal();
+    return GpuLower::current()->kernel()->trueVal();
   }
 
-  kir::Bool* pred = nullptr;
-
+  Bool* pred = nullptr;
   for (const auto pt : pred_types) {
     const auto tp = getPredicatePerParallelType(pt, pred_info);
-    pred = ir_builder.andExpr(pred, tp)->as<kir::Bool>();
+    pred = SimplifyingIrBuilder::andExpr(pred, tp)->as<Bool>();
   }
-
   TORCH_INTERNAL_ASSERT(pred != nullptr);
 
   return pred;
@@ -191,7 +184,9 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
         if (id->isReduction()) {
           id_reductions.set(id->getParallelType());
         }
-        if (id->isBroadcast()) {
+        if (id->isBroadcast() &&
+            GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+                id)) {
           id_bcasts.set(id->getParallelType());
         }
       }
@@ -302,7 +297,7 @@ void ThreadPredicateMap::insert(
   thread_predicates_.insert({tv, pred_info});
 }
 
-kir::Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
+Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
   TORCH_INTERNAL_ASSERT(find(tv) != end(), "Couldn't find ", tv);
   auto pred_info = getPredicateInfo(tv);
   return getPredicateFromPredicateInfo(pred_info);
@@ -326,7 +321,8 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
   const bool output_smem = tv->getMemoryType() == MemoryType::Shared;
 
   for (auto id : iter_domains) {
-    if (!id->isBroadcast()) {
+    if (!id->isBroadcast() ||
+        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(id)) {
       continue;
     }
     if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {
