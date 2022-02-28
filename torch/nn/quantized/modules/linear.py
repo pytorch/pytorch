@@ -284,6 +284,12 @@ class Linear(ReferenceableQuantizedModule):
             output_scale (float): scale for output Tensor
             zero_point (int): zero point for output Tensor
         """
+        if type(ref_qlinear) == nni.LinearBn1d:
+            (inner_linear, bn) = ref_qlinear
+            inner_linear.weight, inner_linear.bias = fuse_linear_bn_weights(
+                inner_linear.weight, inner_linear.bias, bn.running_mean,
+                bn.running_var, bn.eps, bn.weight, bn.bias)
+            return cls.from_reference(inner_linear, output_scale, output_zero_point)
         qlinear = cls(
             ref_qlinear.in_features,
             ref_qlinear.out_features)

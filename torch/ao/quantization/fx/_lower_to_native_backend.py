@@ -204,7 +204,8 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   1) The inner reference module class
 #   2) The replacement quantized module class for lowering
 LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[ReferenceableQuantizedModule]]] = {
-    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU)
+    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
+    nni.LinearBn1d: (nnqr.Linear, nnq.Linear)
 }
 
 def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:

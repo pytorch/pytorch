@@ -758,6 +758,8 @@ class ConvReluQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.intrinsic.qat.LinearReLU)
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.linear))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.linear))
+@register_quant_pattern(torch.nn.intrinsic.LinearBn1d)
+@register_quant_pattern(torch.nn.intrinsic.qat.LinearBn1d)
 # for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Linear))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Linear))
@@ -835,8 +837,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             module_allowlist = [
                 torch.nn.Linear,
                 torch.nn.qat.Linear,
-                torch.nn.intrinsic.modules.fused.LinearReLU,
-                torch.nn.intrinsic.qat.modules.linear_relu.LinearReLU
+                torch.nn.intrinsic.LinearReLU,
+                torch.nn.intrinsic.qat.LinearReLU,
+                torch.nn.intrinsic.LinearBn1d,
+                torch.nn.intrinsic.qat.LinearBn1d,
             ]
             if is_reference or type(self.linear) in module_allowlist and dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
@@ -849,18 +853,27 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # Get the float linear and attach qscheme and qparams the the module
                 float_linear = self.linear
                 fused_linear = None
-                if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
+                qat_modules = (
+                    torch.nn.qat.Linear,
+                    torch.nn.intrinsic.qat.LinearReLU,
+                    torch.nn.intrinsic.qat.LinearBn1d,
+                )
+                static_fused_modules = (
+                    torch.nn.intrinsic.LinearReLU,
+                    torch.nn.intrinsic.LinearBn1d,
+                )
+                if isinstance(float_linear, qat_modules):
                     float_linear = float_linear.to_float()
                     # change qat linear to linear
                     parent_name, name = _parent_name(self.linear_node.target)
                     setattr(modules[parent_name], name, float_linear)
                     # Attach weight fake quant to the linear module
-                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                    if isinstance(float_linear, static_fused_modules):
                         fused_linear = float_linear
                         float_linear = float_linear[0]
                     weight_post_process = self.linear.weight_fake_quant
                 else:
-                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                    if isinstance(float_linear, static_fused_modules):
                         fused_linear = float_linear
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
