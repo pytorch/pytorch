@@ -162,8 +162,8 @@ def is_output_dtype_supported_by_backend(
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
-def need_remove_observer(node, modules, node_name_to_target_dtype):
-    """ Check if observer need to be removed
+def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
+    """ Check if observer in same graph
     when the node output is not fp32 and input is 'placeholder'
     the input is assumed to be quantized, so it is observed
     in a different place rather than not observed.
@@ -1177,12 +1177,12 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
-                            need_remove_observer_ = need_remove_observer(node, modules, node_name_to_target_dtype)
+                            is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
 
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if (is_general_tensor_value_op and need_remove_observer_) or \
+                            if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
                                     is_general_tensor_shape_op or is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
