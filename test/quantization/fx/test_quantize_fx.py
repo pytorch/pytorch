@@ -11,6 +11,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
+from torch.ao.quantization import is_activation_post_process
 
 # graph mode quantization based on fx
 from torch.ao.quantization.quantize_fx import (
@@ -3549,6 +3550,52 @@ class TestQuantizeFx(QuantizationTestCase):
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
 
+    def test_qconfig_dict_setup(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.Conv1d = torch.nn.Conv1d(1, 1, 1)
+                self.Conv2d = torch.nn.Conv2d(1, 1, 1)
+                self.Conv3d = torch.nn.Conv3d(1, 1, 1)
+                self.ConvTranspose1d = torch.nn.ConvTranspose1d(1, 1, 1)
+                self.ConvTranspose2d = torch.nn.ConvTranspose2d(1, 1, 1)
+                self.ConvTranspose3d = torch.nn.ConvTranspose3d(1, 1, 1)
+                self.Linear = torch.nn.Linear(1, 1, 1)
+
+            def forward(self, x):
+                # x = self.Conv1d(x)
+                # x = self.Conv2d(x)
+                # x = self.Conv3d(x)
+                # x = self.ConvTranspose1d(x)
+                # x = self.ConvTranspose2d(x)
+                # x = self.ConvTranspose3d(x)
+                # x = self.Linear(x)
+                x = torch.nn.functional.conv1d(x, torch.rand(2, 2, 2))
+                return x
+
+        backends = ["qnnpack", "fbgemm"]
+        for backend in backends:
+            m = M().eval()
+            qconfig_dict = get_default_qconfig_dict(backend)
+            m = prepare_fx(m, qconfig_dict)
+            for name, mod in m.named_modules():
+                if is_activation_post_process(mod):
+                    if mod.dtype == torch.qint8:
+                        if backend=="fbgemm":
+                            self.assertEqual(mod.quant_min, -64)
+                            self.assertEqual(mod.quant_max, 63)
+                        else:
+                            self.assertEqual(mod.quant_min, -128)
+                            self.assertEqual(mod.quant_max, 127)
+                    elif mod.dtype == torch.quint8:
+                        if backend=="fbgemm":
+                            self.assertEqual(mod.quant_min, 0)
+                            self.assertEqual(mod.quant_max, 127)
+                        else:
+                            self.assertEqual(mod.quant_min, 0)
+                            self.assertEqual(mod.quant_max, 255)
+                    else:
+                        raise ValueError("Observer dtype, ", dtype,  "is not currently supported")
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

@@ -253,19 +253,38 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = default_qat_qconfig_v2
     return qconfig
 
-def get_default_qconfig_dict(backend='fbgemm', version=0):
-    qconfig = get_default_qconfig(backend)
+def get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
     return {
         "": qconfig,
-        "object_type": [("reshape", default_reuse_input_qconfig)]
-    }
+        "object_type": [("reshape", default_reuse_input_qconfig),
+                        (torch.nn.Conv1d, qconfig),
+                        (torch.nn.Conv2d, qconfig),
+                        (torch.nn.Conv3d, qconfig),
+                        (torch.nn.ConvTranspose1d, qconfig_transpose),
+                        (torch.nn.ConvTranspose2d, qconfig_transpose),
+                        (torch.nn.ConvTranspose3d, qconfig_transpose),
+                        (torch.nn.Linear, qconfig),
+                        (torch.nn.functional.conv1d, qconfig),
+                        (torch.nn.functional.conv2d, qconfig),
+                        (torch.nn.functional.conv3d, qconfig),
+                        (torch.nn.functional.conv_transpose1d, qconfig_transpose),
+                        (torch.nn.functional.conv_transpose2d, qconfig_transpose),
+                        (torch.nn.functional.conv_transpose3d, qconfig_transpose),
+                        (torch.nn.functional.linear, qconfig)]}
+
+def get_default_qconfig_dict(backend='fbgemm', version=0):
+    qconfig = get_default_qconfig(backend)
+    qconfig_transpose = qconfig
+    if backend == "fbgemm":
+        qconfig_transpose = QConfig(activation=qconfig.activation, weight=MovingAverageMinMaxObserver)
+    return get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
     qconfig = get_default_qat_qconfig(backend, version=version)
-    return {
-        "": qconfig,
-        "object_type": [("reshape", default_reuse_input_qconfig)]
-    }
+    qconfig_transpose = qconfig
+    if backend == "fbgemm":
+        qconfig_transpose = QConfig(activation=qconfig.activation, weight=MovingAverageMinMaxObserver)
+    return get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
 
 def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
