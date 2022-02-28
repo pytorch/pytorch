@@ -277,12 +277,20 @@ if(IOS)
   set(USE_BREAKPAD OFF)
 endif()
 
+option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
-option(USE_XNNPACK "Use XNNPACK" ON)
+# option USE_XNNPACK: try to enable xnnpack by default.
+set(XNNPACK_MIN_CMAKE_VER 3.12)
+cmake_dependent_option(
+    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
+    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
+if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
+  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
+endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
@@ -688,6 +696,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_SLEEF_FOR_ARM_VEC256)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
 endif()
 
 if(USE_XNNPACK)
