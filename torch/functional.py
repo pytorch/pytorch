@@ -2,7 +2,6 @@ from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
 from collections import namedtuple
-from collections.abc import Iterable
 import itertools
 
 import torch
@@ -108,14 +107,14 @@ def broadcast_shapes(*shapes):
         if isinstance(shape, int):
             if max_len < 1:
                 max_len = 1
-        elif isinstance(shape, tuple):
+        elif isinstance(shape, tuple) or isinstance(shape, list):
             s = len(shape)
             if max_len < s:
                 max_len = s
     result = [1] * max_len
     max_num = 0
     for shape in shapes:
-        if not isinstance(shape, Iterable):
+        if isinstance(shape, int):
             if shape < 0:
                 raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
             if max_num < shape:
@@ -123,8 +122,9 @@ def broadcast_shapes(*shapes):
             if shape == 1 or shape == max_num:
                 continue
             else:
-                raise RuntimeError(rf"The size of shape a {shape} must match the size of shape b {result} at non-singleton dimension")
-        elif isinstance(shape, Iterable):
+                raise RuntimeError(rf"The size of shape a {shape} must match the size "
+                                   "of shape b {result} at non-singleton dimension")
+        elif isinstance(shape, tuple) or isinstance(shape, list):
             for i in range(-1, -1 - len(shape), -1):
                 if shape[i] < 0:
                     raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
