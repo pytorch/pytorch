@@ -565,10 +565,23 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 self._maybe_get_last_node_only_observer(modules)
             assert output_activation_post_process is not None
 
+            module_types_supports_reference_pattern = [
+                torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d
+            ]
+            module_types_supports_reference_pattern = [
+                torch.nn.qat.Conv2d,
+                torch.nn.qat.Conv3d,
+                torch.nn.intrinsic.qat.ConvBn2d,
+                torch.nn.intrinsic.qat.ConvBnReLU2d,
+                torch.nn.intrinsic.qat.ConvReLU2d,
+                torch.nn.intrinsic.qat.ConvBn3d,
+                torch.nn.intrinsic.qat.ConvBnReLU3d,
+                torch.nn.intrinsic.qat.ConvReLU3d
+            ]
             # We'll always produce reference pattern for torch.nn.Conv*d,
             # will remove the else branch after we migrated all use cases
             if is_reference or \
-                    type(self.conv) in [torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d] and \
+                    type(self.conv) in module_types_supports_reference_pattern and \
                     dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
@@ -609,8 +622,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                         float_conv = float_conv[0]  # type: ignore[index]
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
-                    # run weight observer
-                    weight_post_process(float_conv.weight)  # type: ignore[operator]
+                # run weight observer
+                # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
+                # In the future, we should require the user to calibrate the model after calling prepare
+                weight_post_process(float_conv.weight)  # type: ignore[operator]
                 weight_qparams = get_qparam_dict(weight_post_process)
                 # hardcoded for now, TODO: expose the api to user,
                 # we can have a map from module to reference module
