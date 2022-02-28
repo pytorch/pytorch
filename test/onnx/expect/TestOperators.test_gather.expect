@@ -106,7 +106,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Shape_0"
     type {
