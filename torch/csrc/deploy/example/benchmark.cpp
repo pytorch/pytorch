@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
 #include <c10/util/irange.h>
-
+#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/script.h>
 
 #include <pthread.h>
@@ -95,7 +95,7 @@ struct RunPython {
 static torch::IValue to_device(const torch::IValue& v, torch::Device to);
 
 static std::vector<torch::IValue> to_device_vec(
-    at::ArrayRef<torch::IValue> vs,
+    multipy::ArrayRef<torch::IValue> vs,
     torch::Device to) {
   std::vector<torch::IValue> results;
   for (const torch::IValue& v : vs) {

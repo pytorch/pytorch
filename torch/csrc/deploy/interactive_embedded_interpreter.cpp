@@ -5,6 +5,7 @@
 #include <c10/util/Flags.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/csrc/deploy/path_environment.h>
+#include <torch/csrc/deploy/ArrayRef.h>
 
 C10_DEFINE_string(
     python_path,

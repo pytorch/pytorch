@@ -7,6 +7,7 @@
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
+#include <torch/csrc/deploy/ArrayRef.h>
 
 #include <future>
 #include <iostream>
@@ -332,7 +333,7 @@ def get_tensor():
   auto I2 = manager.acquireOne();
 
   auto objOnI =
-      I.global("test_module", "get_tensor")(at::ArrayRef<at::IValue>{});
+      I.global("test_module", "get_tensor")(multipy::ArrayRef<at::IValue>{});
   auto replicated = I.createMovable(objOnI);
   auto objOnI2 = I2.fromMovable(replicated);
 
@@ -345,7 +346,7 @@ def get_tensor():
 thread_local int in_another_module = 5;
 TEST(TorchpyTest, SharedLibraryLoad) {
   torch::deploy::InterpreterManager manager(2);
-  auto no_args = at::ArrayRef<torch::deploy::Obj>();
+  auto no_args = multipy::ArrayRef<torch::deploy::Obj>();
   for (auto& interp : manager.allInstances()) {
     auto I = interp.acquireSession();
 
@@ -453,7 +454,7 @@ result = torch.Tensor([1,2,3])
 #if HAS_NUMPY
 TEST(TorchpyTest, TestNumpy) {
   torch::deploy::InterpreterManager m(2);
-  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
+  auto noArgs = multipy::ArrayRef<torch::deploy::Obj>();
   auto I = m.acquireOne();
   auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
   auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});
