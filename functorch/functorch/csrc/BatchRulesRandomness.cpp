@@ -11,24 +11,6 @@
 namespace at {
 namespace functorch {
 
-void check_randomness(RandomnessType randomness, bool any_tensor_batched) {
-  TORCH_CHECK(
-    randomness != RandomnessType::Error,
-    "vmap: called random operation while in randomness error mode. Please either use the "
-    "'same' or 'different' randomness flags on vmap or perform the randomness operation out of vmap"
-  );
-
-  TORCH_CHECK(
-    !(randomness == RandomnessType::Same && any_tensor_batched),
-    "Vmap does not currently support same randomness with a batched tensor input. ",
-    "Please file an issue with functorch"
-  )
-}
-
-void check_randomness(RandomnessType randomness) {
-  check_randomness(randomness, false); // for ops that don't take in any tensors, don't hit same error
-}
-
 template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(IntArrayRef shape, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
