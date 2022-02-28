@@ -15,7 +15,7 @@ namespace at { namespace functorch {
 
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape. ",
-        "Attempted to vmap over ", op.schema().operator_name(), ".",
+        "Attempted to vmap over ", op.schema().operator_name(), ". ",
         "Please voice your support in https://github.com/pytorch/functorch/issues/256");
 }
 #define UNSUPPORTED_DYNAMIC(op) \
@@ -31,7 +31,7 @@ void unsupportedLocalScalarDense(const c10::OperatorHandle& op, torch::jit::Stac
         "rewrite what you're doing with other operations. ",
         "For (2): If you're doing some ",
         "control flow instead, we don't support that yet, please shout over at ",
-        "https://github.com/pytorch/functorch/issues/257 .",
+        "https://github.com/pytorch/functorch/issues/257 . ",
         "For (3): please file an issue.");
 }
 
@@ -59,6 +59,7 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
     UNSUPPORTED_DYNAMIC(nonzero);
+    UNSUPPORTED_DYNAMIC(where);
     UNSUPPORTED_DYNAMIC(unique);
     m.impl("_local_scalar_dense", torch::CppFunction::makeFromBoxedFunction<&unsupportedLocalScalarDense>());
     m.impl("item", torch::CppFunction::makeFromBoxedFunction<&unsupportedItem>());
