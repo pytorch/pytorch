@@ -1467,23 +1467,24 @@ class TestOldViewOps(TestCase):
         res2 = torch.broadcast_tensors(*map(torch.empty, integral_inputs))[0].shape
         self.assertEqual(res1, res2)
 
-        #integral_inputs_with_neg_vals = [1, 1, -12]
-        #with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
-        #    torch.broadcast_shapes(*integral_inputs_with_neg_vals)
+        integral_inputs_with_neg_vals = [1, 1, -12]
+        with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
+            torch.broadcast_shapes(*integral_inputs_with_neg_vals)
 
-        #negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
-        #for s0 in negative_inputs:
-        #    with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
-        #        torch.broadcast_shapes(s0)
+        negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
+        for s0 in negative_inputs:
+            with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
+                torch.broadcast_shapes(s0)
 
-        #    for s1 in negative_inputs:
-        #        with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
-        #            torch.broadcast_shapes(s0, s1)
+            for s1 in negative_inputs:
+                with self.assertRaisesRegex(RuntimeError, "Trying to create tensor with negative dimension"):
+                    torch.broadcast_shapes(s0, s1)
 
-        diff_input_types = (1, (5,))
-        res1 = torch.broadcast_shapes(*diff_input_types)
-        res2 = torch.broadcast_tensors(*map(torch.empty, diff_input_types))[0].shape
-        self.assertEqual(res1, res2)
+        diff_input_types = [(1, (5,)), (3, (1,)), (1, (3, 4))]
+        for s0 in diff_input_types:
+            res1 = torch.broadcast_shapes(*s0)
+            res2 = torch.broadcast_tensors(*map(torch.empty, s0))[0].shape
+            self.assertEqual(res1, res2)
 
     # Skip BFloat16 since numpy does not support it
     @dtypes(*get_all_dtypes(include_bfloat16=False))
