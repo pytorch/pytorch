@@ -63,6 +63,7 @@ from torch._six import string_classes
 from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.xnnpack
 from enum import Enum
 from statistics import mean
 import functools
@@ -978,6 +979,14 @@ def _test_function(fn, device):
         return fn(self, device)
     return run_test_function
 
+def skipIfNoXNNPACK(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.backends.xnnpack.enabled:
+            raise unittest.SkipTest('XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNoLapack(fn):
     @wraps(fn)
@@ -1570,15 +1579,6 @@ class TensorOrArrayPair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    # TODO: As discussed in https://github.com/pytorch/pytorch/issues/68590#issuecomment-975333883,
-    #  this relaxation should only be temporary and this overwrite should be removed completely in the future.
-    def _equalize_attributes(self, actual, expected):
-        actual, expected = super()._equalize_attributes(actual, expected)
-        if not actual.is_sparse:
-            return actual, expected
-
-        return actual.coalesce(), expected.coalesce()
-
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
@@ -1666,6 +1666,7 @@ class TestCase(expecttest.TestCase):
             try:
                 torch.cuda.synchronize()
             except RuntimeError as rte:
+                print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
                 return True
             return False
         else:
@@ -1774,6 +1775,20 @@ class TestCase(expecttest.TestCase):
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
+            if result.wasSuccessful():
+                case = TestCase()
+                if TEST_SAVE_XML is not None:
+                    # This is a big hacky, XMLRunner modifies expected type from TestCase to TestInfo
+                    # Create dummy TestInfo to record results correctly
+                    from xmlrunner.result import _TestInfo  # type: ignore[import]
+                    case = _TestInfo(result, case)
+                    case.output = _TestInfo.ERROR
+                    case.elapsed_time = 0.0
+                    case.test_description = "TestSuiteEarlyFailure"
+                # This shouldn't really happen, but if does add fake failure
+                # For more details see https://github.com/pytorch/pytorch/issues/71973
+                result.failures.append((case, "TestSuite execution was aborted early"))
+                assert result.wasSuccessful() is False
             result.stop()
 
         if not RETRY_TEST_CASES or not using_unittest:
@@ -2118,7 +2133,7 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
+                torch.storage._TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,
