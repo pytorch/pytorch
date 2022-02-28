@@ -146,6 +146,16 @@ void FlatbufferLoader::internal_registerTypeResolver(
   type_resolver_ = type_resolver;
 }
 
+void parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files) {
+  auto extra_files_offsets = module->extra_files();
+  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
+    const auto* extra_file = extra_files_offsets->Get(i);
+    extra_files[extra_file->name()->str()] = extra_file->content()->str();
+  }
+}
+
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
   module_ = module;
@@ -170,8 +180,16 @@ mobile::Module FlatbufferLoader::parseModule(
       all_ivalues_[i] = parseIValue(ival);
     }
   }
-
   IValue& module_ivalue = getIValue(module->state_obj());
+
+  // register functions
+  for (const auto& f : all_functions_) {
+    uint32_t class_index =
+        ivalues->Get(f.first)->val_as_Function()->class_type();
+    ClassTypePtr class_type = all_types_[class_index];
+    class_type->addMethod(f.second);
+  }
+
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
 
@@ -368,14 +386,14 @@ IValue parseIntList(
   return parseListNative<int64_t>(list);
 }
 
-IValue parseBoolList(
+IValue parseDoubleList(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_DoubleList();
   return parseListNative<double>(list);
 }
 
-IValue parseDoubleList(
+IValue parseBoolList(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_BoolList();
