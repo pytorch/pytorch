@@ -3,13 +3,13 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "input"
+    input: "onnx::PRelu_0"
     input: "onnx::PRelu_4"
     output: "3"
     name: "PRelu_0"
     op_type: "PRelu"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 2
     dims: 1
@@ -19,7 +19,7 @@ graph {
     raw_data: "\000\000\200>\000\000\200>"
   }
   input {
-    name: "input"
+    name: "onnx::PRelu_0"
     type {
       tensor_type {
         elem_type: 1

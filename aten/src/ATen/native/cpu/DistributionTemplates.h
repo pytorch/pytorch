@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/Dispatch.h>
 #include <ATen/CPUApplyUtils.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandBase.h>
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
@@ -105,7 +106,7 @@ static void normal_fill_16_AVX2(float *data,
 }
 
 template<typename RNG>
-void normal_fill_AVX2(Tensor& self, const float mean, const float std, RNG generator) {
+void normal_fill_AVX2(const TensorBase &self, const float mean, const float std, RNG generator) {
   float *data = self.data_ptr<float>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -148,7 +149,7 @@ static void normal_fill_16(scalar_t *data, const scalar_t mean, const scalar_t s
 }
 
 template <typename scalar_t, typename RNG>
-void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG generator) {
+void normal_fill(const TensorBase &self, const scalar_t mean, const scalar_t std, RNG generator) {
   scalar_t *data = self.data_ptr<scalar_t>();
   auto size = self.numel();
   std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -172,7 +173,7 @@ void normal_fill(Tensor& self, const scalar_t mean, const scalar_t std, RNG gene
 }
 
 template<typename RNG>
-void normal_kernel(Tensor& self, double mean, double std, RNG generator) {
+void normal_kernel(const TensorBase &self, double mean, double std, RNG generator) {
   auto size = self.numel();
   if (self.scalar_type() == ScalarType::Float && size >= 16 && self.is_contiguous()) {
 #ifdef CPU_CAPABILITY_AVX2
@@ -308,25 +309,25 @@ struct ExponentialKernel {
 // ================================================== Bernoulli =======================================================
 
 template<typename RNG>
-void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
+void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_tensor_cpu_self_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
     using self_t = scalar_t;
     auto p_cpu = p_.to(kCPU);
-    c10::MaybeOwned<Tensor> p = expand_inplace(self, p_cpu);
+    auto p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
         .add_input(*p)
         .check_all_same_dtype(false)
         .build();
-    if (p_.scalar_type() == kDouble) {
+    if (p->scalar_type() == kDouble) {
       cpu_serial_kernel(iter, [&](const double p_val) -> self_t {
         at::bernoulli_distribution<double> bernoulli(p_val);
         return static_cast<self_t>(bernoulli(generator));
       });
     } else {
-      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, p_.scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
+      AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, p->scalar_type(), "bernoulli_tensor_cpu_p_", [&] {
         using p_t = scalar_t;
         cpu_serial_kernel(iter, [&](const p_t p_val) -> self_t {
           at::bernoulli_distribution<float> bernoulli(p_val);
@@ -338,7 +339,7 @@ void bernoulli_kernel(Tensor& self, const Tensor& p_, RNG generator) {
 }
 
 template<typename RNG>
-void bernoulli_kernel(Tensor& self, double p, RNG generator) {
+void bernoulli_kernel(const TensorBase &self, double p, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::BFloat16, self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
@@ -352,10 +353,10 @@ void bernoulli_kernel(Tensor& self, double p, RNG generator) {
 
 template<typename RNG>
 struct BernoulliKernel {
-  void operator()(Tensor& self, double p, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, double p, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p, check_generator<RNG>(gen));
   }
-  void operator()(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  void operator()(const TensorBase &self, const TensorBase &p_, c10::optional<Generator> gen) {
     bernoulli_kernel(self, p_, check_generator<RNG>(gen));
   }
 };

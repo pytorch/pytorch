@@ -418,6 +418,45 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .GS(appendNode)
       .GS(prependNode)
+      // NB: insert_point_guard defined over direct modification of insert point
+      .def(
+          "insert_point_guard",
+          [](Graph& g, Node* n) {
+            return py::module::import("torch.jit._ir_utils")
+                .attr("insert_point_guard")(g, n);
+          })
+      .def(
+          "insert_point_guard",
+          [](Graph& g, Block* b) {
+            return py::module::import("torch.jit._ir_utils")
+                .attr("insert_point_guard")(g, b);
+          })
+      .GS(insertPoint)
+      .def("setInsertPoint", [](Graph& g, Node* n) { g.setInsertPoint(n); })
+      .def("setInsertPoint", [](Graph& g, Block* n) { g.setInsertPoint(n); })
+      .def(
+          "insertGraph",
+          [](Graph& g, Graph& callee, std::vector<Value*> inputs) {
+            return insertGraph(g, callee, inputs);
+          })
+      .def(
+          "insertGraph",
+          [](Graph& g,
+             Graph& callee,
+             std::vector<Value*> inputs,
+             std::unordered_map<Value*, Value*> value_map) {
+            return insertGraph(g, callee, inputs, value_map);
+          })
+      .def(
+          "insert",
+          [](Graph& g, Symbol opname, std::vector<Value*> args) {
+            std::vector<NamedValue> args_named;
+            args_named.reserve(args.size());
+            for (Value* v : args) {
+              args_named.emplace_back(v);
+            }
+            return g.insert(opname, args_named);
+          })
       .def(
           "makeMultiOutputIntoTuple",
           [](Graph& g) {
@@ -432,6 +471,7 @@ void initPythonIRBindings(PyObject* module_) {
           "insertConstant",
           [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
       .GS(lint)
+      .def("block", [](Graph& g) { return g.block(); })
       .GS(insertNode);
 #undef GS
 
@@ -540,6 +580,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("prev", [](Node& n) { return n.prev(); })
+      .def("matches", [](Node& n, const char* s) { return n.matches(s); })
       .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
@@ -642,6 +684,7 @@ void initPythonIRBindings(PyObject* module_) {
       .CREATE_ACCESSOR(Ints, is)
       .CREATE_ACCESSOR(Graph, g)
       .CREATE_ACCESSOR(Graphs, gs)
+      .CREATE_ACCESSOR(IValue, ival)
 #undef CREATE_ACCESSOR
       // Tensor (t_) -- manually written to unwrap the variable into a tensor.
       .def(
