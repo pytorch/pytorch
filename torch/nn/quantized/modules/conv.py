@@ -244,7 +244,7 @@ class _ConvNd(ReferenceableQuantizedModule):
             ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
                           utilities or provided by the user
             output_scale (float): scale for output Tensor
-            zero_point (int): zero point for output Tensor
+            output_zero_point (int): zero point for output Tensor
         """
         qconv = cls(
             ref_qconv.in_channels,
@@ -622,6 +622,33 @@ class _ConvTransposeNd(_ConvNd):
             qconv.zero_point = int(act_zp)
             return qconv
 
+    @staticmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            output_zero_point (int): zero point for output Tensor
+        """
+        qconv = cls(
+            ref_qconvt.in_channels,
+            ref_qconvt.out_channels,
+            ref_qconvt.kernel_size,  # type: ignore[arg-type]
+            ref_qconvt.stride,  # type: ignore[arg-type]
+            ref_qconvt.padding,  # type: ignore[arg-type]
+            ref_qconvt.output_padding,  # type: ignore[arg-type]
+            ref_qconvt.groups,
+            ref_qconvt.bias is not None,  # type: ignore[arg-type]
+            ref_qconvt.dilation,  # type: ignore[arg-type]
+            ref_qconvt.padding_mode,
+            device=ref_qconvt.weight.device,
+            dtype=ref_qconvt.weight.dtype)
+        qweight = ref_qconvt.get_quantized_weight()
+        qconv.set_weight_bias(qweight, ref_qconvt.bias)
+        qconv.scale = float(output_scale)
+        qconv.zero_point = int(output_zero_point)
+        return qconv
 
 class ConvTranspose1d(_ConvTransposeNd):
     r"""Applies a 1D transposed convolution operator over an input image
@@ -708,6 +735,10 @@ class ConvTranspose1d(_ConvTransposeNd):
         return torch.ops.quantized.conv_transpose1d(
             input, self._packed_params, self.scale, self.zero_point)
 
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
+
 
 class ConvTranspose2d(_ConvTransposeNd):
     r"""Applies a 2D transposed convolution operator over an input image
@@ -791,6 +822,10 @@ class ConvTranspose2d(_ConvTransposeNd):
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         return ops.quantized.conv_transpose2d(
             input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
 
 class ConvTranspose3d(_ConvTransposeNd):
     r"""Applies a 3D transposed convolution operator over an input image
@@ -876,3 +911,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             raise ValueError("Input shape must be `(N, C, T, H, W)`!")
         return ops.quantized.conv_transpose3d(
             input, self._packed_params, self.scale, self.zero_point)
+
+    @classmethod
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+        return _ConvTransposeNd.from_reference(cls, ref_qconvt, output_scale, output_zero_point)
