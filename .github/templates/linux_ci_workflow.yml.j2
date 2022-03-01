@@ -56,6 +56,7 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
 {%- if enable_xla_test == 1 %}
   # This is used for XLA tests only
   XLA_CUDA: 0
@@ -289,6 +290,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

@@ -36,6 +36,7 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
 concurrency:
   group: linux-xenial-py3-clang5-mobile-build-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

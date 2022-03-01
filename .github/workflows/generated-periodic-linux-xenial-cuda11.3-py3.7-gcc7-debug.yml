@@ -33,6 +33,7 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
   DEBUG: 1
 concurrency:
   group: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -401,6 +402,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -655,6 +657,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -909,6 +912,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

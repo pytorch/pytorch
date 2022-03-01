@@ -25,6 +25,7 @@ env:
   IN_CI: 1
   IS_GHA: 1
   PYTORCH_RETRY_TEST_CASES: 1
+  PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
 
   # Set xcode xcode version to 12.4
   DEVELOPER_DIR: /Applications/Xcode_12.4.app/Contents/Developer
