@@ -1318,8 +1318,7 @@ class FullyShardedDataParallel(nn.Module):
                 # backward pass, accumulate gradients into it here, and set
                 # `param.grad` with the accumulated value at the end of the
                 # backward pass in preparation for the optimizer step.
-                accumulate_grad = \
-                    getattr(param, "_saved_grad_shard", None) is not None
+                accumulate_grad = hasattr(param, "_saved_grad_shard")
                 if accumulate_grad:
                     p_assert(
                         param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
@@ -1434,6 +1433,11 @@ class FullyShardedDataParallel(nn.Module):
                             f"p._saved_grad_shard={p._saved_grad_shard.device}"
                         )
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
+                    else:
+                        p_assert(
+                            not p._is_sharded, "All sharded parameters should "
+                            "use `_saved_grad_shard`"
+                        )
                     if hasattr(p, "_saved_grad_shard"):
                         delattr(p, "_saved_grad_shard")
 
