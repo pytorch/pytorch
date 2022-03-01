@@ -1313,7 +1313,7 @@ class FullyShardedDataParallel(nn.Module):
                 if self.gradient_postdivide_factor > 1:
                     # Average grad by world_size for consistency with PyTorch DDP.
                     output.div_(self.gradient_postdivide_factor)
-                # To support gradient accumulation without `no_sync()`, we save
+                # To support gradient accumulation outside `no_sync()`, we save
                 # the gradient data to `param._saved_grad_shard` before the
                 # backward pass, accumulate gradients into it here, and set
                 # `param.grad` with the accumulated value at the end of the
@@ -1325,6 +1325,11 @@ class FullyShardedDataParallel(nn.Module):
                         "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
                         f"existing shape={param._saved_grad_shard.shape} "
                         f"new shape={output.shape}"  # type: ignore[attr-defined]
+                    )
+                    p_assert(
+                        not self.cpu_offload.offload_params,
+                        "FSDP does not support gradient accumulation outside "
+                        "`no_sync()` while using CPU offloading"
                     )
                     param._saved_grad_shard.data += output.data  # type: ignore[attr-defined]
                 else:
@@ -1627,6 +1632,10 @@ class FullyShardedDataParallel(nn.Module):
         .. note:: This likely results in higher memory usage because FSDP will
             accumulate the full model gradients (instead of gradient shards)
             until the eventual sync.
+
+        .. note:: When used with CPU offloading, the gradients will not be
+            offloaded to CPU when inside the context manager. Instead, they
+            will only be offloaded right after the eventual sync.
         """
         self._lazy_init()
         assert self._is_root, "`no_sync()` on inner FSDP instances is not supported"
