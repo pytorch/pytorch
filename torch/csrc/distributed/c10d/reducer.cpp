@@ -1097,7 +1097,7 @@ void Reducer::initialize_buckets(
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
-  const auto& gradients = bucket.gradients;
+  const auto &gradients = bucket.gradients;
   for (const auto i : c10::irange(bucket.variables.size())) {
     auto& v = bucket.variables[i];
     const auto offset = bucket.offsets[i];
