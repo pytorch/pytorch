@@ -199,6 +199,149 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   }
   return dst;
 }
+namespace ir {
+namespace ops {
+
+class ToCopy : public torch::lazy::TsNode {
+ public:
+  ToCopy(const torch::lazy::Value& self, const c10::optional<at::ScalarType>& dtype, const c10::optional<at::Layout>& layout, const c10::optional<at::Device>& device, const c10::optional<bool>& pin_memory, const bool& non_blocking, const c10::optional<at::MemoryFormat>& memory_format, std::vector<torch::lazy::Shape>&& shapes)
+      : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::_to_copy),
+              {self}, std::move(shapes),
+              /* num_outputs */ 1,
+              torch::lazy::MHash(dtype, layout, device, pin_memory, non_blocking, memory_format)),
+
+        dtype(dtype),
+        layout(layout),
+        device(device),
+        pin_memory(pin_memory),
+        non_blocking(non_blocking),
+        memory_format(memory_format)
+
+  {
+    
+  }
+
+  std::string ToString() const override {
+    std::stringstream ss;
+    ss << torch::lazy::TsNode::ToString();
+    if (dtype.has_value()) {
+    ss << ", dtype=" << dtype.value();
+} else {
+    ss << ", dtype=null";
+}
+    if (layout.has_value()) {
+    ss << ", layout=" << layout.value();
+} else {
+    ss << ", layout=null";
+}
+    if (device.has_value()) {
+    ss << ", device=" << device.value();
+} else {
+    ss << ", device=null";
+}
+    if (pin_memory.has_value()) {
+    ss << ", pin_memory=" << pin_memory.value();
+} else {
+    ss << ", pin_memory=null";
+}
+    ss << ", non_blocking=" << non_blocking;
+    if (memory_format.has_value()) {
+    ss << ", memory_format=" << memory_format.value();
+} else {
+    ss << ", memory_format=null";
+}
+    return ss.str();
+  }
+
+  torch::lazy::TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                   torch::lazy::TSLoweringContext* loctx) const override {
+        std::vector<torch::jit::NamedValue> arguments;
+    std::vector<torch::jit::NamedValue> kwarguments;
+    arguments.reserve(1);
+    kwarguments.reserve(6);
+    size_t i = 0;
+    arguments.emplace_back(loctx->GetOutputOp(operand(i++)));
+    kwarguments.emplace_back("dtype", dtype);
+    kwarguments.emplace_back("layout", layout);
+    kwarguments.emplace_back("device", device);
+    kwarguments.emplace_back("pin_memory", pin_memory);
+    kwarguments.emplace_back("non_blocking", non_blocking);
+    kwarguments.emplace_back("memory_format", memory_format);
+    torch::lazy::TSOpVector _to_copy_out = torch::lazy::LowerTSBuiltin(function, op().op, arguments, kwarguments);
+    CHECK_EQ(_to_copy_out.size(), 1);
+
+    return _to_copy_out;
+
+  }
+
+  c10::optional<at::ScalarType> dtype;
+  c10::optional<at::Layout> layout;
+  c10::optional<at::Device> device;
+  c10::optional<bool> pin_memory;
+  bool non_blocking;
+  c10::optional<at::MemoryFormat> memory_format;
+  
+
+};
+
+} // namespace ops
+} // namespace ir
+
+at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
+                                         c10::optional<at::ScalarType> dtype,
+                                         c10::optional<at::Layout> layout,
+                                         c10::optional<at::Device> device,
+                                         c10::optional<bool> pin_memory,
+                                         bool non_blocking,
+                                         c10::optional<at::MemoryFormat> memory_format) {
+    
+    if (force_eager_fallback(at::aten::_to_copy)) {
+      TORCH_INTERNAL_ASSERT(false, "Fallback is currently impossible for _to_copy since the fallback helper itself reinvokes _to_copy");
+    }
+    auto options = self.options();
+    if (dtype) {
+      options.dtype(dtype);
+    }
+    if (layout) {
+      options.layout(layout);
+    }
+    // TODO pin_memory?
+    if (memory_format) {
+      options.memory_format(memory_format);
+    }
+
+    TORCH_LAZY_FN_COUNTER("lazy::");
+    auto lazy_self = torch::lazy::TryGetLtcTensor(self);
+    if (!lazy_self && device && device->type() == c10::kLazy) {
+      // this is a valid '.to(lazy)' call, so it's the one case where we want to support non-lazy self
+      lazy_self = torch::lazy::GetOrCreateLtcTensor(self.to(options, /*non_blocking=*/false, /*copy=*/true),
+                                                    torch::lazy::atenDeviceToBackendDevice(*device));
+      return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
+    } else if(device->type() != c10::kLazy){
+      TORCH_INTERNAL_ASSERT(lazy_self);
+      auto eager_tensor = lazy_self.ToTensor(/*detached=*/true);
+      eager_tensor.print();
+      // TODO: update conditional to handle device->type() == lazy && ordinal != self ordinal (e.g. lazy0->lazy1)
+      return eager_tensor.to(options, /*non_blocking=*/false, /*copy=*/true);
+    } else {
+      // We're not changing the device, but we may want to capture the to.dtype as part of the IR graph
+      auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
+      TORCH_INTERNAL_ASSERT(shapes.size() == 1);
+      auto node = torch::lazy::MakeNode<ir::ops::ToCopy>(lazy_self.GetIrValue(),
+                            dtype,
+                            layout,
+                            device,
+                            pin_memory,
+                            non_blocking,
+                            memory_format,
+                            std::move(shapes));
+
+      auto result = torch::lazy::CreateAtenFromLtcTensor(
+              torch::lazy::LazyTensor::Create(std::move(node), lazy_self.GetDevice()));
+      return result;
+    }
+};
+
 
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size, c10::optional<at::ScalarType> dtype,

@@ -164,6 +164,7 @@ supported:
   - stack
   - t
   - t_
+  - _to_copy
   - transpose.int
   - transpose_
   - unsqueeze
