@@ -8,7 +8,6 @@
 
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>
-#include <cusolverSp.h>
 #endif
 
 #include <ATen/core/ATenGeneral.h>
@@ -75,7 +74,6 @@ TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 
 #ifdef CUDART_VERSION
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
-TORCH_CUDA_CPP_API cusolverSpHandle_t getCurrentCUDASolverSpHandle();
 #endif
 
 } // namespace cuda
