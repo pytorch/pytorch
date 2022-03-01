@@ -4,7 +4,7 @@ import hashlib
 import torch
 import torch.fx
 from typing import Dict, Any, TYPE_CHECKING
-from torch.fx.node import _get_qualified_name
+from torch.fx.node import _get_qualified_name, _format_arg
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
 from itertools import chain
@@ -130,19 +130,34 @@ if HAS_PYDOT:
             return _get_qualified_name(target)
 
         def _get_node_label(self, module: torch.fx.GraphModule, node: torch.fx.Node) -> str:
-            label = "{" + f"{node.name}|op_code={node.op}"
+            def _get_str_for_args_kwargs(arg):
+                if isinstance(arg, tuple):
+                    s = r",\n".join(_format_arg(a, max_list_len=10) for a in arg)
+                    return fr"(\l{s},\n)".replace("{", r"\{").replace("}", r"\}")
+                if isinstance(arg, dict):
+                    s = r",\n".join(f"{k}: {_format_arg(v, max_list_len=10)}" for k, v in arg.items())
+                    return fr"{{\l{s},\n}}".replace("{", r"\{").replace("}", r"\}")
+                return _format_arg(arg).replace("{", r"\{").replace("}", r"\}")
+
+
+            label = "{" + f"name=%{node.name}|op_code={node.op}\n"
 
             if node.op == "call_module":
                 leaf_module = self._get_leaf_node(module, node)
-                label += r"\l" + self._typename(leaf_module) + r"\l|"
+                label += r"\n" + self._typename(leaf_module) + r"\n|"
                 extra = ""
                 if hasattr(leaf_module, "__constants__"):
-                    extra = r"\l".join(
+                    extra = r"\n".join(
                         [f"{c}: {getattr(leaf_module, c)}" for c in leaf_module.__constants__]  # type: ignore[union-attr]
                     )
-                label += extra + r"\l"
+                label += extra + r"\n"
             else:
-                label += "|" + self._typename(node.target) + r"\l"
+                label += f"|target={self._typename(node.target)}" + r"\n"
+                if len(node.args) > 0:
+                    label += f"|args={_get_str_for_args_kwargs(node.args)}" + r"\l"
+                if len(node.kwargs) > 0:
+                    label += f"|kwargs={_get_str_for_args_kwargs(node.kwargs)}" + r"\l"
+                label += f"|num_users={len(node.users)}" + r"\n"
 
             tensor_meta = node.meta.get('tensor_meta')
             label += self._tensor_meta_to_label(tensor_meta)
@@ -176,10 +191,10 @@ if HAS_PYDOT:
             result = ""
             if not hasattr(tm, "dtype"):
                 print("tm", tm)
-            result += "|" + "dtype" + "=" + str(tm.dtype) + r"\l"
-            result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\l"
-            result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\l"
-            result += "|" + "stride" + "=" + str(tm.stride) + r"\l"
+            result += "|" + "dtype" + "=" + str(tm.dtype) + r"\n"
+            result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\n"
+            result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\n"
+            result += "|" + "stride" + "=" + str(tm.stride) + r"\n"
             if tm.is_quantized:
                 assert tm.qparams is not None
                 assert "qscheme" in tm.qparams
@@ -188,23 +203,23 @@ if HAS_PYDOT:
                         torch.per_tensor_affine,
                         torch.per_tensor_symmetric,
                 }:
-                    result += "|" + "q_scale" + "=" + str(tm.qparams["scale"]) + r"\l"
-                    result += "|" + "q_zero_point" + "=" + str(tm.qparams["zero_point"]) + r"\l"
+                    result += "|" + "q_scale" + "=" + str(tm.qparams["scale"]) + r"\n"
+                    result += "|" + "q_zero_point" + "=" + str(tm.qparams["zero_point"]) + r"\n"
                 elif qscheme in {
                         torch.per_channel_affine,
                         torch.per_channel_symmetric,
                         torch.per_channel_affine_float_qparams,
                 }:
-                    result += "|" + "q_per_channel_scale" + "=" + str(tm.qparams["scale"]) + r"\l"
-                    result += "|" + "q_per_channel_zero_point" + "=" + str(tm.qparams["zero_point"]) + r"\l"
-                    result += "|" + "q_per_channel_axis" + "=" + str(tm.qparams["axis"]) + r"\l"
+                    result += "|" + "q_per_channel_scale" + "=" + str(tm.qparams["scale"]) + r"\n"
+                    result += "|" + "q_per_channel_zero_point" + "=" + str(tm.qparams["zero_point"]) + r"\n"
+                    result += "|" + "q_per_channel_axis" + "=" + str(tm.qparams["axis"]) + r"\n"
                 else:
                     raise RuntimeError(f"Unsupported qscheme: {qscheme}")
-                result += "|" + "qscheme" + "=" + str(tm.qparams["qscheme"]) + r"\l"
+                result += "|" + "qscheme" + "=" + str(tm.qparams["qscheme"]) + r"\n"
             return result
 
         def _get_tensor_label(self, t: torch.Tensor) -> str:
-            return str(t.dtype) + str(list(t.shape)) + r"\l"
+            return str(t.dtype) + str(list(t.shape)) + r"\n"
 
         def _to_dot(self, graph_module: torch.fx.GraphModule, name: str, ignore_getattr: bool) -> pydot.Dot:
             """
