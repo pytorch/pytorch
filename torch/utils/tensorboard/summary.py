@@ -20,9 +20,6 @@ from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
 
-logger = logging.getLogger(__name__)
-
-
 def _calc_scale_factor(tensor):
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
     return 1 if converted.dtype == np.uint8 else 255
@@ -96,10 +93,10 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     # hparam_infos=[hp], metric_infos=[mt], user='tw')
 
     if not isinstance(hparam_dict, dict):
-        logger.warning('parameter: hparam_dict should be a dictionary, nothing logged.')
+        logging.warning('parameter: hparam_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: hparam_dict should be a dictionary, nothing logged.')
     if not isinstance(metric_dict, dict):
-        logger.warning('parameter: metric_dict should be a dictionary, nothing logged.')
+        logging.warning('parameter: metric_dict should be a dictionary, nothing logged.')
         raise TypeError('parameter: metric_dict should be a dictionary, nothing logged.')
 
     hparam_domain_discrete = hparam_domain_discrete or {}
@@ -500,7 +497,7 @@ def make_video(tensor, fps):
     try:
         os.remove(filename)
     except OSError:
-        logger.warning('The temporary file used by moviepy cannot be deleted.')
+        logging.warning('The temporary file used by moviepy cannot be deleted.')
 
     return Summary.Image(height=h, width=w, colorspace=c, encoded_image_string=tensor_string)
 

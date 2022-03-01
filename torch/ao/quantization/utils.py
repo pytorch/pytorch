@@ -25,9 +25,6 @@ module_type_list = {
     torch.nn.MaxPool2d,
     torch.nn.MaxPool3d,
     torch.nn.Identity,
-    torch.nn.Hardsigmoid,
-    torch.nn.Sigmoid,
-    torch.nn.Tanh,
 }
 func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
@@ -39,14 +36,10 @@ func_list = {
     torch.nn.functional.relu,
     torch.nn.functional.hardtanh,
     torch.nn.functional.hardtanh_,
-    torch.nn.functional.hardsigmoid,
-    torch.nn.functional.sigmoid,
     torch.transpose,
     torch.repeat_interleave,
-    torch.sigmoid,
     torch.squeeze,
     torch.stack,
-    torch.tanh,
     torch.unsqueeze,
     torch.cat,
 }
@@ -57,21 +50,15 @@ method_list = {
     'contiguous',
     'detach',
     'detach_',
-    'hardsigmoid',
-    'hardsigmoid_',
     'permute',
     'repeat',
     'repeat_interleave',
     'reshape',
     'resize_',
     'shape',
-    'sigmoid',
-    'sigmoid_',
     'size',
     'squeeze',
     'squeeze_',
-    'tanh',
-    'tanh_',
     'transpose',
     'unsqueeze',
     'unsqueeze_',
@@ -79,7 +66,6 @@ method_list = {
 }
 
 def check_node(node, modules):
-    # TODO: reuse is_fixed_qparam_node after we move this function to _lower_to_native_backend.py
     is_call_function = node.op == "call_function" and node.target in func_list
     is_call_method = node.op == "call_method" and node.target in method_list
     is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
@@ -271,10 +257,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
         # The actual values of initial_qmin and initial_qmax will be reset below.
-        if dtype == torch.qint32:
-            initial_quant_min, initial_quant_max = 0, 2**31 - 1
-        else:
-            initial_quant_min, initial_quant_max = 0, 255
+        initial_quant_min, initial_quant_max = 0, 255
         # The following assignment of self.qmin and self.qmax to the local variables and the if check refine the
         # attribute from Optional valid integers for use, based on TorchScript's requirements.
         custom_quant_min, custom_quant_max = quant_min, quant_max
@@ -285,14 +268,9 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
             )
 
         qrange_len = initial_quant_max - initial_quant_min + 1
-        if dtype == torch.qint8:
-            assert (
-                0 < qrange_len <= 256
-            ), "quantization range should be positive and not exceed the maximum bit range (=256)."
-        elif dtype == torch.qint32:
-            assert (
-                0 < qrange_len <= 2**31
-            ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
+        assert (
+            0 < qrange_len <= 256
+        ), "quantization range should be positive and not exceed the maximum bit range (=256)."
         if dtype == torch.qint8:
             quant_min, quant_max = -qrange_len // 2, qrange_len // 2 - 1
         else:
@@ -311,8 +289,6 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
                 quant_min, quant_max = 0, 127
             else:
                 quant_min, quant_max = 0, 255
-        elif dtype == torch.qint32:
-            quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
         else:
             quant_min, quant_max = 0, 15
     return quant_min, quant_max

@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/macros/Export.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
@@ -106,8 +106,9 @@ namespace cuda {
 //!   }
 //! }
 //!
-std::vector<Expr*> processMisalignedVectorization(
-    const std::vector<Expr*>& exprs);
+std::vector<kir::Expr*> processMisalignedVectorization(
+    Fusion* fusion,
+    const std::vector<kir::Expr*>& exprs);
 
 bool containsAnyDirectChildMisalignedVectorize(const kir::ForLoop* fl);
 

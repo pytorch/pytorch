@@ -5,8 +5,6 @@ import torch.distributed as dist
 
 from . import default_hooks as default
 
-logger = logging.getLogger(__name__)
-
 
 class PostLocalSGDState(object):
     r"""
@@ -30,7 +28,7 @@ class PostLocalSGDState(object):
         subgroup,
         start_localSGD_iter,
     ):
-        logger.info(
+        logging.info(
             "Local SGD will be started after {} iterations".format(start_localSGD_iter)
         )
 
@@ -49,7 +47,7 @@ class PostLocalSGDState(object):
             self.iter += 1
 
         if self.iter == self.start_localSGD_iter:
-            logger.info(
+            logging.info(
                 "Start to apply local SGD after {} iterations.".format(self.iter)
             )
 

@@ -2,7 +2,7 @@
 
 #include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/core/TensorBase.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -378,14 +378,12 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
 template <typename scalar1, typename scalar2, int step, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-inline bool CUDA_tensor_apply2(at::TensorBase a,
-                               at::TensorBase b,
+inline bool CUDA_tensor_apply2(at::Tensor a,
+                               at::Tensor b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {
-  TORCH_CHECK(a.device().is_cuda() && b.device().is_cuda(),
-              "CUDA_tensor_apply2: Expected tensors to have CUDA DeviceType, but got "
-              "tensors with type ", a.device().type(), " and ", b.device().type());
+  checkDeviceType("CUDA_tensor_apply2", {a, b}, DeviceType::CUDA);
   int64_t totalElements = a.numel();
 
   if (totalElements != b.numel()) {
@@ -415,8 +413,8 @@ inline bool CUDA_tensor_apply2(at::TensorBase a,
   This ensures that each element of the tensor is operated on once and only
   once.
   */
-  TensorBase oldA;
-  TensorBase oldB;
+  Tensor oldA;
+  Tensor oldB;
 
   if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
     // Must perform in contiguous space
@@ -526,8 +524,8 @@ inline bool CUDA_tensor_apply2(at::TensorBase a,
 template <typename scalar1, typename scalar2, typename Op,
           int max_threads_per_block=AT_APPLY_THREADS_PER_BLOCK,
           int min_blocks_per_sm=AT_APPLY_BLOCKS_PER_SM>
-inline bool CUDA_tensor_apply2(const at::TensorBase &a,
-                               const at::TensorBase &b,
+inline bool CUDA_tensor_apply2(at::Tensor a,
+                               at::Tensor b,
                                const Op op,
                                TensorArgType aType = TensorArgType::ReadWrite,
                                TensorArgType bType = TensorArgType::ReadOnly) {

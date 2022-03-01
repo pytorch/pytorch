@@ -25,6 +25,7 @@ env:
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
   IS_GHA: 1
+  ENABLE_DEPLOY_TEST: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
   IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
@@ -97,7 +98,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
@@ -301,8 +301,10 @@ jobs:
           if-no-files-found: warn
           path:
             test-jsons-*.zip
-      - name: Upload test statistics
+      - name: Display and upload test statistics (Click Me)
         if: always()
+        # temporary hack: set CIRCLE_* vars, until we update
+        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}

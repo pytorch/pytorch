@@ -14,7 +14,7 @@ from torch.utils.data.datapipes.utils.decoder import (
 @functional_datapipe('routed_decode')
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     r"""
-    Decodes binary streams from input DataPipe, yields pathname and decoded data
+    Decode binary streams from input DataPipe, yield pathname and decoded data
     in a tuple (functional name: ``routed_decode``).
 
     Args:

@@ -67,8 +67,6 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Python:
       return "Python";
-    case DispatchKey::PythonTLSSnapshot:
-      return "PythonTLSSnapshot";
 
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
@@ -250,7 +248,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
-      {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
       {"Named", c10::DispatchKey::Named},
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},

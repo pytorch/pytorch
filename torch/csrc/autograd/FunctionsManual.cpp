@@ -12,7 +12,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/Activation.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
@@ -908,7 +907,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
         self, p, reduce_dims, /*keepdim=*/true);
   }
 
-  const auto real_acc_type = c10::toRealValueType(acc_type);
+  const auto real_acc_type = c10::toValueType(acc_type);
   auto grad_output = (self.conj() * grad);
   // vector_norm output is real, so grad_output must also be real
   if (real_acc_type != acc_type) {
@@ -2339,47 +2338,6 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
-Tensor gelu_double_backward(
-                const Tensor & ggI,
-                const Tensor & gO,
-                const Tensor & input,
-                c10::string_view approximate) {
-  //if (at::native::get_gelutype_enum(approximate) == at::native::GeluType::Tanh) {
-  if (approximate == "tanh") {
-    constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
-    constexpr auto kKappa = 0.044715;
-
-    auto inner = kBeta * (input + kKappa * pow(input, 3));
-    auto tanh_inner = tanh(inner);
-    auto sech_inner = 1 / cosh(inner);
-
-    auto f = 0.5 * input;
-    auto g = 1 - tanh_inner * tanh_inner;
-    auto h = kBeta * (1 + 3 * kKappa * input * input);
-
-    auto f_prime_gh = 0.5 * g * h;
-
-    auto g_prime = (2 * sech_inner) * (-sech_inner * tanh_inner) * h;
-    auto g_prime_fh = f * h * g_prime;
-
-    auto h_prime = 6 * kKappa * input * kBeta;
-    auto h_prime_fg = f * g * h_prime;
-
-    // left_derivative = f_prime_gh
-    // right_derivative = f_prime_gh + g_prime_fh + h_prime_fg
-    // dgrad_dX = left_derivative + right_derivative
-    auto gI = ggI * gO * (2 * f_prime_gh + g_prime_fh + h_prime_fg);
-    return gI;
-  } else {
-    constexpr auto kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-    auto input_sq = input * input;
-    auto pdf = kBeta * at::exp(-0.5 * input_sq);
-    auto dgrad_dInput = 2 * pdf - input_sq * pdf;
-    auto gI = ggI * gO * dgrad_dInput;
-    return gI;
-  }
-}
-
 Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -3281,7 +3239,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     return svd_backward(u_grad, s_grad, vh_grad, u, s, vh);
   };
 
-  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
+  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
   auto singular_det_cutoff = eps * at::linalg_matrix_norm(self);
 
   if (self.dim() == 2) {

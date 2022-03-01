@@ -18,9 +18,6 @@ from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.distributed.optim.utils import functional_optim_map
 from torch.optim import Optimizer
 
-
-logger = logging.getLogger(__name__)
-
 __all__ = ["ZeroRedundancyOptimizer"]
 
 
@@ -406,7 +403,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         else:
             self._overlap_info: _OverlapInfo = _OverlapInfo(self.world_size)
             if parameters_as_bucket_view:
-                logger.warning(
+                logging.warning(
                     "`parameters_as_bucket_view=True` will be ignored since "
                     "`overlap_with_ddp=True`; instead, a different bucketing "
                     "strategy will be used"
@@ -995,7 +992,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "does not support changing parameter trainability at run "
                     "time"
                 )
-            logger.warning(
+            logging.warning(
                 "ZeroRedundancyOptimizer detected that the trainable "
                 "parameters changed; rebuilding the parameter buckets if "
                 "enabled"
@@ -1041,7 +1038,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         .. note: Any extra parameters are passed to the base optimizer as-is.
         """
         if self._overlap_with_ddp:
-            logger.warning(
+            logging.warning(
                 "`step()` should not be included in the training loop when "
                 "`overlap_with_ddp=True`"
             )
@@ -1376,7 +1373,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             if "_allow_empty_param_list" in inspect.signature(self._optim_constructor).parameters:
                 self.optim: Any = self._optim_constructor(params, **self._optim_defaults, _allow_empty_param_list=True)
             else:
-                logger.warning(
+                logging.warning(
                     f"{self._optim_constructor} does not support the argument "
                     "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
                     "error due to an empty parameter list"
@@ -1387,12 +1384,12 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
                 local_numel = sum(p.numel() for p in params)
                 num_assigned_buckets = len(self._bucket_assignments_per_rank[self.global_rank])
-                logger.info(
+                logging.info(
                     f"rank {self.global_rank} with {local_numel} parameters "
                     f"across {num_assigned_buckets} buckets"
                 )
                 if self.global_rank == 0:
-                    logger.info(
+                    logging.info(
                         f"{len(self._overlap_info.params_per_bucket)} DDP "
                         f"buckets and "
                         f"{self._overlap_info.num_bucket_assignments} bucket "
@@ -1506,7 +1503,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 # Translate the passed-in optimizer class to its functional
                 # equivalent if `overlap_with_ddp=True`
                 optim_constructor = functional_optim_map[optimizer_class]
-                logger.info(
+                logging.info(
                     f"Using the functional optimizer {optim_constructor} "
                     f"instead of {optimizer_class} since "
                     "`overlap_with_ddp=True`"

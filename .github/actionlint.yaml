@@ -9,4 +9,3 @@ self-hosted-runner:
     - windows.4xlarge
     - windows.8xlarge.nvidia.gpu
     - bm-runner
-    - linux.rocm.gpu

@@ -905,16 +905,15 @@ Tensor& index_select_out_cuda(
 }
 
 Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  Tensor out = at::empty({0}, self.options());
-  at::native::index_select_out_cuda(self, dim, index, out);
-  return out;
-}
-
-Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  TORCH_CHECK(
-    self.qscheme() == kPerTensorAffine,
-    "Only per_tensor quantized quantized tensors are supported by index_select.")
-  Tensor out = at::empty_quantized({0}, self);
+  Tensor out;
+  if (self.is_quantized()){
+    TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per_tensor quantized quantized tensors are supported by index_select.")
+    out = at::empty_quantized({0}, self);
+  } else {
+    out = at::empty({0}, self.options());
+  }
   at::native::index_select_out_cuda(self, dim, index, out);
   return out;
 }

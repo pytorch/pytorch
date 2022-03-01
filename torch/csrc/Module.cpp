@@ -58,7 +58,6 @@
 #include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
-#include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
@@ -846,7 +845,6 @@ PyObject* initModule() {
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
-  torch::lazy::initLazyBindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif

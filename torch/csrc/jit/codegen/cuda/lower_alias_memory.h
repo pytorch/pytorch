@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/macros/Export.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -28,7 +28,8 @@ namespace cuda {
 //!          is not used after this op:
 //! then alias output Allocate to input Allocate.
 //!
-std::vector<Expr*> reuseMemoryAllocations(const std::vector<Expr*>& exprs);
+std::vector<kir::Expr*> reuseMemoryAllocations(
+    const std::vector<kir::Expr*>& exprs);
 
 } // namespace cuda
 } // namespace fuser

@@ -40,12 +40,6 @@ function extract_all_from_image_name() {
   done
 }
 
-# Use the same pre-built XLA test image from PyTorch/XLA
-if [[ "$image" == *xla* ]]; then
-  echo "Using pre-built XLA test image..."
-  exit 0
-fi
-
 if [[ "$image" == *-xenial* ]]; then
   UBUNTU_VERSION=16.04
 elif [[ "$image" == *-artful* ]]; then
@@ -342,6 +336,7 @@ docker build \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "USE_DEPLOY=${USE_DEPLOY}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

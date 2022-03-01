@@ -518,6 +518,7 @@ test_torch_deploy() {
   ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
   "$TORCH_BIN_DIR"/test_deploy
+  "$TORCH_BIN_DIR"/test_api --gtest_filter='IMethodTest.*'
   assert_git_not_dirty
 }
 

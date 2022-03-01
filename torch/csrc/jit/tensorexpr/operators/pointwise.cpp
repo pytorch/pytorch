@@ -10,15 +10,16 @@ using namespace torch::jit::tensorexpr;
 Tensor computeSign(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape) {
-  return Compute("aten_sign", outputShape, [&](ParameterList& axes) {
-    std::vector<ExprHandle> indices(axes.begin(), axes.end());
-    std::vector<ExprHandle> inputs = {
-        tensorOrConstant(inputValues[0], indices)};
-    auto inp = inputs[0];
-    auto zero = ExprHandle(immLike(inp, 0.0f));
-    auto res = (zero < inp) - (inp < zero);
-    return promoteToDtype(res, inp.dtype().scalar_type());
-  });
+  return Compute(
+      "aten_sign", c10::fmap<DimArg>(outputShape), [&](ParameterList& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        std::vector<ExprHandle> inputs = {
+            tensorOrConstant(inputValues[0], indices)};
+        auto inp = inputs[0];
+        auto zero = ExprHandle(immLike(inp, 0.0f));
+        auto res = (zero < inp) - (inp < zero);
+        return promoteToDtype(res, inp.dtype().scalar_type());
+      });
 }
 
 Tensor computeOneOperand(
@@ -30,7 +31,7 @@ Tensor computeOneOperand(
     const int checkParamTypes) {
   return Compute(
       name,
-      outputShape,
+      c10::fmap<DimArg>(outputShape),
       [inputValues, outputType, innerExpr, checkParamTypes](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
@@ -51,7 +52,7 @@ Tensor computeTwoOperand(
         innerExpr) {
   return Compute(
       name,
-      outputShape,
+      c10::fmap<DimArg>(outputShape),
       [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -74,7 +75,7 @@ Tensor computeTwoOperandWithAlpha(
         innerExpr) {
   return Compute(
       name,
-      outputShape,
+      c10::fmap<DimArg>(outputShape),
       [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -99,7 +100,7 @@ Tensor computeConditionWithTwoOperand(
         innerExpr) {
   return Compute(
       name,
-      outputShape,
+      c10::fmap<DimArg>(outputShape),
       [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
@@ -127,7 +128,7 @@ Tensor computeThreeOperand(
     bool promote_inputs) {
   return Compute(
       name,
-      outputShape,
+      c10::fmap<DimArg>(outputShape),
       [inputValues, outputType, innerExpr, promote_inputs](
           const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
@@ -156,7 +157,7 @@ Tensor computeFourOperand(
         const ExprHandle&)>& innerExpr) {
   return Compute(
       name,
-      outputShape,
+      c10::fmap<DimArg>(outputShape),
       [inputValues, outputType, innerExpr](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {

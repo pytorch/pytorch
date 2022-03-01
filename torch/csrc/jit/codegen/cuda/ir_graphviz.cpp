@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 #include <fstream>
@@ -304,13 +303,13 @@ void IrGraphGenerator::generateScheduleGraph() {
       // Maybe not the best way to handle the root domain, but should be okay
       addArc(
           tv,
-          IrBuilder::create<TensorDomain>(tv->getRootDomain()),
+          new TensorDomain(tv->getRootDomain()),
           "[style=dashed, color=green, arrowhead=none]");
 
       if (tv->domain()->hasRFactor())
         addArc(
             tv,
-            IrBuilder::create<TensorDomain>(tv->domain()->getRFactorDomain()),
+            new TensorDomain(tv->domain()->getRFactorDomain()),
             "[style=dashed, color=green, arrowhead=none]");
     }
   }

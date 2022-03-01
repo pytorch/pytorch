@@ -248,8 +248,9 @@ void BytecodeDeserializer::parseFunctionSchema(
     auto parseArgList = [this,
                          function](c10::ivalue::TupleElements&& argTables) {
       std::vector<c10::Argument> args;
-      for (auto& argTable : argTables) {
-        auto argTableElements = std::move(argTable.toTupleRef()).elements();
+      for (auto&& argTable : std::move(argTables)) {
+        auto argTableElements =
+            std::move(*std::move(argTable).toTuple()).elements();
         auto name =
             expect_field(argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
                 .toStringRef();
@@ -270,18 +271,19 @@ void BytecodeDeserializer::parseFunctionSchema(
       tryRegisterMethod(args, *function);
       return args;
     };
-    auto schemaTableElements = std::move(schemaTable->toTupleRef()).elements();
-    auto arg_list = std::move(expect_field(
-                                  schemaTableElements,
-                                  "arguments",
-                                  BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                                  .toTupleRef())
+    auto schemaTableElements =
+        std::move(*std::move(*schemaTable).toTuple()).elements();
+    auto arg_list = std::move(*expect_field(
+                                   schemaTableElements,
+                                   "arguments",
+                                   BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                                   .toTuple())
                         .elements();
     auto ret_list =
         std::move(
-            expect_field(
-                schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
-                .toTupleRef())
+            *expect_field(
+                 schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+                 .toTuple())
             .elements();
     c10::FunctionSchema schema(
         function_name,
@@ -336,10 +338,10 @@ void BytecodeDeserializer::parseMethods(
   // Process all methods in this mobile module.
   for (const auto i : c10::irange(method_i_start, vals.size())) {
     auto element = std::move(vals[i]);
-    auto m_tuple = std::move(element.toTupleRef()).elements();
+    auto m_tuple = std::move(*element.toTuple()).elements();
     const std::string& function_name = m_tuple[0].toStringRef();
     auto codeTableElements =
-        std::move(std::move(m_tuple[1]).toTupleRef()).elements();
+        std::move(*std::move(m_tuple[1]).toTuple()).elements();
     IValue* schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
         ? &m_tuple[2]
@@ -349,23 +351,23 @@ void BytecodeDeserializer::parseMethods(
 
     auto ins_list =
         std::move(
-            expect_field(
-                codeTableElements, "instructions", BYTECODE_INDEX_INSTRUCTION)
-                .toTupleRef())
+            *expect_field(
+                 codeTableElements, "instructions", BYTECODE_INDEX_INSTRUCTION)
+                 .toTuple())
             .elements();
     auto ops_list =
-        std::move(expect_field(
-                      codeTableElements, "operators", BYTECODE_INDEX_OPERATOR)
-                      .toTupleRef())
+        std::move(*expect_field(
+                       codeTableElements, "operators", BYTECODE_INDEX_OPERATOR)
+                       .toTuple())
             .elements();
     auto consts_list =
-        std::move(expect_field(
-                      codeTableElements, "constants", BYTECODE_INDEX_CONSTANT)
-                      .toTupleRef())
+        std::move(*expect_field(
+                       codeTableElements, "constants", BYTECODE_INDEX_CONSTANT)
+                       .toTuple())
             .elements();
     auto types_list =
-        std::move(expect_field(codeTableElements, "types", BYTECODE_INDEX_TYPE)
-                      .toTupleRef())
+        std::move(*expect_field(codeTableElements, "types", BYTECODE_INDEX_TYPE)
+                       .toTuple())
             .elements();
     int64_t register_size =
         expect_field(
@@ -375,7 +377,7 @@ void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements debug_handles_m_tuple;
     if (debug_handles) {
       debug_handles_m_tuple =
-          std::move(std::move((*debug_handles)[i]).toTupleRef()).elements();
+          std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
     init_upgrader(function.get());
     // 1. First pass all operators from models
@@ -452,13 +454,13 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = std::move(readArchive("bytecode", mcu).toTupleRef()).elements();
+  auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
 
   c10::optional<c10::ivalue::TupleElements> debug_handles;
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        std::move(readArchive("mobile_debug_handles", mcu).toTupleRef())
+        std::move(*readArchive("mobile_debug_handles", mcu).toTuple())
             .elements();
     has_debug_handles = true;
   }

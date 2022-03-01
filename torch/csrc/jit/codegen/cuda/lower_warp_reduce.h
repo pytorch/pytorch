@@ -13,7 +13,7 @@ struct WarpPaddedParallelInfo {
   bool has_warp_reduction = false;
 };
 
-std::vector<Expr*> fuseWarpReduce(const std::vector<Expr*> exprs);
+std::vector<kir::Expr*> fuseWarpReduce(const std::vector<kir::Expr*> exprs);
 
 } // namespace cuda
 } // namespace fuser

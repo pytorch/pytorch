@@ -1,13 +1,13 @@
 from functools import partial
 from torch import optim
 
-Adam = partial(optim.Adam, foreach=True)
-AdamW = partial(optim.AdamW, foreach=True)
+from .adam import Adam as Adam
+from .adamw import AdamW as AdamW
 NAdam = partial(optim.NAdam, foreach=True)
-SGD = partial(optim.SGD, foreach=True)
+from .sgd import SGD as SGD
 RAdam = partial(optim.RAdam, foreach=True)
-RMSprop = partial(optim.RMSprop, foreach=True)
-Rprop = partial(optim.Rprop, foreach=True)
+from .rmsprop import RMSprop as RMSprop
+from .rprop import Rprop as Rprop
 ASGD = partial(optim.ASGD, foreach=True)
 Adamax = partial(optim.Adamax, foreach=True)
 Adadelta = partial(optim.Adadelta, foreach=True)

@@ -20,6 +20,17 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* ]]; then
+  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
+  # only on one config for now, can expand later
+  export USE_DEPLOY=ON
+
+  # Deploy feature builds cpython. It requires these packages.
+  # TODO move this to dockerfile?
+  sudo apt-get -qq update
+  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
+fi
+
 echo "Python version:"
 python --version
 
@@ -48,17 +59,8 @@ if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
   export USE_TBB=1
 elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
-fi
-
-if [[ ${BUILD_ENVIRONMENT} == *"deploy"* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
-
-  # Deploy feature builds cpython. It requires these packages.
-  # TODO move this to dockerfile?
-  sudo apt-get -qq update
-  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
+elif [[ ${BUILD_ENVIRONMENT} == *"deploy"* ]]; then
+  export USE_DEPLOY=1
 fi
 
 # TODO: Don't run this...
@@ -209,13 +211,10 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
-    # ppc64le, rocm builds fail when WERROR=1
-    # XLA test build fails when WERROR=1
+    # ppc64le build fails when WERROR=1
     # set only when building other architectures
-    # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* &&
-          "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    # only use for "python setup.py install" line
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *rocm* ]]; then
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel

@@ -61,7 +61,6 @@ Creating TorchScript Code
     ScriptFunction
     freeze
     optimize_for_inference
-    set_fusion_strategy
     save
     load
     ignore

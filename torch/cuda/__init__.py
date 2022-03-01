@@ -674,72 +674,72 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import _TypedStorage
+from torch.storage import TypedStorage
 
-class _UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
+class UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     pass
 
-class ByteStorage(_TypedStorage):
+class ByteStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(_TypedStorage):
+class DoubleStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(_TypedStorage):
+class FloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(_TypedStorage):
+class HalfStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(_TypedStorage):
+class LongStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(_TypedStorage):
+class IntStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(_TypedStorage):
+class ShortStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(_TypedStorage):
+class CharStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(_TypedStorage):
+class BoolStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(_TypedStorage):
+class BFloat16Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(_TypedStorage):
+class ComplexDoubleStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(_TypedStorage):
+class ComplexFloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-torch._storage_classes.add(_UntypedStorage)
+torch._storage_classes.add(UntypedStorage)
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)

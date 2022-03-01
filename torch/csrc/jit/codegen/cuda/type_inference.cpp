@@ -141,7 +141,6 @@ class NaiveTypePropagator {
       }
       // binary operations that forward meta info and broadcast shape:
       case aten::gelu_backward:
-      case aten::tanh_backward:
       case aten::mul:
       case aten::div:
       case aten::min:
@@ -415,14 +414,19 @@ class NaiveTypePropagator {
         node->output()->setType(out_type->withDim(c10::nullopt));
         break;
       }
-      case prim::unsqueeze_copy:
-      case prim::squeeze_copy:
-      case prim::reshape_copy:
-      case prim::view_copy: {
+      /*
+      // TODO: Enable view in parser by detecting non-alias view operation
+      case aten::view:
+      case aten::reshape: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
-        node->output()->setType(out_type);
+        auto size_optional = constant_as<c10::List<int64_t>>(node->input(1));
+        TORCH_INTERNAL_ASSERT(
+            size_optional.has_value(), "The size parameter is required.");
+        auto new_size = size_optional->vec();
+        node->output()->setType(out_type->withSizes(new_size));
         break;
       }
+      */
       case aten::type_as: {
         const auto type0 = getInputTensorType(node, 0);
         const auto type1 = getInputTensorType(node, 1);
