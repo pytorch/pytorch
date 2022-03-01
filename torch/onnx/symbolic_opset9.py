@@ -195,8 +195,8 @@ def floordiv(g, self, other):
 
 
 def true_divide(g, self, other):
-    """
-    Division where both inputs are cast to floating types
+    """Division where both inputs are cast to floating types
+
     If both inputs are floating, performs div as usual
     If only one input is a floating type, the other input is cast to its type
     If neither input is a floating type, both inputs are cast to the default scalar type
