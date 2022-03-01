@@ -1313,7 +1313,7 @@ class TestSparseCSR(TestCase):
             self.assertEqual(csr_sparse.to_dense(), dense)
 
     @skipMeta
-    @dtypes(*get_all_dtypes())
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_csr_coo_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
             size = (m, n)

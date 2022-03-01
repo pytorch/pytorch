@@ -2271,8 +2271,8 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
 
     sample_inputs = []
     for input_args, broadcasts_input in test_cases:
-        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad)
-                     if isinstance(arg, tuple) else arg
+        args = tuple(make_tensor(arg, dtype=dtype, device=device, requires_grad=requires_grad
+                     exclude_zero=True) if isinstance(arg, tuple) else arg
                      for arg in input_args)
         sample_inputs.append(SampleInput(
             args[0],
