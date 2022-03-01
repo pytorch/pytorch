@@ -90,6 +90,9 @@ class DiagTensorBelow(WrapperTensor):
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
             return rs
 
+    def __repr__(self):
+        return super().__repr__(tensor_contents=f"diag={self.diag}")
+
 
 def DiagTensorBelow_in_place_add(a, b, *, alpha=1.0):
     # Custom add_ that operates solely on diagonal elements.
