@@ -128,7 +128,7 @@ std::vector<std::vector<size_t>> Logger::get_per_bucket_variable_indices() {
 std::vector<int> Logger::get_bucket_sizes() {
   std::vector<int> bucket_sizes;
   for (const auto& bucket : reducer_->buckets_) {
-    const auto& variables = bucket.variables;
+    const auto& variables = bucket.replicas[0].variables;
     int bucket_size = 0;
     for (const auto& v : variables) {
       bucket_size += v.numel() * v.element_size();
