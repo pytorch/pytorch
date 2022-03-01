@@ -400,7 +400,7 @@ class TestObserver(QuantizationTestCase):
             x = obs(x)
 
     def _test_memoryless(self, obs_class):
-        obs = obs_class(memoryless=True)
+        obs = obs_class(dtype=torch.float32, compute_dtype=obs_class().dtype)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()

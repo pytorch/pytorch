@@ -481,7 +481,10 @@ class MinMaxObserver(_MinMaxObserver):
         compute_dtype=None,
     ):
         # memoryless should not be a user facing argument, infer it from compute dtype and dtype
-        memoryless = compute_dtype in (torch.quint8, torch.qint8) and dtype == torch.float32
+        memoryless = compute_dtype in (torch.qint8,
+                                       torch.quint8,
+                                       torch.quint4x2,
+                                       torch.qint32,) and dtype == torch.float32
         super(MinMaxObserver, self).__init__(
             dtype=dtype if compute_dtype is None else compute_dtype,
             qscheme=qscheme,
@@ -761,6 +764,7 @@ class PerChannelMinMaxObserver(_PerChannelMinMaxObserver):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
+
     def __init__(
         self,
         ch_axis=0,
@@ -772,8 +776,12 @@ class PerChannelMinMaxObserver(_PerChannelMinMaxObserver):
         compute_dtype=None,
         factory_kwargs=None,
     ) -> None:
-        memoryless = compute_dtype in (torch.quint8, torch.qint8) and dtype==torch.float32
+        memoryless = compute_dtype in (torch.qint8,
+                                       torch.quint8,
+                                       torch.quint4x2,
+                                       torch.qint32,) and dtype == torch.float32
         super(PerChannelMinMaxObserver, self).__init__(
+            ch_axis=ch_axis,
             dtype=dtype if compute_dtype is None else compute_dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
