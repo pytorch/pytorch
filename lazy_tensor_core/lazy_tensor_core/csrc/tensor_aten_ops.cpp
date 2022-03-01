@@ -75,9 +75,10 @@ torch::lazy::Value GetIrValueOrDefault(const torch::lazy::LazyTensorPtr& input,
                                        const at::Scalar& default_value,
                                        const torch::lazy::Shape& default_shape,
                                        const torch::lazy::BackendDevice& device) {
-  return (input && *input) ? input->GetIrValue() :
-                             torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-                              default_value, default_shape, device);
+  return input ? input->GetIrValue()
+               : torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(default_value,
+                                                                                    default_shape,
+                                                                                    device);
 }
 
 torch::lazy::ViewInfo CreateAsStridedViewInfo(
@@ -227,8 +228,8 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
         save_mean->GetIrValue(), save_invstd->GetIrValue(), training, eps,
         std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
   } else {
-    CHECK(*running_mean);
-    CHECK(*running_var);
+    CHECK(running_mean);
+    CHECK(running_var);
     node = torch::lazy::MakeNode<ir::ops::TSNativeBatchNormBackward>(
         grad_out->GetIrValue(), input->GetIrValue(), weight_value,
         running_mean->GetIrValue(), running_var->GetIrValue(),

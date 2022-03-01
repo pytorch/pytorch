@@ -54,15 +54,13 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
   static LazyTensorPtr Create(BackendDataPtr handle);
   static LazyTensorPtr Create(std::shared_ptr<Data> data);
 
-  // Creates an empty/null tensor.
-  LazyTensor() = default;
-
-  bool is_null() const {
-    return data_ptr() == nullptr;
-  }
-  operator bool() const {
-    return !is_null();
-  }
+  // The default ctor previously created a null LazyTensor (one with no 'data' obj).
+  // Creating a null LazyTensor is no longer possible, since the same can be achieved by
+  // creating a null LazyTensorPtr and it is way too confusing to have to check both
+  // lazy_tensor_ptr && *lazy_tensor_ptr,
+  // so everywhere that used to rely on a LazyTensor obj with a null Data can now rely on
+  // a null LazyTensorPtr instead.
+  LazyTensor() = delete;
 
   size_t generation() const {
     return data()->generation;

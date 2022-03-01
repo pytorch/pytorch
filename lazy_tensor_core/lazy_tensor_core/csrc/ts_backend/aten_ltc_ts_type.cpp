@@ -37,7 +37,7 @@ std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> GetBinaryOpera
   torch::lazy::LazyTensorPtr self_tensor;
   torch::lazy::LazyTensorPtr other_tensor;
   auto self_xtensor = torch::lazy::TryGetLtcTensor(self);
-  if (!self_xtensor || self_xtensor->is_null()) {
+  if (!self_xtensor) {
     other_tensor = torch::lazy::TryGetLtcTensor(other);
     self_tensor = GetOrCreateLtcTensor(self, other_tensor->GetDevice());
   } else {
@@ -190,13 +190,13 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
     // providing a new 'eager' value (self) for an existing lazy tensor (dst)
     static bool sync_update =
         lazy_tensors::sys_util::GetEnvBool("XLA_TENSOR_UPDATE_SYNC", true);
-    CHECK(dst_tensor && *dst_tensor);
+    CHECK(dst_tensor);
     dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     // materializing a lazy tensor (self) and copying its value into eager tensor (dst)
     // detached=false lets us skip a copy in `ToTensor`, which should be safe
     // becuase we are only going to use the tensor for dst.copy_()
-    CHECK(self_tensor && *self_tensor);
+    CHECK(self_tensor);
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/false);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
@@ -234,10 +234,10 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   auto dst_tensor = torch::lazy::TryGetLtcTensor(dst);
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   if (!self_tensor) {
-    CHECK(dst_tensor && *dst_tensor);
+    CHECK(dst_tensor);
     dst_tensor->UpdateFromTensorOut(self);
   } else if (!dst_tensor) {
-    CHECK(self_tensor && *self_tensor);
+    CHECK(self_tensor);
     at::Tensor tensor = self_tensor->ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);

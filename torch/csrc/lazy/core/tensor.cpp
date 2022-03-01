@@ -21,7 +21,7 @@ LazyTensorPtr GetOrCreateLtcTensor(const at::Tensor& tensor,
     return torch::lazy::LazyTensorPtr();
   }
   auto lazy_tensor = TryGetLtcTensor(tensor);
-  return (lazy_tensor && *lazy_tensor) ? lazy_tensor : LazyTensor::Create(tensor, device);
+  return lazy_tensor ? lazy_tensor : LazyTensor::Create(tensor, device);
 }
 }  // namespace
 
@@ -470,7 +470,7 @@ LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
 
 LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
   auto lazy_tensor = TryGetLtcTensor(tensor);
-  CHECK(lazy_tensor && *lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
+  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
   return lazy_tensor;
 }
 
@@ -498,13 +498,12 @@ LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, con
 }
 
 at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor) {
-  return ltc_tensor->is_null() ? at::Tensor()
-                               : at::Tensor(c10::make_intrusive<LTCTensorImpl>(ltc_tensor));
+  return ltc_tensor ? at::Tensor(c10::make_intrusive<LTCTensorImpl>(ltc_tensor))
+                    : at::Tensor();
 }
 
 at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor) {
-  return ltc_tensor.is_null() ? at::Tensor()
-                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(std::move(ltc_tensor)));
+  return at::Tensor(c10::make_intrusive<LTCTensorImpl>(std::move(ltc_tensor)));
 }
 
 } // namespace lazy
