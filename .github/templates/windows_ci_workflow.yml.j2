@@ -34,6 +34,7 @@ on:
 {%- if not is_scheduled and not only_on_pr %}
     branches:
       - master
+      - main
       - release/*
 {%- endif %}
 {%- if is_scheduled and not only_on_pr %}
@@ -104,6 +105,10 @@ jobs:
         run: |
           .circleci/scripts/windows_cudnn_install.sh
 {%- endif %}
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       !{{ common.parse_ref() }}
       - name: Build
         shell: bash
@@ -134,7 +139,7 @@ jobs:
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
     name: !{{ test_job.name }}
-    timeout-minutes: !{{ common.timeout_minutes }}
+    timeout-minutes: !{{ common.win_test_timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: !{{ test_job.shard }}
@@ -184,8 +189,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_downloaded_files(name='windows', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}

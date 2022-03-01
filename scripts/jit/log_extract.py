@@ -1,8 +1,19 @@
 from contextlib import contextmanager
+from torch.testing import make_tensor
 from typing import Any, List, Tuple
 import argparse
 import torch
 
+'''
+Usage:
+1. Run your script and pipe into a log file
+  PYTORCH_JIT_LOG_LEVEL=">>graph_fuser" python3 my_test.py &> log.txt
+2. Run log_extract:
+  log_extract.py log.txt --nvfuser
+
+You can also extract the list of extracted IR:
+  log_extract.py log.txt --output
+'''
 
 def extract_ir(filename: str) -> List[str]:
     BEGIN = "<GRAPH_EXPORT>"
@@ -26,6 +37,15 @@ def extract_ir(filename: str) -> List[str]:
     return graphs
 
 
+def make_tensor_from_type(inp_type: torch._C.TensorType):
+    if inp_type.requires_grad() != False:
+        raise NotImplementedError("Tensors with requires_grad are not implemented")
+    return make_tensor(
+        inp_type.sizes(),
+        dtype = inp_type.dtype(),
+        device = inp_type.device())
+
+
 def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
     graph = torch._C.parse_ir(ir)
     graph.makeMultiOutputIntoTuple()
@@ -35,8 +55,10 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
             inputs.append(.5)
         elif isinstance(inp.type(), torch._C.IntType):
             inputs.append(2)
+        elif isinstance(inp.type(), torch._C.TensorType):
+            inputs.append(make_tensor_from_type(inp.type()))
         else:
-            raise NotImplementederror(f"A default value is not implemented for type {inp.type()}")
+            raise NotImplementedError(f"A default value is not implemented for type {inp.type()}")
 
     func = torch._C._create_function_from_graph("forward", graph)
     torch._C._jit_pass_erase_shape_information(func.graph)
@@ -99,7 +121,7 @@ def run_nvfuser(ir, inputs) -> float:
 
 
 def test_nvfuser(graphs: List[str], baseline_fn, nvfuser_fn):
-    for ir in graphs:
+    for i, ir in enumerate(graphs):
         _, inputs = load_graph_and_inputs(ir)
         baseline = baseline_fn(ir, inputs)
         nvfuser = nvfuser_fn(ir, inputs)

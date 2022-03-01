@@ -649,6 +649,29 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         torch.jit._trace._trace_module_map = trace_module_map
         return trace_module_map
 
+    def __register_attribute_hook():
+        attr_name = "_onnx_attrs"
+
+        def _track_module_attributes_forward_pre_hook(module, input):
+            setattr(module, attr_name, _get_module_attributes(module))
+
+        def _track_module_attributes_forward_hook(module, input, output):
+            tracing_state = torch._C._get_tracing_state()
+            if not tracing_state:
+                return
+
+            graph = tracing_state.graph()
+            onnx_attrs = {}
+            if hasattr(module, attr_name):
+                onnx_attrs = getattr(module, attr_name)
+                delattr(module, attr_name)
+
+            torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+
+        for m in model.modules():
+            m.register_forward_hook(_track_module_attributes_forward_hook)
+            m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
+
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
         trace_module_map = __setup_trace_module_map()
         export_modules_as_functions = {v for k, v in trace_module_map.items()}
@@ -665,10 +688,22 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
+
+    if export_modules_as_functions:
+        __register_attribute_hook()
+
     return export_modules_as_functions
 
 def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
+    torch._C._jit_pass_onnx_clear_scope_records()
+
+def _get_module_attributes(module):
+    from typing import get_type_hints
+    annotations = get_type_hints(type(module))
+    base_m_annotations = get_type_hints(torch.nn.Module)
+    [annotations.pop(k, None) for k in base_m_annotations]
+    return {k : getattr(module, k) for k in annotations}
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
