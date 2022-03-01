@@ -36,8 +36,9 @@ void LayerNormKernelImplInternal(
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
   T* Y_data = Y->data_ptr<T>();
-  T* mean_data = mean->data_ptr<T>();
-  T* rstd_data = rstd->data_ptr<T>();
+  T* mean_data = mean ? mean->data_ptr<T>() : nullptr;
+  T* rstd_data = rstd ? rstd->data_ptr<T>() : nullptr;
+
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
@@ -67,8 +68,12 @@ void LayerNormKernelImplInternal(
             beta_data,
             N);
       }
-      mean_data[i] = mean_val;
-      rstd_data[i] = rstd_val;
+      if (mean_data) {
+        mean_data[i] = mean_val;
+      }
+      if (rstd_data) {
+        rstd_data[i] = rstd_val;
+      }
     }
   });
 }

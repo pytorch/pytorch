@@ -1900,81 +1900,80 @@ REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator
   };
 });
 
-static c10::MaybeOwned<at::Tensor> borrow_from_optional_tensor_ivalue(
+namespace {
+
+c10::MaybeOwned<at::Tensor> borrow_from_optional_tensor_ivalue(
     const IValue& iv) {
   if (iv.isNone()) {
     return c10::MaybeOwned<at::Tensor>::owned(c10::in_place);
   }
   return c10::MaybeOwned<at::Tensor>::borrowed(iv.toTensor());
 }
+
+void layerNormImpl(ProcessedNode* p_node) {
+  // ignore Input(5): `bool cudnn_enable=True`
+  const auto& input = p_node->Input(0).toTensor();
+  const auto normalized_shape = p_node->Input(1).toDimVector();
+  float eps = p_node->Input(4).toDouble();
+
+  c10::MaybeOwned<at::Tensor> weight_maybe_owned =
+      borrow_from_optional_tensor_ivalue(p_node->Input(2));
+  const at::Tensor& weight = *weight_maybe_owned;
+  c10::MaybeOwned<at::Tensor> bias_maybe_owned =
+      borrow_from_optional_tensor_ivalue(p_node->Input(3));
+  const at::Tensor& bias = *bias_maybe_owned;
+
+  auto M_N = at::native::_check_layer_norm_inputs(
+      input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
+
+  if (p_node->Output(0).isNone()) {
+    p_node->Output(0) = at::native::empty_like(
+        *X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  } else {
+    at::native::resize_(p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
+  }
+  at::Tensor& output = p_node->Output(0).toTensor();
+  at::native::layer_norm_cpu_out(
+      output, input, normalized_shape, *gamma, *beta, eps, M, N);
+}
+
+} // namespace
+
+// [Static runtime layer norm]
+// layer_norm allocates two tensors internally (mean/rstd). We previously used
+// this op to manage these tensors. We simply had a graph pass that would
+// replace aten::layer_norm with static_runtime::layer_norm - the new op would
+// return mean/rstd to make the memory planner aware of these tensors. But since
+// these tensors are unused, it's actually better to avoid allocating them
+// entirely. So this op is no longer introduced into new models, but we keep it
+// registered here for backwards compatibility.
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::layer_norm,
-    aten_layer_norm,
+    static_runtime_layer_norm,
     [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema(
-              "static_runtime::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> (Tensor,Tensor,Tensor)"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
-      }
-      return [](ProcessedNode* p_node) {
-        // ignore Input(5): `bool cudnn_enable=True`
-        const auto& input = p_node->Input(0).toTensor();
-        const auto normalized_shape = p_node->Input(1).toDimVector();
-        float eps = p_node->Input(4).toDouble();
-
-        c10::MaybeOwned<at::Tensor> weight_maybe_owned =
-            borrow_from_optional_tensor_ivalue(p_node->Input(2));
-        const at::Tensor& weight = *weight_maybe_owned;
-        c10::MaybeOwned<at::Tensor> bias_maybe_owned =
-            borrow_from_optional_tensor_ivalue(p_node->Input(3));
-        const at::Tensor& bias = *bias_maybe_owned;
-
-        auto M_N = at::native::_check_layer_norm_inputs(
-            input, normalized_shape, weight, bias);
-        auto M = M_N.first;
-        auto N = M_N.second;
-        auto X = input.expect_contiguous();
-        auto gamma = weight.expect_contiguous();
-        auto beta = bias.expect_contiguous();
-
-        if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::native::empty_like(
-              *X,
-              c10::nullopt /* dtype */,
-              c10::nullopt /* layout */,
-              c10::nullopt /* device */,
-              c10::nullopt /* pin_memory */,
-              at::MemoryFormat::Contiguous);
-        } else {
-          at::native::resize_(
-              p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
-        }
-        if (p_node->Output(1).isNone()) {
-          p_node->Output(1) = create_empty_from({M}, *X);
-        } else {
-          at::native::resize_(p_node->Output(1).toTensor(), {M}, c10::nullopt);
-        }
-        if (p_node->Output(2).isNone()) {
-          p_node->Output(2) = create_empty_from({M}, *X);
-        } else {
-          at::native::resize_(p_node->Output(2).toTensor(), {M}, c10::nullopt);
-        }
-        at::Tensor& output = p_node->Output(0).toTensor();
-        at::Tensor& mean = p_node->Output(1).toTensor();
-        at::Tensor& rstd = p_node->Output(2).toTensor();
-        at::native::layer_norm_cpu_out(
-            output,
-            mean,
-            rstd,
-            input,
-            normalized_shape,
-            *gamma,
-            *beta,
-            eps,
-            M,
-            N);
+      return [](ProcessedNode* pnode) {
+        // Note that these outputs were designed to be unused, so it's
+        // safe to just write empty tensors to these slots.
+        pnode->Output(1) = at::empty({});
+        pnode->Output(2) = at::empty({});
+        layerNormImpl(pnode);
       };
     });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::layer_norm,
+    aten_layer_norm,
+    [](Node* n) -> SROperator { return layerNormImpl; });
 
 REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
