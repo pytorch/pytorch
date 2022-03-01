@@ -681,7 +681,7 @@
   input, grid: "grad.defined() ? grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask) : std::tuple<Tensor, Tensor>()"
 
 - name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
-  input, grid: "grad.defined() ? grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
+  input, grid: "grad.defined() ? grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners, grad_input_mask) : std::tuple<Tensor, Tensor>()"
 
 # See NOTE [ grid_sample CPU fallback ]
 - name: _grid_sampler_2d_cpu_fallback(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
@@ -1642,7 +1642,7 @@
   self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
   result: at::view_as_complex(self_t)
 
-- name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
+- name: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
   self: where(condition, grad, zeros_like(grad))
   other: where(condition, zeros_like(grad), grad)
