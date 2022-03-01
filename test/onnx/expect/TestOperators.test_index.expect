@@ -27,7 +27,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Gather_0"
     type {
