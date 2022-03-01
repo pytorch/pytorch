@@ -1300,7 +1300,7 @@ class FullyShardedDataParallel(nn.Module):
                 # In that case, the reduced gradients are accumulated in
                 # `param._saved_grad_shard`. The gradient reductions can happen
                 # in arbitrary order, but we tolerate this due to the
-                # (approximate) commutativity of floating-point addition. 
+                # (approximate) commutativity of floating-point addition.
                 param.grad = None
                 grad_flatten = torch.flatten(grad)
                 chunks = list(grad_flatten.chunk(self.world_size))
