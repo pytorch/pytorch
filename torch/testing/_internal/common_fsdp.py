@@ -404,7 +404,9 @@ class FSDPTest(MultiProcessTestCase):
         dist.destroy_process_group()
         sys.exit(0)
 
-    def _train_for_several_steps(self, model, num_steps, autocast, lr=0.01, fsdp_cpu_offload=None):
+    def _train_for_several_steps(
+        self, model, num_steps, autocast, lr=0.01, fsdp_cpu_offload=None, save_model=False
+    ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
@@ -437,6 +439,16 @@ class FSDPTest(MultiProcessTestCase):
                     # p._is_sharded=False
                     self.assertEqual(p.device, torch.device("cpu"))
             optim.step()
+            # if save_model, simulate save + load.
+
+            if save_model:
+                state_dict = {k: v.clone() for k, v in model.state_dict().items()}
+                # Zero params, if save/load state_dict did not work properly, this
+                # would break the parity test with DDP.
+                _zero_model(model)
+
+                model.load_state_dict(state_dict)
+
         if isinstance(model, FullyShardedDataParallel):
             model._assert_state(TrainingState_.IDLE)
         return loss.detach()
@@ -451,6 +463,7 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
+        save_model=True,
         **kwargs
     ):
         group = dist.distributed_c10d._get_default_group()
@@ -463,6 +476,8 @@ class FSDPTest(MultiProcessTestCase):
             )
         else:
             model = ref_ddp_fn(model)
+
+        # DDP training
         ref_loss = self._train_for_several_steps(
             model, num_steps, autocast=False, lr=lr, fsdp_cpu_offload=cpu_offload
         )
@@ -500,9 +515,10 @@ class FSDPTest(MultiProcessTestCase):
             if only_check_err else suppress()
         )
         with ctx:
+            # FSDP training
             shard_loss = self._train_for_several_steps(
                 model, num_steps, autocast=False, lr=lr,
-                fsdp_cpu_offload=cpu_offload,
+                fsdp_cpu_offload=cpu_offload, save_model=save_model,
             )
         # We only check for errors in the case we have the following setup:
         # model = FSDP(model, cpu_offload=True)
