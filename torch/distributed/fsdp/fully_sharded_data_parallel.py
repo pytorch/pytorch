@@ -1519,6 +1519,10 @@ class FullyShardedDataParallel(nn.Module):
                 p.grad.size() != p._orig_size  # type: ignore[attr-defined]
                 or p.grad.device != p.device
             ):
+                if p.grad.device != p.device:
+                    assert self.cpu_offload.offload_params, \
+                        "`p.grad.device` and `p.device` should be the same " \
+                        "if not offloading parameters to CPU"
                 can_accumulate_grad = p.grad.device == p.device and \
                     p.grad.size() == p._local_shard.shape  # type: ignore[attr-defined]
                 if can_accumulate_grad:
