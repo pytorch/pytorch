@@ -12,7 +12,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
             }
         self.weight_qscheme: torch.qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
-        assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine, torch.per_channel_affine_float_qparams], \
+        assert self.weight_qscheme in [
+            None, torch.per_tensor_affine, torch.per_channel_affine,
+            torch.per_channel_affine_float_qparams], \
             Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}")
         if self.weight_qscheme is not None:
             self.register_buffer(

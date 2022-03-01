@@ -214,7 +214,7 @@ class RNNBase(nn.RNNBase):
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
                  device=None, dtype=None,
-                 weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]]=None) -> None:
+                 weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
         super().__init__(
             mode, input_size, hidden_size, num_layers, bias, batch_first, dropout,
             bidirectional, proj_size, device, dtype
@@ -308,7 +308,9 @@ class LSTM(RNNBase):
                 weight_scale = getattr(self, wn + "_scale")
                 weight_zero_point = getattr(self, wn + "_zero_point")
                 weight_axis = getattr(self, wn + "_axis")
-                weight = _quantize_and_dequantize_weight(weight, weight_qscheme, weight_dtype, weight_scale, weight_zero_point, weight_axis)
+                weight = _quantize_and_dequantize_weight(
+                    weight, weight_qscheme, weight_dtype, weight_scale,
+                    weight_zero_point, weight_axis)
             else:
                 weight = None
             flat_weights.append(weight)
