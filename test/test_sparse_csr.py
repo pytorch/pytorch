@@ -106,7 +106,6 @@ def _test_addmm_addmv(
     test_case.assertEqual(res1, res2)
     test_case.assertEqual(res1, res3)
 
-
 class TestSparseCSRSampler(TestCase):
 
     def test_make_crow_indices(self):
@@ -1321,9 +1320,9 @@ class TestSparseCSR(TestCase):
             if sample.input.ndim != 2:
                 continue
 
-            expected = op(sample.input)
+            expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr())
+            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
@@ -1542,6 +1541,41 @@ class TestSparseCSR(TestCase):
             coo_sparse = dense.to_sparse_coo()
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "The test doesn't support ROCM")
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_solve_sparse_csr_cusolver(self, device, dtype):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_linalg_solve
+
+        if (device == 'meta') or (device == 'cpu' and not torch.cuda.is_available()):
+            self.skipTest("Skipped!")
+
+        samples = sample_inputs_linalg_solve(None, device, dtype)
+
+        for sample in samples:
+            if sample.input.ndim != 2:
+                continue
+
+            out = torch.zeros(sample.args[0].size(), dtype=dtype, device=device)
+            if not torch.cuda.is_available():
+                with self.assertRaisesRegex(RuntimeError, "PyTorch was not built with CUDA support"):
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                break
+
+            if sample.args[0].ndim != 1 and sample.args[0].size(-1) != 1:
+                with self.assertRaisesRegex(RuntimeError, "not implemented yet"):
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                break
+            if not sample.args[0].numel():
+                with self.assertRaisesRegex(RuntimeError,
+                                            "Expected non-empty other tensor, but found empty tensor"):
+                    torch.linalg.solve(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs, out=out)
+                break
+
+            expect = torch.linalg.solve(sample.input, *sample.args, **sample.kwargs)
+            sample.input = sample.input.to_sparse_csr()
+            torch.linalg.solve(sample.input, *sample.args, **sample.kwargs, out=out)
+            self.assertEqual(expect, out)
 
     @skipMeta
     @dtypes(*get_all_dtypes())
