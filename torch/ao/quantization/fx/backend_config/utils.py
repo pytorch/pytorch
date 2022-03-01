@@ -101,3 +101,22 @@ def get_fusion_pattern_to_root_node_getter(
             root_node_getter_mapping[pattern] = root_node_getter
 
     return root_node_getter_mapping
+
+def get_fusion_pattern_to_extra_inputs_getter(
+        backend_config_dict: Dict[str, Any]) -> Dict[Pattern, Callable]:
+    """ Get a map from fusion pattern to a function that returns extra input nodes
+    from the fusion pattern, in the order required by the root node. This is optional,
+    if not specified, we will not copy over any extra inputs for the root node.
+    Example:
+    # given a pattern, return the input node that need to be copied to the root node
+    def extra_inputs_getter(pattern) -> List[Any]:
+        ...
+    """
+    extra_inputs_getter_mapping: Dict[Pattern, Callable] = dict()
+    for config in backend_config_dict.get("configs", []):
+        if "extra_inputs_getter" in config:
+            pattern = config["pattern"]
+            extra_inputs_getter = config["extra_inputs_getter"]
+            extra_inputs_getter_mapping[pattern] = extra_inputs_getter
+
+    return extra_inputs_getter_mapping

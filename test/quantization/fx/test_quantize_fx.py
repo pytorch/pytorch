@@ -525,7 +525,14 @@ class TestFuseFx(QuantizationTestCase):
             self.assertFalse(hasattr(m, "bn"))
             self.assertFalse(hasattr(m, "relu"))
 
-    def test_root_node_getter(self):
+    def test_fusion_pattern_with_multiple_inputs(self):
+        """ This test tests two keys in backend_config_dict: root_node_getter and
+        extra_inputs_getter,
+        root_node_getter is used to identify a "root" module in the node pattern,
+        the node that we'll keep after fusion.
+        extra_inputs_getter will return a list of node that needs to be added to the
+        fused node as extra inputs.
+        """
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -556,10 +563,20 @@ class TestFuseFx(QuantizationTestCase):
             bn, conv = bn_pattern
             return conv
 
+        def conv_bn_res_relu_extra_inputs_getter(pattern):
+            """ get inputs pattern for extra inputs, inputs for root node
+            are assumed to be copied over from root node to the fused node
+            """
+            relu, add_pattern = pattern
+            _, bn_pattern, extra_input = add_pattern
+            bn, conv = bn_pattern
+            return [extra_input]
+
         conv_bn_res_relu_config = {
             "pattern": (nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode)),
             "fuser_method": fuse_conv_bn_relu,
             "root_node_getter": conv_bn_res_relu_root_node_getter,
+            "extra_inputs_getter": conv_bn_res_relu_extra_inputs_getter
         }
 
         backend_config_dict = {
@@ -570,6 +587,12 @@ class TestFuseFx(QuantizationTestCase):
         # check bn and relu are gone since we replaced the whole pattern to conv
         self.assertFalse(hasattr(m, "bn"))
         self.assertFalse(hasattr(m, "relu"))
+
+        # check conv module has two inputs
+        named_modules = dict(m.named_modules())
+        for node in m.graph.nodes:
+            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
+                self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
