@@ -110,7 +110,6 @@ ALLOW_LIST = [
     ("aten::grid_sampler_3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_transform_bias_rescale_qkv", datetime.date(9999, 1, 1)),
     ("aten::_scatter_reduce.two", datetime.date(9999, 1, 1)),
-    ("aten::_s_where", datetime.date(2022, 9, 30)),
 ]
 
 ALLOW_LIST_COMPILED = [

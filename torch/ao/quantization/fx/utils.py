@@ -117,7 +117,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = activation_post_process.compute_dtype if hasattr(activation_post_process, "compute_dtype") else None
+    compute_dtype = activation_post_process.compute_dtype if hasattr(activation_post_process, "compute_dtype") else None  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
