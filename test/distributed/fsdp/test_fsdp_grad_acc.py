@@ -180,8 +180,7 @@ class TestGradAcc(FSDPTest):
     )
     @parametrize(
         "cpu_offload",
-        # [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
-        [CPUOffload(offload_params=True)]
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
     )
     @parametrize(
         "backward_prefetch",
@@ -198,9 +197,12 @@ class TestGradAcc(FSDPTest):
 
         This exercises gradient accumulation using the ``no_sync()`` context
         manager, without using the ``no_sync()`` context manager, and
-        interleaving using and not using the ``no_sync()`` context manager. It
-        also checks for compatibility with the CPU offload and backward
-        prefetch options.
+        interleaving using and not using the ``no_sync()`` context manager. For
+        the interleaving, we test the case where the final iteration before the
+        gradient synchronization is in the ``no_sync()`` context and the case
+        where it is not. This is why we have four elements in the ``configs``
+        list. This test also checks for compatibility with the CPU offload and
+        backward prefetch options.
         """
         self._test_grad_acc(
             batch_dim=1,
