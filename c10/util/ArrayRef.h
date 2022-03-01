@@ -22,9 +22,76 @@
 
 #include <array>
 #include <iterator>
+#include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace c10 {
+
+
+
+struct TORCH_API SymbolicIntImpl {
+  bool virtual isSymbolicInt(int64_t data_) = 0;
+
+  // I can't overload + for primitive types
+  int64_t virtual add(int64_t s1, int64_t s2) = 0;
+};
+
+
+class TORCH_API SymbolicOrConcreteInt {
+
+public:
+
+  SymbolicOrConcreteInt(int64_t d):
+  data_(d) {};
+
+  operator int64_t() {
+    return data_;
+  }
+
+  int64_t data_;
+
+  // Note this is static as it should apply to all SymbolicInts
+  static std::unique_ptr<SymbolicIntImpl> impl_;
+
+  // TODO: this can be done per device
+  static void RegisterSymbolicIntImpl(SymbolicIntImpl* impl) {
+    impl_.reset(impl);
+  }
+
+  bool isSymbolicInt() {
+    return impl_->isSymbolicInt(data_);
+  }
+
+  SymbolicOrConcreteInt operator+(SymbolicOrConcreteInt sci) {
+
+    // TODO: is there a way to force a conversion to "SymbolicInt" w/e it is
+    // before we start tracing ops on it?
+    // Otherwise this might not be a bad compromise to make this union to double back
+    // as a proxy object for a symbolic int
+
+    if (this->isSymbolicInt() || sci.isSymbolicInt()) {
+          int64_t data = impl_->add(data_, sci.data_);
+          return SymbolicOrConcreteInt(data);
+    } else {
+      return data_ + sci.data_;
+    }
+  }
+};
+
+class SymbolicInt {
+
+public:
+
+  SymbolicInt(int64_t d):
+  data_(d) {};
+
+  operator int64_t() {
+    return data_;
+  }
+
+  int64_t data_;
+};
 
 /// ArrayRef - Represent a constant reference to an array (0 or more elements
 /// consecutively in memory), i.e. a start pointer and a length.  It allows
@@ -102,6 +169,11 @@ class ArrayRef final {
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();
   }
+
+  template <typename U,
+  typename = std::enable_if_t<std::is_constructible<T, U>::value>>
+  ArrayRef(const ArrayRef<U> ar):
+    Data(reinterpret_cast<const T*>(ar.data())), Length(ar.size()) {}
 
   /// Construct an ArrayRef from a std::vector.
   // The enable_if stuff here makes sure that this isn't used for

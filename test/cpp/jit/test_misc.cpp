@@ -76,6 +76,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "c10/util/ArrayRef.h"
 
 namespace torch {
 namespace jit {
@@ -1377,6 +1378,17 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
       }
     }
   }
+}
+
+TEST(SymbolicInt, Basic) {
+
+  int64_t i = 64;
+  c10::SymbolicOrConcreteInt soi = i;
+  int64_t i2 = soi;
+  std::vector<int64_t> v{1, 2, 3};
+  IntArrayRef iaf (v); 
+  ArrayRef<SymbolicOrConcreteInt> ar(iaf);
+  c10::SymbolicOrConcreteInt soi2 = ar[0];
 }
 
 TEST(FallbackGraphsTest, Basic) {

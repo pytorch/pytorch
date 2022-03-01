@@ -5,9 +5,21 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
+#include "c10/util/ArrayRef.h"
 
 namespace torch {
 namespace lazy {
+
+struct TORCH_API LazySymbolicIntImpl: public c10::SymbolicIntImpl {
+  bool virtual isSymbolicInt(int64_t data_) override {
+    return false;
+  };
+
+  // I can't overload + for primitive types
+  int64_t virtual add(int64_t s1, int64_t s2) override {
+    return 0;
+  }
+};  
 
 class TORCH_API LazyTensor {
  public:
