@@ -89,10 +89,15 @@ cc_library(
         "-D__STDC_CONSTANT_MACROS",
         "-D__STDC_LIMIT_MACROS",
         "-fno-strict-overflow",
-        "-fopenmp",
     ] + select({
         "@//tools/config:thread_sanitizer": ["-DDNNL_CPU_RUNTIME=0"],
         "//conditions:default": ["-DDNNL_CPU_RUNTIME=2"],
+    }) + select({
+        "@platforms//os:macos": [
+            "-Xpreprocessor",
+            "-openmp",
+        ],
+        "//conditions:default": ["-fopenmp"],
     }),
     includes = [
         "third_party/oneDNN/include/",
