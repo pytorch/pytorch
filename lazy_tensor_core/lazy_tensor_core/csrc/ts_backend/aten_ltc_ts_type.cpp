@@ -124,7 +124,9 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
 }
 
 at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
+  std::cout << "Clone " << std::endl;
   auto self_lt = torch::lazy::TryGetLtcTensor(self);
+  std::cout << "Clone ... got self_lt" << std::endl;
   return torch::lazy::CreateAtenFromLtcTensor(self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
 }
 
@@ -298,32 +300,42 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     if (force_eager_fallback(at::aten::_to_copy)) {
       TORCH_INTERNAL_ASSERT(false, "Fallback is currently impossible for _to_copy since the fallback helper itself reinvokes _to_copy");
     }
+
     auto options = self.options();
     if (dtype) {
-      options.dtype(dtype);
+      // I put each of these setters in a conditional instead of doing `self.options().dtype(dtype).layout(layout)...
+      // because calling .dtype(nullopt) on an options() that already has dtype appears to wipe it
+      options = options.dtype(dtype);
     }
     if (layout) {
-      options.layout(layout);
+      options = options.layout(layout);
     }
     // TODO pin_memory?
     if (memory_format) {
-      options.memory_format(memory_format);
+      options = options.memory_format(memory_format);
     }
 
     TORCH_LAZY_FN_COUNTER("lazy::");
     auto lazy_self = torch::lazy::TryGetLtcTensor(self);
     if (!lazy_self && device && device->type() == c10::kLazy) {
+      // std::cout << "to_copy 1 - to lazy -" << std::endl;
       // this is a valid '.to(lazy)' call, so it's the one case where we want to support non-lazy self
-      lazy_self = torch::lazy::GetOrCreateLtcTensor(self.to(options, /*non_blocking=*/false, /*copy=*/true),
+      auto eager_tensor = self.to(options, /*non_blocking=*/false, /*copy=*/true);
+      // std::cout << "...to_copy 1 - to lazy - moved eager tensor to options" << eager_tensor << std::endl;
+      lazy_self = torch::lazy::GetOrCreateLtcTensor(eager_tensor,
                                                     torch::lazy::atenDeviceToBackendDevice(*device));
+      // std::cout << "...to_copy 1 - to lazy - created lazy_self" << std::endl;
       return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
-    } else if(device->type() != c10::kLazy){
+    } else if(device->type() != c10::kLazy) {
+      // std::cout << "to_copy 2 - to device -" << std::endl;
       TORCH_INTERNAL_ASSERT(lazy_self);
       auto eager_tensor = lazy_self.ToTensor(/*detached=*/true);
-      eager_tensor.print();
+      options = options.device(device);
       // TODO: update conditional to handle device->type() == lazy && ordinal != self ordinal (e.g. lazy0->lazy1)
-      return eager_tensor.to(options, /*non_blocking=*/false, /*copy=*/true);
+      auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/false, /*copy=*/true);
+      return moved_eager_tensor;
     } else {
+      // std::cout << "to_copy 3 - to dtype -" << std::endl;
       // We're not changing the device, but we may want to capture the to.dtype as part of the IR graph
       auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
       TORCH_INTERNAL_ASSERT(shapes.size() == 1);
