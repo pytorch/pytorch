@@ -1297,10 +1297,10 @@ class FullyShardedDataParallel(nn.Module):
             if param._is_sharded:  # type: ignore[attr-defined]
                 # We clear `param.grad` to permit repeated gradient
                 # computations when this FSDP module is called multiple times.
-                # In that case, the gradient reductions can happen in arbitrary
-                # order, but we tolerate this due to the (approximate)
-                # commutativity of floating-point addition. The reduced
-                # gradients are accumulated in `param._saved_grad_shard`.
+                # In that case, the reduced gradients are accumulated in
+                # `param._saved_grad_shard`. The gradient reductions can happen
+                # in arbitrary order, but we tolerate this due to the
+                # (approximate) commutativity of floating-point addition. 
                 param.grad = None
                 grad_flatten = torch.flatten(grad)
                 chunks = list(grad_flatten.chunk(self.world_size))
