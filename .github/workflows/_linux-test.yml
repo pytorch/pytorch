@@ -76,6 +76,7 @@ jobs:
           CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
@@ -124,6 +125,7 @@ jobs:
             -e PR_BODY \
             -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
