@@ -411,11 +411,12 @@ bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
 // that oneDNN executes faster. prim::ListConstruct is an exception, since
 // we simply want to fuse it with cat.
 bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
-  return ((kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
-          (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||
-          (kindOfOp == aten::conv2d) || (kindOfOp == aten::_convolution) ||
-          (kindOfOp == aten::mm) || (kindOfOp == aten::linear) ||
-          (kindOfOp == aten::cat) || (kindOfOp == prim::ListConstruct));
+  return (
+      (kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
+      (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||
+      (kindOfOp == aten::conv2d) || (kindOfOp == aten::_convolution) ||
+      (kindOfOp == aten::mm) || (kindOfOp == aten::linear) ||
+      (kindOfOp == aten::cat) || (kindOfOp == prim::ListConstruct));
 }
 
 bool LlgaGraphHelper::checkForSingleOpPartition(Node* node) {

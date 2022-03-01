@@ -382,18 +382,10 @@ class TestFusionPattern(JitLlgaTestCase):
                 x = self.eltwise(x)
                 return x
 
-        # TODO: use itertools.product once all combinations is supported
-        for [has_bias, eltwise] in [
-            [True, 'relu'],
-            [False, 'relu'],
-            [True, 'gelu'],
-            [False, 'gelu'],
-            [True, 'sigmoid'],
-            [False, 'sigmoid'],
-            [False, 'hardtanh'],
-            [False, 'relu6'],
-            [False, 'elu'],
-        ]:
+        for [has_bias, eltwise] in itertools.product(
+                [True, False],
+                ['relu', 'gelu', 'sigmoid', 'hardtanh', 'relu6', 'elu']):
+
             eltwise_fn = get_eltwise_fn(eltwise)
             m = M(eltwise_fn, has_bias)
             x = torch.rand(32, 28, requires_grad=False)
