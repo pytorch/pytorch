@@ -297,6 +297,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const ComplexDouble* c) final {
+    const auto def = c->definition();
+    const bool has_alloc = alloc_map_.find(c) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
+      code_ << "(" << gen(def) << ")";
+    } else if (c->isConst()) {
+      const int digits = std::numeric_limits<double>::max_digits10;
+      code_ << "std::complex<double>" << std::setprecision(digits)
+            << *c->value();
+    } else {
+      code_ << varName(c);
+    }
+  }
+
   void handle(const NamedScalar* ns) final {
     // dim3 components are unsigned int. Cast to signed integer to
     // support negative indexing
@@ -392,12 +406,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       if (is_vector_op) {
         auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
         if (uop->in()->isScalar()) {
-          if (out_tv->getMemoryType() == MemoryType::Local) {
+          // Note:
+          //  Double buffered local tensors need indexed initialization,
+          //   so will need to use `arraySet` option.
+          if (out_tv->getMemoryType() == MemoryType::Local &&
+              !out_tv->isDoubleBuffered()) {
             // Vectorized initialization
             indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
           } else {
-            indent() << "arraySet<" << out_tv->getMemoryType() << ", "
-                     << vector_word_size << ">(" << gen(uop->out()) << ", "
+            // Note: currently arraySet option is not vectorized, so it will
+            //  rely on auto vectorization pass of cuda compiler.
+            indent() << "arraySet<" << out_tv->getDataType().value() << ", "
+                     << vector_word_size << ">(&" << gen(uop->out()) << ", "
+                     << "(" << out_tv->getDataType().value() << ")"
                      << gen(uop->in()) << ");\n";
           }
         } else {
@@ -509,6 +530,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       if (integer_op_str(op_type) && isIntegralType(out->dtype())) {
         auto int_op = integer_op_str(op_type);
         expr << *int_op;
+      } else if (bool_op_str(op_type) && isBooleanType(out->dtype())) {
+        auto bool_op = bool_op_str(op_type);
+        expr << *bool_op;
       } else {
         expr << op_type;
         if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
@@ -660,6 +684,10 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           if (integer_op_str(op_type) && isIntegralType(bop->out()->dtype())) {
             auto int_op = integer_op_str(op_type);
             code_ << " = " << *int_op << "(\n";
+          } else if (
+              bool_op_str(op_type) && isBooleanType(bop->out()->dtype())) {
+            auto bool_op = bool_op_str(op_type);
+            code_ << " = " << *bool_op << "(\n";
           } else {
             std::stringstream op_str;
             op_str << op_type;
@@ -1277,8 +1305,20 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         case MemoryType::Shared:
           if (kir::ExpressionEvaluator::isConst(size)) {
             // Static shared memory
-            indent() << "__shared__ " << buffer_dtype << " " << varName(tv)
-                     << "[" << genInline(size) << "];\n";
+            //  Always align to 16B for tensorview buffers
+            //   with any vectorized access.
+            //  TODO:
+            //   This path will be less commonly exercised once we
+            //    start dynamically allocate all the tensors and
+            //    might be removed in a follow up.
+            auto va = kernel_->summary().vectorized_accesses;
+            if (va.count(tv)) {
+              indent() << "__align__(16) ";
+            } else {
+              indent();
+            }
+            code_ << "__shared__ " << buffer_dtype << " " << varName(tv) << "["
+                  << genInline(size) << "];\n";
           } else {
             // Align Offset Position
             indent() << "offset = alignBufferSize(offset,"

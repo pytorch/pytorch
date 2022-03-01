@@ -148,6 +148,19 @@ bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type) {
       tensor_type->dim().value() == 0;
 }
 
+bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type) {
+  auto opt_sizes = tensor_type->sizes().concrete_sizes();
+  if (opt_sizes.has_value()) {
+    auto sizes = opt_sizes.value();
+    for (const auto& size : sizes) {
+      if (size == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool is_cpu_scalar(const at::Tensor& tensor) {
   return tensor.device().is_cpu() && tensor.numel() == 1 && tensor.dim() == 0;
 }

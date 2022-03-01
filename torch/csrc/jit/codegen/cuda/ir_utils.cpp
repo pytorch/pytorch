@@ -254,6 +254,21 @@ struct SubstituteInExpr : public OptInDispatch {
         gather_expr->padWidth());
   }
 
+  void handle(ViewDtypeOp* view_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in = reference_->sameAs(view_expr->in())
+        ? substitute_->as<TensorView>()
+        : view_expr->in();
+    auto out = reference_->sameAs(view_expr->out())
+        ? substitute_->as<TensorView>()
+        : view_expr->out();
+    expr_ = IrBuilder::create<ViewDtypeOp>(
+        view_expr->container(), out, in, view_expr->dtype());
+  }
+
   void handle(ViewOp* view_expr) final {
     TORCH_INTERNAL_ASSERT(
         substitute_->isA<TensorView>(),
@@ -434,7 +449,7 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
-std::vector<Expr*> getReductionOps(Fusion* fusion) {
+std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   std::vector<Expr*> red_ops;
   for (auto expr : fusion->exprs()) {
     const Val* out_val = nullptr;
@@ -452,8 +467,9 @@ std::vector<Expr*> getReductionOps(Fusion* fusion) {
     if (std::any_of(
             out_tv->getRootDomain().begin(),
             out_tv->getRootDomain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       red_ops.push_back(expr);
     }

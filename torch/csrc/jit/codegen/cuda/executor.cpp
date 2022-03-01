@@ -58,8 +58,14 @@ typedef unsigned long long int uint64_t;
 }
 
 static const std::string& defineComplexTypes() {
-  static std::string result =
-      at::cuda::get_traits_string() + at::cuda::get_complex_body_string();
+  static std::string result = std::string(R"ESCAPE(
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define INFINITY POS_INFINITY
+#define NEG_INFINITY __int_as_float(0xff800000)
+#define NAN __int_as_float(0x7fffffff)
+)ESCAPE") +
+      at::cuda::get_traits_string() + at::cuda::get_complex_body_string() +
+      at::cuda::get_cmath_string() + at::cuda::get_complex_math_string();
   return result;
 }
 

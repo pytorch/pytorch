@@ -25,9 +25,30 @@ bool isFloatingPointType(DataType dtype) {
       return false;
     case DataType::Null:
       TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+          false, "Null type is not a valid argument to isFloatingPointType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isFloatingPointType");
+  }
+}
+
+bool isBooleanType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Bool:
+      return true;
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+    case DataType::BFloat16:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+    case DataType::Index:
+    case DataType::Int:
+    case DataType::Int32:
+      return false;
+    case DataType::Null:
+      TORCH_CHECK(false, "Null type is not a valid argument to isBooleanType");
+    default:
+      TORCH_CHECK(false, "Type not supported in isBooleanType");
   }
 }
 
@@ -98,22 +119,8 @@ DataType promote_type(const DataType& t1, const DataType& t2) {
       t1,
       " and ",
       t2);
-  // FIXME: type promotion is not as simple as (t1 < t2 ? t1 : t2)
-  // hint:
-  // half + bfloat = float
-  // double + complex float = complex double
-  bool is_unsupported =
-      (DataType::BFloat16 == t1 || DataType::BFloat16 == t2 ||
-       DataType::ComplexFloat == t1 || DataType::ComplexFloat == t2 ||
-       DataType::ComplexDouble == t1 || DataType::ComplexDouble == t2);
-  TORCH_CHECK(
-      !is_unsupported,
-      "type promotion for ",
-      t1,
-      " and ",
-      t2,
-      " are not implemented yet");
-  return t1 < t2 ? t1 : t2;
+  return aten_to_data_type(
+      c10::promoteTypes(data_type_to_aten(t1), data_type_to_aten(t2)));
 }
 
 // Return highest on list (smallest enum val)
@@ -207,6 +214,8 @@ static const char* expr_type2string(ExprType t) {
       return "ShiftOp";
     case ExprType::GatherOp:
       return "GatherOp";
+    case ExprType::ViewDtypeOp:
+      return "ViewDtypeOp";
     case ExprType::ViewOp:
       return "ViewOp";
     case ExprType::Split:
@@ -243,6 +252,7 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Frac:
     case UnaryOpType::Gelu:
     case UnaryOpType::Silu:
+    case UnaryOpType::EraseType:
     case UnaryOpType::Neg:
     case UnaryOpType::Relu:
     case UnaryOpType::Reciprocal:
@@ -300,6 +310,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "log1p";
     case UnaryOpType::Log2:
       return "log2";
+    case UnaryOpType::EraseType:
+      return "erase_type";
     case UnaryOpType::Neg:
       return "neg";
     case UnaryOpType::Not:
@@ -429,6 +441,18 @@ static const char* binary_op_integer_op2string(BinaryOpType t) {
       return "min";
     case BinaryOpType::Fmod:
       return "fmod";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
+static const char* binary_op_bool_op2string(BinaryOpType t) {
+  switch (t) {
+    case BinaryOpType::Max:
+      return "max";
+    case BinaryOpType::Min:
+      return "min";
     default:
       break;
   }
@@ -628,6 +652,22 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Int32, DataType::Bool):
     case supported_switch_pair(DataType::Int, DataType::Bool):
       return "(bool)";
+    case supported_switch_pair(DataType::Index, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Int, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Int32, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Double, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Float, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Bool, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::ComplexFloat, DataType::ComplexDouble):
+      return "(std::complex<double>)";
+    case supported_switch_pair(DataType::Index, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Int, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Int32, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Double, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Float, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Bool, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::ComplexFloat):
+      return "(std::complex<float>)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
@@ -755,6 +795,12 @@ c10::optional<std::string> integer_op_str(const BinaryOpType botype) {
                         : c10::nullopt;
 }
 
+c10::optional<std::string> bool_op_str(const BinaryOpType botype) {
+  const char* str = binary_op_bool_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
 std::string stringifyThreadSize(const ParallelType ptype) {
   return thread_size2string(ptype);
 }
@@ -777,6 +823,9 @@ std::string typePrefix(const DataType data_type) {
     case DataType::Int:
     case DataType::Int32:
       return "i";
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return "c";
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
   }
@@ -812,6 +861,10 @@ size_t dataTypeSize(DataType type) {
   switch (type) {
     case DataType::Bool:
       return sizeof(bool);
+    case DataType::ComplexDouble:
+      return sizeof(std::complex<double>);
+    case DataType::ComplexFloat:
+      return sizeof(std::complex<float>);
     case DataType::Double:
       return sizeof(double);
     case DataType::Float:

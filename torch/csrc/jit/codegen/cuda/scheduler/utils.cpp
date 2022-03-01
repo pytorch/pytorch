@@ -437,7 +437,7 @@ PersistentBufferInfo persistentBuffers(Fusion* fusion) {
   }
 
   // Find projectable persistent buffers
-  auto reduction_tvs = getReductionTvs(fusion);
+  auto reduction_tvs = getReductionTvs(fusion /*, ignore_trivial=true */);
   for (auto persistent_buffer : persistent_buffer_info.persistent_buffers) {
     // Inputs marked as persistent buffers can't be projected any further back
     if (persistent_buffer->isFusionInput()) {
@@ -935,7 +935,7 @@ std::pair<bool, bool> canonicalDimReduction(
   }
 }
 
-std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
+std::vector<TensorView*> getReductionTvs(Fusion* fusion, bool ignore_trivial) {
   auto all_tvs = ir_utils::allTvs(fusion);
   std::vector<TensorView*> reduction_tvs;
   for (auto tv : all_tvs) {
@@ -943,8 +943,9 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
         std::any_of(
             tv->domain()->domain().begin(),
             tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
+            [&ignore_trivial](IterDomain* id) {
+              return id->isReduction() &&
+                  !(ignore_trivial && id->isTrivialReduction());
             })) {
       reduction_tvs.emplace_back(tv);
     }
@@ -969,25 +970,13 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
   return reduction_tvs;
 }
 
-bool isViewDefinition(TensorView* tv) {
-  auto def_expr = tv->definition();
-  if (def_expr != nullptr) {
-    auto def_expr_type = def_expr->getExprType();
-    if (def_expr_type.has_value() &&
-        def_expr_type.value() == ExprType::ViewOp) {
-      return true;
-    }
-  }
-  return false;
-}
-
 std::vector<TensorView*> getViewTVs(Fusion* fusion) {
   std::vector<TensorView*> view_tvs;
   auto fusion_vals = fusion->usedMathVals();
   for (auto producer_tv : ir_utils::filterByType<TensorView>(fusion_vals)) {
     auto consumer_tvs = ir_utils::consumerTvsOf(producer_tv);
     for (auto consumer_tv : consumer_tvs) {
-      if (isViewDefinition(consumer_tv)) {
+      if (consumer_tv->isDefinitionType(ExprType::ViewOp)) {
         view_tvs.push_back(consumer_tv);
       }
     }

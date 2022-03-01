@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <c10/util/irange.h>
@@ -118,7 +119,11 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 }
 
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
-    : fusion_(std::move(fusion)) {}
+    : fusion_(std::move(fusion)) {
+  for (const auto& indices : fusion_->getOutputAliasIndices()) {
+    aliased_output_indices_.insert(indices);
+  }
+}
 
 // Note [ Permutation support in nvfuser ]
 //
@@ -185,6 +190,12 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   // Permutation support in nvfuser ]
   for (const auto& pair : fusion_->getPermutationOutputMap()) {
     outputs[pair.first] = outputs[pair.first].permute(pair.second);
+  }
+
+  int offset = 0;
+  for (const auto& v : aliased_output_indices_) {
+    outputs.erase(outputs.begin() + v - offset);
+    offset++;
   }
 
   return outputs;
@@ -634,6 +645,8 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 
   fusion_executor_cache_ =
       std::make_unique<FusionExecutorCache>(parseJitIR(graph));
+
+  num_of_outputs_ = graph->outputs().size();
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -642,6 +655,8 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
       IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
 
+  GRAPH_DEBUG("GraphCache constructor: ", this);
+  GRAPH_DUMP("GraphCache created for graph", graph);
   createFusion(graph);
 }
 
@@ -649,7 +664,16 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
-  return fusion_executor_cache_->runFusionWithInputs(inputs);
+  GRAPH_DEBUG("running GraphCache: ", this);
+  auto outputs = fusion_executor_cache_->runFusionWithInputs(inputs);
+  TORCH_INTERNAL_ASSERT(
+      outputs.size() == num_of_outputs_,
+      "FusionExecutorCache returned ",
+      outputs.size(),
+      " outputs, doesn't match computational graph, which requires ",
+      num_of_outputs_);
+
+  return outputs;
 }
 
 } // namespace cuda

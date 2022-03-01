@@ -432,8 +432,9 @@ class DomainMap {
     }
 
     // Erase all input concrete IDs mapped to the output domain
+    // Ignore unresolved broadcast dimensions
     for (auto out_id : output_tv->getMaybeRFactorDomain()) {
-      if (!out_id->isBroadcast() && !out_id->isReduction()) {
+      if (!out_id->isBroadcast()) {
         if (!eraseIfMapped(in_concrete_ids, out_id)) {
           eraseIfMappedThroughView(in_concrete_ids, out_id);
         }
@@ -516,7 +517,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // maybe has_reduction for scheduling should be done on a per output tensor
   // basis.
   TORCH_INTERNAL_ASSERT(
-      ir_utils::getReductionOps(fusion).empty(),
+      ir_utils::getReductionOps(fusion /*, ignore_trivial=true */).empty(),
       "This scheduler only handles pointwise ops.");
 
   // For intermediate outputs, apply cache_fork

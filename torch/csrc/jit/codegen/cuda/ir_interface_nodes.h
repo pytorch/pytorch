@@ -53,9 +53,9 @@ class TORCH_CUDA_CU_API Bool : public Val {
   const c10::optional<bool> maybe_value_;
 };
 
-//! A Float64 value. For now we don't have any other type besides
-//! Float64. This value can be a symbolic value (defined after the kernel
-//! is compiled) or a constant value (inlined into the kernel definition).
+//! A Float64 value. This value can be a symbolic value (defined after the
+//! kernel is compiled) or a constant value (inlined into the kernel
+//! definition).
 class TORCH_CUDA_CU_API Double : public Val {
  public:
   using ScalarType = double;
@@ -97,6 +97,39 @@ class TORCH_CUDA_CU_API Int : public Val {
   explicit Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value);
 
   Int(const Int* src, IrCloner* ir_cloner);
+
+  bool isSymbolic() const {
+    return !(maybe_value_.has_value());
+  }
+  bool isConst() const final {
+    return maybe_value_.has_value();
+  }
+  c10::optional<ScalarType> value() const {
+    return maybe_value_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const c10::optional<ScalarType> maybe_value_;
+};
+
+//! An c10::complex<double> value. This value can be a symbolic value (defined
+//! after the kernel is compiled) or a constant value (inlined into the kernel
+//! definition).
+class TORCH_CUDA_CU_API ComplexDouble : public Val {
+ public:
+  using ScalarType = c10::complex<double>;
+
+  ComplexDouble(IrBuilderPasskey passkey);
+
+  explicit ComplexDouble(IrBuilderPasskey passkey, ScalarType value);
+
+  explicit ComplexDouble(
+      IrBuilderPasskey passkey,
+      c10::optional<ScalarType> value);
+
+  ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner);
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -175,6 +208,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   TensorDomain* domain() const {
     return domain_;
   }
+
+  //! This is for a TensorView with an rFactor domain that is an input to a
+  //! fusion segment. We convert the rfactor domain into a new root domain.
+  //! Any dynamic-sized rfactor iterDomains are given a new symbolic extent.
+  //! Concrete integer extents are kept. Output TensorViews of any subsequent
+  //! expressions that use this TensorView are also updated.
+  void convertRfactorToRootDomain();
 
   void setContiguity(const std::vector<bool>& contig) {
     domain()->setContiguity(contig);
@@ -415,6 +455,11 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   void setComputeAt(unsigned int this_pos, bool decrease = false);
 
   void setMaxProducer(unsigned int this_pos, bool decrease = false);
+
+  //! Create a new root domain and replacement TensorDomain.
+  //! If a new symbolic extent exists for the original iterDomain,
+  //! we create a new iterDomain.
+  void createReplacementDomain(const std::vector<Val*>& domain_extents);
 
  private:
   int normalizeAxisPos(int pos) const {

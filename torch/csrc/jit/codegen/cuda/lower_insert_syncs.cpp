@@ -465,8 +465,7 @@ class ReadAfterWriteSyncs : public kir::ExprMutator {
             "Tried to place after, ",
             place_after->toString(),
             ", but could not find this expression at the global scope.");
-
-        registerInsertAfter(*(place_after_it + 1), sync_expr, nullptr);
+        registerInsertAfter(*(place_after_it), sync_expr, nullptr);
       } else {
         // Find the last loop in computeAt of out_tv, this is the loop where we
         // would place an allocation for out_tv

@@ -802,15 +802,56 @@ TEST_F(NVFuserTest, FusionSimpleArith_CUDA) {
       "Error where explicit add nodes don't match implicit add nodes.");
 }
 
-TEST_F(NVFuserTest, FusionSimpleTypePromote_CUDA) {
+TEST_F(NVFuserTest, FusionScalarTypePromote_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  Double* d4 = IrBuilder::create<Double>(4.f);
-  Int* i1 = IrBuilder::create<Int>(3);
-  auto d5 = add(d4, i1);
+  Bool* b = IrBuilder::create<Bool>(true);
+  Double* d = IrBuilder::create<Double>(4.f);
+  Int* i = IrBuilder::create<Int>(3);
+  ComplexDouble* c =
+      IrBuilder::create<ComplexDouble>(c10::complex<double>(1, 2));
 
-  TORCH_CHECK(d5->getDataType() == DataType::Double);
+  TORCH_CHECK(add(b, b)->getDataType() == DataType::Bool);
+  TORCH_CHECK(add(b, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(b, i)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(b, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(d, b)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, i)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(d, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(i, b)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(i, d)->getDataType() == DataType::Double);
+  TORCH_CHECK(add(i, i)->getDataType() == DataType::Int);
+  TORCH_CHECK(add(i, c)->getDataType() == DataType::ComplexDouble);
+
+  TORCH_CHECK(add(c, b)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, d)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, i)->getDataType() == DataType::ComplexDouble);
+  TORCH_CHECK(add(c, c)->getDataType() == DataType::ComplexDouble);
+}
+
+TEST_F(NVFuserTest, FusionComplexAbsTypes_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto options = at::TensorOptions().device(at::kCUDA, 0);
+  auto tensor_cf = at::randn({4, 4, 4}, options.dtype(at::kComplexFloat));
+  auto tensor_cd = at::randn({4, 4, 4}, options.dtype(at::kComplexDouble));
+
+  auto type_cf = TensorType::create(tensor_cf);
+  auto tv_cf = IrBuilder::create<TensorView>(type_cf);
+  auto type_cd = TensorType::create(tensor_cd);
+  auto tv_cd = IrBuilder::create<TensorView>(type_cd);
+
+  TORCH_CHECK(
+      tensor_cf.abs().scalar_type() ==
+      data_type_to_aten(abs(tv_cf)->getDataType().value()));
+  TORCH_CHECK(
+      tensor_cd.abs().scalar_type() ==
+      data_type_to_aten(abs(tv_cd)->getDataType().value()));
 }
 
 TEST_F(NVFuserTest, FusionRegister_CUDA) {
@@ -1516,15 +1557,8 @@ TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
 
   // Do math with it, it returns a `Val*` but can be static_casted back to
   // TensorView
-  //
-  // TODO: define ComplexDouble enable the following
-  // c10::complex<double> scalar(2.0, 3.0);
-  // TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar));
-  //
-  // Related files:
-  // in torch/csrc/jit/codegen/cuda/dispatch.h
-  // and torch/csrc/jit/codegen/cuda/ir_interface_nodes.h
-  TensorView* tv2 = add(tv0, tv1); // TODO: replace this
+  c10::complex<double> scalar1(2.0, 3.0);
+  TensorView* tv2 = add(tv1, IrBuilder::create<ComplexDouble>(scalar1));
   TensorView* tv3 = add(tv0, tv2);
 
   // Register your outputs
@@ -1560,9 +1594,7 @@ TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
   fe.compileFusion(&fusion, {input1, input2});
   fe.runFusion({input1, input2}, {output});
 
-  // TODO: use the following
-  // at::Tensor tv2_ref = input2 + scalar;
-  at::Tensor tv2_ref = input2 + input1; // TODO: replace this
+  at::Tensor tv2_ref = input2 + scalar1;
   at::Tensor output_ref = input1 + tv2_ref;
 
   TORCH_CHECK(output_ref.equal(output));
@@ -3766,6 +3798,10 @@ Val* gen_jit_operand(std::pair<ValType, DataType> desc) {
       return IrBuilder::create<Double>();
     } else if (desc.second == DataType::Double) {
       return IrBuilder::create<Double>();
+    } else if (desc.second == DataType::ComplexFloat) {
+      return IrBuilder::create<ComplexDouble>();
+    } else if (desc.second == DataType::ComplexDouble) {
+      return IrBuilder::create<ComplexDouble>();
     } else if (desc.second == DataType::Int) {
       return IrBuilder::create<Int>();
     } else {
@@ -3788,6 +3824,8 @@ IValue gen_aten_operand(
     bool rand) {
   if (desc.first == ValType::TensorView) {
     if (desc.second == DataType::Double || desc.second == DataType::Float ||
+        desc.second == DataType::ComplexDouble ||
+        desc.second == DataType::ComplexFloat ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
       auto options = at::TensorOptions()
                          .dtype(data_type_to_aten(desc.second))
@@ -3823,9 +3861,13 @@ IValue gen_aten_operand(
     }
   } else if (desc.first == ValType::Scalar) {
     // IValue scalars can only be double int64 or bool
-    if (desc.second == DataType::Double || desc.second == DataType::Float ||
+    if (desc.second == DataType::ComplexDouble ||
+        desc.second == DataType::ComplexFloat) {
+      return IValue(at::Scalar(c10::complex<double>(1.0, 0.0)));
+    } else if (
+        desc.second == DataType::Double || desc.second == DataType::Float ||
         desc.second == DataType::Half || desc.second == DataType::BFloat16) {
-      return IValue(at::Scalar(1.f));
+      return IValue(at::Scalar(1.0));
     } else if (desc.second == DataType::Int) {
       return IValue(at::Scalar(1));
     } else {
@@ -3945,43 +3987,73 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
   // list within the vector to make this code compatible with some old env
   // which we still need to support. eg. gcc 5.4 + cuda 9.2.
   std::vector<OpTuple> ops{
-      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
       OpTuple{at::acos, UnaryOpType::Acos, "acos"},
       OpTuple{at::asin, UnaryOpType::Asin, "asin"},
       OpTuple{at::atan, UnaryOpType::Atan, "atan"},
       // There does not appear to be an appropriate ATen function for atanh
       // OpTuple{at::atanh,      UnaryOpType::Atanh,      "atanh"      },
-      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
       OpTuple{at::cos, UnaryOpType::Cos, "cos"},
       OpTuple{at::cosh, UnaryOpType::Cosh, "cosh"},
-      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
-      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"},
       OpTuple{at::exp, UnaryOpType::Exp, "exp"},
-      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
-      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
-      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
       // OpTuple{at::gelu, UnaryOpType::Gelu, "gelu"},
-      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
       OpTuple{at::log, UnaryOpType::Log, "log"},
       OpTuple{at::log10, UnaryOpType::Log10, "log10"},
-      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
-      OpTuple{at::log2, UnaryOpType::Log2, "log2"},
       OpTuple{at::neg, UnaryOpType::Neg, "neg"},
       OpTuple{at::reciprocal, UnaryOpType::Reciprocal, "reciprocal"},
-      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
-      OpTuple{at::round, UnaryOpType::Round, "round"},
-      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
       OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
       OpTuple{at::sin, UnaryOpType::Sin, "sin"},
       OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
-      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
+  };
 
-  std::vector<DataType> dtypes = {DataType::Float, DataType::Double};
+  // The following ops has no complex support in eager mode
+  std::vector<OpTuple> ops_without_complex{
+      OpTuple{at::ceil, UnaryOpType::Ceil, "ceil"},
+      OpTuple{at::floor, UnaryOpType::Floor, "floor"},
+      OpTuple{at::frac, UnaryOpType::Frac, "frac"},
+      OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"},
+      OpTuple{at::round, UnaryOpType::Round, "round"},
+      OpTuple{at::relu, UnaryOpType::Relu, "relu"},
+      OpTuple{at::expm1, UnaryOpType::Expm1, "expm1"},
+      OpTuple{at::log1p, UnaryOpType::Log1p, "log1p"},
+      OpTuple{at::lgamma, UnaryOpType::Lgamma, "lgamma"},
+      OpTuple{at::erf, UnaryOpType::Erf, "erf"},
+      OpTuple{at::erfc, UnaryOpType::Erfc, "erfc"}};
+
+  // Complex support for the following op is not working in nvFuser yet
+  std::vector<OpTuple> ops_skip_complex{
+      // TODO: abs is actually supported in nvFuser, but it has bug!!!
+      // In eager mode, abs(complex_tensor) returns floating point tensor
+      // but in nvFuser, it wrongly returns complex tensor!
+      // We need to:
+      //  1. change our type promotion logic to make a special case for abs
+      //  2. why this bug is not detected here? we should bump up test coverage
+      OpTuple{at::abs, UnaryOpType::Abs, "abs"},
+      // TODO: the following two ops fails with compilation error like
+      // "undefined function rsqrt(complex)", we could implement them in
+      // helpers.cu, but I think it is better to check with Jiterator first,
+      // because Jiterator uses the same string for complex support.
+      OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
+      OpTuple{at::log2, UnaryOpType::Log2, "log2"}};
+
+  std::vector<DataType> dtypes = {
+      DataType::Float,
+      DataType::Double,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
+    auto ops_to_test = ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      ops_to_test.insert(
+          ops_to_test.end(),
+          ops_without_complex.begin(),
+          ops_without_complex.end());
+      ops_to_test.insert(
+          ops_to_test.end(), ops_skip_complex.begin(), ops_skip_complex.end());
+    }
     std::for_each(ops.begin(), ops.end(), [&](OpTuple& op) {
       test_op(
           /*blocks*/ 640,
@@ -3998,19 +4070,24 @@ TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
           std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
     });
 
-    test_op(
-        /*blocks*/ 128,
-        /*threads*/ 64,
-        /*name*/ "rand_like",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::rand_like(vals[0].toTensor());
-        },
-        /*JIT  Func   */
-        [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    // TODO: why the rand_like test is failing for complex? Is it because each
+    // complex needs to draw 2 random numbers from the RNG? We need to enable
+    // this
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      test_op(
+          /*blocks*/ 128,
+          /*threads*/ 64,
+          /*name*/ "rand_like",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::rand_like(vals[0].toTensor());
+          },
+          /*JIT  Func   */
+          [](Val* in1) -> Val* { return unaryOp(UnaryOpType::RandLike, in1); },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    }
   }
 
   dtypes = {DataType::Int, DataType::Int32, DataType::Bool};
@@ -4035,17 +4112,45 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
+
   // see [Note: explicit tuple type for uniform initialization list]
-  std::vector<OpTuple> logic_ops{
+  std::vector<OpTuple> equal_ops{
       OpTuple{at::eq, BinaryOpType::Eq, "eq"},
+      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+
+  // Complex numbers are not ordered
+  std::vector<OpTuple> order_ops{
       OpTuple{at::ge, BinaryOpType::GE, "ge"},
       OpTuple{at::gt, BinaryOpType::GT, "gt"},
       OpTuple{at::le, BinaryOpType::LE, "le"},
-      OpTuple{at::lt, BinaryOpType::LT, "lt"},
-      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+      OpTuple{at::lt, BinaryOpType::LT, "lt"}};
+
+  // see [Note: explicit tuple type for uniform initialization list]
+  std::vector<OpTuple> math_ops{
+      OpTuple{at::div, BinaryOpType::Div, "div"},
+      OpTuple{at::mul, BinaryOpType::Mul, "mul"},
+      OpTuple{at::pow, BinaryOpType::Pow, "pow"}};
+
+  // The following ops has no complex support in eager mode
+  std::vector<OpTuple> math_ops_without_complex{
+      OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
+      OpTuple{at::max, BinaryOpType::Max, "max"},
+      OpTuple{at::min, BinaryOpType::Min, "min"},
+      OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
+      // NOTE: Remainder does not match the Aten impl exactly
+      // despite using an identical function.
+      OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"}};
 
   for (auto dtype : dtypes) {
+    auto logic_ops = equal_ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      logic_ops.insert(logic_ops.end(), order_ops.begin(), order_ops.end());
+    }
     std::for_each(logic_ops.begin(), logic_ops.end(), [&](OpTuple& op) {
       test_op(
           /*blocks*/ 640,
@@ -4066,39 +4171,33 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
               std::make_pair(ValType::TensorView, dtype)));
     });
 
-    // see [Note: explicit tuple type for uniform initialization list]
-    std::vector<OpTuple> math_ops{
-        OpTuple{at::atan2, BinaryOpType::Atan2, "atan2"},
-        OpTuple{at::div, BinaryOpType::Div, "div"},
-        OpTuple{at::fmod, BinaryOpType::Fmod, "fmod"},
-        OpTuple{at::max, BinaryOpType::Max, "max"},
-        OpTuple{at::min, BinaryOpType::Min, "min"},
-        OpTuple{at::mul, BinaryOpType::Mul, "mul"},
-        OpTuple{at::pow, BinaryOpType::Pow, "pow"},
-        // NOTE: Remainder does not match the Aten impl exactly
-        // despite using an identical function.
-        OpTuple{at::remainder, BinaryOpType::Remainder, "remainder"},
-    };
-
-    std::for_each(math_ops.begin(), math_ops.end(), [&](OpTuple& op) {
-      test_op(
-          /*blocks*/ 640,
-          /*threads*/ 64,
-          /*name*/ std::get<2>(op),
-          /*Aten Func   */
-          [&op](std::array<IValue, 2>& vals) {
-            return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
-          },
-          /*JIT  Func   */
-          [&op](Val* in1, Val* in2) -> Val* {
-            return binaryOp(std::get<1>(op), in1, in2);
-          },
-          /*Output      */ std::make_pair(ValType::TensorView, dtype),
-          /*Inputs Tuple*/
-          std::make_tuple(
-              std::make_pair(ValType::TensorView, dtype),
-              std::make_pair(ValType::TensorView, dtype)));
-    });
+    auto enabled_math_ops = math_ops;
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      enabled_math_ops.insert(
+          enabled_math_ops.end(),
+          math_ops_without_complex.begin(),
+          math_ops_without_complex.end());
+    }
+    std::for_each(
+        enabled_math_ops.begin(), enabled_math_ops.end(), [&](OpTuple& op) {
+          test_op(
+              /*blocks*/ 640,
+              /*threads*/ 64,
+              /*name*/ std::get<2>(op),
+              /*Aten Func   */
+              [&op](std::array<IValue, 2>& vals) {
+                return std::get<0>(op)(vals[0].toTensor(), vals[1].toTensor());
+              },
+              /*JIT  Func   */
+              [&op](Val* in1, Val* in2) -> Val* {
+                return binaryOp(std::get<1>(op), in1, in2);
+              },
+              /*Output      */ std::make_pair(ValType::TensorView, dtype),
+              /*Inputs Tuple*/
+              std::make_tuple(
+                  std::make_pair(ValType::TensorView, dtype),
+                  std::make_pair(ValType::TensorView, dtype)));
+        });
 
     test_op(
         /*blocks*/ 640,
@@ -4137,59 +4236,66 @@ TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
-    test_op(
-        /*blocks*/ 640,
-        /*threads*/ 64,
-        /*name*/ "clamp",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::clamp(vals[0].toTensor(), 0.f, 1.f);
-        },
-        /*JIT  Func   */
-        [&](Val* in1) -> Val* {
-          if (dtype == DataType::Float) {
-            return clamp(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          } else {
-            return clamp(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          }
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
-    test_op(
-        /*blocks*/ 640,
-        /*threads*/ 64,
-        /*name*/ "threshold",
-        /*Aten Func   */
-        [](std::array<IValue, 1>& vals) {
-          return at::threshold(vals[0].toTensor(), 0.f, 1.f);
-        },
-        /*JIT  Func   */
-        [&](Val* in1) -> Val* {
-          if (dtype == DataType::Float) {
-            return threshold(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          } else {
-            return threshold(
-                in1,
-                IrBuilder::create<Double>(0.f),
-                IrBuilder::create<Double>(1.f));
-          }
-        },
-        /*Output      */ std::make_pair(ValType::TensorView, dtype),
-        /*Inputs Tuple*/
-        std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    // clamp and threshold are not supported for complex on eager mode
+    if (dtype != DataType::ComplexFloat && dtype != DataType::ComplexDouble) {
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ "clamp",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::clamp(vals[0].toTensor(), 0.f, 1.f);
+          },
+          /*JIT  Func   */
+          [&](Val* in1) -> Val* {
+            if (dtype == DataType::Float) {
+              return clamp(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            } else {
+              return clamp(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            }
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+      test_op(
+          /*blocks*/ 640,
+          /*threads*/ 64,
+          /*name*/ "threshold",
+          /*Aten Func   */
+          [](std::array<IValue, 1>& vals) {
+            return at::threshold(vals[0].toTensor(), 0.f, 1.f);
+          },
+          /*JIT  Func   */
+          [&](Val* in1) -> Val* {
+            if (dtype == DataType::Float) {
+              return threshold(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            } else {
+              return threshold(
+                  in1,
+                  IrBuilder::create<Double>(0.f),
+                  IrBuilder::create<Double>(1.f));
+            }
+          },
+          /*Output      */ std::make_pair(ValType::TensorView, dtype),
+          /*Inputs Tuple*/
+          std::make_tuple(std::make_pair(ValType::TensorView, dtype)));
+    }
     test_op(
         /*blocks*/ 640,
         /*threads*/ 64,
@@ -4210,7 +4316,11 @@ TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionCompoundOps_CUDA) {
-  std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
+  std::vector<DataType> dtypes = {
+      DataType::Double,
+      DataType::Float,
+      DataType::ComplexFloat,
+      DataType::ComplexDouble};
 
   for (auto dtype : dtypes) {
     test_op(
@@ -7773,6 +7883,11 @@ TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
 TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: add test for complex. Currently complex fails with the following
+  // NVRTC compilation error message:
+  //   error: no suitable user-defined conversion from
+  //   "CudaCodeGen::std::complex<double>" to "CudaCodeGen::std::complex<float>"
+  //   exists
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -7846,6 +7961,10 @@ TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
 TEST_F(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: add complex support. Currently, complex fails with the following
+  // NVRTC compilation error:
+  //   error: no instance of overloaded function "__shfl_xor_sync" matches the
+  //   argument list
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -8956,9 +9075,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       executor_cache.fusion(),
       cg_outputs,
       aten_inputs,
-      {at_run_mean,
-       at_run_var,
-       std::get<0>(aten_outputs),
+      {std::get<0>(aten_outputs),
        std::get<1>(aten_outputs),
        std::get<2>(aten_outputs)},
       __LINE__,
@@ -10647,7 +10764,7 @@ TEST_F(NVFuserTest, FusionTrivialReduction_CUDA) {
   fusion.addOutput(tv1);
 
   TORCH_CHECK(
-      ir_utils::getReductionOps(&fusion).empty(),
+      ir_utils::getReductionOps(&fusion, true /* ignore_trivial */).empty(),
       "Trivial reduction picked up by fusion");
 
   const auto options =
@@ -12637,6 +12754,11 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
 TEST_F(NVFuserTest, FusionWelfordShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
+  // TODO: enable this for complex. Currently, complex yields
+  // silent wrong results:
+  //   Detected abs error of: 3.8062
+  //     absolute tolerance was set to 2.23704e-06
+  //     and relative tolerance set to 2.23704e-08
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::getDeviceProperties(0)->major >= 8) {
     dtypes.insert(dtypes.end(), DataType::BFloat16);
@@ -14385,6 +14507,53 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 }
 
+TEST_F(NVFuserTest, FusionViewDtypeSameSizeOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size(), DataType::Float);
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, DataType::Int32);
+  fusion.addOutput(x_view);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, aten_inputs, lparams);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at_x_add_bias.view(at::ScalarType::Int);
+
+  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionViewDtypeFailMismatchSize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size(), DataType::Float);
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(view(x_add_bias, DataType::Int));
+}
+
 TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -14456,35 +14625,112 @@ TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
-TEST_F(NVFuserTest, FusionViewFailReduction_CUDA) {
-  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-  Fusion& fusion = *fusion_ptr.get();
-  FusionGuard fg(&fusion);
+void reductionViewAddFusion(
+    std::vector<int64_t>& input_shape,
+    std::vector<int64_t>& output_shape,
+    bool view_before_reduction) {
+  constexpr int kReductionAxis = -1;
 
-  // View is only supported by the pointwise scheduler,
-  // so it should fail with any reduction operations
-  std::vector<int64_t> input_shape{2, 10, 40};
-  std::vector<int64_t> output_shape{2, 10, 2, 20};
+  // Drop size for reduction axis from view_shape
+  std::vector<int64_t> view_shape;
+  {
+    const auto kAxis = (kReductionAxis < 0)
+        ? (kReductionAxis + input_shape.size())
+        : kReductionAxis;
+    for (auto i : c10::irange(input_shape.size())) {
+      if (view_before_reduction || i != kAxis) {
+        view_shape.push_back(input_shape[i]);
+      }
+    }
+  }
 
-  TensorView* x = makeSymbolicTensor(input_shape.size());
-  TensorView* bias = makeSymbolicTensor(input_shape.size());
-  fusion.addInput(x);
-  fusion.addInput(bias);
+  auto bias_shape = (view_before_reduction) ? input_shape : output_shape;
+  for (auto has_implicit_broadcast : {false, true}) {
+    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+    Fusion& fusion = *fusion_ptr.get();
+    FusionGuard fg(&fusion);
 
-  auto x_add_bias = add(x, bias);
-  auto x_view = view(x_add_bias, input_shape, output_shape);
-  auto x_sum = sum(x_view, {-1});
+    TensorView* x = (has_implicit_broadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    TensorView* bias = (has_implicit_broadcast)
+        ? makeConcreteTensor(bias_shape)
+        : makeSymbolicTensor(bias_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
 
-  fusion.addOutput(x_sum);
+    auto tv1 =
+        (view_before_reduction) ? add(x, bias) : sum(x, {kReductionAxis});
+    auto x_view = view(tv1, view_shape, output_shape);
+    auto y = (view_before_reduction) ? sum(x_view, {kReductionAxis})
+                                     : add(x_view, bias);
+    fusion.addOutput(y);
 
-  const auto options =
-      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(bias_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
 
-  at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_bias = at::randn(input_shape, options);
+    FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
+    auto outputs = fusion_executor_cache.runFusionWithInputs(aten_inputs);
 
-  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
-  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
+    auto at_tv1 = (view_before_reduction) ? (at_x + at_bias)
+                                          : at::sum(at_x, kReductionAxis);
+    auto at_x_view = at::native::view(at_tv1, output_shape);
+    auto at_y = (view_before_reduction) ? at::sum(at_x_view, kReductionAxis)
+                                        : at::add(at_x_view, at_bias);
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionViewReductionShmoo_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> view_before_examples = {
+      {{19, 12, 7, 99}, {19, 3, 2772}},
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
+      // Incorrect Result - Broadcast Issue - Pointwise
+      // {{3, 17, 80, 1}, {51, 2, 4, 1, 10}},
+      // {{3, 17, 80, 1, 9}, {51, 2, 4, 1, 10, 9}},
+      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
+      {{22, 22, 2}, {22, 11, 1, 1, 4}},
+      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
+      {{1, 1, 333, 1}, {1, 1, 333, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
+      {{1, 333, 1}, {1, 37, 9, 1}},
+      {{1, 333}, {1, 1, 1, 111, 1, 3}},
+      {{22, 1, 22, 1}, {484}},
+      {{1, 333, 1}, {333}},
+      // Incorrect Result - Broadcast Issue - Reduction
+      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
+      {{1, 7844, 1, 7}, {1, 27454, 2}}};
+
+  for (auto e : view_before_examples) {
+    reductionViewAddFusion(e.first, e.second, true /* view_before_reduction */);
+  }
+
+  std::vector<view_example> view_after_examples = {
+      {{19, 12, 7, 99}, {19, 3, 28}},
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 28}},
+      {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
+      {{3, 17, 80, 1, 9}, {51, 1, 2, 4, 10}},
+      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 1}},
+      {{22, 22, 2}, {22, 11, 1, 1, 2}},
+      {{37, 9, 7, 6, 10}, {333, 2, 21}},
+      {{1, 1, 333, 1}, {1, 1, 333, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1}},
+      {{1, 333, 1}, {1, 37, 9, 1}},
+      {{22, 1, 22, 1}, {484}},
+      {{1, 333, 1}, {333}},
+      {{1, 27454, 1, 2}, {1, 3922, 1, 7}},
+      {{1, 7844, 1, 7}, {1, 1961, 4}}};
+
+  for (auto e : view_after_examples) {
+    reductionViewAddFusion(
+        e.first, e.second, false /* view_before_reduction */);
+  }
 }
 
 TEST_F(NVFuserTest, FusionViewFailPersistent_CUDA) {
@@ -14521,14 +14767,14 @@ TEST_F(NVFuserTest, FusionViewFailPersistent_CUDA) {
 void addViewGeluFusion(
     std::vector<int64_t>& input_shape,
     std::vector<int64_t>& output_shape) {
-  for (auto hasImplicitBroadcast : {false, true}) {
+  for (auto has_implicit_broadcast : {false, true}) {
     Fusion fusion;
     FusionGuard fg(&fusion);
 
-    TensorView* x = (hasImplicitBroadcast)
+    TensorView* x = (has_implicit_broadcast)
         ? makeConcreteTensor(input_shape)
         : makeSymbolicTensor(input_shape.size());
-    TensorView* bias = (hasImplicitBroadcast)
+    TensorView* bias = (has_implicit_broadcast)
         ? makeConcreteTensor(input_shape)
         : makeSymbolicTensor(input_shape.size());
     fusion.addInput(x);
@@ -15960,8 +16206,7 @@ TEST_F(NVFuserTest, FusionBNRepro_CUDA) {
   auto at_mean = std::get<1>(at_results);
   auto at_invstd = std::get<2>(at_results);
 
-  std::vector<at::Tensor> aten_outputs = {
-      input4_ref, input5_ref, at_output, at_mean, at_invstd};
+  std::vector<at::Tensor> aten_outputs = {at_output, at_mean, at_invstd};
 
   testValidate(
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
@@ -16181,9 +16426,13 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
                                    //  keeps normalization scheduler away)
   TensorView* tv6 = add(tv5, tv2); //  Group 1 (Broadcast after reduce)
 
-  fusion->addOutput(tv6);
   // Note: test alias;
   fusion->aliasOutputToInput(tv6, tv0);
+  // TODO: support output on aliased fusion #1488
+  // remove tv7 after #1488
+  // fusion->addOutput(tv6);
+  TensorView* tv7 = add(tv6, IrBuilder::create<Double>(1)); // Group 0
+  fusion->addOutput(tv7);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({128, 65}, options);
@@ -16194,13 +16443,15 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
   auto t4 = std::get<0>(at::max(t3, 0));
   auto t5 = t4.add(t1);
   auto t6 = t5.add(t2);
+  auto t7 = t6.add(1.0);
 
   FusionExecutorCache executor_cache(std::move(fusion));
 
   auto outputs = executor_cache.runFusionWithInputs({t0, t1, t2});
 
+  // TODO: support output on aliased fusion #1488
   // validating aliasing
-  TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
+  // TORCH_INTERNAL_ASSERT(outputs[0].data_ptr() == t0.data_ptr());
 
   TORCH_CHECK(
       executor_cache.getMostRecentKernelRuntime()->isSegmented(),
@@ -16213,7 +16464,7 @@ TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
       "segmentation didn't happen as expected");
 
   testValidate(
-      executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
+      executor_cache.fusion(), outputs, {t0, t1, t2}, {t7}, __LINE__, __FILE__);
 }
 
 TEST_F(NVFuserTest, FusionWelford1Output_CUDA) {
@@ -21007,6 +21258,84 @@ TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
   auto cg_outputs = fe.runFusion({t0, t1});
 
   auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Vectorized reset test for double buffered registers
+TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1.0));
+  auto tv2 = sum(tv1, {0});
+  auto tv2c = tv2->cache_before();
+
+  fusion.addOutput(tv2);
+
+  auto tv1cw = tv1->cache_after();
+  auto tv1cr = tv1cw->cache_after();
+
+  tv1cw->split(-1, 32);
+  tv1cr->split(-1, 32);
+  tv1cr->split(-1, 4);
+  tv1cr->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  tv1cw->computeAt(tv1cr, 1);
+  tv0->computeAt(tv1cw, -1);
+  tv2c->split(-1, 32);
+  tv2c->split(-1, 4);
+  tv1cr->computeAt(tv2c, 2);
+
+  tv1cw->setMemoryType(MemoryType::Shared);
+  tv1cr->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::manual_seed(0);
+  auto t0 = at::randn({200}, options);
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  auto ref = (t0 + 1).sum({0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of issue #1493
+TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigTensor(2);
+  fusion.addInput(tv1);
+
+  auto tv2 = view(tv0, {2, 3}, {6});
+  auto tv3 = add(tv2, IrBuilder::create<Double>(1));
+  auto tv4 = broadcast(tv3, {true, false});
+  auto tv5 = add(tv4, tv1);
+
+  fusion.addOutput(tv5);
+
+  tv5->merge(0);
+  tv0->computeAt(tv5, -1);
+  tv1->computeAt(tv5, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({2, 3}, options);
+  auto t1 = at::randn({1, 6}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = (at::native::view(t0, {6}) + 1).unsqueeze(0) + t1;
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }

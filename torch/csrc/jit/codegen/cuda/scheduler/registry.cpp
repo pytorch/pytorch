@@ -767,12 +767,20 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
+    // Temporarily allow view in reduction scheduler
+    // TODO Add more testing before enabling
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
       return false;
     }
 
-    auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
+    // Needs at least one non-trivial reduction to consider.
+    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      return false;
+    }
+
+    auto reduction_tvs =
+        scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
 
     if (reduction_tvs.size() == 0) {
       // Use pointwise logic
@@ -785,7 +793,8 @@ class ReductionScheduler : public SchedulerEntry {
     }
 
     // Make sure reduction axes are consistent through the fusion
-    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
     if (reduction_ops.size() > 1) {
       // Before examining the reduction axes want to quickly
       //   check the reductions have the same axis width
@@ -883,7 +892,8 @@ class PointWiseScheduler : public SchedulerEntry {
       return false;
     }
 
-    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, true /* ignore_trivial */);
     auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
     return reduction_ops.empty() && welford_ops.empty();
   }
@@ -926,7 +936,13 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
-    auto reduction_ops = ir_utils::getReductionOps(fusion);
+    // Needs at least one non-trivial reduction to consider.
+    if (ir_utils::getReductionOps(fusion, true /* ignore_trivial */).empty()) {
+      return false;
+    }
+
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
     auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
     // For persistent schedule we want welford translated to average and
     // standard deviation reductions.
@@ -939,7 +955,8 @@ class PersistentKernelScheduler : public SchedulerEntry {
       return false;
     }
 
-    auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
+    auto reduction_tvs =
+        scheduler_utils::getReductionTvs(fusion, false /* ignore_trivial */);
 
     if (reduction_tvs.size() == 0) {
       // Use pointwise logic
@@ -1013,7 +1030,8 @@ class PersistentKernelScheduler : public SchedulerEntry {
         HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>(
             data_cache, [&fusion]() {
               return std::make_unique<std::vector<TensorView*>>(
-                  scheduler_utils::getReductionTvs(fusion));
+                  scheduler_utils::getReductionTvs(
+                      fusion /*, ignore_trivial = true*/));
             });
 
     auto& reduction_tvs = reduction_tv_entry.get();
@@ -1261,20 +1279,22 @@ HeuristicSummary::HeuristicSummary(
 
 void HeuristicSummary::validate() const {
   switch (heuristic_) {
-    case ScheduleHeuristic::PointWise:
+    case ScheduleHeuristic::PointWise: {
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::BROADCAST_BYTE_MULTIPLES));
       break;
-    case ScheduleHeuristic::Reduction:
+    }
+    case ScheduleHeuristic::Reduction: {
       TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::REDUCTION_TVS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::UNROLLABLE_INPUTS_AND_OUTPUTS));
       break;
-    case ScheduleHeuristic::Persistent:
+    }
+    case ScheduleHeuristic::Persistent: {
       TORCH_INTERNAL_ASSERT(entry_type_map_.count(EntryType::REDUCTION_TVS));
       TORCH_INTERNAL_ASSERT(
           entry_type_map_.count(EntryType::VECTORIZABLE_INPUTS_AND_OUTPUTS));
@@ -1292,6 +1312,9 @@ void HeuristicSummary::validate() const {
           !persistent_buffer_info->persistent_buffers.empty() &&
           entry_type_map_.count(EntryType::SCOPE_PERSISTENT_FACTOR_INFO));
       break;
+    }
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown heuristic");
   }
 }
 

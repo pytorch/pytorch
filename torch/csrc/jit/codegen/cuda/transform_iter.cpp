@@ -279,6 +279,8 @@ BestEffortReplay::BestEffortReplay(
   std::string err_str(
       "Error during replay, a transformation was called that conflicts with an rfactor call.");
 
+  bool any_target_expr_contains_broadcast_id = false;
+
   // Iterate through target IterDomains' history and compare with what we
   // recorded from replay_domain
   for (auto target_expr : target_exprs) {
@@ -312,6 +314,12 @@ BestEffortReplay::BestEffortReplay(
 
     std::vector<IterDomain*> target_id_inps(
         target_inps_filtered.begin(), target_inps_filtered.end());
+
+    bool target_expr_contains_broadcast_id = std::any_of(
+        target_inps_filtered.begin(),
+        target_inps_filtered.end(),
+        [](IterDomain* id) { return id->isBroadcast(); });
+    any_target_expr_contains_broadcast_id |= target_expr_contains_broadcast_id;
 
     std::vector<IterDomain*> replay_inps =
         std::vector<IterDomain*>(target_id_inps.size(), nullptr);
@@ -353,12 +361,20 @@ BestEffortReplay::BestEffortReplay(
               return replay_id2expr_map.find(id) == replay_id2expr_map.end();
             }
           });
-      TORCH_INTERNAL_ASSERT(no_missing_exprs, err_str);
+      // View operation creates a TensorView with rfactor. After view, broadcast
+      // operation adds iterDomains for any size-1 dimensions. Therefore, the
+      // target domain (broadcast) may contain broadcast ids that are not
+      // present in the replay domain (view). In this case, we skip any target
+      // expressions that contain broadcast ids.
+      TORCH_INTERNAL_ASSERT(
+          no_missing_exprs || any_target_expr_contains_broadcast_id, err_str);
     }
 
     // If any inputs are missing, continue as this expr doesn't match.
     if (missing_replay_input) {
-      TORCH_INTERNAL_ASSERT(!replay_has_rfactor_inp, err_str);
+      TORCH_INTERNAL_ASSERT(
+          !replay_has_rfactor_inp || any_target_expr_contains_broadcast_id,
+          err_str);
       continue;
     }
 

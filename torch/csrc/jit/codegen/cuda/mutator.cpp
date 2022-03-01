@@ -51,6 +51,8 @@ void OptOutMutator::mutate(Double* d) {}
 
 void OptOutMutator::mutate(Int* i) {}
 
+void OptOutMutator::mutate(ComplexDouble* c) {}
+
 void OptOutMutator::mutate(NamedScalar* ns) {}
 
 void OptOutMutator::mutate(IterDomain* id) {
@@ -289,6 +291,19 @@ void OptOutMutator::mutate(GatherOp* op) {
   auto container = op->container();
   container->removeExpr(op);
   IrBuilder::create<GatherOp>(container, out, in, window_shape, pad_width);
+}
+
+void OptOutMutator::mutate(ViewDtypeOp* vop) {
+  TensorView* out = maybeMutated(vop->out())->as<TensorView>();
+  TensorView* in = maybeMutated(vop->in())->as<TensorView>();
+
+  if (out->sameAs(vop->out()) && in->sameAs(vop->in())) {
+    return;
+  }
+
+  auto container = vop->container();
+  container->removeExpr(vop);
+  IrBuilder::create<ViewDtypeOp>(container, out, in, vop->dtype());
 }
 
 void OptOutMutator::mutate(ViewOp* vop) {

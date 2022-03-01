@@ -46,7 +46,7 @@ void IrVisitor::handle(IfThenElse* ite) {
 }
 
 std::vector<Expr*> ExprMutator::mutate(bool reverse_order) {
-  if (insertions_.empty() && replacements_.empty()) {
+  if (insertions_.empty() && replacements_.empty() && removal_.empty()) {
     return exprs_;
   }
 
@@ -119,6 +119,10 @@ std::vector<Expr*> ExprMutator::mutate(bool reverse_order) {
           pos_it != exprs_.end(), "Issue finding expression to remove.");
       exprs_.erase(pos_it);
     } else {
+      TORCH_INTERNAL_ASSERT(
+          removal_info.scope->contains(removal_info.reference),
+          "Expression to remove is not found in the given scope: ",
+          removal_info.reference->toString());
       removal_info.scope->erase(removal_info.reference);
     }
   }

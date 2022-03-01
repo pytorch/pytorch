@@ -7,14 +7,14 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-int positiveAxis(int axis, int ndims) {
-  return (axis > 0) ? axis : (ndims + axis);
+int nonNegativeAxis(int axis, int ndims) {
+  return (axis >= 0) ? axis : (ndims + axis);
 }
 
 Val* numFeatures(TensorView* x, const std::vector<int>& dims, int ndims) {
   Val* num_features = IrBuilder::create<Double>(x->container(), 1);
   for (const auto dim : dims) {
-    const int axis = positiveAxis(dim, ndims);
+    const int axis = nonNegativeAxis(dim, ndims);
     num_features = mul(num_features, x->domain()->domain()[axis]->extent());
   }
   return num_features;
@@ -480,19 +480,16 @@ ForwardNormResult batch_norm(
             "Input running stats must have dtype defined");
         auto casted_output = castOp(*rm_dtype, aliased_output);
 
-        fusion->addOutput(casted_output);
         fusion->aliasOutputToInput(casted_output, input_to_cast);
       };
 
       if (running_mean->isFusionInput()) {
-        fusion->addOutput(new_mean_hat);
         fusion->aliasOutputToInput(new_mean_hat, running_mean);
       } else {
         cast_to_input_dtype(running_mean, new_mean_hat);
       }
 
       if (running_var->isFusionInput()) {
-        fusion->addOutput(new_var_hat);
         fusion->aliasOutputToInput(new_var_hat, running_var);
       } else {
         cast_to_input_dtype(running_var, new_var_hat);
@@ -712,7 +709,6 @@ ForwardNormResult instance_norm(
       // https://godbolt.org/z/6Prd77xYs
       auto new_mean_sum = sum(new_mean_hat, {static_cast<int>(kBatchDim)});
       auto new_mean_channels_only = mul(new_mean_sum, reciprocal(B));
-      fusion->addOutput(new_mean_channels_only);
       fusion->aliasOutputToInput(new_mean_channels_only, running_mean);
 
       auto num_feature_decrement = sub(N, x->container()->oneVal());
@@ -726,7 +722,6 @@ ForwardNormResult instance_norm(
       // https://godbolt.org/z/6Prd77xYs
       auto new_var_sum = sum(new_var_hat, {static_cast<int>(kBatchDim)});
       auto new_var_channels_only = mul(new_var_sum, reciprocal(B));
-      fusion->addOutput(new_var_channels_only);
       fusion->aliasOutputToInput(new_var_channels_only, running_var);
     }
 

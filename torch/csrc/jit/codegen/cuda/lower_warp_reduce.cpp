@@ -176,6 +176,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
         }
       }
     }
+    kir::IrVisitor::handle(expr);
   }
 
   bool openLoopNestLevel(IterDomain* id) {

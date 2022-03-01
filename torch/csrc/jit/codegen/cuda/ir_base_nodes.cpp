@@ -193,6 +193,16 @@ bool Val::isOneInt() const {
   return int_val.has_value() && int_val.value() == 1;
 }
 
+bool Val::isDefinitionType(ExprType expression_type) const {
+  if (definition() != nullptr) {
+    auto def_expr_type = definition()->getExprType();
+    if (def_expr_type.has_value() && def_expr_type.value() == expression_type) {
+      return true;
+    }
+  }
+  return false;
+}
+
 c10::optional<DataType> Val::getDataType() const {
   TORCH_INTERNAL_ASSERT(
       dtype_ != DataType::Null, "Value does not have a data type.");

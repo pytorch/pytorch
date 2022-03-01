@@ -33,6 +33,9 @@ Val* newScalar(ValType vtype, DataType dtype) {
         case DataType::Int32:
         case DataType::Int:
           return IrBuilder::create<Int>();
+        case DataType::ComplexFloat:
+        case DataType::ComplexDouble:
+          return IrBuilder::create<ComplexDouble>();
         default:
           break;
       }
@@ -258,7 +261,6 @@ TensorView* unaryOp(
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
 NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
-NVFUSER_DEFINE_UNARY_OP(abs, Abs)
 NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
@@ -270,6 +272,25 @@ NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 #undef NVFUSER_DEFINE_UNARY_OP
+
+// The output of abs(complex_tensor) are real numbers
+Val* abs(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Abs, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Abs, out, v);
+    return out;
+  }
+  return unaryOp(UnaryOpType::Abs, v);
+}
+
+TensorView* abs(TensorView* tv) {
+  return abs(tv->as<Val>())->as<TensorView>();
+}
 
 // UNARY FLOAT CAST OPERATIONS
 
@@ -652,8 +673,9 @@ TensorView* reductionOp(
   const auto init_type = init->getDataType().value();
   TORCH_CHECK(
       (isFloatingPointType(out_type) && isFloatingPointType(init_type)) ||
+          (isComplexType(out_type) && isComplexType(init_type)) ||
           (isIntegralType(out_type) && isIntegralType(init_type)) ||
-          (out_type == DataType::Bool && init_type == DataType::Bool),
+          (isBooleanType(out_type) && isBooleanType(init_type)),
       "Types should match for reduction ops but received: ",
       out_type,
       " and ",
@@ -661,7 +683,7 @@ TensorView* reductionOp(
   IrBuilder::create<ReductionOp>(reduction_op_type, init, out, tv);
 
   if (keep_dim) {
-    auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
+    auto tv_root = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
     std::vector<bool> is_broadcast(tv_root.size(), false);
     for (auto axis : uint_axes) {
       is_broadcast.at(axis) = true;
@@ -680,7 +702,12 @@ TensorView* sum(
   auto dtype = v1->getDataType().value();
   if (isFloatingPointType(dtype)) {
     init = IrBuilder::create<Double>(0.0);
+  } else if (isComplexType(dtype)) {
+    init = IrBuilder::create<ComplexDouble>(c10::complex<double>(0.0, 0.0));
   } else if (isIntegralType(dtype)) {
+    init = FusionGuard::getCurFusion()->zeroVal();
+  } else if (isBooleanType(dtype)) {
+    v1 = castOp(DataType::Int, v1);
     init = FusionGuard::getCurFusion()->zeroVal();
   } else {
     TORCH_CHECK(
@@ -710,6 +737,9 @@ TensorView* max(
     case (DataType::Int32):
       init = IrBuilder::create<Int>(std::numeric_limits<int32_t>::lowest());
       break;
+    case (DataType::Bool):
+      init = IrBuilder::create<Bool>(false);
+      break;
     default:
       TORCH_CHECK(
           false,
@@ -737,6 +767,9 @@ TensorView* min(
       break;
     case (DataType::Int32):
       init = IrBuilder::create<Int>(std::numeric_limits<int32_t>::max());
+      break;
+    case (DataType::Bool):
+      init = IrBuilder::create<Bool>(true);
       break;
     default:
       TORCH_CHECK(
@@ -785,7 +818,12 @@ TensorView* broadcast(
           ParallelType::Serial,
           IterType::BroadcastWithoutStride));
     } else {
-      out_domain.push_back(inp_domain[iinp]->clone());
+      out_domain.push_back(IrBuilder::create<IterDomain>(
+          inp_domain[iinp]->start(),
+          inp_domain[iinp]->extent(),
+          inp_domain[iinp]->stopOffset(),
+          inp_domain[iinp]->getParallelType(),
+          inp_domain[iinp]->getIterType()));
       iinp++;
     }
     ibdim++;
@@ -895,7 +933,7 @@ WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
 TensorView* transpose(
     TensorView* inp,
     const std::unordered_map<int, int>& old2new) {
-  auto inp_domain = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   std::vector<IterDomain*> out_domain(inp_domain.size());
 
   auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
@@ -1115,7 +1153,7 @@ TensorView* clamp(TensorView* in, Val* min_val, Val* max_val) {
 // sum_to operator
 
 TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
-  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+  const auto& root = TensorDomain::noReductions(in->getMaybeRFactorDomain());
 
   TORCH_CHECK(
       root.size() >= sum_to_size.size(),
@@ -1161,7 +1199,7 @@ TensorView* sum_to(TensorView* in, const std::vector<Int*>& sum_to_size) {
 }
 
 TensorView* sum_to(TensorView* in, const std::vector<int64_t>& sum_to_size) {
-  const auto& root = TensorDomain::noReductions(in->getRootDomain());
+  const auto& root = TensorDomain::noReductions(in->getMaybeRFactorDomain());
 
   TORCH_CHECK(
       root.size() >= sum_to_size.size(),

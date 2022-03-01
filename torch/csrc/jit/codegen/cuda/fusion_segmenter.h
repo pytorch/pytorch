@@ -129,7 +129,7 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   int group_id_ = -1;
 
   //! The scheduler to use for compiling this group
-  ScheduleHeuristic heuristic_ = ScheduleHeuristic::PointWise;
+  ScheduleHeuristic heuristic_ = ScheduleHeuristic::None;
 
   //! Exprs that make up the group
   std::vector<Expr*> exprs_;

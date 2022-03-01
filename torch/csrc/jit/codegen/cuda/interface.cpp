@@ -117,11 +117,15 @@ bool profileNode(const Node* node) {
 //!             extra attention should be paid to contiguity across size-1
 //!             dimensions.
 //!   c. size check:
+//!        c.1 broadcast check:
 //!        making sure that broadcast semantics are identical. So we want to
 //!        make sure a given dimension either are both size-1 for `tensor` &
 //!        `guard_tensor_type`, or are both non-size-1.
 //!        This is due to the fact that we specialize size-1 dimension as
 //!        broadcasted dimension while translating PyTorch tensor to Fusion IR.
+//!        c.1 size-0 check:
+//!        we don't specialize this on codegen, but we do specialize fusion
+//!        logic for size-0 on reductoins, hence the check
 //!
 bool complyWith(
     const at::Tensor& tensor,
@@ -207,10 +211,16 @@ bool complyWith(
       }
     }
 
-    // check c, we go along semantic ordered dimensions
+    // check c.1, we go along semantic ordered dimensions
     // check broadcast / size-1:
     bool guard_bcast = sizes[j].has_value() && sizes[j].value() == 1;
     if (guard_bcast != (t_sizes[j] == 1)) {
+      return false;
+    }
+
+    // check c.2, check for size-0
+    bool guard_size_0 = sizes[j].has_value() && sizes[j].value() == 0;
+    if (guard_size_0 != (t_sizes[j] == 0)) {
       return false;
     }
   }

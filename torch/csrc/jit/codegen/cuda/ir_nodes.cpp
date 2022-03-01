@@ -152,6 +152,36 @@ bool Int::sameAs(const Statement* other) const {
   return false;
 }
 
+ComplexDouble::ComplexDouble(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{c10::nullopt} {}
+
+ComplexDouble::ComplexDouble(IrBuilderPasskey passkey, ScalarType value)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{value} {}
+
+ComplexDouble::ComplexDouble(
+    IrBuilderPasskey passkey,
+    c10::optional<ScalarType> value)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{value} {}
+
+ComplexDouble::ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
+bool ComplexDouble::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ComplexDouble>()) {
+    return false;
+  }
+  const auto other_complex = other->as<ComplexDouble>();
+  if (isConst() && other_complex->isConst())
+    return *value() == *(other_complex->value());
+  return false;
+}
+
 UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
     : Expr(passkey, ExprType::UnaryOp),
       unary_op_type_{type},
@@ -696,6 +726,22 @@ int GatherOp::gatherAxis(int axis) const {
       axis >= 0 && axis < (int)windowShape().size(), "Invalid axis: ", axis);
   return int(windowShape().size()) + axis;
 }
+
+ViewDtypeOp::ViewDtypeOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    DataType dtype)
+    : Expr(passkey, ExprType::ViewDtypeOp), out_(out), in_(in), dtype_(dtype) {
+  addOutput(out);
+  addInput(in);
+}
+
+ViewDtypeOp::ViewDtypeOp(const ViewDtypeOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      dtype_(src->dtype()) {}
 
 ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
     : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {

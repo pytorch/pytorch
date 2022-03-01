@@ -126,9 +126,9 @@ bool validateKernelArgTensor(
   size_t arg_dim = arg.dim();
   // Note: This requires current Fusion to be active.
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t param_dim =
-      TensorDomain::noReductions(param->as<TensorView>()->getRootDomain())
-          .size();
+  size_t param_dim = TensorDomain::noReductions(
+                         param->as<TensorView>()->getMaybeRFactorDomain())
+                         .size();
   // see [Note - broadcast support in integration]
   // Because of broadcasting support handled in integration, we relax the rank
   // check as necessary.
@@ -202,6 +202,10 @@ bool validateKernelArgScalar(
     case c10::ScalarType::Long:
       match = param_type == DataType::Int || param_type == DataType::Int32;
       break;
+    case c10::ScalarType::ComplexDouble:
+      match = param_type == DataType::ComplexDouble ||
+          param_type == DataType::ComplexFloat;
+      break;
     case c10::ScalarType::Double:
       match = param_type == DataType::Double || param_type == DataType::Float ||
           param_type == DataType::Half || param_type == DataType::BFloat16;
@@ -209,7 +213,6 @@ bool validateKernelArgScalar(
     case c10::ScalarType::Bool:
       match = param_type == DataType::Bool;
       break;
-    // TODO: support complex double scalar
     default:
       match = false;
   }
@@ -696,8 +699,8 @@ kir::ExpressionEvaluator bindKernelInputs(
           i);
 
       const auto aten_tensor = aten_inputs[i].toTensor();
-      const auto root_domain =
-          TensorDomain::noReductions(tensor_input->domain()->getRootDomain());
+      const auto root_domain = TensorDomain::noReductions(
+          tensor_input->domain()->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
           "Something went wrong configuring launch. Inputs no longer match.");
@@ -705,10 +708,11 @@ kir::ExpressionEvaluator bindKernelInputs(
       for (const auto dim : c10::irange(root_domain.size())) {
         const auto extent = root_domain[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
-        if (value == 0 && extent->isOneInt()) {
-          // don't bind 0 to a dimension if it's marked as broadcast
+        if (value == 0 && tensor_input->uses().empty()) {
+          // If there's no uses, ignore there's a size-0 dimension.
           continue;
         }
+        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
         bool should_bind = true;
         if (check_consistency) {
           const auto prev_value = expr_eval.evaluate(extent);
@@ -764,18 +768,19 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs do not match.");
 
       auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
+      auto root_dom =
+          TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == (int64_t)root_dom.size(),
           "Something went wrong configuring launch. Inputs do not match.");
-
       for (const auto dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();
         const auto value = aten_tensor.sizes()[dim];
-        if (value == 0 && extent->isOneInt()) {
-          // don't bind 0 to a dimension if it's marked as broadcast
+        if (value == 0 && cg_tensor->uses().empty()) {
+          // If there's no uses, ignore there's a size-0 dimension.
           continue;
         }
+        TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
         const auto prev_value = evaluator.evaluate(extent);
         if (prev_value.has_value()) {
           TORCH_CHECK(

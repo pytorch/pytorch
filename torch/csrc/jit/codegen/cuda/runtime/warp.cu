@@ -51,7 +51,7 @@ __device__ void warpReduceTIDX(
     block_sync::sync();
 
     if (warp_idx == 0) {
-      // This assumes num_of_warps will be < 32, meaning < 1024 blocks.
+      // This assumes num_of_warps will be < 32, meaning < 1024 threads.
       //  Should be true for long enough.
       assert(num_of_warps <= 32);
 

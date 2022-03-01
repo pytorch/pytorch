@@ -64,6 +64,7 @@ class TensorView;
 class Bool;
 class Double;
 class Int;
+class ComplexDouble;
 class NamedScalar;
 
 // Exprs
@@ -76,15 +77,12 @@ class BroadcastOp;
 class TransposeOp;
 class ShiftOp;
 class GatherOp;
+class ViewDtypeOp;
 class ViewOp;
 
 // Exprs
 class Split;
 class Merge;
-class TransposeOp;
-class ShiftOp;
-class GatherOp;
-class ViewOp;
 
 namespace kir {
 class Predicate;
@@ -120,6 +118,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const Bool* stmt);
   virtual void handle(const Double* stmt);
   virtual void handle(const Int* stmt);
+  virtual void handle(const ComplexDouble* stmt);
   virtual void handle(const NamedScalar* stmt);
 
   virtual void handle(const kir::Predicate*);
@@ -138,6 +137,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const TransposeOp* stmt);
   virtual void handle(const ShiftOp* stmt);
   virtual void handle(const GatherOp* stmt);
+  virtual void handle(const ViewDtypeOp* stmt);
   virtual void handle(const ViewOp* stmt);
 
   virtual void handle(const kir::Allocate*);
@@ -165,6 +165,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(Bool* stmt);
   virtual void handle(Double* stmt);
   virtual void handle(Int* stmt);
+  virtual void handle(ComplexDouble* stmt);
   virtual void handle(NamedScalar* stmt);
   virtual void handle(IterDomain* stmt);
   virtual void handle(TensorDomain* stmt);
@@ -186,6 +187,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(TransposeOp* stmt);
   virtual void handle(ShiftOp* stmt);
   virtual void handle(GatherOp* stmt);
+  virtual void handle(ViewDtypeOp* stmt);
   virtual void handle(ViewOp* stmt);
 
   virtual void handle(kir::Allocate* stmt);
@@ -254,6 +256,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(Bool*);
   virtual void mutate(Double*);
   virtual void mutate(Int*);
+  virtual void mutate(ComplexDouble*);
   virtual void mutate(NamedScalar*);
   virtual void mutate(IterDomain*);
   virtual void mutate(TensorDomain*);
@@ -275,6 +278,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(TransposeOp*);
   virtual void mutate(ShiftOp*);
   virtual void mutate(GatherOp*);
+  virtual void mutate(ViewDtypeOp*);
   virtual void mutate(ViewOp*);
 
   virtual void mutate(kir::Allocate*);

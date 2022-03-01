@@ -12,6 +12,7 @@ namespace cuda {
 void debugPrint(const c10::TensorTypePtr& type);
 
 bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
 
 bool is_cpu_scalar(const at::Tensor& tensor);
 bool is_cpu_scalar(const c10::TensorType& tensor_type);

@@ -266,6 +266,9 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return definition_;
   }
 
+  // Determine if value definition matches given expression type
+  bool isDefinitionType(ExprType expression_type) const;
+
   const std::vector<Expr*>& uses() const;
 
   bool isFusionInput() const {

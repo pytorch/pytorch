@@ -67,6 +67,21 @@ const auto& strAttr = Symbol::attr("profiled_str");
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
+bool isReductionNonCompatibleTensor(
+    const std::shared_ptr<c10::TensorType>& tensor_type) {
+  return is_zero_dim_tensor(tensor_type) || is_zero_sized_tensor(tensor_type);
+}
+
+bool isInputNonSizeZeroTensor(const Node* node) {
+  for (const auto& val : node->inputs()) {
+    auto tensor_type = val->type()->cast<TensorType>();
+    if (tensor_type && is_zero_sized_tensor(tensor_type)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Note [ Permutation Bookkeeping and Propagation in Parser ]
 //
 // The goal in supporting permutation propagation in parser is to:
@@ -736,7 +751,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -772,7 +787,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -828,7 +843,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -877,7 +892,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -920,7 +935,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -991,7 +1006,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1012,7 +1027,7 @@ class IrParser {
             auto out = randlike(operand);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1034,7 +1049,7 @@ class IrParser {
             auto out = softplus(operand, beta, threshold);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1057,7 +1072,7 @@ class IrParser {
             auto out = threshold(operand, th, value);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1089,7 +1104,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1115,7 +1130,7 @@ class IrParser {
             auto out = clamp(operand, low, high);
             value_map.emplace(node->output()->unique(), out);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1143,7 +1158,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1174,7 +1189,7 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            nullptr,
+            isInputNonSizeZeroTensor,
             nullptr);
       }
     }
@@ -1206,7 +1221,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1243,7 +1258,7 @@ class IrParser {
                   ValueHolder(TensorViewBuilder().build(), format));
             }
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1276,7 +1291,7 @@ class IrParser {
               value_map.emplace(node->output()->unique(), input);
             }
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1304,7 +1319,7 @@ class IrParser {
                 grad->as<TensorView>(), mask->as<TensorView>(), scale);
             value_map.emplace(node->output()->unique(), output);
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -1345,9 +1360,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_mean =
                     value_map[node->input(3)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    running_mean->isFusionInput(),
-                    "IO_tensor `instance_norm::running_mean` can only be input tensor to fusion");
               }
 
               TensorView* running_var = nullptr;
@@ -1355,9 +1367,6 @@ class IrParser {
                       static_cast<c10::TypePtr>(NoneType::get()))) {
                 running_var =
                     value_map[node->input(4)->unique()]->as<TensorView>();
-                TORCH_INTERNAL_ASSERT(
-                    running_var->isFusionInput(),
-                    "IO_tensor `instance_norm::running_var` can only be input tensor to fusion");
               }
 
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -1400,7 +1409,13 @@ class IrParser {
                 value_map.emplace(node->output()->unique(), result.output);
               }
             },
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1511,7 +1526,13 @@ class IrParser {
                     ValueHolder(result.output, format));
               }
             },
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1665,7 +1686,13 @@ class IrParser {
                   node->output(2)->unique(), TensorViewBuilder().build());
             }
           },
-          [](const Node* node) -> bool { return true; },
+          [](const Node* node) -> bool {
+            if (isReductionNonCompatibleTensor(
+                    node->input(1)->type()->cast<TensorType>())) {
+              return false;
+            }
+            return true;
+          },
           [](const Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
@@ -1730,7 +1757,13 @@ class IrParser {
               }
             },
             // TODO: #ProfileIValue List should update this
-            [](const Node* node) -> bool { return true; },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -1828,7 +1861,13 @@ class IrParser {
             }
           },
           // TODO: #ProfileIValue List should update this
-          [](const Node* node) -> bool { return true; },
+          [](const Node* node) -> bool {
+            if (isReductionNonCompatibleTensor(
+                    node->input(0)->type()->cast<TensorType>())) {
+              return false;
+            }
+            return true;
+          },
           [](const Node* node) -> OperatorType {
             return OperatorType::Normalization;
           });
@@ -1865,7 +1904,7 @@ class IrParser {
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {
-              if (is_zero_dim_tensor(
+              if (isReductionNonCompatibleTensor(
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
@@ -1909,7 +1948,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), output);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (isReductionNonCompatibleTensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -1966,7 +2005,7 @@ class IrParser {
               value_map.emplace(node->output()->unique(), grad_input);
             },
             [](const Node* node) -> bool {
-              if (is_zero_dim_tensor(
+              if (isReductionNonCompatibleTensor(
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
@@ -2024,7 +2063,13 @@ class IrParser {
                         input, dims, unbiased.value(), keepdim.value());
               value_map.emplace(node->output()->unique(), output);
             },
-            nullptr,
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(0)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
             [](const Node* node) -> OperatorType {
               return OperatorType::Normalization;
             });
@@ -2066,7 +2111,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (isReductionNonCompatibleTensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -2140,7 +2185,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (isReductionNonCompatibleTensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -2198,7 +2243,7 @@ class IrParser {
               }
             },
             [](const Node* node) -> bool {
-              if (is_zero_dim_tensor(
+              if (isReductionNonCompatibleTensor(
                       node->input(0)->type()->cast<TensorType>())) {
                 return false;
               }
@@ -2241,7 +2286,7 @@ class IrParser {
               value_map.emplace(
                   node->output()->unique(), ValueHolder(out, format));
             },
-            nullptr,
+            isInputNonSizeZeroTensor,
             nullptr);
       }
     }
@@ -2279,7 +2324,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2308,7 +2353,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2369,7 +2414,7 @@ class IrParser {
                   node->output()->unique(), ValueHolder(out, format));
             }
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2403,7 +2448,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2441,7 +2486,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2466,7 +2511,7 @@ class IrParser {
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
-          nullptr,
+          isInputNonSizeZeroTensor,
           nullptr);
     }
 
@@ -2505,7 +2550,7 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           },
           [](const Node* node) -> bool {
-            if (is_zero_dim_tensor(
+            if (isReductionNonCompatibleTensor(
                     node->input(0)->type()->cast<TensorType>())) {
               return false;
             }
@@ -2553,10 +2598,26 @@ class IrParser {
               value_map.emplace(node->output()->unique(), output);
             },
             [](const Node* node) -> bool {
+              auto self_value = node->inputs()[0];
+              auto tensor_type = self_value->type()->cast<c10::TensorType>();
+              if (tensor_type == nullptr) {
+                return false;
+              }
+              if (!tensor_type->sizes().concrete_sizes().has_value()) {
+                // Shape information for input tensor is required.
+                return false;
+              }
+
+              if (!isInputNonSizeZeroTensor(node)) {
+                return false;
+              }
               // Reject fusing node if view_sizes contains an inferred dimension
               auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
-              TORCH_INTERNAL_ASSERT(
-                  view_sizes.has_value(), "The size parameter is required.");
+              if (!view_sizes.has_value()) {
+                // The size parameter is required.
+                return false;
+              }
+
               for (auto axis_size : view_sizes->vec()) {
                 if (axis_size == -1) {
                   return false;
@@ -2589,7 +2650,18 @@ class IrParser {
             auto output = squeeze(self, self_sizes);
             value_map.emplace(node->output()->unique(), output);
           },
-          nullptr,
+          [](const Node* node) -> bool {
+            // Shape information for input tensor is required.
+            auto self_value = node->inputs()[0];
+            auto tensor_type = self_value->type()->cast<c10::TensorType>();
+            if (tensor_type == nullptr) {
+              return false;
+            }
+            if (!isInputNonSizeZeroTensor(node)) {
+              return false;
+            }
+            return tensor_type->sizes().concrete_sizes().has_value();
+          },
           nullptr);
     }
 
@@ -2625,7 +2697,19 @@ class IrParser {
               }
               value_map.emplace(node->output()->unique(), output);
             },
-            nullptr,
+            [](const Node* node) -> bool {
+              // Shape information for input tensor is required.
+              auto self_value = node->inputs()[0];
+              auto tensor_type = self_value->type()->cast<c10::TensorType>();
+              if (tensor_type == nullptr) {
+                return false;
+              }
+              if (!isInputNonSizeZeroTensor(node)) {
+                return false;
+              }
+              auto optional_sizes = tensor_type->sizes().concrete_sizes();
+              return tensor_type->sizes().concrete_sizes().has_value();
+            },
             nullptr);
       }
     }

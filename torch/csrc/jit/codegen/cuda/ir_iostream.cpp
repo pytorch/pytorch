@@ -221,6 +221,25 @@ void IrPrinter::handle(const Int* i) {
   }
 }
 
+void IrPrinter::handle(const ComplexDouble* c) {
+  if (print_inline_) {
+    if (auto def = c->definition()) {
+      os_ << "( ";
+      handle(def);
+      os_ << " )";
+      return;
+    }
+  }
+
+  if (c->isSymbolic()) {
+    os_ << "c" << varName(c);
+  } else {
+    os_ << "std::complex<double>"
+        << std::setprecision(std::numeric_limits<double>::max_digits10)
+        << *(c->value());
+  }
+}
+
 void IrPrinter::handle(const NamedScalar* ns) {
   os_ << ns->name();
 }
@@ -455,6 +474,11 @@ void IrPrinter::handle(const GatherOp* op) {
     no_comma = false;
   }
   os_ << "} )\n";
+}
+
+void IrPrinter::handle(const ViewDtypeOp* top) {
+  indent() << top->out() << " = view.dtype( " << top->in() << ", "
+           << top->dtype() << " )\n";
 }
 
 void IrPrinter::handle(const ViewOp* top) {

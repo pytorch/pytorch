@@ -54,6 +54,9 @@ void Val::dispatch(T handler, Val* val) {
         case DataType::Int:
           ptr(handler)->handle(val->as<Int>());
           return;
+        case DataType::ComplexDouble:
+          ptr(handler)->handle(val->as<ComplexDouble>());
+          return;
         default:
           break;
       }
@@ -120,6 +123,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
       return;
+    case ExprType::ViewDtypeOp:
+      ptr(handler)->handle(expr->as<ViewDtypeOp>());
+      return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
       return;
@@ -179,6 +185,9 @@ void Val::constDispatch(T handler, const Val* val) {
           return;
         case DataType::Int:
           ptr(handler)->handle(val->as<Int>());
+          return;
+        case DataType::ComplexDouble:
+          ptr(handler)->handle(val->as<ComplexDouble>());
           return;
         default:
           break;
@@ -245,6 +254,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GatherOp:
       ptr(handler)->handle(expr->as<GatherOp>());
+      return;
+    case ExprType::ViewDtypeOp:
+      ptr(handler)->handle(expr->as<ViewDtypeOp>());
       return;
     case ExprType::ViewOp:
       ptr(handler)->handle(expr->as<ViewOp>());
@@ -317,6 +329,9 @@ void Val::mutatorDispatch(T mutator, Val* val) {
         case DataType::Int:
           ptr(mutator)->mutate(val->as<Int>());
           return;
+        case DataType::ComplexDouble:
+          ptr(mutator)->mutate(val->as<ComplexDouble>());
+          return;
         default:
           break;
       }
@@ -382,6 +397,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GatherOp:
       ptr(mutator)->mutate(expr->as<GatherOp>());
+      return;
+    case ExprType::ViewDtypeOp:
+      ptr(mutator)->mutate(expr->as<ViewDtypeOp>());
       return;
     case ExprType::ViewOp:
       ptr(mutator)->mutate(expr->as<ViewOp>());
@@ -530,6 +548,9 @@ void OptOutConstDispatch::handle(const Double* stmt) {
 void OptOutConstDispatch::handle(const Int* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ComplexDouble* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const NamedScalar* stmt) {
   unhandled(stmt);
 }
@@ -585,6 +606,9 @@ void OptOutConstDispatch::handle(const ShiftOp* stmt) {
 void OptOutConstDispatch::handle(const GatherOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const ViewDtypeOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const ViewOp* stmt) {
   unhandled(stmt);
 }
@@ -627,6 +651,9 @@ void OptOutDispatch::handle(Double* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(Int* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(ComplexDouble* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(NamedScalar* stmt) {
@@ -682,6 +709,9 @@ void OptOutDispatch::handle(ShiftOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(GatherOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(ViewDtypeOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(ViewOp* stmt) {

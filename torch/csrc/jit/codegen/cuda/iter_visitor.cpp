@@ -83,6 +83,10 @@ class RecursiveDependencies : public OptInDispatch {
     simpleVal(stmt);
   }
 
+  void handle(ComplexDouble* stmt) final {
+    simpleVal(stmt);
+  }
+
   void handle(NamedScalar* stmt) final {
     simpleVal(stmt);
   }
