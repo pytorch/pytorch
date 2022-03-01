@@ -322,7 +322,10 @@ torch::lazy::LazyTensor squeeze(const torch::lazy::LazyTensor& input) {
   auto input_shape = input.shape();
   auto output_dimensions = ir::ops::BuildSqueezedDimensions(
       input_shape.Get().sizes(), /*squeeze_dim=*/-1);
-  return view(input, output_dimensions);
+  torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kSqueeze,
+                                  Shape(input_shape.Get().scalar_type(), output_dimensions), input_shape, -1);
+
+  return input.CreateViewTensor(std::move(view_info));
 }
 
 torch::lazy::LazyTensor squeeze(const torch::lazy::LazyTensor& input, int64_t dim) {
@@ -331,7 +334,11 @@ torch::lazy::LazyTensor squeeze(const torch::lazy::LazyTensor& input, int64_t di
       torch::lazy::GetCanonicalDimensionIndex(dim, input.shape().Get().dim());
   auto output_dimensions =
       ir::ops::BuildSqueezedDimensions(input_shape.Get().sizes(), squeeze_dim);
-  return view(input, output_dimensions);
+
+  torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kSqueeze,
+                                  Shape(input_shape.Get().scalar_type(), output_dimensions), input_shape, squeeze_dim);
+
+  return input.CreateViewTensor(std::move(view_info));
 }
 
 void squeeze_(torch::lazy::LazyTensor& input) {
