@@ -6,9 +6,10 @@
 
 import torch
 import functools
+from collections import OrderedDict
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
+from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec, _register_pytree_node
 from .pytree_hacks import tree_map_
 from functools import partial
 import inspect
@@ -40,8 +41,20 @@ def register_torch_return_types():
 
 register_torch_return_types()
 
-# Checks that all args-to-be-batched have the same batch dim size
 
+# Temporary OrderedDict registration as pytree
+def _odict_flatten(d):
+    return list(d.values()), list(d.keys())
+
+
+def _odict_unflatten(values, context):
+    return OrderedDict((key, value) for key, value in zip(context, values))
+
+
+_register_pytree_node(OrderedDict, _odict_flatten, _odict_unflatten)
+
+
+# Checks that all args-to-be-batched have the same batch dim size
 
 def _validate_and_get_batch_size(
         flat_in_dims: List[Optional[int]],
