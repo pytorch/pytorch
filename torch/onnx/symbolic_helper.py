@@ -174,14 +174,7 @@ def parse_args(*arg_descriptors):
         @wraps(fn)
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
-            FILE_BUG_MSG = "If you believe this is not due to custom symbolic implementation within your code or "\
-                "an external library, please file an issue at "\
-                "https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to report this bug."
-            assert len(arg_descriptors) >= len(args),\
-                f"A mismatch between the number of arguments ({len(args)}) and "\
-                f"their descriptors ({len(arg_descriptors)}) was found at symbolic function '{fn.__name__}'. "\
-                f"{FILE_BUG_MSG}"
-
+            assert len(arg_descriptors) >= len(args)
             try:
                 sig = inspect.signature(fn)
                 arg_names = list(sig.parameters.keys())[1:]
@@ -192,14 +185,9 @@ def parse_args(*arg_descriptors):
             args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[assignment]
                     for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]
             # only support _outputs in kwargs
-            assert len(kwargs) <= 1,\
-                f"Symbolic function {fn.__name__}'s '**kwargs' can contain a single key/value entry. "\
-                f"{FILE_BUG_MSG}"
-
+            assert len(kwargs) <= 1
             if len(kwargs) == 1:
-                assert "_outputs" in kwargs,\
-                    f"Symbolic function {fn.__name__}'s '**kwargs' can only contain '_outputs' key at '**kwargs'. "\
-                    f"{FILE_BUG_MSG}"
+                assert "_outputs" in kwargs
             return fn(g, *args, **kwargs)
 
         return wrapper
@@ -950,6 +938,17 @@ def quantize_helper(g, tensor, scale, zero_point):
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     output = g.op("QuantizeLinear", tensor, scale, zero_point)
     return g.op("prim::TupleConstruct", output, scale, zero_point)
+
+def requantize_bias_helper(g, bias, input_scale, weight_scale):
+    # In PyTorch, bias is float and is quantized implicitly inside the quantized ATen op kernel.
+    # In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
+    # Since int32 is not supported by ONNX operator `QuantizeLinear`, quantization is exported using regular operators.
+    bias_scale = g.op("Mul", weight_scale, input_scale)
+    bias_zero_point = g.op("Constant", value_t=torch.tensor([0], dtype=torch.int))
+    q_bias = g.op("Cast",
+                  g.op("Div", bias, bias_scale),
+                  to_i=torch.onnx.TensorProtoDataType.INT32)
+    return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
 
 # ---------------------------------------------------------------------
 # ONNX operator version
