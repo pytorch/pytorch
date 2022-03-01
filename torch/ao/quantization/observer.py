@@ -335,7 +335,7 @@ class _ObserverBase(ObserverBase):
 class _MinMaxObserver(_ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
-    
+
     def __init__(
         self,
         dtype=torch.quint8,
