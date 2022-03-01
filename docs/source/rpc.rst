@@ -190,6 +190,14 @@ Example::
     :members:
     :inherited-members:
 
+.. note ::
+  The RPC framework does not automatically retry any 
+  :meth:`~torch.distributed.rpc.rpc_sync`, 
+  :meth:`~torch.distributed.rpc.rpc_async` and 
+  :meth:`~torch.distributed.rpc.remote` calls. The reason being that there is 
+  no way the RPC framework can determine whether an operation is idempotent or 
+  not and whether it is safe to retry. As a result, it is the application's 
+  responsibility to deal with failures and retry if necessary.
 
 .. _rref:
 
