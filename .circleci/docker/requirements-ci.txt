@@ -25,7 +25,7 @@
 #Pinned versions:
 #test that import:
 
-#expecttest
+expecttest==0.1.3
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
 #Pinned versions: 0.1.3
@@ -51,7 +51,7 @@
 #Pinned versions: 2.1.1
 #test that import:
 
-#librosa
+librosa>=0.6.2
 #Description: A python package for music and audio analysis
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
@@ -79,7 +79,7 @@
 #Pinned versions:
 #test that import:
 
-#mypy
+mypy==0.812
 #Description: linter
 #Pinned versions: 0.812
 #test that import: test_typing.py, test_type_hints.py
@@ -129,7 +129,7 @@
 #Pinned versions:
 #test that import: test_tensorboard.py
 
-#psutil
+psutil
 #Description: information on running processes and system utilization
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
@@ -164,7 +164,7 @@
 #Pinned versions: 10.9.0
 #test that import:
 
-#scikit-image
+scikit-image
 #Description: image processing routines
 #Pinned versions:
 #test that import: test_nn.py
@@ -174,7 +174,7 @@
 #Pinned versions: 0.20.3
 #test that import:
 
-#scipy
+scipy==1.6.3
 #Description: scientific python
 #Pinned versions: 1.6.3
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
@@ -193,7 +193,7 @@
 #Pinned versions:
 #test that import:
 
-#tb-nightly
+tb-nightly
 #Description: TensorBoard
 #Pinned versions:
 #test that import:
@@ -208,7 +208,7 @@
 #Pinned versions:
 #test that import:
 
-#unittest-xml-reporting
+unittest-xml-reporting
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
