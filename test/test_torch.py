@@ -116,6 +116,19 @@ class TestVitalSignsCuda(TestCase):
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
+    # FIXME: Port this to ErrorInputs on where
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_where_invalid_device(self, device, dtype):
+        for devices in [('cpu', device, device), (device, 'cpu', 'cpu'),
+                        (device, 'cpu', device), ('cpu', device, 'cpu')]:
+            condition = make_tensor(16, device=devices[0], dtype=torch.float32)
+            x = make_tensor(16, device=devices[1], dtype=torch.float32)
+            y = make_tensor(16, device=devices[2], dtype=torch.float32)
+            with self.assertRaisesRegex(RuntimeError,
+                                        "Expected condition, x and y to be on the same device"):
+                torch.where(condition, x, y)
+
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
