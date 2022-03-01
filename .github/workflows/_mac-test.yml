@@ -48,6 +48,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch

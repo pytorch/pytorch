@@ -66,6 +66,7 @@ jobs:
           INSTALL_WINDOWS_SDK: 1
           PYTHON_VERSION: 3.8
           PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
