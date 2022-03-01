@@ -114,8 +114,6 @@ def broadcast_shapes(*shapes):
     result = [1] * max_len
     for shape in shapes:
         if isinstance(shape, int):
-            if shape < 0:
-                raise RuntimeError(rf"Trying to create tensor with negative dimension {shape}: [{shape}]")
             shape = (shape,)
         if isinstance(shape, tuple) or isinstance(shape, list):
             for i in range(-1, -1 - len(shape), -1):
