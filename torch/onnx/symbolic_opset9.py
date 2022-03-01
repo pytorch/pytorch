@@ -742,7 +742,7 @@ def op_with_optional_float_cast(g, op_name, self, *args, other_operands=None, op
     if require_cast:
         warnings.warn(
             f"{op_name}-{sym_help._export_onnx_opset_version} only support float types."
-            f"Using cast<{target_float_t}>-{op_name}-cast-back instead.")
+            f"Using cast<{target_float_t}>-{op_name}-cast<{origin_dtype}> instead.")
         self = g.op("Cast", self, to_i=sym_help.cast_pytorch_to_onnx[target_float_t])
         for i in range(len(other_operands)):
             if not sym_help._is_fp(other_operands[i]):
