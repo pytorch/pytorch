@@ -1,9 +1,8 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from .utils import ReferenceQuantizedModule
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 
 class Embedding(nn.Embedding, ReferenceQuantizedModule):
     """ A reference quantized Embedding module that fits into the
