@@ -10,7 +10,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 "scale": 1.0,
                 "zero_point": 0
             }
-        self.weight_qscheme = weight_qparams["qscheme"]
+        self.weight_qscheme: torch.qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
         assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine, torch.per_channel_affine_float_qparams], \
             Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}")
@@ -38,6 +38,8 @@ class ReferenceQuantizedModule(torch.nn.Module):
         model
         """
         # suppress mypy warning
+        assert isinstance(self.weight, torch.Tensor)
+        # assert isinstance(self.weight_qscheme, torch.qscheme)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
@@ -47,6 +49,8 @@ class ReferenceQuantizedModule(torch.nn.Module):
 
     def get_quantized_weight(self):
         # suppress mypy warning
+        assert isinstance(self.weight, torch.Tensor)
+        # assert isinstance(self.weight_qscheme, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
