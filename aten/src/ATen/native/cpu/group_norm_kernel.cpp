@@ -29,6 +29,7 @@ void GroupNormKernelImplInternal(
     Tensor& Y,
     Tensor& mean,
     Tensor& rstd) {
+  TORCH_CHECK(group > 0);
   TORCH_CHECK(X.numel() == N * C * HxW);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
