@@ -1,5 +1,16 @@
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
+
+# Bazel) as well as valid Python (for our cmake build).  This means that
+# load() directives are not allowed (as they are not recognized by Python).
+# If you want to fix this, figure out how run this file from cmake with a proper
+# Starlark interpreter as part of the default OSS build process.  If you need
+# some nontrivial Starlark features, make a separate bzl file (remember that
+
+# bzl files are not exported via ShipIt by default, so you may also need to
+# update PyTorch's ShipIt config)
+
 # In both open-source and fbcode builds, these are generated into
-# torch/csrc/{autgrad,jit}/generated.i
+# torch/csrc/{autograd,jit}/generated.i
 GENERATED_CPP = [
     "autograd/generated/Functions.cpp",
     "autograd/generated/VariableType_0.cpp",
@@ -1063,6 +1074,10 @@ aten_cpu_source_non_codegen_list = [
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
+]
+
+aten_ufunc_headers = [
+    "aten/src/ATen/native/ufunc/add.h",
 ]
 
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
