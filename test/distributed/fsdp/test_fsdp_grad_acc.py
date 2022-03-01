@@ -164,15 +164,24 @@ class TestGradAcc(FSDPTest):
     @parametrize(
         "configs",
         [
-            [_GradAccConfig(True, 4)],
-            [_GradAccConfig(False, 4)],
-            [_GradAccConfig(True, 2), _GradAccConfig(False, 2), _GradAccConfig(True, 2)],
-            [_GradAccConfig(False, 2), _GradAccConfig(True, 2), _GradAccConfig(False, 2)],
+            [_GradAccConfig(use_no_sync=True, num_iters=4)],
+            [_GradAccConfig(use_no_sync=False, num_iters=4)],
+            [
+                _GradAccConfig(use_no_sync=True, num_iters=2),
+                _GradAccConfig(use_no_sync=False, num_iters=2),
+                _GradAccConfig(use_no_sync=True, num_iters=2),
+            ],
+            [
+                _GradAccConfig(use_no_sync=False, num_iters=2),
+                _GradAccConfig(use_no_sync=True, num_iters=2),
+                _GradAccConfig(use_no_sync=False, num_iters=2),
+            ],
         ]
     )
     @parametrize(
         "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
+        # [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
+        [CPUOffload(offload_params=True)]
     )
     @parametrize(
         "backward_prefetch",

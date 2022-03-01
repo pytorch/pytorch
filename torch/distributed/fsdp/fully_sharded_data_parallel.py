@@ -1305,7 +1305,13 @@ class FullyShardedDataParallel(nn.Module):
                 if self.gradient_postdivide_factor > 1:
                     # Average grad by world_size for consistency with PyTorch DDP.
                     output.div_(self.gradient_postdivide_factor)
-                accumulate_grad = getattr(param, "_saved_grad_shard", None) is not None
+                # To support gradient accumulation without `no_sync()`, we save
+                # the gradient data to `param._saved_grad_shard` before the
+                # backward pass, accumulate gradients into it here, and set
+                # `param.grad` with the accumulated value after the backward
+                # pass in preparation for the optimizer step.
+                accumulate_grad = \
+                    getattr(param, "_saved_grad_shard", None) is not None
                 if accumulate_grad:
                     p_assert(
                         param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
@@ -1343,8 +1349,8 @@ class FullyShardedDataParallel(nn.Module):
                 # the transfer is async so it is not necessarily done until we
                 # explicitly synchronize in backward.
                 param.grad.data = param._cpu_grad  # type: ignore[attr-defined]
-                # Ensure the postcondition that `param._saved_grad_shard` is on
-                # the same device as `param.grad` (to avoid autograd issues)
+                # We ensure that `param._saved_grad_shard` is on the same device
+                # as `param.grad` (to appease autograd).
                 param._saved_grad_shard = param._cpu_grad  # type: ignore[attr-defined]
 
             # After _post_backward_hook returns, orig_grad_data will eventually
@@ -1413,6 +1419,9 @@ class FullyShardedDataParallel(nn.Module):
                         # iteration.
                         continue
                     if hasattr(p, "_saved_grad_shard"):
+                        # We set `p.grad` to the saved gradient shard to ensure
+                        # optimizer correctness since optimizers operate on the
+                        # `grad` attribute.
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                         delattr(p, "_saved_grad_shard")
 
@@ -1510,9 +1519,12 @@ class FullyShardedDataParallel(nn.Module):
                 p.grad.size() != p._orig_size  # type: ignore[attr-defined]
                 or p.grad.device != p.device
             ):
-                can_accumulate_grad = p.grad.device == p.data.device and \
+                can_accumulate_grad = p.grad.device == p.device and \
                     p.grad.size() == p._local_shard.shape  # type: ignore[attr-defined]
                 if can_accumulate_grad:
+                    # We use `p._saved_grad_shard` as an auxiliary variable in
+                    # which to accumulate gradients, leaving `p.grad` for FSDP
+                    # to use for managing each per-iteration gradient.
                     p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
                 p.grad = None
 
