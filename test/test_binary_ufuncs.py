@@ -794,6 +794,7 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     def test_comparison_ops_device_computation(self, device):
+        raise AssertionError("Failing on purpose")
         operands = (
             torch.tensor(0),
             torch.tensor(2, device='cuda'),

@@ -30,7 +30,7 @@ class TestAsync(JitTestCase):
         # testing flakiness
         import random
         if random.randint(0, 1) == 1:
-            assert(False)
+            raise AssertionError("I'm flaky")
         # assert nothing; only to make sure the fake python path works
 
     def test_async_future_type_python(self):
