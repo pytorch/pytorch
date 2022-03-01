@@ -4062,7 +4062,26 @@ class TestCudaFuser(JitTestCase):
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x, y)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_view_copy_graph_guard_double_fusion(self):
+        x = torch.randn(2, 2, 5, device="cuda")
+        w = torch.randn(5, 5, device="cuda")
 
+        with nvfuser_singleton_fusion(True):
+            def t(x, w):
+                o = x.view([4, x.size()[-1]])
+                o = torch.matmul(o, w)
+                o = o.view([2, 2, o.size()[1]])
+                return o
+
+            t_jit = torch.jit.script(t)
+            for i in range(3):
+                jit_o = t_jit(x, w)
+            o = t(x, w)
+            self.assertEqual(jit_o, o)
+            self.assertGraphContainsExactly(t_jit.graph_for(x, w), FUSION_GUARD, 2, consider_subgraphs=True)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,

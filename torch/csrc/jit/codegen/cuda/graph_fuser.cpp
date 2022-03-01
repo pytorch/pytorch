@@ -1101,7 +1101,8 @@ struct CudaGraphFuser {
     // TODO: failure in buildShapeExpressions should not break fusion execution,
     // we can add a try/catch here to bailout from removeOutputsUsedOnlyInSize.
     GRAPH_DEBUG("before build shape expression: ", *graph_);
-    fusion_value_to_runtime_shape_ = buildShapeExpressions(fusion_group);
+    auto shape_map = buildShapeExpressions(fusion_group);
+    fusion_value_to_runtime_shape_.insert(shape_map.begin(), shape_map.end());
     GRAPH_DEBUG("after build shape expression: ", *graph_);
 
     auto outputs = fusion_group->outputs().vec();
@@ -1112,14 +1113,12 @@ struct CudaGraphFuser {
     for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
       auto output = outputs[i];
       auto soutput = soutputs[i];
-      if (usedOnlyInDtypeAndSize(output) &&
-          fusion_value_to_runtime_shape_.count(soutput) > 0) {
+      if (usedOnlyInDtypeAndSize(output) && shape_map.count(soutput) > 0) {
         bool has_dtype = usedInDtype(output);
         auto uses = output->uses();
         for (Use u : uses) {
           if (u.user->matches("aten::size(Tensor self) -> int[]")) {
-            u.user->output()->replaceAllUsesWith(
-                fusion_value_to_runtime_shape_.at(soutput));
+            u.user->output()->replaceAllUsesWith(shape_map.at(soutput));
             u.user->destroy();
           } else if (u.user->matches("prim::dtype(Tensor a) -> int")) {
             continue;
