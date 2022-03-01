@@ -9,7 +9,7 @@ import torch
 from torch import distributed as dist
 from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch
+from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch, FullyShardedDataParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -200,7 +200,7 @@ class TestGradAcc(FSDPTest):
         interleaving using and not using the ``no_sync()`` context manager. For
         the interleaving, we test the case where the final iteration before the
         gradient synchronization is in the ``no_sync()`` context and the case
-        where it is not. This is why we have four elements in the ``configs``
+        where it is not, which is why we have four elements in the ``configs``
         list. This test also checks for compatibility with the CPU offload and
         backward prefetch options.
         """
