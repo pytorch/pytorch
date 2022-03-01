@@ -61,8 +61,8 @@ class TestSubclass(TestCase):
             x = nn.Parameter(x)
         str_repr = x.__repr__()
         if tensor_cls is not torch.Tensor:
-            self.assertTrue(tensor_cls.__name__ in str_repr)
-        self.assertEqual(as_param, 'Parameter' in str_repr)
+            self.assertEqual(str_repr.count(f"{tensor_cls.__name__}("), 1)
+        self.assertEqual(str_repr.count("Parameter"), 1 if as_param else 0)
 
     @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
     @parametrize("as_param", [False, True])
