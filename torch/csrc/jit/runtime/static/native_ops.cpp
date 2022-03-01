@@ -39,7 +39,7 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name) {
   return SRNativeOperatorRegistry()->Has(name);
 }
 
-std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
+SROperator getNativeOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SRNativeOperatorRegistry()->Has(op_name)) {
     return SRNativeOperatorRegistry()->Create(op_name)->Generate(n);

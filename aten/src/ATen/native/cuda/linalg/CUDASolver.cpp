@@ -148,6 +148,149 @@ void getrs<c10::complex<float>>(
       info));
 }
 
+template <>
+void lsvqr<float, float>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(float, float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvqr(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void lsvqr<double, double>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(double, double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvqr(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void lsvqr<c10::complex<float>, float>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<float>, float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvqr(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        reinterpret_cast<const cuComplex*>(csrValA),
+        csrRowPtrA,
+        csrColIndA,
+        reinterpret_cast<const cuComplex*>(b),
+        tol,
+        reorder,
+        reinterpret_cast<cuComplex*>(x),
+        singularity));
+  }
+
+template <>
+void lsvqr<c10::complex<double>, double>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<double>, double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvqr(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        reinterpret_cast<const cuDoubleComplex*>(csrValA),
+        csrRowPtrA,
+        csrColIndA,
+        reinterpret_cast<const cuDoubleComplex*>(b),
+        tol,
+        reorder,
+        reinterpret_cast<cuDoubleComplex*>(x),
+        singularity));
+  }
+
+template <>
+void lsvlu<float, float>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(float, float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void lsvlu<double, double>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(double, double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        csrValA,
+        csrRowPtrA,
+        csrColIndA,
+        b,
+        tol,
+        reorder,
+        x,
+        singularity));
+  }
+
+template <>
+void lsvlu<c10::complex<float>, float>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<float>, float)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        reinterpret_cast<const cuComplex*>(csrValA),
+        csrRowPtrA,
+        csrColIndA,
+        reinterpret_cast<const cuComplex*>(b),
+        tol,
+        reorder,
+        reinterpret_cast<cuComplex*>(x),
+        singularity));
+  }
+
+template <>
+void lsvlu<c10::complex<double>, double>(
+  CUSOLVER_LINEAR_SOLVER_ARGTYPES(c10::complex<double>, double)) {
+    TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvluHost(
+        handle,
+        n,
+        nnzA,
+        descrA,
+        reinterpret_cast<const cuDoubleComplex*>(csrValA),
+        csrRowPtrA,
+        csrColIndA,
+        reinterpret_cast<const cuDoubleComplex*>(b),
+        tol,
+        reorder,
+        reinterpret_cast<cuDoubleComplex*>(x),
+        singularity));
+  }
 
 template<>
 void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
