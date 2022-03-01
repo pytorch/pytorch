@@ -14322,7 +14322,6 @@ op_db: List[OpInfo] = [
            backward_dtypes=floating_types(),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
-           supports_sparse_csr=True,
            check_batched_grad=False,
            check_batched_gradgrad=False,
            skips=(
