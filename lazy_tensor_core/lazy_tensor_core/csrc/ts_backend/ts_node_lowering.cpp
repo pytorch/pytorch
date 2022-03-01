@@ -2,6 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
@@ -19,6 +20,7 @@
 #include <torch/csrc/lazy/core/view_ops/select_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/view.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include <torch/csrc/lazy/core/lazy_graph_executor.h>
 
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
@@ -156,6 +158,11 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       const torch::lazy::DeviceData* device_data_node =
           torch::lazy::NodeCast<torch::lazy::DeviceData>(
               node, *torch::lazy::ltc_device_data);
+      auto infoptr = device_data_node->data()->info();
+      auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
+      if (GRAPH_DUMP_ENABLED) {
+        LOG(ERROR) << "Lowering device data node, tensor id " << deviceDataInfoPtr->tensor_id << std::endl;
+      }
       return {loctx()->GetParameter(device_data_node->data())};
     }
     std::vector<torch::jit::NamedValue> arguments;
