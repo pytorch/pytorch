@@ -30,7 +30,7 @@ def extract_ir(filename: str) -> List[str]:
             if end_loc == -1:
                 continue
             s = split_str[:end_loc]
-            pfx = split_strs[i-1].splitlines()[-1]
+            pfx = split_strs[i - 1].splitlines()[-1]
             lines = [x[len(pfx):] for x in s.splitlines(keepends=True)]
             graphs.append(''.join(lines))
 
@@ -38,12 +38,12 @@ def extract_ir(filename: str) -> List[str]:
 
 
 def make_tensor_from_type(inp_type: torch._C.TensorType):
-    if inp_type.requires_grad() != False:
+    if inp_type.requires_grad() is not False:
         raise NotImplementedError("Tensors with requires_grad are not implemented")
     return make_tensor(
         inp_type.sizes(),
-        dtype = inp_type.dtype(),
-        device = inp_type.device())
+        dtype=inp_type.dtype(),
+        device=inp_type.device())
 
 
 def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
@@ -130,7 +130,9 @@ def test_nvfuser(graphs: List[str], baseline_fn, nvfuser_fn):
 
 
 def run():
-    parser = argparse.ArgumentParser(description="Extracts torchscript IR from log files and, optionally, benchmarks it or outputs the IR")
+    parser = argparse.ArgumentParser(
+        description="Extracts torchscript IR from log files and, optionally, benchmarks it or outputs the IR"
+    )
     parser.add_argument("filename", help="Filename of log file")
     parser.add_argument("--nvfuser", dest="nvfuser", action="store_true", help="benchmark nvfuser against no fusion")
     parser.add_argument("--no-nvfuser", dest="nvfuser", action="store_false", help="DON'T benchmark nvfuser against no fusion")
@@ -152,7 +154,6 @@ def run():
     if args.nvfuser_nnc:
         print("NVFuser vs NNC:")
         test_nvfuser(graphs, run_nnc, run_nvfuser)
-        #test_nvfuser(graphs, run_baseline_no_fusion, run_nnc)
 
     if args.output:
         quoted = []
