@@ -409,8 +409,10 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 return quantized_graph.node_copy(node, load_arg(quantized=torch.float))
         else:
             if self.num_tensor_args == 2:
+                print("loading act dtype:", act_dtype)
                 # make sure both inputs are quantized to act_dtype
                 load_arg(quantized={0: act_dtype, 1: act_dtype})(self.binary_op_node.args)
+                print("after loading act dtype")
             args = load_arg(quantized=torch.float)(self.binary_op_node.args)
             kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
             op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
@@ -425,10 +427,13 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 op_out = quantized_graph.node_copy(self.relu_node, modified_load_arg)
             activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
-            assert activation_post_process is not None
-            return quantize_node(
-                op_out, activation_post_process,
-                node, modules, quantized_graph, node_name_to_scope, is_input=False)
+            # assert activation_post_process is not None
+            if activation_post_process is not None:
+                return quantize_node(
+                    op_out, activation_post_process,
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
+            else:
+                return quantized_graph.node_copy(op_out, load_arg(quantized=None))
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
@@ -1517,6 +1522,8 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                     activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
             else:
+                # make sure the input is quantized to act_dtype
+                load_arg(quantized={0: act_dtype})(node.args)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out
 

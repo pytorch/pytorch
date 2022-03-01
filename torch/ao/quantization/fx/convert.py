@@ -345,6 +345,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         return load_quantized_impl
 
     def load_x(n: Node) -> Node:
+        print("n:", n, "env:" ,env)
         assert n.name in env, \
             'node ' + n.name + ' does not exist in environment'
         dtype_to_node = env[n.name]

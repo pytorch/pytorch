@@ -5454,6 +5454,34 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # FX Graph Mode and Eager Mode now diverages in numerics of add_scalar and mul_scalar
             # self.assertEqual(m(data), ref_m(data))
 
+    def test_add_scalar_with_quantized_input(self):
+        class TorchAdd(nn.Module):
+            """Wrapper around torch.add so that all ops can be found at build"""
+            def __init__(self):
+                super().__init__()
+                self.add_func = nnq.FloatFunctional()
+
+            def forward(self, x, y):
+                return self.add_func.add(x, y)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ff = nnq.FloatFunctional()
+
+            def forward(self, x):
+                x = self.ff.add_scalar(x, 3)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig}, prepare_custom_config_dict={
+            "input_quantized_idxs": [0]})
+        print("after prepare", m)
+        m = convert_fx(m)
+        print("after convert", m)
+        # test it runs
+
+
     def test_embedding(self):
         class M(torch.nn.Module):
             def __init__(self):
