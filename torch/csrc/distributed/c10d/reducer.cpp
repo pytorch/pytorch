@@ -796,7 +796,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 
   // TODO(@pietern): Make this work for both CPU/CUDA tensors.
   // When using CPU tensors we don't need to do this.
-  // // Record event so that we can wait for all of them.
+  // Record event so that we can wait for all of them.
   // auto& event = bucket.events[bucket_index.intra_bucket_index];
   // event.record();
 
