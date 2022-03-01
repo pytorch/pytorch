@@ -152,8 +152,8 @@ class Embedding(torch.nn.Module):
                 nn.Embedding.__name__
             assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
             from torch.ao.quantization import float_qparams_weight_only_qconfig
-            if mod.qconfig is not None and mod.qconfig.weight is not None:
-                weight_observer = mod.qconfig.weight()
+            if mod.qconfig is not None and mod.qconfig.weight is not None:  # type: ignore[union-attr]
+                weight_observer = mod.qconfig.weight()  # type: ignore[union-attr, operator]
             else:
                 weight_observer = float_qparams_weight_only_qconfig.weight()
 
@@ -239,8 +239,8 @@ class EmbeddingBag(Embedding):
                 nn.EmbeddingBag.__name__
             assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
             from torch.ao.quantization.qconfig import float_qparams_weight_only_qconfig
-            if mod.qconfig is not None and mod.qconfig.weight is not None:
-                weight_observer = mod.qconfig.weight()
+            if mod.qconfig is not None and mod.qconfig.weight is not None:  # type: ignore[union-attr]
+                weight_observer = mod.qconfig.weight()  # type: ignore[union-attr, operator]
             else:
                 weight_observer = float_qparams_weight_only_qconfig.weight()
 
