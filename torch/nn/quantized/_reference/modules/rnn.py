@@ -6,6 +6,9 @@ from typing import Optional, Dict, Any, Tuple
 from torch import _VF
 from torch.nn.utils.rnn import PackedSequence
 
+def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+    return tensor.index_select(dim, permutation)
+
 class RNNCellBase(nn.RNNCellBase):
     def __init__(self, input_size: int, hidden_size: int, bias: bool, num_chunks: int,
                  device=None, dtype=None, weight_qparams_dict=None) -> None:
@@ -210,7 +213,8 @@ class RNNBase(nn.RNNBase):
     def __init__(self, mode: str, input_size: int, hidden_size: int,
                  num_layers: int = 1, bias: bool = True, batch_first: bool = False,
                  dropout: float = 0., bidirectional: bool = False, proj_size: int = 0,
-                 device=None, dtype=None, weight_qparams_dict=None) -> None:
+                 device=None, dtype=None,
+                 weight_qparams_dict: Optional[Dict[str, Dict[str, Any]]]=None) -> None:
         super().__init__(
             mode, input_size, hidden_size, num_layers, bias, batch_first, dropout,
             bidirectional, proj_size, device, dtype
@@ -222,6 +226,7 @@ class RNNBase(nn.RNNBase):
                 'scale': 1.0,
                 'zero_point': 0
             }
+            weight_qparams_dict = dict()
             for wn in self._flat_weights_names:
                 weight_qparams_dict[wn] = weight_qparams
 
@@ -260,6 +265,15 @@ class LSTM(RNNBase):
     def __init__(self, *args, **kwargs):
         assert "weight_qparams_dict" in kwargs
         super(LSTM, self).__init__('LSTM', *args, **kwargs)
+
+    # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
+    def permute_hidden(self,  # type: ignore[override]
+                       hx: Tuple[Tensor, Tensor],
+                       permutation: Optional[Tensor]
+                       ) -> Tuple[Tensor, Tensor]:
+        if permutation is None:
+            return hx
+        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
