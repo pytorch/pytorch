@@ -1,0 +1,10 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+cc_library(
+    name = "mkl",
+    visibility = ["//visibility:public"],
+    deps = select({
+        "@platforms//os:linux": ["@mkl_linux//:mkl"],
+        "@platforms//os:macos": ["@mkl_macos//:mkl"],
+    }),
+)
