@@ -292,7 +292,6 @@ def get_default_qconfig_dict(backend='fbgemm', version=0):
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=0):
     qconfig = get_default_qat_qconfig(backend, version)
-    print(qconfig)
     qconfig_transpose = qconfig
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
     # so we have to modify the weight observer to MovingAverageMinMaxObserver or another
