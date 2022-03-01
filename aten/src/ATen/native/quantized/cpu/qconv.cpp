@@ -294,6 +294,13 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                                             : "quantized::conv";
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  TORCH_CHECK(act.scalar_type() == c10::kQUInt8,
+                func_name,
+                "(FBGEMM): Expected activation data type ",
+                toString(c10::kQUInt8),
+                " but got ",
+                toString(act.scalar_type()));
+
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
@@ -435,6 +442,21 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
         padding(),
         output_padding(),
         dilation());
+
+    // if use direct convolution implementation, compute the col_offsets
+    // of the weight matrix at model initialization stage.
+    // We need to know the shape of output matrix
+    // to compute col_offsets for direct convolution.
+    // Hence it cannot be called from inside weight packing function
+    // like other quantized conv implementation
+    if (pack_w->getPackedWForDirectconv().get() &&
+        pack_w->getPackedWForDirectconv().get()->is_first_call()) {
+          pack_w->getPackedWForDirectconv().get()->col_offsets_with_zero_pt_s8acc32_DirectConvT(
+              conv_p,
+              w_zp.data(),
+              col_offsets,
+              M);
+    }
   } else {
     output_shape = MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
   }
@@ -596,6 +618,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
               kSpatialDim == 2,
               func_name, kSpatialDim,
               "d (qnnpack): ConvTranspose cannot be fused with ReLU.");
+  TORCH_CHECK(act.scalar_type() == c10::kQUInt8,
+              func_name,
+              "(qnnpack): Expected activation data type ",
+              toString(c10::kQUInt8),
+              "but got ",
+              toString(act.scalar_type()));
   ConvDimChecks<kSpatialDim>(
       act.ndimension(), stride().size(), padding().size(),
       output_padding().size(), dilation().size(), func_name, transpose());
@@ -621,12 +649,12 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
 
   auto output_min = kReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .first
       : std::numeric_limits<uint8_t>::min();
   auto output_max = kReluFused
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      ? activationLimits(output_scale, output_zero_point, Activation::RELU)
+      ? activationLimits<uint8_t>(output_scale, output_zero_point, Activation::RELU)
             .second
       : std::numeric_limits<uint8_t>::max();
 

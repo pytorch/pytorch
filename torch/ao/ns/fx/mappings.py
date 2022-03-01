@@ -80,6 +80,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nnqatd.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
+            nniqat.LinearBn1d,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
@@ -376,7 +377,17 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # dropout
         set([
             nn.Dropout,
+            nnq.Dropout,
+        ]),
+        # F.dropout
+        set([
             F.dropout,
+            toq.dropout,
+        ]),
+        # matmul
+        set([
+            torch.matmul,
+            toq.matmul,
         ]),
     ]
 
@@ -433,6 +444,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.instance_norm,
         F.layer_norm,
         F.leaky_relu,
+        F.dropout,
         F.silu,
         F.mish,
         # TODO(future PR): implement shadowing for binary ops and
@@ -459,6 +471,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.instance_norm,
         toq.layer_norm,
         toq.leaky_relu,
+        toq.dropout,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # toq.add,
@@ -524,6 +537,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnqd.LSTM,
         nn.BatchNorm2d,
         nn.BatchNorm3d,
+        nn.Dropout,
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
         nn.ConvTranspose3d,
@@ -559,6 +573,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqat.LinearBn1d,
         nniqd.LinearReLU,
     ])
 
@@ -570,6 +585,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Conv3d,
         nnq.BatchNorm2d,
         nnq.BatchNorm3d,
+        nnq.Dropout,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
         nnq.ConvTranspose3d,
@@ -584,6 +600,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.ReLU6,
         nnq.Embedding,
         nnq.EmbeddingBag,
+        nnq.Dropout,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,

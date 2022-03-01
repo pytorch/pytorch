@@ -219,6 +219,12 @@ index_add(input, dim, index, source, *, alpha=1, out=None) -> Tensor
 See :meth:`~Tensor.index_add_` for function description.
 """)
 
+add_docstr(torch.index_copy, r"""
+index_copy(input, dim, index, source, *, out=None) -> Tensor
+
+See :meth:`~Tensor.index_add_` for function description.
+""")
+
 add_docstr(torch.add, r"""
 add(input, other, *, alpha=1, out=None) -> Tensor
 
@@ -993,60 +999,71 @@ add_docstr(torch.asarray,
            r"""
 asarray(obj, *, dtype=None, device=None, copy=None, requires_grad=False) -> Tensor
 
-Converts :attr:`obj` into a tensor, sharing data and preserving autograd history
-if possible.
+Converts :attr:`obj` to a tensor.
 
 :attr:`obj` can be one of:
 
 1. a tensor
 2. a NumPy array
 3. a DLPack capsule
-4. a Python object that implements the buffer protocol
-5. a Python sequence
+4. an object that implements Python's buffer protocol
+5. a scalar
+6. a sequence of scalars
 
-For each of the mentioned options, in order, this functions will assume :attr:`obj`
-is of that type and try, first, sharing memory. Only then, it will make a copy (if
-necessary).
+When :attr:`obj` is a tensor, NumPy array, or DLPack capsule the returned tensor will,
+by default, not require a gradient, have the same datatype as :attr:`obj`, be on the
+same device, and share memory with it. These properties can be controlled with the
+:attr:`dtype`, :attr:`device`, :attr:`copy`, and :attr:`requires_grad` keyword arguments.
+If the returned tensor is of a different datatype, on a different device, or a copy is
+requested then it will not share its memory with :attr:`obj`. If :attr:`requires_grad`
+is ``True`` then the returned tensor will require a gradient, and if :attr:`obj` is
+also a tensor with an autograd history then the returned tensor will have the same history.
 
-The dtype of the result tensor is inferred from the input object, except when
-object is (4): an object that implements the buffer protocol (see :func:`torch.frombuffer`).
-In that case, the buffer is interpreted as an array of bytes, which are grouped
-according to the size of the given :attr:`dtype` or the global default
-(see :func:`torch.set_default_tensor_type`) if `None` is given.
+When :attr:`obj` is not a tensor, NumPy Array, or DLPack capsule but implements Python's
+buffer protocol then the buffer is interpreted as an array of bytes grouped according to
+the size of the datatype passed to the :attr:`dtype` keyword argument. (If no datatype is
+passed then the default floating point datatype is used, instead.) The returned tensor
+will have the specified datatype (or default floating point datatype if none is specified)
+and, by default, be on the CPU device and share memory with the buffer.
 
-For example: NumPy arrays also implement the buffer protocol. However, since NumPy
-arrays have higher priority than objects implementing the buffer protocol, this function
-will handle them as NumPy arrays. In other words, it will infer its dtype as if using
-``torch.from_numpy`` (instead of ``torch.frombuffer``).
+When :attr:`obj` is none of the above but a scalar or sequence of scalars then the
+returned tensor will, by default, infer its datatype from the scalar values, be on the
+CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` tries to avoid copies for tensors and NumPy arrays.
-    :func:`torch.tensor` always copies the data from the input object.
-    :func:`torch.from_numpy` creates a tensor that shares its memory with a NumPy array.
-    :func:`torch.frombuffer` creates a tensor that shares its memory with an object
-    that implements the buffer protocol.
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that shares its memory
-    with the object represented in the dlpack.
+    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
+           tensor or a NumPy array, copying otherwise.
+
+    :func:`torch.tensor` creates a tensor that always copies the data from the input object.
+
+    :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
+
+    :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
+           implement the buffer protocol.
+
+    :func:`torch.from_dlpack` creates a tensor that always shares memory from
+           DLPack capsules.
 
 Args:
-    obj (object): a Python object that satisfies, at least, one of the five options
-           mentioned above.
+    obj (object): a tensor, NumPy array, DLPack Capsule, object that implements Python's
+           buffer protocol, scalar, or sequence of scalars.
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-           Default: if ``None``, it will be inferred from :attr:`obj`.
-    copy (bool, optional): flags whether the object memory should be copied or not.
-           If ``None``, then the result tensor shares memory with the Python object
-           whenever possible. If ``True``, then the object memory is copied. If ``False``,
-           then the object memory is shared. If the object memory cannot be shared
-           and this flag is ``False``, then an error is thrown.
-    device (:class:`torch.device`, optional): the device of the constructed tensor.
-           If `None`, then the device of :attr:`obj` is used. Else, it either copies
-           the data, if :attr:`obj` lives in a different device, or it shares the
-           memory, if :attr:`obj` lives in the same device.
-    requires_grad (bool, optional): If autograd should record operations on the
-           returned tensor. However, if this flag is ``False`` and the input object
-           is a non-leaf :class:`Tensor`, this function will call :func:`torch.Tensor.detach`.
+    dtype (:class:`torch.dtype`, optional): the datatype of the returned tensor.
+           Default: ``None``, which causes the datatype of the returned tensor to be
+           inferred from :attr:`obj`.
+    copy (bool, optional): controls whether the returned tensor shares memory with :attr:`obj`.
+           Default: ``None``, which causes the returned tensor to share memory with :attr:`obj`
+           whenever possible. If ``True`` then the returned tensor does not share its memory.
+           If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
+           error is thrown if it cannot.
+    device (:class:`torch.device`, optional): the device of the returned tensor.
+           Default: ``None``, which causes the device of :attr:`obj` to be used.
+    requires_grad (bool, optional): whether the returned tensor requires grad.
+           Default: ``False``, which causes the returned tensor not to require a gradient.
+           If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
+           is also a tensor with an autograd history then the returned tensor will have
+           the same history.
 
 Example::
 
@@ -1775,7 +1792,7 @@ depthwise according to :attr:`indices_or_sections`. Each split is a view of
 :attr:`input`.
 
 This is equivalent to calling torch.tensor_split(input, indices_or_sections, dim=2)
-(the split dimension is 1), except that if :attr:`indices_or_sections` is an integer
+(the split dimension is 2), except that if :attr:`indices_or_sections` is an integer
 it must evenly divide the split dimension or a runtime error will be thrown.
 
 This function is based on NumPy's :func:`numpy.dsplit`.
@@ -3730,10 +3747,15 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors, and the modulus operation for integer tensors. The result
-has the same sign as the dividend :attr:`input` and its absolute value
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
+The result has the same sign as the dividend :attr:`input` and its absolute value
 is less than that of :attr:`other`.
+
+This function may be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3749,6 +3771,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
    Complex inputs are not supported. In some cases, it is not mathematically
    possible to satisfy the definition of a modulo operation with complex numbers.
 
+.. seealso::
+
+    :func:`torch.remainder` which implements Python's modulus operator.
+    This one is defined using division rounding down the result.
+
 Args:
     input (Tensor): the dividend
     other (Tensor or Scalar): the divisor
@@ -3763,11 +3790,6 @@ Example::
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
-.. seealso::
-
-    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
-    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
-    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -5134,13 +5156,7 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \text{end})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -5470,13 +5486,8 @@ with base :attr:`base`. That is, the values are:
     \text{base}^{\text{end}})
 """ + """
 
-.. warning::
-    Not providing a value for :attr:`steps` is deprecated. For backwards
-    compatibility, not providing a value for :attr:`steps` will create a tensor
-    with 100 elements. Note that this behavior is not reflected in the
-    documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for :attr:`steps` will throw a
-    runtime error.
+
+From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
     start (float): the starting value for the set of points
@@ -8315,10 +8326,16 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors and the modulus operation for integer tensors.
-Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
-than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
+Computes
+`Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_
+entrywise.  The result has the same sign as the divisor :attr:`other` and its absolute value
+is less than that of :attr:`other`.
+
+It may also be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -8328,12 +8345,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
-.. note::
-    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
-    is equivalent to Python's modulus operation, and different from Python's
-    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
-    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
-    the IEEE remainder.
+.. seealso::
+
+    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_.
+    This one is defined in terms of division rounding towards zero.
 
 Args:
     input (Tensor or Scalar): the dividend
@@ -8348,12 +8363,6 @@ Example::
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
     >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
-
-.. seealso::
-
-    :func:`torch.fmod` which just computes the modulus for integer inputs and
-    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
@@ -8450,26 +8459,53 @@ row_stack(tensors, *, out=None) -> Tensor
 Alias of :func:`torch.vstack`.
 """)
 
-add_docstr(torch.round,
-           r"""
-round(input, *, out=None) -> Tensor
+add_docstr(torch.round, r"""
+round(input, *, decimals=0, out=None) -> Tensor
 
-Returns a new tensor with each of the elements of :attr:`input` rounded
-to the closest integer.
+Rounds elements of :attr:`input` to the nearest integer.
+
+.. note::
+    This function implements the "round half to even" to
+    break ties when a number is equidistant from two
+    integers (e.g. `round(2.5)` is 2).
+
+    When the :attr:\`decimals\` argument is specified the
+    algorithm used is similar to NumPy's `around`. This
+    algorithm is fast but inexact and it can easily
+    overflow for low precision dtypes.
+    Eg. `round(tensor([10000], dtype=torch.float16), decimals=3)` is `inf`.
+
+.. seealso::
+    :func:`torch.ceil`, which rounds up.
+    :func:`torch.floor`, which rounds down.
+    :func:`torch.trunc`, which rounds towards zero.
 
 Args:
     {input}
+    decimals (int): Number of decimal places to round to (default: 0).
+        If decimals is negative, it specifies the number of positions
+        to the left of the decimal point.
 
 Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.9920,  0.6077,  0.9734, -1.0362])
-    >>> torch.round(a)
-    tensor([ 1.,  1.,  1., -1.])
+    >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
+    tensor([ 5.,  -2.,  9., -8.])
+
+    >>> # Values equidistant from two integers are rounded towards the
+    >>> #   the nearest even value (zero is treated as even)
+    >>> torch.round(torch.tensor([-0.5, 0.5, 1.5, 2.5]))
+    tensor([-0., 0., 2., 2.])
+
+    >>> # A positive decimals argument rounds to the to that decimal place
+    >>> torch.round(torch.tensor([0.1234567]), decimals=3)
+    tensor([0.1230])
+
+    >>> # A negative decimals argument rounds to the left of the decimal
+    >>> torch.round(torch.tensor([1200.1234567]), decimals=-3)
+    tensor([1000.])
 """.format(**common_args))
 
 add_docstr(torch.rsqrt,
@@ -8511,6 +8547,59 @@ scatter_add(input, dim, index, src) -> Tensor
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 """)
 
+add_docstr(torch.scatter_reduce, r"""
+scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
+
+Reduces all values from the :attr:`input` tensor to the indices specified in
+the :attr:`index` tensor. For each value in :attr:`input`, its output index is
+specified by its index in :attr:`input` for ``dimension != dim`` and by the
+corresponding value in :attr:`index` for ``dimension = dim``.
+The applied reduction for non-unique indices is defined via the :attr:`reduce`
+argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`).
+For non-existing indices, the output will be filled with the identity of the
+applied reduction (1 for :obj:`"prod"` and 0 otherwise).
+
+It is also required that ``index.size(d) == input.size(d)`` for all dimensions ``d``.
+Moreover, if :attr:`output_size` is defined the the values of :attr:`index` must be
+between ``0`` and ``output_size - 1`` inclusive.
+
+
+For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
+
+    out[index[i][j][k]][j][k] += input[i][j][k]  # if dim == 0
+    out[i][index[i][j][k]][k] += input[i][j][k]  # if dim == 1
+    out[i][j][index[i][j][k]] += input[i][j][k]  # if dim == 2
+
+Note:
+    This out-of-place operation is similar to the in-place versions of
+    :meth:`~torch.Tensor.scatter_` and :meth:`~torch.Tensor.scatter_add_`,
+    in which the output tensor is automatically created according to the
+    maximum values in :attr:`index` and filled based on the identity of the
+    applied reduction.
+
+Note:
+    {forward_reproducibility_note}
+
+Args:
+    input (Tensor): the input tensor
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter and reduce.
+    src (Tensor): the source elements to scatter and reduce
+    reduce (str): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`)
+    output_size (int, optional): the size of the output at dimension :attr:`dim`.
+        If set to :obj:`None`, will get automatically inferred according to
+        :obj:`index.max() + 1`
+
+Example::
+
+    >>> input = torch.tensor([1, 2, 3, 4, 5, 6])
+    >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
+    >>> torch.scatter_reduce(input, 0, index, reduce="sum", output_size=3)
+    tensor([4, 12, 5])
+
+""".format(**reproducibility_notes))
+
 add_docstr(torch.select,
            r"""
 select(input, dim, index) -> Tensor
@@ -8519,7 +8608,7 @@ Slices the :attr:`input` tensor along the selected dimension at the given index.
 This function returns a view of the original tensor with the given dimension removed.
 
 Args:
-    {input} (Tensor)
+    {input}
     dim (int): the dimension to slice
     index (int): the index to select with
 
@@ -8528,7 +8617,7 @@ Args:
     :meth:`select` is equivalent to slicing. For example,
     ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
     ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
-""")
+""".format(**common_args))
 
 add_docstr(torch.select_scatter,
            r"""
@@ -8539,7 +8628,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into.
     index (int): the index to select with
@@ -8557,7 +8646,7 @@ Example::
     >>> a.select_scatter(b, 0, 0)
     tensor([[1., 1.],
             [0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.slice_scatter,
            r"""
@@ -8569,7 +8658,7 @@ This function returns a tensor with fresh storage; it does not create a view.
 
 
 Args:
-    {input} (Tensor)
+    {input}
     src (Tensor): The tensor to embed into :attr:`input`
     dim (int): the dimension to insert the slice into
     start (Optional[int]): the start index of where to insert the slice
@@ -8600,7 +8689,7 @@ Example::
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.]])
-""")
+""".format(**common_args))
 
 add_docstr(torch.set_flush_denormal,
            r"""
@@ -9390,7 +9479,7 @@ always be real-valued, even if :attr:`input` is complex.
 
     .. code:: python
 
-        S = torch.svdvals(A)
+        S = torch.linalg.svdvals(A)
 
 .. note:: Differences with :func:`torch.linalg.svd`:
 
@@ -10784,7 +10873,7 @@ Calculates log determinant of a square matrix or batches of square matrices.
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    :func:`torch.linalg.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
@@ -11477,6 +11566,34 @@ Example::
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.tensor(0.1), torch.tensor(10), torch.quint8)
     tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
        quantization_scheme=torch.per_tensor_affine, scale=0.10, zero_point=10)
+""")
+
+add_docstr(torch.quantize_per_tensor_dynamic,
+           r"""
+quantize_per_tensor_dynamic(input, dtype, reduce_range) -> Tensor
+
+Converts a float tensor to a quantized tensor with scale and zero_point calculated
+dynamically based on the input.
+
+Arguments:
+    input (Tensor): float tensor or list of tensors to quantize
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+        Has to be one of the quantized dtypes: ``torch.quint8``, ``torch.qint8``
+    reduce_range (bool): a flag to indicate whether to reduce the range of quantized
+    data by 1 bit, it's required to avoid instruction overflow for some hardwares
+
+Returns:
+    Tensor: A newly (dynamically) quantized tensor
+
+Example::
+
+    >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
+    >>> print(t)
+    tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
+           quantization_scheme=torch.per_tensor_affine, scale=0.011764705882352941,
+           zero_point=85)
+    >>> t.int_repr()
+    tensor([  0,  85, 170, 255], dtype=torch.uint8)
 """)
 
 add_docstr(torch.quantize_per_channel,

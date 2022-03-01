@@ -14,8 +14,7 @@ namespace jit {
 //
 //   %c = foo(%a)
 //
-// on the module forward, if it's safe to do so. It currently assumes
-// that the forward has been inlined before this function is called.
+// on the module forward, if it's safe to do so.
 TORCH_API Module DBRQuantRemoveRedundantAliases(Module& module);
 
 } // namespace jit

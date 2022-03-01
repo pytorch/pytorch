@@ -362,6 +362,7 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
@@ -399,6 +400,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
   dim3 block, grid;
   int64_t numel = cx.numel();
   getLaunchConfig(&block, &grid, numel);
+  if (numel == 0) return;
 
   auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
   auto grad_cyI = tryGetTensorInfo<scalar_t, index_type>(grad_cy);
@@ -433,6 +435,7 @@ void gru_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = hx.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
@@ -466,6 +469,7 @@ void gru_backward_impl(const Tensor& grad_hy, const Tensor& workspace,
 
   dim3 block, grid;
   int64_t numel = grad_hy.numel();
+  if (numel == 0) return;
   getLaunchConfig(&block, &grid, numel);
 
   auto grad_hyI = getTensorInfo<scalar_t, index_type>(grad_hy);

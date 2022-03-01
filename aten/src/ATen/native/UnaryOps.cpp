@@ -31,7 +31,7 @@ namespace meta {
 // For complex inputs, the output type should be the same as input type.
 #define CREATE_UNARY_FLOAT_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
-    build_unary_float_op(maybe_get_output(), self);   \
+    build_borrowing_unary_float_op(maybe_get_output(), self);   \
   }
 
 CREATE_UNARY_FLOAT_META_FUNC(acos)
@@ -73,58 +73,62 @@ CREATE_UNARY_FLOAT_META_FUNC(tanh)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  build_unary_float_op(maybe_get_output(), self);
+  build_borrowing_unary_float_op(maybe_get_output(), self);
 }
 
 // These are normal unary ops that preserve dtype
 #define CREATE_UNARY_META_FUNC(func)                  \
   TORCH_META_FUNC(func) (const Tensor& self) {        \
-    build_unary_op(maybe_get_output(), self);   \
+    build_borrowing_unary_op(maybe_get_output(), self);   \
   }
 CREATE_UNARY_META_FUNC(bitwise_not)
 CREATE_UNARY_META_FUNC(frac)
 CREATE_UNARY_META_FUNC(round)
 CREATE_UNARY_META_FUNC(sgn)
 
+TORCH_META_FUNC2(round, decimals)(const Tensor& self, int64_t decimals){
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC(neg)(const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(trunc) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "trunc is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(floor) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "floor is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(sign) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(),
               "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(signbit) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
-  build_unary_force_boolean_op(maybe_get_output(), self);
+  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(ceil) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "ceil is not supported for complex inputs");
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 } // namespace meta
@@ -185,6 +189,15 @@ CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
 
+TORCH_IMPL_FUNC(round_decimals_out)
+(const Tensor& self, int64_t decimals, const Tensor& result) {
+  if (decimals != 0) {
+    round_decimals_stub(device_type(), *this, decimals);
+  } else {
+    round_stub(device_type(), *this);
+  }
+}
+
 TORCH_IMPL_FUNC(polygamma_out)
 (int64_t n, const Tensor& self, const Tensor& result) {
   polygamma_stub(device_type(), *this, n);
@@ -237,7 +250,7 @@ template <typename Stub>
 static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, const Tensor& self, Stub& stub, bool promotes_integer_to_float) {
     if (self.is_complex() && !result.is_complex()) {
       // Checks if the corresponding float type can be cast to the desired dtype
-      const auto float_type = c10::toValueType(self.scalar_type());
+      const auto float_type = c10::toRealValueType(self.scalar_type());
       TORCH_CHECK(canCast(float_type, result.scalar_type()),
             "result type ", float_type, " can't be cast to the desired output type ",
             result.scalar_type());
@@ -275,7 +288,7 @@ static inline Tensor unary_op_impl(const Tensor& self, OutImpl& out_impl) {
 template <typename OutImpl>
 static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, OutImpl& out_impl) {
   if (self.is_complex()) {
-    const auto float_type = c10::toValueType(self.scalar_type());
+    const auto float_type = c10::toRealValueType(self.scalar_type());
     Tensor result = at::empty({0}, self.options().dtype(float_type));
     return out_impl(result, self);
   }
@@ -372,7 +385,7 @@ Tensor& angle_out(const Tensor& self, Tensor& result) {
 }
 Tensor angle(const Tensor& self) {
   if (self.is_complex()) {
-    const auto float_type = c10::toValueType(self.scalar_type());
+    const auto float_type = c10::toRealValueType(self.scalar_type());
     Tensor result = at::empty({0}, self.options().dtype(float_type));
     return at::angle_out(result, self);
   }
@@ -390,7 +403,7 @@ Tensor real(const Tensor& self) {
     }
     return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
-    TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
+    return self;
   }
 }
 
@@ -515,8 +528,8 @@ Tensor& special_log1p_out(const Tensor& self, Tensor& result) { return at::log1p
 Tensor special_log1p(const Tensor& self) { return self.log1p(); }
 
 // special_round, alias for round
-Tensor& special_round_out(const Tensor& self, Tensor& result) { return at::round_out(result, self); }
-Tensor special_round(const Tensor& self) { return self.round(); }
+Tensor& special_round_out(const Tensor& self, int64_t decimals, Tensor& result) { return at::round_out(result, self, decimals); }
+Tensor special_round(const Tensor& self, int64_t decimals) { return self.round(decimals); }
 
 // special_sinc, alias for sinc
 Tensor& special_sinc_out(const Tensor& self, Tensor& result) { return at::sinc_out(result, self); }
@@ -833,6 +846,7 @@ DEFINE_DISPATCH(nan_to_num_stub); // NOLINT(cppcoreguidelines-avoid-non-const-gl
 DEFINE_DISPATCH(polygamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(reciprocal_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(round_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(round_decimals_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(rsqrt_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sigmoid_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logit_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)

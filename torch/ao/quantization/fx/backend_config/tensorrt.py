@@ -4,7 +4,7 @@ import torch.nn.qat as nnqat
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.qat as nniqat
 
-from ...fuser_method_mappings import reverse2
+from ...fuser_method_mappings import reverse_sequential_wrapper2
 
 def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
@@ -63,9 +63,7 @@ def get_tensorrt_backend_config_dict():
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
-        "fuser_method": reverse2(nni.LinearReLU),
-        "root_module": torch.nn.Linear,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     }
     linear_relu_mf_config = {
         "pattern": (torch.nn.functional.relu, torch.nn.Linear),
@@ -73,9 +71,7 @@ def get_tensorrt_backend_config_dict():
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
-        "fuser_method": reverse2(nni.LinearReLU),
-        "root_module": torch.nn.Linear,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+        "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     }
 
     linear_relu_fused_config = {
@@ -160,9 +156,7 @@ def get_tensorrt_backend_config_dict():
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
-        "fuser_method": reverse2(nni.ConvReLU2d),
-        "root_module": torch.nn.Conv2d,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        "fuser_method": reverse_sequential_wrapper2(nni.ConvReLU2d),
     }
     conv2d_relu_mm_config = {
         "pattern": (torch.nn.ReLU, torch.nn.Conv2d),
@@ -170,9 +164,7 @@ def get_tensorrt_backend_config_dict():
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
         ],
-        "fuser_method": reverse2(nni.ConvReLU2d),
-        "root_module": torch.nn.Conv2d,
-        "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        "fuser_method": reverse_sequential_wrapper2(nni.ConvReLU2d),
     }
     addmm_config = {
         "pattern": torch.addmm,
