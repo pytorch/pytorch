@@ -500,7 +500,6 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         res = torch.jit._shapes.matmul(m1_shape, m2_shape)
         self.assertEqual(res, [10, 10])
 
-
     def test_register_function_error_checking(self):
         # this will error before registering on global map, so
         # no issue in overwriting schema mappings
