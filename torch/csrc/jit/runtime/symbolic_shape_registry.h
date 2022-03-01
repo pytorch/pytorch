@@ -8,7 +8,6 @@
 namespace torch {
 namespace jit {
 
-// clang-format-off
 /*
 ADDING A NEW SHAPE GRAPH:
 - For one node schema, there is one corresponding registered shape compute
@@ -46,7 +45,6 @@ Operators which take in a list of tensors, such as concat, are not yet
 supported. Concat has been special cased and could be generalized as needed.
 Please file an issue.
 */
-// clang-format-on
 
 TORCH_API void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
