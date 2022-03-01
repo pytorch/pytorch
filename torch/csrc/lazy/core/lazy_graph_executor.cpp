@@ -3,6 +3,7 @@
 #include <ATen/ScalarOps.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
@@ -741,12 +742,6 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
   return po_data;
 }
 
-static void printComputation(Computation* comp, bool created) {
-  LOG(ERROR) << "Print computation: created " << created << std::endl;
-  TSComputation* tscomp = (TSComputation*) comp;
-  LOG(ERROR) << *tscomp->graph() << std::endl;
-}
-
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
     std::vector<LazyTensor>* tensors,
     SyncTensorCollection* coll,
@@ -756,7 +751,10 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   if (cached_computation == nullptr) {
     return nullptr;
   }
-  printComputation(cached_computation->computation.get(), false);
+  if (GRAPH_DUMP_ENABLED) {
+    auto* tscomp = (TSComputation*) cached_computation->computation.get();
+    LOG(ERROR) << "Run a cached graph: " << *tscomp->graph() << std::endl;
+  }
   TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
@@ -912,7 +910,11 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   }
 
   CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
-  printComputation(compile_result.computation.get(), true);
+  if (GRAPH_DUMP_ENABLED) {
+    auto* tscomp = (TSComputation*) compile_result.computation.get();
+    LOG(ERROR) << "Add a cached computation with hash " << coll.hash << std::endl;
+    LOG(ERROR) << "Add a graph to cache: " << *tscomp->graph() << std::endl;
+  }
 
   TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
   VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;
@@ -920,8 +922,6 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   auto cached_computation = std::make_shared<CachedComputation>(
       std::move(compile_result.computation));
   GetComputationCache()->Add(coll.hash, cached_computation);
-
-  LOG(ERROR) << "Add a cached computation with hash " << coll.hash << std::endl;
 
   return ScheduleSyncTensorsGraph(
       tensors,
@@ -1099,7 +1099,6 @@ hash_t LazyGraphExecutor::GetGraphHash(const std::vector<LazyTensor>& tensors) {
   auto coll = CollectSyncTensors(tensors, config);
   auto po_data = RunPostOrder(tensors, coll.indices);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
-  LOG(ERROR) << "GetGraphHash returns " << coll.hash << std::endl;
   return coll.hash;
 }
 

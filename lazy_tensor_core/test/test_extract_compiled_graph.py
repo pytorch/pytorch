@@ -2,12 +2,12 @@ import unittest
 
 from lazy_tensor_core import _LAZYC
 _LAZYC._ltc_init_ts_backend()
-from lazy_tensor_core.core.optimize import optimize
+from lazy_tensor_core.core.extract_compiled_graph import extract_compiled_graph
 import torch
 from torch import nn
 import dis
-import sys
 import inspect
+from torch import fx
 
 class ModuleConstScale(nn.Module):
     def __init__(self):
@@ -40,6 +40,16 @@ class ModuleReturnMulti(nn.Module):
     def forward(self, a, b):
         return (b + 1, a - 1)
 
+# The default fx tracer will convert torch.randn to a constant.. We may need
+# a custom tracer.
+# class ModuleEagerTensor(nn.Module):
+#     def __init__(self):
+#         super(ModuleEagerTensor, self).__init__()
+#
+#     def forward(self, a):
+#         b = torch.randn(2, 3, device="cpu") # eager device
+#         return a + b
+
 def gen_rand_args(mod):
     args = []
     for _ in range(len(inspect.signature(mod.forward).parameters)):
@@ -67,7 +77,7 @@ def verify_reusing_compiled_graph(mod, ncase=10):
 
     dis.dis(mod.forward)
 
-    optimized_mod = optimize(mod, args)
+    optimized_mod = extract_compiled_graph(fx.symbolic_trace(mod), args)
     print("return value of optimized_mod", optimized_mod(*args))
 
     # check correctness
@@ -95,3 +105,4 @@ class OptimizeTest(unittest.TestCase):
     test_const_scale = maketest(ModuleConstScale)
     test_addcmul = maketest(ModuleAddcmul)
     test_return_multi = maketest(ModuleReturnMulti)
+    # test_eager_tensor = maketest(ModuleEagerTensor)
