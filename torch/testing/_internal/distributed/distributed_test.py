@@ -7345,36 +7345,17 @@ class DistributedTest:
         @require_backends_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_different_graph_across_ranks(self):
-            # In default rebuilt bucket is enabled when
-            # find_unused_parameters=True.
             base_model = self._test_different_graph_across_ranks(
                 find_unused_parameters=True
             )
-            self.assertTrue(
+            self.assertFalse(
                 base_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
-
-            # rebuilt bucket could be disabled when find_unused_parameters=True
-            # by setting environment variable for debugging purpose.
-            os.environ["DISABLE_REBUILT_BUCKET"] = "1"
-            base_model_1 = self._test_different_graph_across_ranks(
-                find_unused_parameters=True
-            )
-            self.assertFalse(
-                base_model_1._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
-            )
-
-            # rebuilt bucket is always enabled for static_graph=True in default.
             static_model = self._test_different_graph_across_ranks(static_graph=True)
             self.assertTrue(
                 static_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
-
-            # compare the training results
             for i, j in zip(base_model.parameters(), static_model.parameters()):
-                self.assertEqual(i, j)
-
-            for i, j in zip(base_model_1.parameters(), static_model.parameters()):
                 self.assertEqual(i, j)
 
         @require_backend({"gloo"})
