@@ -143,9 +143,9 @@ class TestGradAcc(FSDPTest):
                 losses = []
                 batch_idx = 0
                 for config in configs:
-                    context = fsdp_model.no_sync() if config.use_no_sync \
+                    sync_context = fsdp_model.no_sync() if config.use_no_sync \
                         else contextlib.suppress()
-                    with context:
+                    with sync_context:
                         for _ in range(config.num_iters):
                             if batch_idx == num_iters_to_acc - 1:
                                 break  # always sync on the last iteration

@@ -1541,10 +1541,14 @@ class FullyShardedDataParallel(nn.Module):
                         "`p.grad.device` and `p.device` should be the same " \
                         "if not offloading parameters to CPU"
                 outside_no_sync: bool = p.grad.size() == p._local_shard.shape  # type: ignore[attr-defined]
+                assert not outside_no_sync or \
+                    (self._is_root or self._require_backward_grad_sync), \
+                    "Each FSDP modules should require backward grad sync " \
+                    "outside `no_sync()` except the root module"
                 # FSDP currently does not support gradient accumulation outside
-                # `no_sync()` when using CPU offloading
-                can_accumulate_grad = not offloaded and outside_no_sync  # type: ignore[attr-defined]
-                if can_accumulate_grad:
+                # `no_sync()` when using CPU offloading, and `no_sync()`
+                # accumulates directly in `p.grad`
+                if not offloaded and outside_no_sync:
                     # Use `p._saved_grad_shard` as an auxiliary variable in
                     # which to accumulate gradients, leaving `p.grad` for FSDP
                     # to use for managing each per-iteration gradient
