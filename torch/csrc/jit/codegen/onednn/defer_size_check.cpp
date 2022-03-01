@@ -42,11 +42,7 @@ class SizeCheckMover {
           OperatorMap<std::string> schemaMap = get_tensorexpr_elementwise_set();
           c10::optional<std::string> mapping =
               schemaMap.find(u.user->getOperator());
-          if (mapping == "unary") {
-            return true;
-          } else {
-            return false;
-          }
+          return mapping == "unary";
         });
 
     if (!onlyUsedByShapePreserveOp)

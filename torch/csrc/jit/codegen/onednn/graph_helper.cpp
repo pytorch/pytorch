@@ -221,7 +221,6 @@ Operator createOperator(Node* node) {
       // TODO: do we need add checks for all Constants?
       REQUIRE(
           node->namedInput("kernel_size")->node()->kind() == prim::Constant);
-
       auto rounding_type =
           toIValue(node->namedInput("ceil_mode"))->toBool() ? "ceil" : "floor";
       auto divisor_override = toIValue(node->namedInput("divisor_override"));
@@ -412,15 +411,11 @@ bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
 // that oneDNN executes faster. prim::ListConstruct is an exception, since
 // we simply want to fuse it with cat.
 bool isBetterSuitedForLLGA(NodeKind kindOfOp) {
-  if ((kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
-      (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||
-      (kindOfOp == aten::conv2d) || (kindOfOp == aten::_convolution) ||
-      (kindOfOp == aten::mm) || (kindOfOp == aten::linear) ||
-      (kindOfOp == aten::cat) || (kindOfOp == prim::ListConstruct)) {
-    return true;
-  } else {
-    return false;
-  }
+  return ((kindOfOp == aten::layer_norm) || (kindOfOp == aten::avg_pool2d) ||
+          (kindOfOp == aten::matmul) || (kindOfOp == aten::max_pool2d) ||
+          (kindOfOp == aten::conv2d) || (kindOfOp == aten::_convolution) ||
+          (kindOfOp == aten::mm) || (kindOfOp == aten::linear) ||
+          (kindOfOp == aten::cat) || (kindOfOp == prim::ListConstruct));
 }
 
 bool LlgaGraphHelper::checkForSingleOpPartition(Node* node) {

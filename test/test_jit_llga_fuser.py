@@ -2,7 +2,6 @@
 import torch
 import unittest
 import itertools
-from functools import wraps
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +20,12 @@ def warmup_forward(f, *args, profiling_count=2):
 
 
 class JitLlgaTestCase(JitTestCase):
+    def setUp(self):
+        torch.jit.enable_onednn_fusion(True)
+
+    def tearDown(self):
+        torch.jit.enable_onednn_fusion(False)
+
     def checkTrace(self, m, x, *args, **kwargs):
         if isinstance(m, torch.nn.Module):
             m.eval()
@@ -51,17 +56,6 @@ except RuntimeError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, 'no torchvision')
 
-
-def llga_test_env(func):
-    @wraps(func)
-    def wrapTheFunction(*args):
-        torch.jit.enable_onednn_fusion(True)
-        func(*args)
-        torch.jit.enable_onednn_fusion(False)
-
-    return wrapTheFunction
-
-
 def get_eltwise_fn(name):
     if hasattr(torch, name):
         return getattr(torch, name)
@@ -73,7 +67,6 @@ def get_eltwise_fn(name):
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestOp(JitLlgaTestCase):
-    @llga_test_env
     def test_conv2d(self):
         for [spatial, in_channels, out_channels, kernel, padding, stride, dilation, g, bias] in itertools.product(
                 [7, 8],
@@ -99,7 +92,6 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x])
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @llga_test_env
     def test_bn2d(self):
         m = nn.BatchNorm2d(32).eval()
         x = torch.rand(1, 32, 28, 28)
@@ -107,7 +99,6 @@ class TestOp(JitLlgaTestCase):
         # single-op partition shouldn't be created for softmax
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
@@ -125,7 +116,6 @@ class TestOp(JitLlgaTestCase):
             # single-op partition shouldn't be created.
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_max_pool2d(self):
         for [spatial, kernel, padding, stride, dilation, ceil_mode] in itertools.product(
                 [15, 16, 17, 18, 19],
@@ -145,14 +135,13 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x])
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @llga_test_env
     def test_avg_pool2d(self):
         for [spatial, kernel, padding, stride, ceil_mode, count_include_pad] in itertools.product(
                 [15, 16, 17, 18, 19],
                 [4, 5],
                 [0, 1, 2],
                 [1, 2, 4],
-                [False],  # TODO: DNNL does not fully support ceil_mode=True
+                [False],  # TODO: oneDNN Graph does not fully support ceil_mode=True
                 [True, False]):
 
             m = nn.AvgPool2d(kernel_size=kernel,
@@ -165,7 +154,6 @@ class TestOp(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x])
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @llga_test_env
     def test_variable_kernel_avg_pool2d(self):
         class M(nn.Module):
             def __init__(self):
@@ -182,7 +170,6 @@ class TestOp(JitLlgaTestCase):
         # TODO: with shape specialization, should have 1 LLGA_FUSION_GROUP
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_softmax(self):
         for dim in [-4, -3, -2, -1, 0, 1, 2, 3]:
             m = nn.Softmax(dim=dim)
@@ -191,7 +178,6 @@ class TestOp(JitLlgaTestCase):
             # single-op partition shouldn't be created for softmax
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_linear(self):
         for bias in [True, False]:
             x = torch.rand(32, 28)
@@ -212,7 +198,6 @@ class TestOp(JitLlgaTestCase):
             if gen_permute and xshape != yshape:
                 yield torch.rand(yshape), torch.rand(xshape)
 
-    @llga_test_env
     def test_add(self):
         def forward_add(x, y):
             return torch.add(x, y, alpha=2)
@@ -222,7 +207,6 @@ class TestOp(JitLlgaTestCase):
             # single-op partitions shouldn't be created
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_add_scalar(self):
         def add_scalar(x):
             return 42 + x + 3.14
@@ -232,7 +216,6 @@ class TestOp(JitLlgaTestCase):
         # single-op partitions shouldn't be created.
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_addmm(self):
         def addmm(x, y, z):
             # alpha and beta are 1, by default
@@ -245,7 +228,6 @@ class TestOp(JitLlgaTestCase):
         # single-op partition should be created for matmul with bias.
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @llga_test_env
     def test_mul(self):
         def forward_mul(x, y):
             return torch.mul(x, y) * 3
@@ -255,7 +237,6 @@ class TestOp(JitLlgaTestCase):
             # single-op partitions shouldn't be created
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
-    @llga_test_env
     def test_identity_binary(self):
         def forward(x):
             return x * 1 + 0.0
@@ -264,7 +245,6 @@ class TestOp(JitLlgaTestCase):
         _, graph = self.checkTrace(forward, [x])
         self.assertFused(graph, ['aten::add', 'aten::mul'])
 
-    @llga_test_env
     def test_layer_norm(self):
         # TODO: support more normalized_shape
         m = torch.nn.LayerNorm(10)
@@ -272,7 +252,6 @@ class TestOp(JitLlgaTestCase):
         _, graph = self.checkTrace(m, [x])
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @llga_test_env
     def test_cat(self):
         def cat_along_dim(d):
             def forward_cat(*inputs):
@@ -289,7 +268,6 @@ class TestOp(JitLlgaTestCase):
                 _, graph = self.checkTrace(cat_along_dim(d), [x, x, x])
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
-    @llga_test_env
     def test_typecheck(self):
         x = torch.rand(32, 28)
         m = torch.nn.Linear(in_features=28, out_features=64, bias=True)
@@ -303,7 +281,6 @@ class TestOp(JitLlgaTestCase):
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestFusionPattern(JitLlgaTestCase):
-    @llga_test_env
     def test_conv2d_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
@@ -334,7 +311,6 @@ class TestFusionPattern(JitLlgaTestCase):
                 # test if relu is fused into the fusion group
                 self.assertFused(graph, ['aten::' + eltwise])
 
-    @llga_test_env
     def test_conv2d_bn(self):
         class M(nn.Module):
             def __init__(self):
@@ -353,7 +329,7 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm'])
 
-    @llga_test_env
+
     def test_conv2d_bn_relu(self):
         class M(nn.Module):
             def __init__(self):
@@ -374,7 +350,6 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm',
                                  'aten::relu'])
 
-    @llga_test_env
     def test_bn2d_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
@@ -395,7 +370,6 @@ class TestFusionPattern(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::' + eltwise])
 
-    @llga_test_env
     def test_linear_eltwise(self):
         class M(nn.Module):
             def __init__(self, eltwise_fn, bias):
@@ -427,7 +401,6 @@ class TestFusionPattern(JitLlgaTestCase):
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::' + eltwise])
 
-    @llga_test_env
     def test_conv2d_sum(self):
         class M(nn.Module):
             def __init__(self, bias=False):
@@ -457,7 +430,6 @@ class TestFusionPattern(JitLlgaTestCase):
             _, graph = self.checkTrace(m, [x, y])
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 3)
 
-    @llga_test_env
     def test_wildcard(self):
         class M(nn.Module):
             def __init__(self):
@@ -490,7 +462,6 @@ class TestFusionPattern(JitLlgaTestCase):
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestModel(JitLlgaTestCase):
     @skipIfNoTorchVision
-    @llga_test_env
     def _test_vision(self, model_name):
         m = getattr(torchvision.models, model_name)().eval()
         x = torch.rand(1, 3, 224, 224) / 10
