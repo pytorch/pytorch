@@ -142,8 +142,7 @@ mobile::Code compileGraphToMobileCode(
       graph,
       name,
       compilation_options.enable_default_value_for_unspecified_arg,
-      compilation_options.enable_default_args_before_out_args,
-      compilation_options.enable_emit_promoted_ops);
+      compilation_options.enable_default_args_before_out_args);
 
   mobile::Code mobile_code;
 

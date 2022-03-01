@@ -1,8 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -10,9 +9,6 @@ namespace fuser {
 namespace cuda {
 
 void debugPrint(const c10::TensorTypePtr& type);
-
-bool is_cpu_scalar(const at::Tensor& tensor);
-bool is_cpu_scalar(const c10::TensorType& tensor_type);
 
 //! Types of debug print-outs
 //!
@@ -119,8 +115,6 @@ constexpr unsigned int switch_pair(T t1, T t2) {
   constexpr unsigned int _WORD_SHIFT = 16;
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
-
-std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
 
 } // namespace cuda
 } // namespace fuser

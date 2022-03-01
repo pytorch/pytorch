@@ -2,7 +2,6 @@
 
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/add_if_then_else.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
@@ -651,7 +650,6 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
-  runFinalOptimizations(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
@@ -749,11 +747,6 @@ void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
       it++;
     }
   }
-}
-
-void ProfilingGraphExecutorImpl::runFinalOptimizations(
-    std::shared_ptr<Graph>& graph) {
-  AddIfThenElseOp(graph);
 }
 
 } // namespace jit

@@ -115,7 +115,12 @@ def _shard_tensor(
         )
     ]
 
-    return ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=pg)
+    st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=pg)
+
+    # Manually set sharding_spec
+    st._sharding_spec = sharding_spec
+
+    return st
 
 def shard_parameter(
         module: torch.nn.Module,

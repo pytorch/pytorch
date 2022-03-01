@@ -13,7 +13,7 @@ T_co = TypeVar("T_co", covariant=True)
 @functional_datapipe("map")
 class MapperIterDataPipe(IterDataPipe[T_co]):
     r"""
-    Applies a function over each item from the source DataPipe (functional name: ``map``).
+    Apply a function over each item from the source DataPipe (functional name: ``map``).
     The function can be any regular Python function or partial object. Lambda
     function is not recommended as it is not supported by pickle.
 
@@ -33,20 +33,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
               multiple indices, the left-most one is used, and other indices will be removed.
             - Integer is used for list/tuple. ``-1`` represents to append result at the end.
             - Key is used for dict. New key is acceptable.
-
-    Example:
-        >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
-        >>> def add_one(x):
-        ...     return x + 1
-        >>> dp = IterableWrapper(range(10))
-        >>> map_dp_1 = dp.map(add_one)  # Invocation via functional form is preferred
-        >>> list(map_dp_1)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> # We discourage the usage of `lambda` functions as they are not serializable with `pickle`
-        >>> # Use `functools.partial` or explicitly define the function instead
-        >>> map_dp_2 = Mapper(dp, lambda x: x + 1)
-        >>> list(map_dp_2)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -151,7 +137,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 @functional_datapipe("collate")
 class CollatorIterDataPipe(MapperIterDataPipe):
     r"""
-    Collates samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
+    Collate samples from DataPipe to Tensor(s) by a custom collate function (functional name: ``collate``).
     By default, it uses :func:`torch.utils.data.default_collate`.
 
     .. note::
@@ -180,6 +166,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         >>> ds = MyIterDataPipe(start=3, end=7)
         >>> print(list(ds))
         [3, 4, 5, 6]
+
         >>> def collate_fn(batch):
         ...     return torch.tensor(batch, dtype=torch.float)
         ...

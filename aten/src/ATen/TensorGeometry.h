@@ -1,16 +1,9 @@
 #pragma once
 
-#include <c10/core/WrapDimMinimal.h>
-#include <ATen/core/TensorBase.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/core/Tensor.h>
 
 namespace at {
-
-// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
-// Although we cache is_contiguous in tensor now, this is till useful because it
-// allows checking if a particular geometry is contiguous without explicitly
-// constructing a tensor, e.g., when you want to choose a kernel strategy based
-// on whether a subgeometry is contiguous.
-TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
 struct TORCH_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
@@ -28,7 +21,7 @@ struct TORCH_API TensorGeometry {
       numel_ = expected_stride;
   }
 
-  explicit TensorGeometry(const TensorBase& t)
+  explicit TensorGeometry(const Tensor& t)
     : sizes_(t.sizes().vec())
     , strides_(t.strides().vec())
     , storage_offset_(t.storage_offset())
@@ -39,12 +32,12 @@ struct TORCH_API TensorGeometry {
 
   int64_t dim() const { return sizes_.size(); }
   int64_t size(int64_t dim) const {
-    dim = c10::maybe_wrap_dim(dim, this->dim());
+    dim = maybe_wrap_dim(dim, this->dim());
     return sizes_.at(static_cast<size_t>(dim));
   }
   IntArrayRef sizes() const { return IntArrayRef{ sizes_ }; }
   int64_t stride(int64_t dim) const {
-    dim = c10::maybe_wrap_dim(dim, this->dim());
+    dim = maybe_wrap_dim(dim, this->dim());
     return strides_.at(static_cast<size_t>(dim));
   }
   IntArrayRef strides() const { return IntArrayRef{ strides_ }; }

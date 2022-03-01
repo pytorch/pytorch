@@ -1,9 +1,9 @@
 #pragma once
 
 #include <c10/core/ScalarType.h>
-#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
@@ -35,8 +35,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-using ValueId = int32_t;
-
 using StmtNameType = unsigned int;
 
 constexpr StmtNameType kInvalidStmName =
@@ -50,22 +48,6 @@ class UnaryOp;
 class BinaryOp;
 class IterDomain;
 class IrCloner;
-class IrContainer;
-class IrBuilderPasskey;
-class IrContainerPasskey;
-
-namespace kir {
-class Kernel;
-class Predicate;
-} // namespace kir
-
-// Passkey for container to register names with statements
-class ExprPasskey {
-  friend class Expr;
-
- private:
-  explicit ExprPasskey() {}
-};
 
 TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept;
 
@@ -78,12 +60,12 @@ TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept;
 //! is also important for the design to have a dispatch system for a Statment.
 //! Basically beinng able to succienctly traverse down the inhereitance stack of
 //! a Statment at runtime. This is currently implemented in dispatch.h
+//!
 class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
-  friend void swap(IrContainer& a, IrContainer& b) noexcept;
 
  public:
-  Statement() = delete;
+  Statement() = default;
 
   // Cloning constructor
   Statement(const Statement* src, IrCloner* ir_cloner);
@@ -96,7 +78,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   static void constDispatch(T handler, const Statement* const);
 
   template <typename T>
-  static void mutatorDispatch(T mutator, Statement*);
+  static Statement* mutatorDispatch(T mutator, Statement*);
 
   // Accessor functions to types. Vals always have a DataType, Exprs never do
   virtual c10::optional<ValType> getValType() const {
@@ -124,27 +106,14 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   Expr* asExpr();
 
   // Return the fusion this statement belongs to
-  Fusion* fusion() const;
-
-  // Return the kernel this statement belongs to
-  kir::Kernel* kernel() const;
-
-  // Return the container this statement belongs to
-  IrContainer* container() const {
-    return ir_container_;
+  Fusion* fusion() const {
+    return fusion_;
   }
 
   // Return the int that represents its name
   StmtNameType name() const {
     return name_;
   }
-
-  // Set the statements' name. Typically the container will set the name,
-  // however if we're dealing with cloning, IrBuilder will set the name, this
-  // maybe should be from IrCloner, however I didn't want to add another
-  // passkey.
-  void setName(IrContainerPasskey, StmtNameType name);
-  void setName(IrBuilderPasskey, StmtNameType name);
 
   virtual bool sameType(const Statement* const other) {
     if (isVal() && other->isVal())
@@ -160,17 +129,13 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
     return this == other;
   }
 
-  std::string toString() const;
-  std::string toInlineString() const;
+  void print() const;
 
  protected:
-  Statement(IrBuilderPasskey);
-
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   StmtNameType name_ = kInvalidStmName;
-
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  IrContainer* ir_container_ = nullptr;
+  Fusion* fusion_ = nullptr;
 };
 
 //! A Val represents a "value." These are objects, like tensors, scalars, and
@@ -204,43 +169,34 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
 //!
 class TORCH_CUDA_CU_API Val : public Statement {
  public:
+  // We may not want to register this value during Val's constructor. The reason
+  // for this is that if we register the val, then in a derived constructor try
+  // to throw, fusion's destructor will get called, but the pointer to this Val
+  // will be invalid. When fusion tries to delete this value it will cause a seg
+  // fault, instead of showing the thrown error.
   explicit Val(
-      IrBuilderPasskey,
       ValType _vtype,
-      DataType _dtype = DataType::Null);
+      DataType _dtype = DataType::Null,
+      bool register_val = true);
 
   Val(const Val* src, IrCloner* ir_cloner);
 
-  // Dispatch functions, definitions in dispatch.cpp
-  template <typename T>
-  static void dispatch(T handler, Val*);
-
-  template <typename T>
-  static void constDispatch(T handler, const Val* const);
-
-  template <typename T>
-  static void mutatorDispatch(T mutator, Val*);
-
+  // TODO: why is this optional?
+  //
   c10::optional<ValType> getValType() const override {
     return vtype_;
   }
 
-  ValType vtype() const {
-    return vtype_;
-  }
-
-  DataType dtype() const {
-    return dtype_;
-  }
-
   // Throws if no DataType is found. Vals must have a DataType
+  //
+  // TODO: why is this optional?
+  //
   c10::optional<DataType> getDataType() const override;
 
   bool isScalar() const {
     return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar;
   }
 
-  // Returns if all dependencies are constant scalars
   bool isConstScalar() const;
 
   bool isAnInt() const {
@@ -248,11 +204,6 @@ class TORCH_CUDA_CU_API Val : public Statement {
   }
 
   c10::optional<int64_t> getInt() const;
-
-  // Returns if no dependencies and is a constant scalar.
-  virtual bool isConst() const {
-    return false;
-  }
 
   bool isZeroInt() const;
   bool isOneInt() const;
@@ -303,11 +254,15 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return evaluator_index_;
   }
 
-  // Following is managed by Fusion (or kirIrBuilder) and can change.
-  // TODO: Protect with a passkey.
-  void setDefinition(Expr* expr) {
-    definition_ = expr;
-  }
+  // Dispatch functions, definitions in dispatch.cpp
+  template <typename T>
+  static void dispatch(T handler, Val*);
+
+  template <typename T>
+  static void constDispatch(T handler, const Val* const);
+
+  template <typename T>
+  static Statement* mutatorDispatch(T mutator, Val*);
 
  protected:
   friend Fusion;
@@ -317,17 +272,19 @@ class TORCH_CUDA_CU_API Val : public Statement {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const DataType dtype_;
 
-  // TODO: Add fusion passkey for this
+  // Following is managed by Fusion and can change.
+  void setDefinition(Expr* expr) {
+    definition_ = expr;
+  }
+
   void setIsFusionInput(bool is_fusion_input) {
     is_fusion_input_ = is_fusion_input;
   }
 
-  // TODO: Add fusion passkey for this
   void setIsFusionOutput(bool is_fusion_output) {
     is_fusion_output_ = is_fusion_output;
   }
 
-  // TODO: Add fusion or container passkey for this
   void setUses(const std::vector<Expr*>& uses) {
     uses_ = uses;
   }
@@ -340,7 +297,6 @@ class TORCH_CUDA_CU_API Val : public Statement {
   Expr* definition_ = nullptr;
   std::vector<Expr*> uses_;
 
-  // Expr evaluator idx;
   int evaluator_index_ = -1;
 };
 
@@ -386,16 +342,15 @@ class TORCH_CUDA_CU_API Val : public Statement {
 //!
 class TORCH_CUDA_CU_API Expr : public Statement {
  public:
-  explicit Expr(IrBuilderPasskey, ExprType type);
-
+  explicit Expr(ExprType type);
   Expr(const Expr* src, IrCloner* ir_cloner);
 
   c10::optional<ExprType> getExprType() const override {
-    return etype_;
+    return type_;
   }
 
-  ExprType etype() const {
-    return etype_;
+  ExprType type() const {
+    return type_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -425,46 +380,23 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   static void constDispatch(T handler, const Expr* const);
 
   template <typename T>
-  static void mutatorDispatch(T mutator, Expr*);
-
-  // TODO: Protect based on being in kernel container
-  kir::Predicate* predicate() const;
-
-  // TODO: Protect based on being in kernel container
-  void setPredicate(kir::Predicate* predicate);
-
-  // TODO: Protect based on being in kernel container
-  kir::Predicate* writePredicate() const;
-
-  // TODO: Protect based on being in kernel container
-  void setWritePredicate(kir::Predicate* write_predicate);
+  static Statement* mutatorDispatch(T mutator, Expr*);
 
  protected:
-  // TODO: Add Fusion passkey
   void addInput(Val* input) {
     TORCH_INTERNAL_ASSERT(input != nullptr);
     inputs_.push_back(input);
   }
 
-  // TODO: Add Fusion passkey
   void addOutput(Val* output) {
     TORCH_INTERNAL_ASSERT(output != nullptr);
     outputs_.push_back(output);
   }
 
-  ExprPasskey exprPasskey() {
-    return ExprPasskey();
-  }
-
  private:
-  ExprType etype_ = ExprType::Invalid;
+  ExprType type_ = ExprType::Invalid;
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
-
-  kir::Predicate* predicate_ = nullptr;
-
-  // Only used for reduction-related expressions
-  kir::Predicate* write_predicate_ = nullptr;
 };
 
 } // namespace cuda

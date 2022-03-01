@@ -198,6 +198,7 @@ class TORCH_API TensorExprKernel {
   void genInputDebugNames();
   void runKernel(Stack& stack);
 
+  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
@@ -218,11 +219,7 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
-  void getStaticOutputSizesAndStrides(
-      const at::ArrayRef<IValue>& inputs,
-      std::vector<std::vector<int64_t>>* static_sizes,
-      std::vector<std::vector<int64_t>>* static_strides);
-
+  void updateOutputSizesAndStrides(const at::ArrayRef<IValue>& inputs);
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs);

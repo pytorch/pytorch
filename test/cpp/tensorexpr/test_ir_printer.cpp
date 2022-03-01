@@ -53,36 +53,42 @@ TEST(IRPrinter, FunctionName) {
   int N = 20;
 
   Tensor producer = Compute(
-      "producer", {M, N}, [&](const ExprHandle& m, const ExprHandle& n) {
-        return m * n;
-      });
+      "producer",
+      {{M, "m"}, {N, "n"}},
+      [&](const ExprHandle& m, const ExprHandle& n) { return m * n; });
 
   Tensor chunk_0 = Compute(
-      "chunk_0", {M, N / 2}, [&](const ExprHandle& m, const ExprHandle& n) {
+      "chunk",
+      {{M, "m"}, {N / 2, "n"}},
+      [&](const ExprHandle& m, const ExprHandle& n) {
         return producer.load(m, n);
       });
 
   Tensor chunk_1 = Compute(
-      "chunk_1", {M, N / 2}, [&](const ExprHandle& m, const ExprHandle& n) {
+      "chunk",
+      {{M, "m"}, {N / 2, "n"}},
+      [&](const ExprHandle& m, const ExprHandle& n) {
         return producer.load(m, n + ExprHandle(N / 2));
       });
 
   Tensor consumer = Compute(
-      "consumer", {M, N / 2}, [&](const ExprHandle& i, const ExprHandle& j) {
+      "consumer",
+      {{M, "i"}, {N / 2, "j"}},
+      [&](const ExprHandle& i, const ExprHandle& j) {
         return i * chunk_1.load(i, j);
       });
 
   LoopNest l({chunk_0, chunk_1, consumer});
-  auto body = LoopNest::sanitizeNames(l.root_stmt());
+  auto body = l.root_stmt();
 
   std::stringstream ss;
   ss << *body;
 
   const std::string& verification_pattern =
       R"IR(
- # CHECK:   for (int i_2
- # CHECK:    for (int j_2
- # CHECK:     consumer[i_2, j_2] = i_2 * (chunk_1[i_2, j_2])IR";
+ # CHECK:   for (int i
+ # CHECK:    for (int j
+ # CHECK:     consumer[i, j] = i * (chunk_1[i, j])IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, ss.str());
 }

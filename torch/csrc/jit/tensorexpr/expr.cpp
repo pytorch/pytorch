@@ -425,30 +425,16 @@ Buf::Buf(
   TORCH_CHECK(var);
 }
 
-BufHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
-  return Buf::make("", dims, dtype);
-}
-
-BufHandle Buf::make(
+ExprHandle Buf::make(
     const std::string& name_hint,
     const std::vector<ExprHandle>& dims,
-    Dtype dtype,
-    c10::optional<ExprHandle> initializer,
-    c10::optional<std::vector<ExprHandle>> strides,
-    c10::optional<ExprHandle> qscale,
-    c10::optional<ExprHandle> qzero) {
-  c10::optional<std::vector<ExprPtr>> opt_strides;
-  if (strides) {
-    opt_strides = ExprHandleVectorToExprVector(*strides);
-  }
-  return BufHandle(alloc<Buf>(
-      name_hint,
-      ExprHandleVectorToExprVector(dims),
-      dtype,
-      initializer ? initializer->node() : nullptr,
-      opt_strides,
-      qscale ? qscale->node() : nullptr,
-      qzero ? qzero->node() : nullptr));
+    Dtype dtype) {
+  return ExprHandle(
+      alloc<Buf>(name_hint, ExprHandleVectorToExprVector(dims), dtype));
+}
+
+ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
+  return Buf::make("", dims, dtype);
 }
 
 std::vector<ExprHandle> BufHandle::dims() const {

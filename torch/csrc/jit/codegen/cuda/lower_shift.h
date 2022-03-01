@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/macros/Export.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -16,14 +16,16 @@ namespace cuda {
 //! Auxiliary class to represent information about halo of an axis
 class AxisHaloInfo {
  public:
+  AxisHaloInfo();
+
   //! Width of halo.
   //!
   //! pos is either 0 or 1. The width of halo at offset zero is set
   //! when pos is 0.
-  int width(int pos) const;
+  kir::Int* width(int pos) const;
 
   //! Sum of the widths of both widths
-  int width() const;
+  kir::Int* width() const;
 
   const auto& widths() const {
     return widths_;
@@ -32,10 +34,10 @@ class AxisHaloInfo {
   //! Set the halo width of either side.
   //! pos is either 0 or 1. The width of halo at offset zero is set
   //! when pos is 0.
-  void setWidth(int pos, int width);
+  void setWidth(int pos, kir::Int* width);
 
   //! Extend the halo width to account for another axis.
-  void merge(int pos, int other);
+  void merge(int pos, kir::Int* other);
 
   //! Extend the halo width to account for another axis.
   void merge(const AxisHaloInfo& other);
@@ -51,7 +53,7 @@ class AxisHaloInfo {
   //! widths_[0] is non-zero and designates the size of the
   //! halo. Similarly, non-zero widths_[1] means the axis has halo at
   //! the other end of the axis.
-  std::array<int, 2> widths_ = {0, 0};
+  std::array<kir::Int*, 2> widths_ = {nullptr, nullptr};
 };
 
 //! Helper class for lowering tensors with halo. Only valid at the
@@ -75,6 +77,7 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! Returns true if id has the root halo information set by
   //! setRootAxisInfo.
   bool hasRootAxisInfo(IterDomain* id) const;
+  bool hasRootAxisInfo(kir::IterDomain* id) const;
 
   //! Returns the registed AxisHaloInfo of a root axis.
   //!
@@ -82,6 +85,9 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! non-root axes.
   const AxisHaloInfo& getRootAxisInfo(IterDomain* id) const;
   AxisHaloInfo& getRootAxisInfo(IterDomain* id);
+  //! KIR version
+  const AxisHaloInfo& getRootAxisInfo(kir::IterDomain* id) const;
+  AxisHaloInfo& getRootAxisInfo(kir::IterDomain* id);
 
   //! Query if an axis has a halo width.
   //!
@@ -92,11 +98,12 @@ class TORCH_CUDA_CU_API HaloInfo {
   //!
   //! It's an error if queried for an axis with no halo width
   //! information.
-  int getHaloWidth(IterDomain* id) const;
+  kir::Int* getHaloWidth(IterDomain* id) const;
 
   //! Returns an extent if id is extended for halo. Nullptr is
   //! returned otherwise.
-  Val* getExtent(IterDomain* id) const;
+  kir::Val* getExtent(IterDomain* id) const;
+  kir::Val* getExtent(kir::IterDomain* id) const;
 
   //! Returns all child domains of a root domain that inherits the
   //! halo of the root domain.
@@ -128,6 +135,7 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! interior and another for padding. Predicate insertion is done in
   //! the ShiftPredicateInserter class below.
   bool needsShiftPredicate(Expr* expr) const;
+  bool needsShiftPredicate(kir::Expr* expr) const;
 
   std::string toString() const;
 
@@ -158,14 +166,14 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! Validate shift usage
   void validate(TensorView* td) const;
 
-  void setHaloWidth(IterDomain* id, int halo_width);
-
  private:
   //! Halo information of root axes
   std::unordered_map<IterDomain*, AxisHaloInfo> root_axis_map_;
+  //! KIR version
+  std::unordered_map<kir::IterDomain*, AxisHaloInfo> kir_root_axis_map_;
 
   //! Halo-extended extents. No mapping for axes without halo extension
-  std::unordered_map<IterDomain*, Val*> extent_map_;
+  std::unordered_map<kir::IterDomain*, kir::Val*> kir_extent_map_;
 
   //! The halo width of an axis.
   //!
@@ -201,7 +209,7 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! inner axis is merged with another axis of extent M, we know that
   //! the extent of the resulting output axis is 5*M, but we don't
   //! create its mapping.
-  std::unordered_map<IterDomain*, int> halo_width_map_;
+  std::unordered_map<IterDomain*, kir::Int*> halo_width_map_;
 
   //! Mappings from root domains to child domains that inherit halo
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
@@ -216,9 +224,9 @@ class ShiftPredicateInserter {
   //! the usual predicated expression, so the insertion is also done
   //! here.
   static void insert(
-      Expr* expr,
+      kir::Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      Bool* thread_pred,
+      kir::Bool* thread_pred,
       bool within_unswitch);
 };
 

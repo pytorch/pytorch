@@ -14,46 +14,12 @@ from ..utils import _parent_name, check_node
 from typing import Dict, Tuple, Type, List
 from torch.fx import Node
 
-
-def is_fixed_qparams_node(node, modules):
-    func_list = [
-        torch.nn.functional.hardsigmoid,
-        torch.nn.functional.sigmoid,
-        torch.sigmoid,
-        torch.tanh,
-    ]
-    method_list = [
-        'hardsigmoid',
-        'hardsigmoid_',
-        'sigmoid',
-        'sigmoid_',
-        'tanh',
-        'tanh_',
-    ]
-    module_type_list = [
-        torch.nn.Hardsigmoid,
-        torch.nn.Sigmoid,
-        torch.nn.Tanh,
-    ]
-    is_call_function = node.op == "call_function" and node.target in func_list
-    is_call_method = node.op == "call_method" and node.target in method_list
-    is_call_module = node.op == "call_module" and type(modules[str(node.target)]) in module_type_list
-    return is_call_function, is_call_method, is_call_module
-
 # Mapping from reference module class to the replacement quantized module class for lowering
-# TODO: fix typing, the key is reference module
-LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]] = {
+LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[ReferenceableQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
     nnqr.Conv3d: nnq.Conv3d,
-}
-
-# TODO: merge with LOWER_MODULE_MAP after we merge
-# _lower_weighted_ref_module and special_pattern_replacement
-SPECIAL_PATTERN_LOWER_MODULE_MAP = {
-    nn.BatchNorm2d: nnq.BatchNorm2d,
-    nn.BatchNorm3d: nnq.BatchNorm3d,
 }
 
 # Mapping from fused module class to a 2-tuple of:
@@ -135,19 +101,13 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
         q_node = n
-        is_quantize = q_node.target == torch.quantize_per_tensor
-        is_to_fp16 = q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16
-        if not (is_quantize or is_to_fp16):
+        if not (q_node.target == torch.quantize_per_tensor or
+           (q_node.op == "call_method" and q_node.target == "to" and q_node.args[1] == torch.float16)):
             continue
         ref_node = q_node.args[0]
         # get output scale/zero_point/dtype from the quantize node
         # ref_node, scale_node, zero_point_node, dtype = q_node.args
         # TODO: add safety checks that users for the ref_node and dq_node needs to be one
-
-        is_call_function, is_call_method, is_call_module = is_fixed_qparams_node(ref_node, modules)
-        if is_to_fp16 and (is_call_function or is_call_method or is_call_module):
-            # TODO: add a warning or error out here? (bc-breaking if error out)
-            continue
 
         is_call_function, is_call_method, is_call_module = check_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
@@ -167,19 +127,12 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
             continue
 
         # TODO: enable we have patterns that needs to swap the modules
-        if is_call_module:
-            ref_module = modules[ref_node.target]
-            if type(ref_module) in SPECIAL_PATTERN_LOWER_MODULE_MAP and is_quantize:
-                qmodule_cls = SPECIAL_PATTERN_LOWER_MODULE_MAP.get(type(ref_module))
-                scale_node = q_node.args[1]
-                zero_point_node = q_node.args[2]
-                output_scale = getattr(model, scale_node.target)
-                output_zero_point = getattr(model, zero_point_node.target)
-
-                qmodule = qmodule_cls.from_reference(ref_module, output_scale, output_zero_point)  # type:ignore[union-attr]
-                # replace reference module with quantized module
-                parent_name, module_name = _parent_name(ref_node.target)
-                setattr(modules[parent_name], module_name, qmodule)
+        # if is_call_module:
+        #     ref_module = modules[ref_node.target]
+        #     # change this pattern to use the corresponding quantized module
+        #     # replace reference module with quantized module
+        #     parent_name, module_name = _parent_name(ref_node.target)
+        #     setattr(modules[parent_name], module_name, ref_module)
 
         # remove dq node:
         dq_nodes: List[Node] = []

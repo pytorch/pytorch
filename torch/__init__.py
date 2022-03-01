@@ -594,101 +594,101 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage
+from .storage import _StorageBase, TypedStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
-# dtype, use torch.storage._TypedStorage directly.
+# dtype, use torch.storage.TypedStorage directly.
 
-class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
+class UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
-class ByteStorage(_TypedStorage):
+class ByteStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(_TypedStorage):
+class DoubleStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(_TypedStorage):
+class FloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(_TypedStorage):
+class HalfStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(_TypedStorage):
+class LongStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(_TypedStorage):
+class IntStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(_TypedStorage):
+class ShortStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(_TypedStorage):
+class CharStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(_TypedStorage):
+class BoolStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(_TypedStorage):
+class BFloat16Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(_TypedStorage):
+class ComplexDoubleStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(_TypedStorage):
+class ComplexFloatStorage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-class QUInt8Storage(_TypedStorage):
+class QUInt8Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint8
 
-class QInt8Storage(_TypedStorage):
+class QInt8Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint8
 
-class QInt32Storage(_TypedStorage):
+class QInt32Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint32
 
-class QUInt4x2Storage(_TypedStorage):
+class QUInt4x2Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint4x2
 
-class QUInt2x4Storage(_TypedStorage):
+class QUInt2x4Storage(TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint2x4
 
 _storage_classes = {
-    _UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,

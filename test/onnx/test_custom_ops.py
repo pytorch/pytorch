@@ -111,13 +111,12 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 h = self.relu(h)
                 return h
 
-        def symbolic_pythonop(ctx: torch.onnx.SymbolicContext, g, *args, **kwargs):
-            n = ctx.cur_node
+        def symbolic_pythonop(g, n, *args, **kwargs):
             name = kwargs["name"]
             if name == "MyClip":
-                return g.op("Clip", args[0], min_f=args[1], outputs=n.outputsSize())
+                return g.op("Clip", args[0], min_f=args[1])
             elif name == "MyRelu":
-                return g.op("Relu", args[0], outputs=n.outputsSize())
+                return g.op("Relu", args[0])
             else:
                 return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
 
@@ -137,7 +136,7 @@ class TestExportAsContribOps(unittest.TestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.gelu = torch.nn.GELU(approximate='none')
+                self.gelu = torch.nn.GELU()
 
             def forward(self, x):
                 res = []
@@ -150,7 +149,7 @@ class TestExportAsContribOps(unittest.TestCase):
                     res.append(x[0])
                 return torch.stack(res), torch.stack(res2)
 
-        def symbolic_custom_gelu(g, input, approximate):
+        def symbolic_custom_gelu(g, input):
             return g.op("com.microsoft::Gelu", input).setType(input.type())
 
         from torch.onnx import register_custom_op_symbolic
@@ -158,7 +157,7 @@ class TestExportAsContribOps(unittest.TestCase):
 
         x = torch.randn(3, 3, 4, requires_grad=True)
         model = torch.jit.script(M())
-        run_model_test(self, model, input=(x,))
+        run_model_test(self, model, input=(x, ))
 
 if __name__ == "__main__":
     unittest.main()

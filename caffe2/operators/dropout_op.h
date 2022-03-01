@@ -19,6 +19,7 @@ class DropoutOp final : public Operator<Context> {
         is_test_(
             this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
     CAFFE_ENFORCE_GE(ratio_, 0);
+    CAFFE_ENFORCE_LT(ratio_, 1);
   }
 
   bool RunOnDevice() override;
@@ -40,6 +41,7 @@ class DropoutGradientOp final : public Operator<Context> {
         is_test_(
             this->template GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
     CAFFE_ENFORCE_GE(ratio_, 0);
+    CAFFE_ENFORCE_LT(ratio_, 1);
   }
 
   bool RunOnDevice() override;

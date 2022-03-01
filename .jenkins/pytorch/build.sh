@@ -209,13 +209,10 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
-    # ppc64le, rocm builds fail when WERROR=1
-    # XLA test build fails when WERROR=1
+    # ppc64le build fails when WERROR=1
     # set only when building other architectures
-    # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* &&
-          "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    # only use for "python setup.py install" line
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *rocm* ]]; then
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel

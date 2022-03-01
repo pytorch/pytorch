@@ -1,5 +1,4 @@
 from .linear_relu import LinearReLU
-from .linear_fused import LinearBn1d
 from .conv_fused import (
     ConvBn1d,
     ConvBn2d,
@@ -15,7 +14,6 @@ from .conv_fused import (
 
 __all__ = [
     "LinearReLU",
-    "LinearBn1d",
     "ConvReLU2d",
     "ConvReLU3d",
     "ConvBn1d",

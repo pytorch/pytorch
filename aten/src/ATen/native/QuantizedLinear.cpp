@@ -53,9 +53,6 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
-  TORCH_WARN_ONCE("fbgemm_linear_int8_weight_fp32_activation is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   const Tensor input_contig = input.contiguous();
   const float* input_ptr = input_contig.data_ptr<float>();
 
@@ -182,6 +179,11 @@ Tensor fbgemm_linear_int8_weight(
     const Scalar& weight_scale,
     const Scalar& weight_zero_point,
     const Tensor& bias) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_int8_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_int8_weight_fp32_activation instead.");
+
   return at::native::fbgemm_linear_int8_weight_fp32_activation(
       input,
       weight,
@@ -217,9 +219,6 @@ void CalcColOffsetsTranspose(
 
 std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
     const Tensor& weight) {
-  TORCH_WARN_ONCE("fbgemm_linear_quantize_weight is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -285,9 +284,6 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
 }
 
 Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
-  TORCH_WARN_ONCE("fbgemm_pack_quantized_matrix is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -370,9 +366,6 @@ void HandleWeightsSaturation(int64_t N, float* weight) {
 } // namespace
 
 Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
-  TORCH_WARN_ONCE("fbgemm_pack_gemm_matrix_fp16 is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -405,9 +398,6 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
-  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -453,6 +443,10 @@ Tensor fbgemm_linear_fp16_weight(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_fp16_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_fp16_weight_fp32_activation instead.");
   return at::native::fbgemm_linear_fp16_weight_fp32_activation(
       input, packed_weight, bias);
 }
@@ -467,9 +461,6 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
     const Scalar& /*weight_scale*/,
     const Scalar& /*weight_zero_point*/,
     const Tensor& /*bias*/) {
-  TORCH_WARN_ONCE("fbgemm_linear_int8_weight_fp32_activation is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -485,8 +476,10 @@ Tensor fbgemm_linear_int8_weight(
     const Scalar& /*weight_scale*/,
     const Scalar& /*weight_zero_point*/,
     const Tensor& /*bias*/) {
-  TORCH_WARN_ONCE("fbgemm_linear_int8_weight is deprecated "
-                  "and will be removed in a future PyTorch release.")
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_int8_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_int8_weight_fp32_activation instead.");
 
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
@@ -497,9 +490,6 @@ Tensor fbgemm_linear_int8_weight(
 
 std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
     const Tensor& /*weight*/) {
-  TORCH_WARN_ONCE("fbgemm_linear_quantize_weight is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -508,9 +498,6 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
 }
 
 Tensor fbgemm_pack_quantized_matrix(const Tensor& /*input*/) {
-  TORCH_WARN_ONCE("fbgemm_pack_quantized_matrix is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -522,8 +509,10 @@ Tensor fbgemm_pack_quantized_matrix(
     const Tensor& /*input*/,
     int64_t /*K*/,
     int64_t /*N*/) {
-  TORCH_WARN_ONCE("fbgemm_pack_quantized_matrix is deprecated "
-                  "and will be removed in a future PyTorch release.")
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_pack_quantized_matrix(weight, K, N) will be deprecated soon."
+  //     "Please use fbgemm_pack_quantized_matrix(weight) instead.");
 
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
@@ -533,9 +522,6 @@ Tensor fbgemm_pack_quantized_matrix(
 }
 
 Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
-  TORCH_WARN_ONCE("fbgemm_pack_gemm_matrix_fp16 is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -547,9 +533,6 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
-  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight_fp32_activation is deprecated "
-                  "and will be removed in a future PyTorch release.")
-
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -561,14 +544,20 @@ Tensor fbgemm_linear_fp16_weight(
     const Tensor& input,
     const Tensor& packed_weight,
     const Tensor& bias) {
-  TORCH_WARN_ONCE("fbgemm_linear_fp16_weight is deprecated "
-                  "and will be removed in a future PyTorch release.")
+  // Replace after https://github.com/pytorch/pytorch/issues/24354 is fixed
+  // TORCH_WARN(
+  //     "fbgemm_linear_fp16_weight will be deprecated soon."
+  //     "Please use fbgemm_linear_fp16_weight_fp32_activation instead.");
 
   // We make a strong guarantee that models using these operators will have the
   // same numerics across different machines. Therefore, we do not provide a
   // fallback path and rather fail loudly if we cannot run FBGEMM.
   TORCH_CHECK(
       false, "This PyTorch installation was not built with FBGEMM operators");
+}
+
+bool fbgemm_is_cpu_supported() {
+  return false;
 }
 
 #endif // USE_FBGEMM

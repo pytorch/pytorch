@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/WrapDimUtils.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>

@@ -43,6 +43,7 @@ inline bool variable_excluded_from_dispatch() {
   // Please read the comment in `VariableFallbackKernel.cpp` about the background of this change.
   return true;
 #else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::impl::tls_local_dispatch_key_set().excluded_.has(DispatchKey::Autograd));
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
@@ -140,8 +141,6 @@ class TORCH_API TensorBase {
 
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
-
-  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());

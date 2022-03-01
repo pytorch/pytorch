@@ -35,14 +35,18 @@ class ExpressionEvaluator;
 //! Context for using generic logic on FusionIR
 class FusionIRContext {
  public:
+  using VAL_TYPE = Val;
+  using EXPR_TYPE = Expr;
   using TV_TYPE = TensorView;
   using EVALUATOR_TYPE = ExpressionEvaluator;
+  using BINARY_OP_TYPE = BinaryOp;
+  using UNARY_OP_TYPE = UnaryOp;
 
-  static BinaryOpType getOpType(BinaryOp* bop) {
+  static BinaryOpType getOpType(BINARY_OP_TYPE* bop) {
     return bop->getBinaryOpType();
   }
 
-  static UnaryOpType getOpType(UnaryOp* uop) {
+  static UnaryOpType getOpType(UNARY_OP_TYPE* uop) {
     return uop->getUnaryOpType();
   }
 };
@@ -50,14 +54,19 @@ class FusionIRContext {
 //! Context for using generic logic on KernelIR
 class KernelIRContext {
  public:
+  using VAL_TYPE = kir::Val;
+  using EXPR_TYPE = kir::Expr;
+  using TV_TYPE = kir::TensorView;
   using EVALUATOR_TYPE = kir::ExpressionEvaluator;
+  using BINARY_OP_TYPE = kir::BinaryOp;
+  using UNARY_OP_TYPE = kir::UnaryOp;
 
-  static BinaryOpType getOpType(BinaryOp* bop) {
-    return bop->getBinaryOpType();
+  static BinaryOpType getOpType(BINARY_OP_TYPE* bop) {
+    return bop->operation();
   }
 
-  static UnaryOpType getOpType(UnaryOp* uop) {
-    return uop->getUnaryOpType();
+  static UnaryOpType getOpType(UNARY_OP_TYPE* uop) {
+    return uop->operation();
   }
 };
 
@@ -88,10 +97,10 @@ class NaiveIntegerMachine {
 
  private:
   //! Convert an unary IR expr to an instruction
-  void makeUnaryOp(UnaryOp* uop);
+  void makeUnaryOp(typename IRContext::UNARY_OP_TYPE* uop);
 
   //! Convert an binary IR expr to an instruction
-  void makeBinaryOp(BinaryOp* bop);
+  void makeBinaryOp(typename IRContext::BINARY_OP_TYPE* bop);
 
   //! Create an empty instruction with all default values
   //!  and place it at the end of the instruction buffer.
@@ -160,6 +169,11 @@ class NaiveIntegerMachine {
 //!  integers and store them in the workspace ahead of time.
 template <typename IRContext>
 class PrecomputedIntegersBase {
+  using IR_UNARY_OP = typename IRContext::UNARY_OP_TYPE;
+  using IR_BINARY_OP = typename IRContext::BINARY_OP_TYPE;
+  using IR_VAL = typename IRContext::VAL_TYPE;
+  using IR_EXPR = typename IRContext::EXPR_TYPE;
+  using IR_TV = typename IRContext::TV_TYPE;
   using INTEGER_MACHINE = NaiveIntegerMachine<IRContext>;
 
  public:
@@ -176,10 +190,7 @@ class PrecomputedIntegersBase {
 
   //! Returns value for the given IR node if it's stored
   //!  in the workspace and has been evaluated.
-  c10::optional<int64_t> getMaybeValueFor(const Val* val);
-
-  //! Debugging helper, prints all the currently known values
-  void print() const;
+  c10::optional<int64_t> getMaybeValueFor(const IR_VAL* val);
 
  protected:
   //! Initialize the workspace before first use.
@@ -187,7 +198,7 @@ class PrecomputedIntegersBase {
   //!  been topologically sorted.
   void initializeValueList(
       typename IRContext::EVALUATOR_TYPE& evaluator,
-      const std::vector<Val*>& sorted_value_list);
+      const std::vector<IR_VAL*>& sorted_value_list);
 
   //! Bind concrete value to the given index
   //!  if the index is valid.
@@ -204,12 +215,12 @@ class PrecomputedIntegersBase {
   void invalidate();
 
   //! Interface for subclasses to access symbols_
-  void loadSymbols(std::vector<Val*> symbols) {
+  void loadSymbols(std::vector<IR_VAL*> symbols) {
     symbols_ = std::move(symbols);
   }
 
   //! Interface for subclasses to access symbols_
-  std::vector<Val*>& symbols() {
+  std::vector<IR_VAL*>& symbols() {
     return symbols_;
   }
 
@@ -256,7 +267,7 @@ class PrecomputedIntegersBase {
   std::vector<int64_t> values_;
 
   //! Stores the IR nodes corresponding to each index.
-  std::vector<Val*> symbols_;
+  std::vector<IR_VAL*> symbols_;
 
   //! An internal log to keep track of all the bindings
   //!  used in each evaluation cycle. To be used for
@@ -297,14 +308,12 @@ class KernelPrecomputedIntegers
 
  public:
   using ParallelExtentMap =
-      std::unordered_map<ParallelType, std::vector<const Val*>, TypeHash>;
+      std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>;
 
-  KernelPrecomputedIntegers(kir::Kernel* kernel);
+  KernelPrecomputedIntegers(Fusion* fusion, GpuLower& lower);
 
   //! Bind concrete values from fusion runtime inputs
-  void bindKernelInputs(
-      kir::Kernel* kernel,
-      const at::ArrayRef<IValue>& aten_inputs);
+  void bindKernelInputs(const at::ArrayRef<IValue>& aten_inputs);
 
   //! Bind concrete values from launch constraints
   void bindParallelExtents(
@@ -317,7 +326,7 @@ class KernelPrecomputedIntegers
   void bindConcreteParallelTypeValue(ParallelType pt, int64_t value);
 
  private:
-  void bindTensorMetaData(TensorView* tv, const at::Tensor& at_tensor);
+  void bindTensorMetaData(kir::TensorView* tv, const at::Tensor& at_tensor);
 
   //! Iterate through all the named scalars corresponding
   //!  to thread sizes and pre-group them by their parallel
@@ -325,6 +334,8 @@ class KernelPrecomputedIntegers
   void initializeNamedScalars();
 
  private:
+  GpuLower* lower_ = nullptr;
+
   //! Contains all the named scalars correspond
   //!  to thread size of each parallel type.
   std::unordered_map<ParallelType, std::unique_ptr<std::vector<int>>, TypeHash>

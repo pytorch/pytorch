@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
@@ -40,8 +39,8 @@ static void setupInstanceNorm(Fusion* fusion, DataType dtype) {
   const bool kTraining = true;
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
-  auto momentum_ptr = IrBuilder::create<Double>(kMomentum);
-  auto eps_ptr = IrBuilder::create<Double>(kEps);
+  auto momentum_ptr = new Double(kMomentum);
+  auto eps_ptr = new Double(kEps);
 
   auto norm = instance_norm(
       input,

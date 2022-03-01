@@ -1,7 +1,9 @@
 #pragma once
 
+#include <c10/core/GeneratorImpl.h>
 #include <ATen/core/Generator.h>
 #include <ATen/cuda/detail/PhiloxCudaStateRaw.cuh>
+#include <ATen/Tensor.h>
 #include <ATen/Context.h>
 #include <limits>
 

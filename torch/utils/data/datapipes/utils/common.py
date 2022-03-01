@@ -3,7 +3,7 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Iterable, List, Tuple, Union, Optional
+from typing import Iterable, List, Tuple, Union
 
 try:
     import dill
@@ -72,13 +72,10 @@ def get_file_pathnames_from_root(
             if not recursive:
                 break
             if not non_deterministic:
-                # Note that this is in-place modifying the internal list from `os.walk`
-                # This only works because `os.walk` doesn't shallow copy before turn
-                # https://github.com/python/cpython/blob/f4c03484da59049eb62a9bf7777b963e2267d187/Lib/os.py#L407
                 dirs.sort()
 
 
-def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: Optional[str] = None):
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
     if not isinstance(pathnames, Iterable):
         pathnames = [pathnames, ]
 
@@ -89,7 +86,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: O
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
+        yield pathname, StreamWrapper(open(pathname, mode))
 
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):

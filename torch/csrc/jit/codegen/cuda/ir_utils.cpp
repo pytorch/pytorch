@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
@@ -141,8 +140,7 @@ struct SubstituteInExpr : public OptInDispatch {
         reference_->sameAs(unary_expr->in()) ? substitute_ : unary_expr->in();
     auto out =
         reference_->sameAs(unary_expr->out()) ? substitute_ : unary_expr->out();
-    expr_ = IrBuilder::create<UnaryOp>(
-        unary_expr->container(), unary_expr->getUnaryOpType(), out, in);
+    expr_ = new UnaryOp(unary_expr->getUnaryOpType(), out, in);
   }
 
   void handle(BinaryOp* binary_expr) final {
@@ -153,12 +151,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto out = reference_->sameAs(binary_expr->out()) ? substitute_
                                                       : binary_expr->out();
 
-    expr_ = IrBuilder::create<BinaryOp>(
-        binary_expr->container(),
-        binary_expr->getBinaryOpType(),
-        out,
-        lhs,
-        rhs);
+    expr_ = new BinaryOp(binary_expr->getBinaryOpType(), out, lhs, rhs);
   }
 
   void handle(TernaryOp* ternary_expr) final {
@@ -170,13 +163,7 @@ struct SubstituteInExpr : public OptInDispatch {
                                                        : ternary_expr->in3();
     auto out = reference_->sameAs(ternary_expr->out()) ? substitute_
                                                        : ternary_expr->out();
-    expr_ = IrBuilder::create<TernaryOp>(
-        ternary_expr->container(),
-        ternary_expr->getTernaryOpType(),
-        out,
-        in1,
-        in2,
-        in3);
+    expr_ = new TernaryOp(ternary_expr->getTernaryOpType(), out, in1, in2, in3);
   }
 
   void handle(ReductionOp* reduction_expr) final {
@@ -189,12 +176,8 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in = reference_->sameAs(reduction_expr->in()) ? substitute_
                                                        : reduction_expr->in();
 
-    expr_ = IrBuilder::create<ReductionOp>(
-        reduction_expr->container(),
-        reduction_expr->getReductionOpType(),
-        init,
-        out,
-        in);
+    expr_ =
+        new ReductionOp(reduction_expr->getReductionOpType(), init, out, in);
   }
 
   void handle(BroadcastOp* broadcast_expr) final {
@@ -204,11 +187,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in = reference_->sameAs(broadcast_expr->in()) ? substitute_
                                                        : broadcast_expr->in();
 
-    expr_ = IrBuilder::create<BroadcastOp>(
-        broadcast_expr->container(),
-        out,
-        in,
-        broadcast_expr->getBroadcastDimFlags());
+    expr_ = new BroadcastOp(out, in, broadcast_expr->getBroadcastDimFlags());
   }
 
   void handle(TransposeOp* transpose_expr) final {
@@ -222,8 +201,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in = reference_->sameAs(transpose_expr->in())
         ? substitute_->as<TensorView>()
         : transpose_expr->in();
-    expr_ = IrBuilder::create<TransposeOp>(
-        transpose_expr->container(), out, in, transpose_expr->new2old());
+    expr_ = new TransposeOp(out, in, transpose_expr->new2old());
   }
 
   void handle(ShiftOp* shift_expr) final {
@@ -232,12 +210,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in =
         reference_->sameAs(shift_expr->in()) ? substitute_ : shift_expr->in();
 
-    expr_ = IrBuilder::create<ShiftOp>(
-        shift_expr->container(),
-        out,
-        in,
-        shift_expr->offsets(),
-        shift_expr->padWidth());
+    expr_ = new ShiftOp(out, in, shift_expr->offsets(), shift_expr->pad());
   }
 
   void handle(GatherOp* gather_expr) final {
@@ -246,12 +219,8 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in =
         reference_->sameAs(gather_expr->in()) ? substitute_ : gather_expr->in();
 
-    expr_ = IrBuilder::create<GatherOp>(
-        gather_expr->container(),
-        out,
-        in,
-        gather_expr->windowShape(),
-        gather_expr->padWidth());
+    expr_ = new GatherOp(
+        out, in, gather_expr->windowShape(), gather_expr->padWidth());
   }
 
   void handle(ViewOp* view_expr) final {
@@ -265,7 +234,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto out = reference_->sameAs(view_expr->out())
         ? substitute_->as<TensorView>()
         : view_expr->out();
-    expr_ = IrBuilder::create<ViewOp>(view_expr->container(), out, in);
+    expr_ = new ViewOp(out, in);
   }
 
   void handle(WelfordOp* welford_expr) final {
@@ -299,8 +268,7 @@ struct SubstituteInExpr : public OptInDispatch {
         welford_expr->initN() && reference_->sameAs(welford_expr->initN())
         ? substitute_
         : welford_expr->initN();
-    expr_ = IrBuilder::create<WelfordOp>(
-        welford_expr->container(),
+    expr_ = new WelfordOp(
         out_avg,
         out_var,
         out_N,
@@ -434,31 +402,13 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
-std::vector<Expr*> getReductionOps(Fusion* fusion) {
-  std::vector<Expr*> red_ops;
-  for (auto expr : fusion->exprs()) {
-    const Val* out_val = nullptr;
-    if (expr->isA<ReductionOp>()) {
-      out_val = expr->as<ReductionOp>()->out();
-    } else if (expr->isA<WelfordOp>()) {
-      out_val = expr->as<WelfordOp>()->outAvg();
-    } else {
-      continue;
-    }
-    if (out_val == nullptr || !out_val->isA<TensorView>()) {
-      continue;
-    }
-    auto out_tv = out_val->as<TensorView>();
-    if (std::any_of(
-            out_tv->getRootDomain().begin(),
-            out_tv->getRootDomain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && !id->isTrivialReduction();
-            })) {
-      red_ops.push_back(expr);
-    }
-  }
-  return red_ops;
+std::vector<Expr*> historyOf(TensorDomain* td) {
+  return ExprSort::getExprs(
+      td->fusion(), {td->domain().begin(), td->domain().end()});
+}
+
+std::vector<Expr*> historyOf(TensorView* tv) {
+  return historyOf(tv->domain());
 }
 
 } // namespace ir_utils

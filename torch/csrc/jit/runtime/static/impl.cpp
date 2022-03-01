@@ -12,7 +12,6 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/add_if_then_else.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
@@ -174,7 +173,6 @@ void OptimizeGraph(
   UseVariadicGroupedAccessor(graph);
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
-  AddIfThenElseOp(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -1260,6 +1258,9 @@ void BlockRunner::benchmark(
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   std::cout << "Input size: " << args_list.size() << std::endl;
+  if (args_list.size() == 0) {
+    return;
+  }
   float time_per_iter =
       benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
@@ -1279,20 +1280,11 @@ void BlockRunner::benchmark(
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
       results.time_per_node_type.begin(), results.time_per_node_type.end()};
-  if (args_list.size() == 0) {
-    std::sort(
-        time_per_node_type_vec.begin(),
-        time_per_node_type_vec.end(),
-        [&results](auto& left, auto& right) {
-          return results.instances_per_node_type[left.first] >
-              results.instances_per_node_type[right.first];
-        });
-  } else {
-    std::sort(
-        time_per_node_type_vec.begin(),
-        time_per_node_type_vec.end(),
-        [](auto& left, auto& right) { return left.second > right.second; });
-  }
+  std::sort(
+      time_per_node_type_vec.begin(),
+      time_per_node_type_vec.end(),
+      [](auto& left, auto& right) { return left.second > right.second; });
+
   std::cout << "Time per node type:" << std::endl;
   for (const auto& p : time_per_node_type_vec) {
     const std::string& kind = p.first;
@@ -1347,14 +1339,13 @@ void BlockRunner::benchmark(
       std::cout << "Total number of reused tensors: "
                 << planner_->total_reused_tensors() << std::endl;
     }
+    std::cout << "Total number of 'out' variant nodes/total number of nodes: "
+              << results.out_nodes_count << "/" << results.total_nodes_count
+              << " ("
+              << 100.0 * (results.out_nodes_count) /
+            static_cast<float>(results.total_nodes_count)
+              << "%)" << std::endl;
   }
-  std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-            << results.out_nodes_count << "/" << results.total_nodes_count
-            << " ("
-            << 100.0 * (results.out_nodes_count) /
-          static_cast<float>(results.total_nodes_count)
-            << "%)" << std::endl;
-
   check_for_memory_leak();
 
 #ifndef NDEBUG
@@ -1475,36 +1466,8 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   TORCH_CHECK(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
-
-  IndividualMetrics results;
-  results.time_per_node.resize(nodes_.size(), 0);
   if (args_list.size() == 0) {
-    // When the given input is empty, compute the op statistics from the given
-    // graph without executing it.
-    for (const auto i : c10::irange(nodes_.size())) {
-      const Node* node = nodes_[i].node();
-      std::string kind(node->kind().toQualString());
-      // TODO: Collect op statistics from sub-blocks here.
-      results.time_per_node[i] = 0;
-      results.time_per_node_type[kind] = 0;
-      results.instances_per_node_type[kind]++;
-      if (nodes_[i].has_out_variant()) {
-        results.out_nodes.insert(kind);
-        results.out_nodes_count++;
-      } else if (nodes_[i].has_native()) {
-        results.native_nodes.insert(kind);
-      }
-      results.total_time += results.time_per_node[i];
-    }
-    results.total_nodes_count = nodes_.size();
-    results.memory_alloc_time = 0;
-    results.memory_dealloc_time = 0;
-    results.output_dealloc_time = 0;
-    for (const auto& p : results.time_per_node_type) {
-      const std::string& kind = p.first;
-      results.percent_per_node_type[kind] = 0;
-    }
-    return results;
+    return {};
   }
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
@@ -1513,6 +1476,9 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
   // See comment on above use of InferenceMode for
   // explanation.
   c10::InferenceMode mode;
+
+  IndividualMetrics results;
+  results.time_per_node.resize(nodes_.size(), 0);
 
   // setup time
   caffe2::Timer timer;
@@ -1768,8 +1734,7 @@ ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
     bool check_memory_overlap)
-    : check_memory_overlap_(check_memory_overlap),
-      num_outputs_(node->outputs().size()) {
+    : check_memory_overlap_(check_memory_overlap) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
@@ -1826,7 +1791,13 @@ ProcessedNode::ProcessedNode(
       fn_(fn),
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset) {
-  TORCH_CHECK(num_outputs() == node->outputs().size());
+  TORCH_CHECK(
+      node->outputs().size() < (1 << (sizeof(num_outputs_) * 8)),
+      node->outputs().size(),
+      " outputs to ProcessedNode ",
+      node->kind().toQualString(),
+      " is too many to use 2-byte indexing");
+  num_outputs_ = node->outputs().size();
 }
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
@@ -1880,9 +1851,8 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 6> special_case_ops = {
+  const static std::array<c10::Symbol, 5> special_case_ops = {
       fromQualString("prim::TypeCheck"),
-      fromQualString("prim::IfThenElse"),
       fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
       fromQualString("static_runtime::dict_unpack"),
@@ -1899,12 +1869,12 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  for (const auto i : c10::irange(num_outputs())) {
+  for (const auto i : c10::irange(num_outputs_)) {
     if (!Output(i).isTensor()) {
       continue;
     }
     const auto& out0_t = Output(i).toTensor();
-    for (const auto j : c10::irange(i + 1, num_outputs())) {
+    for (const auto j : c10::irange(i + 1, num_outputs_)) {
       if (!Output(j).isTensor()) {
         continue;
       }
@@ -1924,7 +1894,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   // skip memory overlap check for mutable or view ops with only one output
   bool skip_check = !schema ||
       ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
-       num_outputs() == 1);
+       num_outputs_ == 1);
   if (!force_check && skip_check) {
     if (!schema) {
       VLOG(2) << "Detected that op schema is null";
@@ -1932,7 +1902,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
     }
     VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
             << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
-            << ", num_outputs_: " << num_outputs();
+            << ", num_outputs_: " << num_outputs_;
     return true;
   }
 
@@ -1942,7 +1912,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
       continue;
     }
     const auto& in_t = in->toTensor();
-    for (const auto j : c10::irange(num_outputs())) {
+    for (const auto j : c10::irange(num_outputs_)) {
       const IValue& out = Output(j);
       if (!out.isTensor()) {
         continue;
@@ -1979,7 +1949,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
       continue;
     }
     const auto& in_t = in.toTensor();
-    for (const auto j : c10::irange(num_outputs())) {
+    for (const auto j : c10::irange(num_outputs_)) {
       auto& output = Output(j);
       if (output.isTensor()) {
         check_and_correct_overlap_with(in_t, output);

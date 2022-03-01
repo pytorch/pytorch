@@ -58,7 +58,6 @@ Creation Ops
     as_tensor
     as_strided
     from_numpy
-    from_dlpack
     frombuffer
     zeros
     zeros_like

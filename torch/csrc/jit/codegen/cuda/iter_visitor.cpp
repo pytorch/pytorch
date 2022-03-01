@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 namespace torch {
@@ -32,94 +31,21 @@ void remove_visited(
   }
 }
 
-// Return all dependencies of a node including members of the node.
-class RecursiveDependencies : public OptInDispatch {
- public:
-  static std::vector<Statement*> next(Statement* stmt) {
-    RecursiveDependencies find_next(stmt);
-    return find_next.next_stmts_;
-  }
-
- private:
-  RecursiveDependencies() = default;
-
-  RecursiveDependencies(Statement* stmt) {
-    handle(stmt);
-  }
-
-  using OptInDispatch::handle;
-
-  void handle(Expr* expr) final {
-    FusionGuard::getCurFusion()->assertInContainer(
-        expr,
-        "IterVisitor.cpp::RecursiveDependencies::handle(Expr*) Cannot traverse expr, ");
-    next_stmts_.insert(
-        next_stmts_.end(), expr->inputs().begin(), expr->inputs().end());
-  }
-
-  void handle(Val* val) final {
-    FusionGuard::getCurFusion()->assertInContainer(
-        val,
-        "IterVisitor.cpp::RecursiveDependencies::handle(Val*) Cannot traverse val, ");
-    OptInDispatch::handle(val);
-  }
-
-  void simpleVal(Val* val) {
-    if (val->definition() == nullptr) {
-      return;
-    }
-    next_stmts_.push_back(val->definition());
-  }
-
-  void handle(Bool* stmt) final {
-    simpleVal(stmt);
-  }
-
-  void handle(Double* stmt) final {
-    simpleVal(stmt);
-  }
-
-  void handle(Int* stmt) final {
-    simpleVal(stmt);
-  }
-
-  void handle(NamedScalar* stmt) final {
-    simpleVal(stmt);
-  }
-
-  void handle(IterDomain* stmt) final {
-    next_stmts_.push_back(stmt->start());
-    next_stmts_.push_back(stmt->extent());
-    next_stmts_.push_back(stmt->stopOffset());
-    simpleVal(stmt);
-  }
-
-  void handle(TensorDomain* stmt) final {
-    next_stmts_.insert(
-        next_stmts_.end(), stmt->domain().begin(), stmt->domain().end());
-    simpleVal(stmt);
-  }
-
-  void handle(TensorView* tv) final {
-    next_stmts_.push_back(tv->domain());
-    simpleVal(tv);
-  }
-
-  std::vector<Statement*> next_stmts_;
-};
-
 } // namespace
 
 std::vector<Statement*> IterVisitor::next(Statement* stmt) {
   if (stmt->isVal()) {
     return next(stmt->as<Val>());
-  } else {
+  } else if (stmt->isExpr()) {
     return next(stmt->as<Expr>());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "IterVisitor could not detect type in next_dispatch.");
   }
 }
 
 std::vector<Statement*> IterVisitor::next(Val* v) {
-  FusionGuard::getCurFusion()->assertInContainer(v, "Cannot traverse val, ");
+  FusionGuard::getCurFusion()->assertInFusion(v, "Cannot traverse val, ");
   if (v->definition() != nullptr) {
     return {v->definition()};
   }
@@ -127,8 +53,7 @@ std::vector<Statement*> IterVisitor::next(Val* v) {
 }
 
 std::vector<Statement*> IterVisitor::next(Expr* expr) {
-  FusionGuard::getCurFusion()->assertInContainer(
-      expr, "Cannot traverse expr, ");
+  FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
   std::vector<Statement*> next_stmts{
       expr->inputs().begin(), expr->inputs().end()};
   return next_stmts;
@@ -168,8 +93,7 @@ void IterVisitor::handle(Val* v) {
 void IterVisitor::traverseFrom(
     Fusion* fusion,
     const std::vector<Val*>& from,
-    bool traverseAllPaths,
-    bool traverseIntoMembers) {
+    bool traverseAllPaths) {
   FusionGuard fg(fusion);
 
   std::unordered_set<Statement*> visited;
@@ -213,8 +137,7 @@ void IterVisitor::traverseFrom(
     } else {
       // We're not ready to process this node, so add all its inputs to be
       // checked Visit input nodes.
-      auto next_stmts =
-          traverseIntoMembers ? RecursiveDependencies::next(stmt) : next(stmt);
+      auto next_stmts = next(stmt);
       // We may want to retraverse nodes, in that case revisit everything!
       if (!traverseAllPaths) {
         // If we don't want to retraverse, remove nodes we already visisted.
@@ -385,7 +308,7 @@ void BackwardVisitor::traverseFrom(
 
   auto vals = AllVals::get(fusion, from);
 
-  auto exprs = StmtSort::getExprs(fusion, from);
+  auto exprs = ExprSort::getExprs(fusion, from);
 
   {
     size_t pos = 0;
@@ -781,41 +704,22 @@ std::unordered_set<Val*> DependencyCheck::getAllDependentVals(
   return DependentVals::getAllDependentVals(of);
 }
 
-void StmtSort::handle(Statement* stmt) {
-  stmts.push_back(stmt);
+void ExprSort::handle(Expr* expr) {
+  exprs.push_back(expr);
 }
 
-std::vector<Expr*> StmtSort::getExprs(Fusion* fusion, bool traverse_members) {
-  auto terminating_outputs = fusion->getTerminatingOutputs();
-  return StmtSort::getExprs(fusion, terminating_outputs, traverse_members);
+std::vector<Expr*> ExprSort::getExprs(Fusion* fusion) {
+  ExprSort es;
+  es.traverse(fusion);
+  return es.exprs;
 }
 
-std::vector<Expr*> StmtSort::getExprs(
+std::vector<Expr*> ExprSort::getExprs(
     Fusion* fusion,
-    const std::vector<Val*>& from,
-    bool traverse_members) {
-  StmtSort es;
-  es.traverseFrom(fusion, from, false, traverse_members);
-  auto stmts = StmtSort::getStmts(fusion, from, traverse_members);
-  auto filter = ir_utils::filterByType<Expr>(stmts.begin(), stmts.end());
-  std::vector<Expr*> exprs(filter.begin(), filter.end());
-  return exprs;
-}
-
-std::vector<Statement*> StmtSort::getStmts(
-    Fusion* fusion,
-    bool traverse_members) {
-  auto terminating_outputs = fusion->getTerminatingOutputs();
-  return StmtSort::getStmts(fusion, terminating_outputs, traverse_members);
-}
-
-std::vector<Statement*> StmtSort::getStmts(
-    Fusion* fusion,
-    const std::vector<Val*>& from,
-    bool traverse_members) {
-  StmtSort es;
-  es.traverseFrom(fusion, from, false, traverse_members);
-  return es.stmts;
+    const std::vector<Val*>& from) {
+  ExprSort es;
+  es.traverseFrom(fusion, from, false);
+  return es.exprs;
 }
 
 void InputsOf::handle(Val* v) {

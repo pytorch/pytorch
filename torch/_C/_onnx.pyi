@@ -2,7 +2,7 @@
 
 from enum import Enum
 
-_CAFFE2_ATEN_FALLBACK: bool
+PYTORCH_ONNX_CAFFE2_BUNDLE: bool
 PRODUCER_VERSION: str
 
 class TensorProtoDataType(Enum):

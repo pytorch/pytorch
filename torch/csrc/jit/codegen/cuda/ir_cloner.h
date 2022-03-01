@@ -1,8 +1,7 @@
 #pragma once
 
-#include <c10/macros/Export.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 
 #include <unordered_map>
 #include <vector>
@@ -12,7 +11,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class IrContainer;
+class Fusion;
 
 //! Clones nodes from an exiting Fusion
 //!
@@ -22,11 +21,10 @@ class IrContainer;
 //!
 class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
-  friend class IrBuilder;
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit IrCloner(IrContainer* container);
+  explicit IrCloner(Fusion* new_fusion) : fusion_(new_fusion) {}
 
   Statement* clone(const Statement* statement);
 
@@ -47,8 +45,8 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
     return copy;
   }
 
-  IrContainer* container() const {
-    return ir_container_;
+  Fusion* fusion() const {
+    return fusion_;
   }
 
  protected:
@@ -88,15 +86,12 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
 
  private:
   // The destination Fusion container
-  IrContainer* ir_container_ = nullptr;
+  Fusion* fusion_ = nullptr;
 
   // The dispatch interface doesn't allow returning values from
   // individual `handle()` methods, so they are storing the
   // result here
   Statement* clone_ = nullptr;
-
-  // Builder to make all the new nodes
-  IrBuilder builder_;
 };
 
 // Replicates all expressions used to generate the provided TensorView. Does not
@@ -110,9 +105,7 @@ class RecomputeTv : private IrCloner {
  private:
   RecomputeTv(Fusion* fusion, std::vector<Expr*> exprs);
 
-  void handle(const TensorDomain*) final;
-
-  Fusion* fusion_;
+  void handle(const TensorDomain*) override;
 };
 
 } // namespace cuda

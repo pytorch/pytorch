@@ -6,7 +6,7 @@ from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
-from typing import List, Tuple, Union, Iterable
+from typing import List, Tuple
 
 
 
@@ -153,12 +153,8 @@ class PackedSequence(PackedSequence_):
 
 # TorchScript doesn't support constructors on named tuples, so we use this helper
 # method to construct PackedSequence
-def _packed_sequence_init_args(
-    data: Tensor,
-    batch_sizes: Optional[Tensor] = None,
-    sorted_indices: Optional[Tensor] = None,
-    unsorted_indices: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
+def _packed_sequence_init_args(data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> Tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]  # noqa: B950
     # NB: if unsorted_indices is provided, it should be the inverse permutation
     # to sorted_indices. Don't assert it here because the PackedSequence ctor
     # should only be used internally.
@@ -184,18 +180,15 @@ def _packed_sequence_init_args(
         return data[0], data[1], sorted_indices, unsorted_indices
 
 
-def _packed_sequence_init(
-    data: Tensor,
-    batch_sizes: Optional[Tensor] = None,
-    sorted_indices: Optional[Tensor] = None,
-    unsorted_indices: Optional[Tensor] = None,
-) -> PackedSequence:
+def _packed_sequence_init(data, batch_sizes=None, sorted_indices=None, unsorted_indices=None):
+    # type: (Tensor, Optional[Tensor], Optional[Tensor], Optional[Tensor]) -> PackedSequence
     data, batch_sizes, sorted_indices, unsorted_indices = _packed_sequence_init_args(
         data, batch_sizes, sorted_indices, unsorted_indices)
     return PackedSequence(data, batch_sizes, sorted_indices, unsorted_indices)
 
 
-def invert_permutation(permutation: Optional[Tensor]) -> Optional[Tensor]:
+def invert_permutation(permutation):
+    # type: (Optional[Tensor]) -> Optional[Tensor]
     if permutation is None:
         return None
     output = torch.empty_like(permutation, memory_format=torch.legacy_contiguous_format)
@@ -204,12 +197,8 @@ def invert_permutation(permutation: Optional[Tensor]) -> Optional[Tensor]:
     return output
 
 
-def pack_padded_sequence(
-    input: Tensor,
-    lengths: Tensor,
-    batch_first: bool = False,
-    enforce_sorted: bool = True,
-) -> PackedSequence:
+def pack_padded_sequence(input, lengths, batch_first=False, enforce_sorted=True):
+    # type: (Tensor, Tensor, bool, bool) -> PackedSequence
     r"""Packs a Tensor containing padded sequences of variable length.
 
     :attr:`input` can be of size ``T x B x *`` where `T` is the length of the
@@ -261,12 +250,8 @@ def pack_padded_sequence(
     return _packed_sequence_init(data, batch_sizes, sorted_indices, None)
 
 
-def pad_packed_sequence(
-    sequence: PackedSequence,
-    batch_first: bool = False,
-    padding_value: float = 0.0,
-    total_length: Optional[int] = None,
-) -> Tuple[Tensor, Tensor]:
+def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
+    # type: (PackedSequence, bool, float, Optional[int]) -> Tuple[Tensor, Tensor]
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -335,11 +320,8 @@ def pad_packed_sequence(
     return padded_output, lengths
 
 
-def pad_sequence(
-    sequences: Union[Tensor, List[Tensor]],
-    batch_first: bool = False,
-    padding_value: float = 0.0,
-) -> Tensor:
+def pad_sequence(sequences, batch_first=False, padding_value=0.0):
+    # type: (List[Tensor], bool, float) -> Tensor
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
@@ -376,31 +358,13 @@ def pad_sequence(
         Tensor of size ``B x T x *`` otherwise
     """
 
-    if not (torch.jit.is_tracing() or torch.jit.is_scripting()):
-        # JIT doesn't support `Iterable`
-        if not isinstance(sequences, Iterable):
-            msg = ('pad_sequence: Expected iterable for input sequences, but got arg of type: '
-                   f'{type(sequences)}')
-            raise RuntimeError(msg)
-
-        # In JIT context this leads to,
-        # RuntimeError: cannot statically infer the expected size of a list in this context
-        sequences = tuple(sequences)
-    else:
-        # For JIT, we only support Union[Tensor, Tuple[Tensor]]
-        if isinstance(sequences, torch.Tensor):
-            sequences = sequences.unbind(0)
-
     # assuming trailing dimensions and type of all the Tensors
     # in sequences are same and fetching those from sequences[0]
     return torch._C._nn.pad_sequence(sequences, batch_first, padding_value)
 
 
-def unpad_sequence(
-    padded_sequences: Tensor,
-    lengths: Tensor,
-    batch_first: bool = False,
-) -> List[Tensor]:
+def unpad_sequence(padded_sequences, lengths, batch_first=False):
+    # type: (Tensor, Tensor, bool) -> List[Tensor]
     r"""Unpad padded Tensor into a list of variable length Tensors
 
     ``unpad_sequence`` unstacks padded Tensor into a list of variable length Tensors.
@@ -446,7 +410,8 @@ def unpad_sequence(
     return unpadded_sequences
 
 
-def pack_sequence(sequences: List[Tensor], enforce_sorted: bool = True) -> PackedSequence:
+def pack_sequence(sequences, enforce_sorted=True):
+    # type: (List[Tensor], bool) -> PackedSequence
     r"""Packs a list of variable length Tensors
 
     Consecutive call of the next functions: ``pad_sequence``, ``pack_padded_sequence``.
@@ -482,7 +447,8 @@ def pack_sequence(sequences: List[Tensor], enforce_sorted: bool = True) -> Packe
     return pack_padded_sequence(pad_sequence(sequences), lengths, enforce_sorted=enforce_sorted)
 
 
-def unpack_sequence(packed_sequences: PackedSequence) -> List[Tensor]:
+def unpack_sequence(packed_sequences):
+    # type: (PackedSequence) -> List[Tensor]
     r"""Unpacks PackedSequence into a list of variable length Tensors
 
     ``packed_sequences`` should be a PackedSequence object.

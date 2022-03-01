@@ -49,7 +49,7 @@ Tensor conv2d_depthwise_static(
 
   Tensor conv = Reduce(
       "conv2d_depthwise",
-      {N, K, OH, OW},
+      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -70,7 +70,7 @@ Tensor conv2d_depthwise_static(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {C / groups, R, S});
+      {{C / groups, "c"}, {R, "r"}, {S, "s"}});
 
   LoopNest nest({conv});
 
@@ -120,7 +120,7 @@ Tensor conv2d_depthwise_dynamic(
 
   return Reduce(
       "conv2d_depthwise",
-      {N, K, OH, OW},
+      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
       Sum(),
       [&](const std::vector<VarHandle>& v) { return init_func(v); },
       [&](const std::vector<VarHandle>& v) {
@@ -141,7 +141,7 @@ Tensor conv2d_depthwise_dynamic(
             input.load(n, k, oh * stride - pad + r, ow * stride - pad + s));
         return in * weight.load(k, c, r, s);
       },
-      {C / groups, R, S});
+      {{C / groups, "c"}, {R, "r"}, {S, "s"}});
 }
 
 } // namespace

@@ -1,7 +1,6 @@
 import itertools
 import math
 from copy import deepcopy
-import warnings
 
 import torch
 from torch.nn import Module

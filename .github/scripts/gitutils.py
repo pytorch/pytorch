@@ -127,10 +127,7 @@ class GitRepo:
         return self._run_git("symbolic-ref", "--short", "HEAD").strip()
 
     def checkout(self, branch: str) -> None:
-        self._run_git("checkout", branch)
-
-    def fetch(self, ref: str, branch: str) -> None:
-        self._run_git("fetch", self.remote, f"{ref}:{branch}")
+        self._run_git('checkout', branch)
 
     def show_ref(self, name: str) -> str:
         refs = self._run_git('show-ref', '-s', name).strip().split('\n')

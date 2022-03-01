@@ -58,7 +58,7 @@ class FunctionCounts(object):
     def __len__(self) -> int:
         return len(self._data)
 
-    def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
+    def __getitem__(self, item: Any) -> "Union[FunctionCount, FunctionCounts]":
         data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
         return (
             FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
@@ -90,13 +90,13 @@ class FunctionCounts(object):
 
     def __add__(
         self,
-        other: "FunctionCounts",
+        other,  # type: FunctionCounts
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: c)
 
     def __sub__(
         self,
-        other: "FunctionCounts",
+        other,  # type: FunctionCounts
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
 
@@ -137,7 +137,7 @@ class FunctionCounts(object):
 
     def _merge(
         self,
-        second: "FunctionCounts",
+        second,   # type: FunctionCounts
         merge_fn: Callable[[int], int]
     ) -> "FunctionCounts":
         assert self.inclusive == second.inclusive, "Cannot merge inclusive and exclusive counts."
@@ -217,7 +217,7 @@ class CallgrindStats(object):
     # FIXME: Once 3.7 is the minimum version, type annotate `other` per PEP 563
     def delta(
         self,
-        other: "CallgrindStats",
+        other,  # type: CallgrindStats
         inclusive: bool = False,
     ) -> FunctionCounts:
         """Diff two sets of counts.
