@@ -1,5 +1,16 @@
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
+
+# Bazel) as well as valid Python (for our cmake build).  This means that
+# load() directives are not allowed (as they are not recognized by Python).
+# If you want to fix this, figure out how run this file from cmake with a proper
+# Starlark interpreter as part of the default OSS build process.  If you need
+# some nontrivial Starlark features, make a separate bzl file (remember that
+
+# bzl files are not exported via ShipIt by default, so you may also need to
+# update PyTorch's ShipIt config)
+
 # In both open-source and fbcode builds, these are generated into
-# torch/csrc/{autgrad,jit}/generated.i
+# torch/csrc/{autograd,jit}/generated.i
 GENERATED_CPP = [
     "autograd/generated/Functions.cpp",
     "autograd/generated/VariableType_0.cpp",
@@ -214,6 +225,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/operator_upgraders/utils.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
+    "torch/csrc/jit/passes/add_if_then_else.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
@@ -373,6 +385,7 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
+    "torch/csrc/jit/runtime/static/generated_ops.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/memory_planner.cpp",
     "torch/csrc/jit/runtime/static/native_ops.cpp",
@@ -388,6 +401,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/backend_interface.cpp",
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
+    "torch/csrc/lazy/core/debug_util.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",
@@ -400,6 +414,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/multi_wait.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/core/shape_inference.cpp",
     "torch/csrc/lazy/core/tensor.cpp",
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
@@ -427,6 +442,11 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
 
+lazy_tensor_core_python_sources = [
+    "torch/csrc/lazy/python/init.cpp",
+    "torch/csrc/lazy/python/python_util.cpp",
+]
+
 libtorch_core_sources = sorted(
     core_sources_common +
     torch_unpickler_common +
@@ -450,9 +470,11 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/debug.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/exception.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
+    "torch/csrc/distributed/c10d/logging.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
@@ -835,6 +857,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
+    "torch/csrc/jit/passes/onnx/deduplicate_initializers.cpp",
     "torch/csrc/jit/passes/onnx/eval_peephole.cpp",
     "torch/csrc/jit/passes/onnx/constant_fold.cpp",
     "torch/csrc/jit/passes/onnx/constant_map.cpp",
@@ -893,7 +916,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/disable_torch_function.cpp",
-]
+] + lazy_tensor_core_python_sources
 
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
@@ -1055,6 +1078,10 @@ aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
 ]
 
+aten_ufunc_headers = [
+    "aten/src/ATen/native/ufunc/add.h",
+]
+
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
 # codegen process. The codegen version of this file, like Activation.cpp.DEFAULT.cpp, will be included
 # in ${cpu_kernel_cpp} in aten/src/ATen/CMakeLists.txt. As a result, in aten/src/ATen/CMakeLists.txt,
@@ -1145,6 +1172,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qconv_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp",
+    "aten/src/ATen/native/quantized/cpu/qmatmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qnormalization.cpp",
     "aten/src/ATen/native/quantized/cpu/qpool.cpp",
@@ -1169,7 +1197,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/library.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
-    "aten/src/ATen/native/attention.cpp",
     "aten/src/ATen/native/Activation.cpp",
     "aten/src/ATen/native/AdaptiveAveragePooling.cpp",
     "aten/src/ATen/native/AdaptiveAveragePooling3d.cpp",
@@ -1322,3 +1349,38 @@ aten_native_source_non_codegen_list = [
 # TODO: move the exceptions to proper locations
 # 2. The whole aten native source list includes the list with and without aten codegen process.
 aten_native_source_list = sorted(aten_native_source_non_codegen_list + aten_native_source_codegen_list)
+
+# These are cpp files which need to go in the torch_cuda_cu library
+# .cu files can be found via glob
+aten_cuda_cu_source_list = [
+    "aten/src/ATen/cuda/CUDABlas.cpp",
+    "aten/src/ATen/cuda/CUDASparseBlas.cpp",
+    "aten/src/ATen/cuda/CublasHandlePool.cpp",
+    "aten/src/ATen/native/cuda/Activation.cpp",
+    "aten/src/ATen/native/cuda/Blas.cpp",
+    "aten/src/ATen/native/cuda/Equal.cpp",
+    "aten/src/ATen/native/cuda/GridSampler.cpp",
+    "aten/src/ATen/native/cuda/IndexKernel.cpp",
+    "aten/src/ATen/native/cuda/ReduceOps.cpp",
+    "aten/src/ATen/native/cuda/ScanKernels.cpp",
+    "aten/src/ATen/native/cuda/Sort.cpp",
+    "aten/src/ATen/native/cuda/Sorting.cpp",
+    "aten/src/ATen/native/cuda/TensorModeKernel.cpp",
+    "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
+    "aten/src/ATen/native/cuda/TensorTopK.cpp",
+    "aten/src/ATen/native/cuda/jit_utils.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
+    "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
+]
+
+# Files using thrust::sort_by_key need to be linked last
+aten_cuda_with_sort_by_key_source_list = [
+    # empty_cuda is needed by torch_cuda_cpp
+    "aten/src/ATen/native/cuda/TensorFactories.cu",
+]
+
+aten_cuda_cu_with_sort_by_key_source_list = [
+    "aten/src/ATen/native/cuda/Unique.cu",
+]

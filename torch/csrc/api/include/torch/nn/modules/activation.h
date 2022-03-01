@@ -570,7 +570,7 @@ TORCH_MODULE(GLU);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
  public:
-  explicit GELUImpl(const GELUOptions& options_ = {});
+  explicit GELUImpl(GELUOptions options_ = {});
 
   Tensor forward(const Tensor& input);
 

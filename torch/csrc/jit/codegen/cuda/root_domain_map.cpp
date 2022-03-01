@@ -595,7 +595,7 @@ std::unordered_set<IterDomain*> ComputeAtRootDomainMap::getMappableDims(
   return mappable_ids;
 }
 
-TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap& root_map) {
+std::string toString(const ComputeAtRootDomainMap& root_map) {
   std::stringstream ss;
   root_map.eq_set_.print(ss);
   return ss.str();

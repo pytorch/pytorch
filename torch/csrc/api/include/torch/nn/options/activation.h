@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/arg.h>
+#include <torch/enum.h>
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
@@ -99,14 +100,11 @@ using GLUFuncOptions = GLUOptions;
 ///
 /// Example:
 /// ```
-/// GELU model(GELUOptions(False));
+/// GELU model(GELUOptions().approximate("none"));
 /// ```
 struct TORCH_API GELUOptions {
-  /* implicit */ GELUOptions(bool approximate = false);
-
-  /// The tanh gelu estimate is used when the approximation flag is enabled.
-  /// Default: false
-  TORCH_ARG(bool, approximate);
+  /// Specifies the approximation to apply to the output.
+  TORCH_ARG(std::string, approximate) = "none";
 };
 
 namespace functional {
@@ -118,7 +116,7 @@ namespace functional {
 /// Example:
 /// ```
 /// namespace F = torch::nn::functional;
-/// F::gelu(input, GELUFuncOptions(false));
+/// F::gelu(input, F::GELUFuncOptions().approximate("none"));
 /// ```
 using GELUFuncOptions = GELUOptions;
 } // namespace functional

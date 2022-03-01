@@ -654,11 +654,12 @@ class GELU(Module):
 
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
-    When the approximate flag is enabled, Gelu is estimated with:
-        :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+    When the approximate argument is 'tanh', Gelu is estimated with:
+        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate: Use tanh gelu approximation if flag is enabled. Default: False
+        approximate (string, optional): the gelu approximation algorithm to use:
+            ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
@@ -673,14 +674,14 @@ class GELU(Module):
         >>> output = m(input)
     """
     __constants__ = ['approximate']
-    approximate: bool
+    approximate: str
 
-    def __init__(self, approximate: bool = False) -> None:
+    def __init__(self, approximate: str = 'none') -> None:
         super(GELU, self).__init__()
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.gelu(input, self.approximate)
+        return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
         return 'approximate={}'.format(self.approximate)
@@ -1037,7 +1038,15 @@ class MultiheadAttention(Module):
         """
         is_batched = query.dim() == 3
         if self.batch_first and is_batched:
-            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+            # make sure that the transpose op does not affect the "is" property
+            if key is value:
+                if query is key:
+                    query = key = value = query.transpose(1, 0)
+                else:
+                    query, key = [x.transpose(1, 0) for x in (query, key)]
+                    value = key
+            else:
+                query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = F.multi_head_attention_forward(

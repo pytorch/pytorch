@@ -685,7 +685,7 @@ RegisterOperators reg_infer_unsqueeze_size({
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_infer_squeeze_dim_size({
     Operator(
-        "prim::infer_squeeze_size(int[] a, int dim) -> int[]",
+        "prim::infer_squeeze_size.dim(int[] a, int dim) -> int[]",
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
             auto dim = pop(stack).toInt();

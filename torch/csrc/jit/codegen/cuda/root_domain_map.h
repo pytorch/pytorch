@@ -206,7 +206,7 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
 //! This will create mappings between i0, i2 and i4.
 class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   friend class ComputeAtRootDomainMapBuilder;
-  friend std::string toString(const ComputeAtRootDomainMap&);
+  friend TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap&);
 
  public:
   //! Builds a mapping table by analyzing the current
@@ -327,7 +327,7 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   std::unordered_set<IterDomain*> window_axes_;
 };
 
-std::string toString(const ComputeAtRootDomainMap& root_map);
+TORCH_CUDA_CU_API std::string toString(const ComputeAtRootDomainMap& root_map);
 
 //! Create a DisjointSet of root IterDomains by traversing the
 //! current fusion entirely. IterDomains that can be mapped each
