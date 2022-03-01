@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -8,7 +9,6 @@
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <unordered_map>
-#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
@@ -173,11 +173,6 @@ TypePtr mapTensorToListOfInts(TypePtr type) {
   }
   return type->withContained(
       fmap(type->containedTypes(), mapTensorToListOfInts));
-  // else if (type->cast<ClassType>()) {
-  //   return type;
-  // } else { return type->withContained(
-  //       fmap(type->containedTypes(), mapTensorToListOfInts));
-  // }
 }
 
 void checkForWhileLoop(
@@ -221,15 +216,10 @@ void checkInputReturnedAsOutput(
   }
 }
 
-void checkNumInputsOutputs(
+void checkInputAndOutputTypes(
     const FunctionSchema* schema,
     const std::shared_ptr<Graph>& graph) {
   // allow extra unused arguments to map multiple functions to e.g. unary
-}
-
-void checkTypes(
-    const FunctionSchema* schema,
-    const std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
       graph->inputs().size() <= schema->arguments().size(),
       "Shape function must have fewer arguments than schema. Got ",
@@ -238,6 +228,7 @@ void checkTypes(
       schema->arguments().size(),
       " schema arguments of schema: ",
       *schema);
+
   for (auto i : c10::irange(graph->inputs().size())) {
     auto inp_type = schema->arguments().at(i).type();
     auto mapped_type = mapTensorToListOfInts(inp_type);
@@ -264,6 +255,7 @@ void checkTypes(
       schema->returns().size(),
       " schema returns of schema: ",
       *schema);
+
   for (auto i : c10::irange(schema->returns().size())) {
     auto out_type = schema->returns().at(i).type();
     auto mapped_type = mapTensorToListOfInts(out_type);
@@ -286,8 +278,7 @@ void checkTypes(
 void checkShapeFunction(
     const FunctionSchema* schema,
     const std::shared_ptr<Graph>& graph) {
-  checkNumInputsOutputs(schema, graph);
-  checkTypes(schema, graph);
+  checkInputAndOutputTypes(schema, graph);
   checkForWhileLoop(schema, graph);
   checkInputReturnedAsOutput(schema, graph);
   // TODO: other checks ? list ops which we don't symbolically optimize, etc ?
@@ -337,8 +328,6 @@ void registerSchema(
       toGraphFunction(shape_compute_function).graph();
 
   transformShapeFunction(schema_string, graph);
-  // don't want spam from internal functions, just user registered function
-  // warnings
   checkShapeFunction(schema_string, graph);
 
   cached_schema_to_graph[schema_string] = graph;

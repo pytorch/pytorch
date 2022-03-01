@@ -161,7 +161,7 @@ void initJITBindings(PyObject* module) {
           })
       // using Node* here instead of Schema because looking up the schema
       // and passing it in from Python will have a different pointer than the
-      // schema that is globally using for caching
+      // schema that is globally used for caching
       .def(
           "_jit_register_shape_compute_graph_for_node",
           [](Node* n, std::shared_ptr<Graph>& graph) {
