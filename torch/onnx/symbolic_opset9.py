@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -11,7 +13,7 @@ from functools import partial
 from functools import wraps
 
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType
+from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented, ScalarType, quantized_args
 
 from typing import Optional
 from sys import maxsize as maxsize
@@ -111,6 +113,12 @@ def div(g, self, other, *args):
         return true_divide(g, self, other)
     else:
         return _div_rounding_mode(g, self, other, *args)
+
+
+@parse_args("v", "v", "v", "f")
+def addcmul(g, self, tensor1, tensor2, value=1.0):
+    value_tens = g.op("Constant", value_t=torch.tensor([value]))
+    return add(g, self, mul(g, mul(g, tensor1, tensor2), value_tens))
 
 
 @parse_args("v", "v", "s")
@@ -694,10 +702,22 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = sym_help._get_tensor_rank(self)
-    if self_rank is not None and self_rank > 2:
-        weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
-    return g.op("PRelu", self, weight)
+    if self_rank is not None:
+        if self_rank > 2:
+            # make weight unidirectional broadcastable
+            weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
+        elif self_rank == 0:
+            # weight is always rank 1. torch allows scalar self, and ONNX is ambiguous
+            # about whether this is allowed, but some implementations enforce
+            # rank(self) >= rank(weight), which makes sense.
+            self = sym_help._unsqueeze_helper(g, self, [0])
+            self_rank = 1
 
+    weight_rank = sym_help._get_tensor_rank(weight)
+    if self_rank is not None and weight_rank is not None:
+        assert self_rank >= weight_rank, \
+            "rank(x) should be >= rank(slope) but got {} < {}".format(self_rank, weight_rank)
+    return g.op("PRelu", self, weight)
 
 def silu(g, input):
     return g.op("Mul", input, g.op("Sigmoid", input))
@@ -929,6 +949,7 @@ avg_pool3d = _avg_pool("avg_pool3d", _triple)
 
 
 def _adaptive_pool(name, type, tuple_fn, fn=None):
+    @quantized_args(True, False)
     def symbolic_fn(g, input, output_size):
         # _adaptive_pool is supported for cases where output_size is 1 for all dimensions,
         # by executing a GlobalPool.
@@ -1620,6 +1641,10 @@ def max(g, self, dim_or_y=None, keepdim=None):
         return max, indices
 
 
+def maximum(g, input, other):
+    return max(g, input, dim_or_y=other)
+
+
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
@@ -1634,6 +1659,10 @@ def min(g, self, dim_or_y=None, keepdim=None):
         min = g.op("ReduceMin", self, axes_i=[dim], keepdims_i=keepdim)
         indices = g.op("ArgMin", self, axis_i=dim, keepdims_i=keepdim)
         return min, indices
+
+
+def minimum(g, input, other):
+    return min(g, input, dim_or_y=other)
 
 
 def exp(g, self):
@@ -1937,6 +1966,8 @@ def hardswish(g, self):
     return g.op("Mul", self, hs)
 
 
+# Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp
+@quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @parse_args("v")
 def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.
@@ -2143,20 +2174,69 @@ def pixel_shuffle(g, self, upscale_factor):
     dims = sym_help._get_tensor_sizes(self)
     if len(dims) != 4:
         return _unimplemented("pixel_shuffle", "only support 4d input")
-    if any([i is None for i in dims[1:]]):
-        return _unimplemented("pixel_shuffle", "only support static input shape, except for batch size")
-    output_channel = dims[1] // upscale_factor // upscale_factor
-    after_view = sym_help._reshape_helper(g, self,
-                                          g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                                upscale_factor, upscale_factor,
-                                                                                dims[2], dims[3]])),
-                                          allowzero=0)
-    after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
-    return sym_help._reshape_helper(g, after_transpose,
-                                    g.op("Constant", value_t=torch.tensor([-1, output_channel,
-                                                                          dims[2] * upscale_factor,
-                                                                          dims[3] * upscale_factor])),
-                                    allowzero=0)
+    if any(i is None for i in dims[1:]):
+        after_view = sym_help._reshape_helper(g, sym_help._unsqueeze_helper(g, self, [2, 3]),
+                                              g.op("Constant", value_t=torch.tensor([0, -1,
+                                                                                     upscale_factor, upscale_factor,
+                                                                                     0, 0])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+        # For dynamic input shapes, two reshapes are performed
+        reshape_h = sym_help._reshape_helper(g, after_transpose,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, -1, 1, 0, 0])),
+                                             allowzero=0)
+        reshape_w = sym_help._reshape_helper(g, reshape_h,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, 1])),
+                                             allowzero=0)
+        return sym_help._squeeze_helper(g, reshape_w, [3, 5])
+    else:
+        output_channel = dims[1] // upscale_factor // upscale_factor
+        after_view = sym_help._reshape_helper(g, self,
+                                              g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                                     upscale_factor, upscale_factor,
+                                                                                     dims[2], dims[3]])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
+        return sym_help._reshape_helper(g, after_transpose,
+                                        g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                               dims[2] * upscale_factor,
+                                                                               dims[3] * upscale_factor])),
+                                        allowzero=0)
+
+
+@parse_args("v", "i")
+def pixel_unshuffle(g, self, downscale_factor):
+    dims = sym_help._get_tensor_sizes(self)
+    if len(dims) != 4:
+        return _unimplemented("pixel_shuffle", "only support 4d input")
+    if any(i is None for i in dims[1:]):
+        # For dynamic input shapes, two reshapes are performed
+        reshape_h = sym_help._reshape_helper(g, sym_help._unsqueeze_helper(g, self, [3]),
+                                             g.op("Constant", value_t=torch.tensor([0, 0, -1, downscale_factor, 0])),
+                                             allowzero=0)
+        reshape_w = sym_help._reshape_helper(g, reshape_h,
+                                             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, downscale_factor])),
+                                             allowzero=0)
+        after_transpose = g.op("Transpose", reshape_w, perm_i=[0, 1, 3, 5, 2, 4])
+        final_reshape = sym_help._reshape_helper(g, after_transpose,
+                                                 g.op("Constant", value_t=torch.tensor([0, -1, 1, 1, 0, 0])),
+                                                 allowzero=0)
+        return sym_help._squeeze_helper(g, final_reshape, [2, 3])
+    else:
+        output_channel = dims[1] * downscale_factor * downscale_factor
+        after_view = sym_help._reshape_helper(g, self,
+                                              g.op("Constant", value_t=torch.tensor([-1, dims[1],
+                                                                                     dims[2] // downscale_factor,
+                                                                                     downscale_factor,
+                                                                                     dims[3] // downscale_factor,
+                                                                                     downscale_factor])),
+                                              allowzero=0)
+        after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 3, 5, 2, 4])
+        return sym_help._reshape_helper(g, after_transpose,
+                                        g.op("Constant", value_t=torch.tensor([-1, output_channel,
+                                                                               dims[2] // downscale_factor,
+                                                                               dims[3] // downscale_factor])),
+                                        allowzero=0)
 
 
 def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
@@ -2501,6 +2581,7 @@ def erf(g, input):
     return g.op("Erf", input)
 
 
+@quantized_args(True, False, False)
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
@@ -2897,6 +2978,93 @@ def index(g, self, index):
             return sym_help._reshape_helper(g, self, final_shape)
 
 
+@parse_args("v", "v", "is", "i", "v")
+def linalg_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
+    ord_value = None
+    if dim is None:
+        if sym_help._is_none(ord):
+            self = sym_help._reshape_helper(g, self, [-1])
+            ord = g.op("Constant", value_t=torch.LongTensor([2]))
+        self_dim = sym_help._get_tensor_rank(self)
+        if self_dim is None:
+            return _unimplemented("dim",
+                                  "Input rank must be known at export time.")
+        if self_dim == 1:
+            ord_value = sym_help._parse_arg(ord, "f")
+        else:
+            dim = [0, 1]
+    else:
+        if len(dim) == 1:
+            if sym_help._is_none(ord):
+                ord = g.op("Constant", value_t=torch.LongTensor([2]))
+            ord_value = sym_help._parse_arg(ord, "f")
+    if ord_value:
+        return linalg_vector_norm(g, self, ord_value, dim, keepdim, dtype)
+    return linalg_matrix_norm(g, self, ord, dim, keepdim, dtype)
+
+
+@parse_args("v", "f", "is", "i", "v")
+def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
+    if dim is None:
+        self = sym_help._reshape_helper(g, self, [-1])
+        keepdim = None
+
+    if ord == math.inf:
+        result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == -math.inf:
+        result = g.op("ReduceMin", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
+    elif ord == 0:
+        return sym_help._onnx_opset_unsupported_detailed("linalg_vector_norm", 9, 11, "ord=0 not supported")
+    else:
+        ord_op = g.op("Constant", value_t=torch.FloatTensor([ord]))
+        result = sym_help._reducesum_helper(g, g.op("Pow", g.op("Abs", self), ord_op),
+                                            axes_i=dim, keepdims_i=keepdim)
+        result = g.op("Pow", result, g.op("Div", g.op("Constant", value_t=torch.FloatTensor([1])), ord_op))
+    return result
+
+
+@parse_args("v", "v", "is", "i", "v")
+def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
+    # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
+    ord_value = sym_help._parse_arg(ord, "s")
+    if ord_value == 'fro':
+        return frobenius_norm(g, self, dim, keepdim)
+    elif ord_value == 'nuc':
+        return _unimplemented("linalg.matrix_norm", "ord==nuc")
+    else:
+        ord_value = sym_help._parse_arg(ord, "f")
+        if ord_value is None:
+            return frobenius_norm(g, self, dim, keepdim)
+        if ord_value == 2 or ord_value == -2:
+            # ord = 2/-2 unimplemented due to lack of operators
+            # used to calculate singular values
+            return _unimplemented("linalg.matrix_norm", "ord==2")
+        # Wrap the dim vector to handle neagtive dim values
+        self_dim = sym_help._get_tensor_rank(self)
+        if self_dim is None:
+            return _unimplemented("linalg.matrix_norm",
+                                  "Input rank must be known at export time.")
+        # Common implementation for cases with
+        # ord = 1/-1 and ord = inf/-inf
+        if dim[0] < 0:
+            dim[0] += self_dim
+        if dim[1] < 0:
+            dim[1] += self_dim
+
+        if ord_value == math.inf or ord_value == -math.inf:
+            dim[0], dim[1] = dim[1], dim[0]
+        if dim[1] > dim[0] and not keepdim:
+            dim[1] -= 1
+        sum = sym_help._reducesum_helper(g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim)
+        if ord_value > 0:
+            result, indices = max(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+        else:
+            result, indices = min(g, sum, dim_or_y=g.op("Constant", value_t=torch.LongTensor([dim[1]])), keepdim=keepdim)
+        return result
+
+
 @parse_args("v", "is", "i")
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
@@ -2953,12 +3121,27 @@ def remainder(g, input, other):
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
+@parse_args("v", "s")
+def gelu(g, self, approximate):
+    # none approximate : onnx::Constant[value={0}]
+    # tanh approximate : onnx::Constant[value={1}]
+    if approximate == 'tanh':
+        kBeta = math.sqrt(2 / math.pi)
+        kKappa = 0.044715
 
-def gelu(g, self):
-    _sqrt2 = 1.4142135623730951
-    erf = g.op("Erf", g.op("Div", self, torch.tensor(_sqrt2, dtype=torch.double)))
-    erf_plusone = add(g, erf, g.op("Constant", value_t=torch.tensor(1, dtype=torch.double)))
-    return mul(g, mul(g, self, erf_plusone), g.op("Constant", value_t=torch.tensor(0.5, dtype=torch.double)))
+        beta = torch.tensor(kBeta, dtype=torch.double)
+        kappa = torch.tensor(kKappa, dtype=torch.double)
+        one = torch.tensor(1., dtype=torch.double)
+        half = torch.tensor(0.5, dtype=torch.double)
+
+        self_cube = mul(g, self, mul(g, self, self))
+        inner = mul(g, beta, add(g, self, mul(g, kappa, self_cube)))
+        return mul(g, half, mul(g, self, add(g, one, g.op("Tanh", inner))))
+    else:
+        _sqrt2 = 1.4142135623730951
+        erf = g.op("Erf", g.op("Div", self, torch.tensor(_sqrt2, dtype=torch.double)))
+        erf_plusone = add(g, erf, g.op("Constant", value_t=torch.tensor(1, dtype=torch.double)))
+        return mul(g, mul(g, self, erf_plusone), g.op("Constant", value_t=torch.tensor(0.5, dtype=torch.double)))
 
 @parse_args("v", "i", "v", "v", "f", "i")
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
@@ -3337,6 +3520,10 @@ class Prim:
 
     @staticmethod
     def ListUnpack(g, *inputs, **kwargs):
+        return None
+
+    @staticmethod
+    def TupleConstruct(g, *inputs, **kwargs):
         return None
 
     @staticmethod

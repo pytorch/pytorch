@@ -74,6 +74,7 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    @override_qengines
     def _test_reference_module_impl(self,
                                     float_module_class,
                                     quantized_module_class,
@@ -109,21 +110,22 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                 x = self.dequant2(x)
                 return x
 
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines or qengine == 'qnnpack':
+            return   # qnnpack does not support nnq.ConvTranspose3d
 
         data = torch.randn(*input_size, dtype=torch.float)
         original_m = M()
         original_ref_m = RefM()
-        torch.backends.quantized.engine = 'qnnpack'
 
         original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
 
-        original_m.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        original_m.qconfig = torch.quantization.default_qconfig
 
         m = prepare(original_m)
         # calibration
         m(data)
-
         m = convert(m)
         # check if the module is properly quantized
         self.assertEqual(type(m.quant), nnq.Quantize)
@@ -133,7 +135,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         # quantize the reference model
         original_ref_m.eval()
-        original_ref_m.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        original_ref_m.qconfig = torch.quantization.default_qconfig
 
         ref_m = prepare(original_ref_m)
         ref_m(data)

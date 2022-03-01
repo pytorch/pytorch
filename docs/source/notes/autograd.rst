@@ -278,8 +278,8 @@ Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
-that can help you make the best use of it in a multithreaded environment.(this is
-relevant only for PyTorch 1.6+ as the behavior in previous version was different).
+that can help you make the best use of it in a multithreaded environment. (This is
+relevant only for PyTorch 1.6+ as the behavior in previous version was different.)
 
 User could train their model with multithreading code (e.g. Hogwild training), and
 does not block on the concurrent backward computations, example code could be:
