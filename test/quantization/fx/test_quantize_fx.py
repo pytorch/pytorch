@@ -3672,16 +3672,13 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = torch.nn.functional.linear(x, torch.rand(2, 2))
                 return x
 
-        backends = ["fbgemm"]
-        i = 0
+        backends = ["qnnpack", "fbgemm"]
         for func in [get_default_qconfig_dict, get_default_qat_qconfig_dict]:
             for backend in backends:
                 m = M().eval()
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict)
                 for name, mod in m.named_modules():
-                    i += 1
-                    print(i)
                     if is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if mod.dtype == torch.qint8:
                             if backend == "fbgemm":
