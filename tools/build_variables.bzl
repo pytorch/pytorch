@@ -1355,6 +1355,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
     "aten/src/ATen/native/cuda/Activation.cpp",
+    "aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp",
     "aten/src/ATen/native/cuda/Blas.cpp",
     "aten/src/ATen/native/cuda/Distributions.cpp",
     "aten/src/ATen/native/cuda/Equal.cpp",
