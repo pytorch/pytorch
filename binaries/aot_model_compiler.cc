@@ -30,6 +30,16 @@ C10_DEFINE_string(
     "If multiple inputs needed, use semicolon to separate "
     "the dtype of different tensors."
     "Supported dtypes: float, int64, uint8");
+C10_DEFINE_string(
+    input_memory_formats,
+    "",
+    "Input memory format."
+    "If multiple inputs needed, use semicolon to separate."
+    "Supported values: contiguous, channels_last");
+C10_DEFINE_string(
+    dynamic_dims,
+    "",
+    "Comma separated dimensions of input tensors that can be dynamic");
 C10_DEFINE_string(method_name, "forward", "The name of the method.");
 C10_DEFINE_string(
     output_llvm,
@@ -61,6 +71,8 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
       c10::StringType::get(), c10::AnyType::get());
   method_spec.insert("sizes", FLAGS_input_dims);
   method_spec.insert("types", FLAGS_input_types);
+  method_spec.insert("memory_formats", FLAGS_input_memory_formats);
+  method_spec.insert("dynamic_sizes", FLAGS_dynamic_dims);
   method_spec.insert("asmfile", FLAGS_output_llvm);
   method_spec.insert("model_name", FLAGS_model_name);
   method_spec.insert("model_version", FLAGS_model_version);
@@ -79,6 +91,7 @@ int main(int argc, char** argv) {
       " --model_version=<model version>"
       " --input_dims=<input dimensions like '1,3,224,224;2,2'>"
       " --input_types=<input dtypes like 'float;float'>"
+      " --input_memory_formats=<input memory formats like 'channels_last;contiguous'>"
       " [--method_name=<method name>]"
       " [--output_llvm=<llvm assembly output file path>]"
       " [--output_model=<output model file path>]");
@@ -93,10 +106,18 @@ int main(int argc, char** argv) {
   CAFFE_ENFORCE(!FLAGS_model_name.empty(), c10::UsageMessage());
   CAFFE_ENFORCE(!FLAGS_model_version.empty(), c10::UsageMessage());
   CAFFE_ENFORCE(!FLAGS_input_dims.empty(), c10::UsageMessage());
+  const auto dims_size = split(';', FLAGS_input_dims).size();
   CAFFE_ENFORCE(
-      split(';', FLAGS_input_dims).size() ==
-          split(';', FLAGS_input_types).size(),
+      dims_size == split(';', FLAGS_input_types).size(),
       "Number of input_dims and input_types should be the same");
+  const auto mem_formats_size = split(';', FLAGS_input_memory_formats).size();
+  CAFFE_ENFORCE(
+      mem_formats_size == 0 || mem_formats_size == dims_size,
+      "Number of input_memory_formats should be 0 (default contiguous) or the same as number of input_dims");
+  if (FLAGS_output_llvm.empty()) {
+    FLAGS_output_llvm =
+        FLAGS_model.substr(0, FLAGS_model.find('.')) + ".compiled.ll";
+  }
 
   std::string output_model_name = FLAGS_output_model;
   if (output_model_name.empty()) {

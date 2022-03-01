@@ -637,7 +637,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
 
 
 def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
-    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
+    if not check_sparse_nnz and any(t.is_sparse or t.is_sparse_csr for t in tupled_inputs if isinstance(t, torch.Tensor)):
         raise GradcheckError('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
@@ -649,7 +649,12 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
                     'is not a double precision floating point or complex. '
                     'This check will likely fail if all the inputs are '
                     'not of double precision floating point or complex. ')
-            content = inp._values() if inp.is_sparse else inp
+            if inp.is_sparse:
+                content = inp._values()
+            elif inp.is_sparse_csr:
+                content = inp.values()
+            else:
+                content = inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
             if content.layout is not torch._mkldnn:  # type: ignore[attr-defined]
@@ -1521,16 +1526,21 @@ def gradgradcheck(
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
-        # If grad_outputs is not specified, create random Tensors of the same
-        # shape, type, and device as the outputs
-        def randn_like(x):
-            y = torch.randn_like(
-                x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
-            if gen_non_contig_grad_outputs:
-                y = torch.testing.make_non_contiguous(y)
-            return y.requires_grad_()
+        # If grad_outputs is not specified, create random Tensors of the same shape, type, and device as the outputs
+
         outputs = _as_tuple(func(*tupled_inputs))
-        tupled_grad_outputs = tuple(randn_like(x) for x in outputs)
+        tupled_grad_outputs = tuple(
+            torch.testing.make_tensor(
+                x.shape,
+                dtype=x.dtype if x.is_floating_point() or x.is_complex() else torch.double,
+                device=x.device,
+                low=-1,
+                high=1,
+                requires_grad=True,
+                noncontiguous=gen_non_contig_grad_outputs,
+            )
+            for x in outputs
+        )
     else:
         tupled_grad_outputs = _as_tuple(grad_outputs)
 

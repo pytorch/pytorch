@@ -203,10 +203,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Caffe2-specific optimization
     is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
                                torch.onnx._CAFFE2_ATEN_FALLBACK)
+    torch.onnx.symbolic_helper._quantized_ops.clear()
+    # Unpack quantized weights for conv and linear ops and insert into graph.
+    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback)
     if is_caffe2_aten_fallback:
-        torch.onnx.symbolic_helper._quantized_ops.clear()
-        # Unpack quantized weights for conv and linear ops and insert into graph.
-        torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict)
         # Insert permutes before and after each conv op to ensure correct order.
         torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
@@ -471,6 +471,21 @@ def _get_example_outputs(model, args):
     return example_outputs
 
 
+_qtype_vtype_map = {torch.quint8: torch.uint8, torch.qint8: torch.int8, torch.qint32: torch.int32, torch.quint4x2: torch.int8}
+
+
+def unpack_quantized_tensor(value):
+    if isinstance(value, torch.Tensor) and value.dtype in _qtype_vtype_map:
+        q_value_dequantize = value.dequantize()
+        q_scale = torch.tensor(value.q_scale(), dtype=torch.double)
+        q_zero_point = torch.tensor(value.q_zero_point(), dtype=torch.int64)
+        q_value = q_value_dequantize / q_scale + q_zero_point
+        q_value = q_value.to(dtype=_qtype_vtype_map[value.dtype])
+        return q_value, q_scale, q_zero_point
+    else:
+        return (value,)
+
+
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
@@ -505,7 +520,10 @@ def _model_to_graph(model, args, verbose=False,
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         example_outputs = _get_example_outputs(model, args)
-        out_vars, desc = torch.jit._flatten(tuple(example_outputs))
+        example_outputs_final = ()
+        for example_output in example_outputs:
+            example_outputs_final += unpack_quantized_tensor(example_output)
+        out_vars, desc = torch.jit._flatten(example_outputs_final)
         torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
     else:
         flatten_args, _ = torch._C._jit_flatten(args)
@@ -619,7 +637,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
             # as-is rather than cause a failure.
             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH)
     unsupported_ops = list()
-    supported_namespaces = ("onnx", "prim")
+    supported_namespaces = ("onnx", "prim", "quantized")
     for node in graph.nodes():
         if node.kind().split(":")[0] not in supported_namespaces:
             unsupported_ops.append(node.kind())
@@ -630,6 +648,29 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         trace_module_map = {_m : torch.typename(type(_m)) for _m in model.modules()}
         torch.jit._trace._trace_module_map = trace_module_map
         return trace_module_map
+
+    def __register_attribute_hook():
+        attr_name = "_onnx_attrs"
+
+        def _track_module_attributes_forward_pre_hook(module, input):
+            setattr(module, attr_name, _get_module_attributes(module))
+
+        def _track_module_attributes_forward_hook(module, input, output):
+            tracing_state = torch._C._get_tracing_state()
+            if not tracing_state:
+                return
+
+            graph = tracing_state.graph()
+            onnx_attrs = {}
+            if hasattr(module, attr_name):
+                onnx_attrs = getattr(module, attr_name)
+                delattr(module, attr_name)
+
+            torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+
+        for m in model.modules():
+            m.register_forward_hook(_track_module_attributes_forward_hook)
+            m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
 
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
         trace_module_map = __setup_trace_module_map()
@@ -647,10 +688,22 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
+
+    if export_modules_as_functions:
+        __register_attribute_hook()
+
     return export_modules_as_functions
 
 def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
+    torch._C._jit_pass_onnx_clear_scope_records()
+
+def _get_module_attributes(module):
+    from typing import get_type_hints
+    annotations = get_type_hints(type(module))
+    base_m_annotations = get_type_hints(torch.nn.Module)
+    [annotations.pop(k, None) for k in base_m_annotations]
+    return {k : getattr(module, k) for k in annotations}
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
@@ -727,7 +780,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
             torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions is not None:
+            if export_modules_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
@@ -781,13 +834,14 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             # string in memory.
             if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
                 try:
-                    _check_onnx_proto(proto)
+                    _check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
                     raise CheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
         _reset_trace_module_map()
+
     return torch_out
 
 
@@ -1051,11 +1105,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         domain = ns
         if ns == "aten":
             domain = ""
-        if ns == "quantized":
-            domain = ""
-            # Caffe2-specific quantized op
-            if is_caffe2_aten_fallback:
-                domain = "caffe2"
+        elif ns == "quantized" and is_caffe2_aten_fallback:
+            domain = "caffe2"
 
         if sym_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)

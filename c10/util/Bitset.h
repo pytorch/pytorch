@@ -76,7 +76,7 @@ struct bitset final {
   // (i.e. if the very first bit is set, this function returns '1'), and a
   // return of '0' means that there was no bit set.
   size_t find_first_set() const {
-#if defined(_MSC_VER) && defined(_M_X64)
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_ARM64))
     unsigned long result;
     bool has_bits_set = (0 != _BitScanForward64(&result, bitset_));
     if (!has_bits_set) {
