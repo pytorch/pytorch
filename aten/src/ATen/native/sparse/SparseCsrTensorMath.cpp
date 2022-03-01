@@ -9,8 +9,6 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <c10/util/irange.h>
@@ -62,7 +60,6 @@
 #include <ATen/ops/isneginf_native.h>
 #include <ATen/ops/isposinf.h>
 #include <ATen/ops/isposinf_native.h>
-#include <ATen/ops/linalg_solve_native.h>
 #include <ATen/ops/log1p.h>
 #include <ATen/ops/log1p_native.h>
 #include <ATen/ops/mm_native.h>
@@ -95,7 +92,6 @@
 #include <ATen/ops/trunc.h>
 #include <ATen/ops/trunc_native.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/zeros_like.h>
 #include <ATen/ops/zero_native.h>
 #endif
 
@@ -208,17 +204,6 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
     }
   });
 
-}
-
-// This function is needed for completeness, though we always call the CUDA dispatch
-//  defined in aten/src/ATen/native/sparse/cuda/SparseCsrTensorMath.cu file when given CPU inputs
-void linalg_solve_sparse_csr_kernel_error(
-  const Tensor& input,
-  const Tensor& other,
-  const Tensor& result,
-  int& singularity
-) {
-  TORCH_CHECK(false, "Not implemented for the given backend: ", input.device().type());
 }
 
 } // end anonymous namespace
@@ -699,72 +684,6 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
     });
   }
 }
-
-Tensor& linalg_solve_sparse_csr_out(const Tensor& input, const Tensor& other, Tensor& result) {
-  if (at::globalContext().hasCUDA()) {
-    TORCH_INTERNAL_ASSERT(input.is_sparse_csr());
-
-    c10::MaybeOwned<Tensor> other_ = other.expect_contiguous();
-    c10::MaybeOwned<Tensor> result_ = result.expect_contiguous();
-
-    if (other.ndimension() > 1) {
-      TORCH_CHECK(other.size(-1) == 1, "NotImplementedError: multiple vector case stored in 'other' tensor is not implemented yet.");
-    }
-
-    // the "other" Tensor needs to be a vector
-    TORCH_CHECK(
-      other.ndimension() == 1 || (other.ndimension() == 2 && other.size(1) == 1),
-      "other tensor must be a vector, but got tensor with dimension: ",
-      other.ndimension());
-
-    // The API expects a square matrix
-    TORCH_CHECK(
-      input.size(0) == input.size(1),
-      "Expected a sparse matrix of dimension N x N (square matrix), but got: ",
-      input.sizes()
-    );
-
-    // Ensure that the vector shape is either (n, 1) or (n,) given input sparse matrix of
-    // shape (n, n)
-    TORCH_CHECK(
-      other.size(0) == input.size(0),
-      "Dimension mismatch for the vector, got shape: ", other.sizes(), " should have been (",
-      input.size(0), ", 1) or (", input.size(0), ",)"
-    );
-
-    TORCH_CHECK(
-      other.scalar_type() == result.scalar_type(),
-      "other (got: ", result.scalar_type(), ") and out (got: ", result.scalar_type(), ") tensors must have same dtype.");
-
-    at::native::resize_output(result, other.sizes());
-    // Return for an empty other tensor
-    if (other.numel() == 0) return result;
-
-    int singularity = -1;
-
-    linalg_solve_sparse_csr_stub(kCUDA, input, *other_, *result_, singularity);
-
-    result.copy_(*result_);
-
-    TORCH_CHECK_LINALG(singularity == -1, "torch.linalg.solve",
-        ": The diagonal element ", singularity , " is zero, the solve could not be completed because the input matrix is singular.");
-    return result;
-  } else {
-    TORCH_CHECK(false, "PyTorch was not built with CUDA support. Please use PyTorch built CUDA support");
-  }
-}
-
-Tensor linalg_solve_sparse_csr(const Tensor& input, const Tensor& other) {
-  // Result tensor will be a vector, dimension same as that of other tensor
-  // The checks for the input tensors (input, other) are done in the call to out variant
-  auto result = at::zeros_like(other);
-  linalg_solve_sparse_csr_out(input, other, result);
-  return result;
-}
-
-DEFINE_DISPATCH(linalg_solve_sparse_csr_stub);
-
-REGISTER_ALL_CPU_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel_error);;
 
 } // namespace native
 } // namespace at

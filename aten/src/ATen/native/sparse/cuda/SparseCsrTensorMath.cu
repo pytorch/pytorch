@@ -9,10 +9,6 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/sparse/SparseCsrTensorMath.h>
-#include <ATen/cuda/CUDASparseDescriptors.h>
-#include <ATen/native/cuda/linalg/CUDASolver.h>
 #include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -36,7 +32,6 @@
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
-#include <ATen/native/cuda/MiscUtils.h>
 
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
@@ -115,46 +110,6 @@ void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& c
   row1.copy_(*col_indices.expect_contiguous());
   convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-template <typename scalar_t>
-void _apply_sparse_csr_linear_solve(
-  const Tensor& input,
-  const Tensor& other,
-  const Tensor& result,
-  int &_singularity) {
-#ifdef USE_ROCM
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.solve with sparse tensors requires compiling ",
-      "PyTorch with CUDA and not supported in ROCm build.");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto values = input.values();
-  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
-  auto crow_indices = input.crow_indices().to(kInt);
-  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
-  auto col_indices = input.col_indices().to(kInt);
-  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
-  auto handle = at::cuda::getCurrentCUDASolverSpHandle();
-  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
-
-  const scalar_t *b = other.data_ptr<scalar_t>();
-  int n = cuda_int_cast(input.size(-1), "n");
-  int nnzA = input._nnz();
-  value_t tol = 0.0;
-  // default reordering of symrcm
-  // Should reorder be an argument provided for users to choose between the following?
-  // symrcm, symamd, csrmetisnd (1, 2, 3)
-  int reorder = 0;
-  scalar_t *x = result.data_ptr<scalar_t>();
-
-  // cuSolver API: lsvqr provides device path, while lsvlu is only available on Host
-  auto cusolver_func = input.is_cuda() ? at::cuda::solver::lsvqr<scalar_t, value_t> : at::cuda::solver::lsvlu<scalar_t, value_t>;
-
-  cusolver_func(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
-    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
-#endif
 }
 
 } // namespace
@@ -319,18 +274,6 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
     });
   }
 }
-
-void linalg_solve_sparse_csr_kernel(
-  const Tensor& input,
-  const Tensor& other,
-  const Tensor& result,
-  int& singularity) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "sparse_csr_solve", [&] {
-    _apply_sparse_csr_linear_solve<scalar_t>(input, other, result, singularity);
-  });
-}
-
-REGISTER_CUDA_DISPATCH(linalg_solve_sparse_csr_stub, &linalg_solve_sparse_csr_kernel);
 
 } // namespace native
 } // namespace at
