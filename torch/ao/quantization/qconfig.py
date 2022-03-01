@@ -193,14 +193,15 @@ def get_default_qconfig(backend='fbgemm', version=0):
     if version == 0:
         if backend == 'fbgemm':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
-                            weight=default_per_channel_weight_observer)
+                              weight=default_per_channel_weight_observer)
         elif backend == 'qnnpack':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
-                            weight=default_weight_observer)
+                              weight=default_weight_observer)
         else:
             qconfig = default_qconfig
     else:
-        raise AssertionError("Version number: " + str(version) + " in get_default_qconfig is not supported. Version number must be 0")
+        raise AssertionError("Version number: " + str(version) +
+                             " in get_default_qconfig is not supported. Version number must be 0")
 
     return qconfig
 
@@ -253,7 +254,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=0):
         else:
             qconfig = default_qat_qconfig
     else:
-        raise AssertionError("Version number: " + str(version) + " in get_default_qat_qconfig is not supported. Version number must be 0 or 1")
+        raise AssertionError("Version number: " + str(version) +
+                             "in get_default_qat_qconfig is not supported. Version number must be 0 or 1")
 
     return qconfig
 
