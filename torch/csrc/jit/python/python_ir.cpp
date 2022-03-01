@@ -936,9 +936,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "requires_grad",
-          [](const TypePtr& self) -> bool {
-            return self->requires_grad();
-          })
+          [](const TypePtr& self) -> bool { return self->requires_grad(); })
       .def_property_readonly(
           "annotation_str", [](const std::shared_ptr<Type>& self) {
             return self->annotation_str();
