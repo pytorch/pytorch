@@ -208,7 +208,7 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
   std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
   auto opGraph = cudnn_frontend::OperationGraphBuilder()
       .setHandle(handle)
-      .setOperationGraph(1, ops.data())
+      .setOperationGraph(ops.size(), ops.data())
       .build();
   return opGraph;
 }
