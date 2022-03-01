@@ -262,7 +262,7 @@ Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> 
 }
 
 Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);  // TODO: dedupe
+  TORCH_CHECK(std >= 0.0, "normal_ expects std >= 0.0, but found std=", std);  // TODO: dedupe
   return self;
 }
 
