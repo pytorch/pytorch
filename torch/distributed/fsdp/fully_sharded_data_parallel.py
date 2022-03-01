@@ -1043,13 +1043,13 @@ class FullyShardedDataParallel(nn.Module):
     def load_local_state_dict(
         self,
         state_dict: "OrderedDict[str, torch.Tensor]",
-        strict: bool = True,
+        *args,
     ) -> NamedTuple:
         """
         Load states from a flatten, sharded state dictionary.
         """
         with self.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-            return self.load_state_dict(state_dict, strict)
+            return self.load_state_dict(state_dict, *args)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         self._lazy_init()
