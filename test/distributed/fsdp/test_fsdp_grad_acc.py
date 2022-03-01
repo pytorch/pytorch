@@ -202,7 +202,7 @@ class TestGradAcc(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
+        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None],
     )
     def test_grad_acc(
         self,
