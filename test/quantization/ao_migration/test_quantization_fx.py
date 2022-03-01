@@ -32,7 +32,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'prepare',
             'convert',
-            'Fuser',
+            'fuse',
         ]
         self._test_function_import('fx', function_list)
 
@@ -155,9 +155,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_package_import('fx.fuse')
 
     def test_function_import_fx_fuse(self):
-        function_list = [
-            'Fuser'
-        ]
+        function_list = ['fuse']
         self._test_function_import('fx.fuse', function_list)
 
     def test_package_import_fx_fusion_patterns(self):
