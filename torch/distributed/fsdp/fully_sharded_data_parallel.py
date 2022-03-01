@@ -1411,14 +1411,14 @@ class FullyShardedDataParallel(nn.Module):
                         )
                         p._shard_bwd_hook[1].remove()  # type: ignore[attr-defined]
                         delattr(p, "_shard_bwd_hook")
-                    # We preserve the gradient accumulation state if not
+                    # Preserve the gradient accumulation state if not
                     # synchronizing: `p.grad` remains the unsharded gradient
                     # accumulated from prior `no_sync()` iterations, and
                     # `p._saved_grad_shard` remains the sharded gradient from
-                    # the last synchronized iteration.
+                    # the last synchronized iteration
                     if not self._require_backward_grad_sync:
                         continue
-                    # We set `p.grad` as needed to ensure optimizer correctness
+                    # Set `p.grad` as needed to ensure optimizer correctness
                     # since optimizers operate on the `grad` attribute.
                     if hasattr(p, "_cpu_grad"):
                         p_assert(
@@ -1538,12 +1538,12 @@ class FullyShardedDataParallel(nn.Module):
                         "if not offloading parameters to CPU"
                 outside_no_sync: bool = p.grad.size() == p._local_shard.shape  # type: ignore[attr-defined]
                 # FSDP currently does not support gradient accumulation outside
-                # `no_sync()` when using CPU offloading.
+                # `no_sync()` when using CPU offloading
                 can_accumulate_grad = not offloaded and outside_no_sync  # type: ignore[attr-defined]
                 if can_accumulate_grad:
-                    # We use `p._saved_grad_shard` as an auxiliary variable in
+                    # Use `p._saved_grad_shard` as an auxiliary variable in
                     # which to accumulate gradients, leaving `p.grad` for FSDP
-                    # to use for managing each per-iteration gradient.
+                    # to use for managing each per-iteration gradient
                     p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
                 p.grad = None
 
