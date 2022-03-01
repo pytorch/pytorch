@@ -23,10 +23,10 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "linux-xenial-py3-clang5-mobile-build",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "macos-10-15-py3-arm64",
@@ -94,10 +94,10 @@
       "linux-docs-push",
       "linux-vulkan-bionic-py3.7-clang9",
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "parallelnative-linux-xenial-py3.7-gcc5.4",
@@ -133,10 +133,10 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test",
       "linux-xenial-py3-clang5-mobile-build",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "macos-arm64-binary-conda",
@@ -167,7 +167,7 @@
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7"
     ],
     "ciflow/linux": [
@@ -185,10 +185,10 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "linux-xenial-py3-clang5-mobile-build",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "parallelnative-linux-xenial-py3.7-gcc5.4",
@@ -215,7 +215,7 @@
     "ciflow/mobile": [
       "linux-xenial-py3-clang5-mobile-build",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build"
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build"
     ],
     "ciflow/noarch": [
       "linux-bionic-py3.7-clang9"
@@ -265,10 +265,10 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "linux-xenial-py3-clang5-mobile-build",
       "linux-xenial-py3-clang5-mobile-custom-build-static",
-      "linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "macos-10-15-py3-arm64",

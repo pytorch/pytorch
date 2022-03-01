@@ -13,12 +13,10 @@ echo "Build lite interpreter with lightweight dispatch."
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
 
-LIGHTWEIGHT_DISPATCH_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/lightweight-dispatch-build"
 BUILD_LIBTORCH_PY="$PWD/tools/build_libtorch.py"
 TEST_SRC_ROOT="$PWD/test/mobile/lightweight_dispatch"
 
-mkdir -p "$LIGHTWEIGHT_DISPATCH_BUILD"
-pushd "$LIGHTWEIGHT_DISPATCH_BUILD"
+pushd "$CUSTOM_TEST_ARTIFACT_BUILD_DIR"
 
 # prepare test
 python "$TEST_SRC_ROOT/tests_setup.py" setup

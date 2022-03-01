@@ -529,8 +529,8 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile-lightweight-dispatch-build",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        build_environment="linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         build_generates_artifacts=False,
         exclude_test=True,
