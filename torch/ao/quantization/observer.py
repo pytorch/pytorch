@@ -332,72 +332,10 @@ class _ObserverBase(ObserverBase):
         raise NotImplementedError("Cannot reset min/max values in the given observer.")
 
 
-class MinMaxObserver(_ObserverBase):
-    r"""Observer module for computing the quantization parameters based on the
-    running min and max values.
-
-    This observer uses the tensor min/max statistics to compute the quantization
-    parameters. The module records the running minimum and maximum of incoming
-    tensors, and uses this statistic to compute the quantization parameters.
-
-    Args:
-        dtype: Quantized data type
-        qscheme: Quantization scheme to be used
-        reduce_range: Reduces the range of the quantized data type by 1 bit
-        quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
-        quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
-        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
-                    This is most useful for simulating dynamic quantization, especially during QAT.
-
-    Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
-    scale :math:`s` and zero point :math:`z` are computed as:
-
-    The running minimum/maximum :math:`x_\text{min/max}` is computed as:
-
-    .. math::
-
-        \begin{array}{ll}
-        x_\text{min} &= \begin{cases}
-            \min(X) & \text{if~}x_\text{min} = \text{None} \\
-            \min\left(x_\text{min}, \min(X)\right) & \text{otherwise}
-        \end{cases}\\
-        x_\text{max} &= \begin{cases}
-            \max(X) & \text{if~}x_\text{max} = \text{None} \\
-            \max\left(x_\text{max}, \max(X)\right) & \text{otherwise}
-        \end{cases}\\
-        \end{array}
-
-    where :math:`X` is the observed tensor.
-
-    The scale :math:`s` and zero point :math:`z` are then computed as:
-
-    .. math::
-
-        \begin{aligned}
-            \text{if Symmetric:}&\\
-            &s = 2 \max(|x_\text{min}|, x_\text{max}) /
-                \left( Q_\text{max} - Q_\text{min} \right) \\
-            &z = \begin{cases}
-                0 & \text{if dtype is qint8} \\
-                128 & \text{otherwise}
-            \end{cases}\\
-            \text{Otherwise:}&\\
-                &s = \left( x_\text{max} - x_\text{min}  \right ) /
-                    \left( Q_\text{max} - Q_\text{min} \right ) \\
-                &z = Q_\text{min} - \text{round}(x_\text{min} / s)
-        \end{aligned}
-
-    where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
-    maximum of the quantized data type.
-
-    .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
-
-    .. note:: If the running minimum equals to the running maximum, the scale
-              and zero_point are set to 1.0 and 0.
-    """
+class _MinMaxObserver(_ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
-
+    
     def __init__(
         self,
         dtype=torch.quint8,
@@ -405,8 +343,8 @@ class MinMaxObserver(_ObserverBase):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
-        factory_kwargs=None,
         memoryless=False,
+        factory_kwargs=None,
     ) -> None:
 
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
@@ -415,7 +353,7 @@ class MinMaxObserver(_ObserverBase):
         # For more details see aten/src/ATen/native/quantized/cpu/qconv.cpp
         # This is not an optimal choice for non x86 backends as it loses a bit
         # of precision for activations.
-        super(MinMaxObserver, self).__init__(
+        super(_MinMaxObserver, self).__init__(
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
@@ -467,7 +405,96 @@ class MinMaxObserver(_ObserverBase):
         self.min_val.copy_(torch.tensor(float("inf")))
         self.max_val.copy_(torch.tensor(float("-inf")))
 
-class MovingAverageMinMaxObserver(MinMaxObserver):
+
+class MinMaxObserver(_MinMaxObserver):
+    r"""Observer module for computing the quantization parameters based on the
+    running min and max values.
+
+    This observer uses the tensor min/max statistics to compute the quantization
+    parameters. The module records the running minimum and maximum of incoming
+    tensors, and uses this statistic to compute the quantization parameters.
+
+    Args:
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
+        quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
+        quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        compute_dtype: if compute_dtype is not set, dtype is the compute_dtype, if compute_dtype
+                       is set, then dtype is the activation dtype.
+
+    Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
+    scale :math:`s` and zero point :math:`z` are computed as:
+
+    The running minimum/maximum :math:`x_\text{min/max}` is computed as:
+
+    .. math::
+
+        \begin{array}{ll}
+        x_\text{min} &= \begin{cases}
+            \min(X) & \text{if~}x_\text{min} = \text{None} \\
+            \min\left(x_\text{min}, \min(X)\right) & \text{otherwise}
+        \end{cases}\\
+        x_\text{max} &= \begin{cases}
+            \max(X) & \text{if~}x_\text{max} = \text{None} \\
+            \max\left(x_\text{max}, \max(X)\right) & \text{otherwise}
+        \end{cases}\\
+        \end{array}
+
+    where :math:`X` is the observed tensor.
+
+    The scale :math:`s` and zero point :math:`z` are then computed as:
+
+    .. math::
+
+        \begin{aligned}
+            \text{if Symmetric:}&\\
+            &s = 2 \max(|x_\text{min}|, x_\text{max}) /
+                \left( Q_\text{max} - Q_\text{min} \right) \\
+            &z = \begin{cases}
+                0 & \text{if dtype is qint8} \\
+                128 & \text{otherwise}
+            \end{cases}\\
+            \text{Otherwise:}&\\
+                &s = \left( x_\text{max} - x_\text{min}  \right ) /
+                    \left( Q_\text{max} - Q_\text{min} \right ) \\
+                &z = Q_\text{min} - \text{round}(x_\text{min} / s)
+        \end{aligned}
+
+    where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
+    maximum of the quantized data type.
+
+    .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
+
+    .. note:: If the running minimum equals to the running maximum, the scale
+              and zero_point are set to 1.0 and 0.
+    """
+
+    def __init__(
+        self,
+        dtype=torch.quint8,
+        qscheme=torch.per_tensor_affine,
+        reduce_range=False,
+        quant_min=None,
+        quant_max=None,
+        factory_kwargs=None,
+        compute_dtype=None,
+    ):
+        # memoryless should not be a user facing argument, infer it from compute dtype and dtype
+        memoryless = compute_dtype in (torch.quint8, torch.qint8) and dtype == torch.float32
+        super(MinMaxObserver, self).__init__(
+            dtype=dtype if compute_dtype is None else compute_dtype,
+            qscheme=qscheme,
+            reduce_range=reduce_range,
+            quant_min=quant_min,
+            quant_max=quant_max,
+            factory_kwargs=factory_kwargs,
+            memoryless=memoryless
+        )
+
+
+
+class MovingAverageMinMaxObserver(_MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
     moving average of the min and max values.
 
@@ -549,33 +576,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         return x_orig
 
 
-class PerChannelMinMaxObserver(_ObserverBase):
-    r"""Observer module for computing the quantization parameters based on the
-    running per channel min and max values.
-
-    This observer uses the tensor min/max statistics to compute the per channel
-    quantization parameters. The module records the running minimum and maximum
-    of incoming tensors, and uses this statistic to compute the quantization
-    parameters.
-
-    Args:
-        ch_axis: Channel axis
-        dtype: Quantized data type
-        qscheme: Quantization scheme to be used
-        reduce_range: Reduces the range of the quantized data type by 1 bit
-        quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
-        quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
-        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
-                    This is most useful for simulating dynamic quantization, especially during QAT.
-
-    The quantization parameters are computed the same way as in
-    :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
-    that the running min/max values are stored per channel.
-    Scales and zero points are thus computed per channel as well.
-
-    .. note:: If the running minimum equals to the running maximum, the scales
-              and zero_points are set to 1.0 and 0.
-    """
+class _PerChannelMinMaxObserver(_ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -587,10 +588,10 @@ class PerChannelMinMaxObserver(_ObserverBase):
         reduce_range=False,
         quant_min=None,
         quant_max=None,
-        factory_kwargs=None,
         memoryless=False,
+        factory_kwargs=None,
     ) -> None:
-        super(PerChannelMinMaxObserver, self).__init__(
+        super(_PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
             qscheme=qscheme,
             reduce_range=reduce_range,
@@ -696,7 +697,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 missing_keys.append(key)
 
         if not torch.jit.is_scripting():
-            super(PerChannelMinMaxObserver, self)._load_from_state_dict(
+            super(_PerChannelMinMaxObserver, self)._load_from_state_dict(
                 state_dict,
                 prefix,
                 local_metadata,
@@ -733,8 +734,56 @@ class PerChannelMinMaxObserver(_ObserverBase):
         self.min_val = torch.tensor([])
         self.max_val = torch.tensor([])
 
+class PerChannelMinMaxObserver(_PerChannelMinMaxObserver):
+    r"""Observer module for computing the quantization parameters based on the
+    running per channel min and max values.
 
-class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
+    This observer uses the tensor min/max statistics to compute the per channel
+    quantization parameters. The module records the running minimum and maximum
+    of incoming tensors, and uses this statistic to compute the quantization
+    parameters.
+
+    Args:
+        ch_axis: Channel axis
+        dtype: Quantized data type
+        qscheme: Quantization scheme to be used
+        reduce_range: Reduces the range of the quantized data type by 1 bit
+        quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
+        quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        compute_dtype: if compute_dtype is not set, dtype is used as the Quantized data type,
+                       if compute_dtype is set, then dtype should be set as the activation dtype.
+
+    The quantization parameters are computed the same way as in
+    :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
+    that the running min/max values are stored per channel.
+    Scales and zero points are thus computed per channel as well.
+
+    .. note:: If the running minimum equals to the running maximum, the scales
+              and zero_points are set to 1.0 and 0.
+    """
+    def __init__(
+        self,
+        ch_axis=0,
+        dtype=torch.quint8,
+        qscheme=torch.per_channel_affine,
+        reduce_range=False,
+        quant_min=None,
+        quant_max=None,
+        compute_dtype=None,
+        factory_kwargs=None,
+    ) -> None:
+        memoryless = compute_dtype in (torch.quint8, torch.qint8) and dtype==torch.float32
+        super(PerChannelMinMaxObserver, self).__init__(
+            dtype=dtype if compute_dtype is None else compute_dtype,
+            qscheme=qscheme,
+            reduce_range=reduce_range,
+            quant_min=quant_min,
+            quant_max=quant_max,
+            memoryless=memoryless,
+            factory_kwargs=factory_kwargs,
+        )
+
+class MovingAveragePerChannelMinMaxObserver(_PerChannelMinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
 
