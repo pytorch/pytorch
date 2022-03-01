@@ -279,7 +279,7 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     return tuple(SampleInput(
-        make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, S, S), device=device, dtype=dtype, low=None, high=None, requires_grad=requires_grad),
         args=args)
         for args in test_args)
 
