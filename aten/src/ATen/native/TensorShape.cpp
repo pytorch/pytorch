@@ -1416,7 +1416,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       auto t1_idx = at::empty({lmin}, t1.options());
       auto t2_idx = at::empty({lmin}, t2.options());
       int64_t nnz = 0;
-      int64_t n_intersect = 0;
 
       auto* ptr_t1_idx = t1_idx.data_ptr<int64_t>();
       auto* ptr_t2_idx = t2_idx.data_ptr<int64_t>();
@@ -1439,10 +1438,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           const auto count2 = ptr_c2[j];
           *ptr_t1_idx++ = i;
           *ptr_t2_idx++ = j;
-          ++n_intersect;
           nnz += count1 * count2;
         }
       }
+      const auto n_intersect = ptr_t1_idx - t1_idx.data_ptr<int64_t>();
 
       return std::make_tuple(t1_idx, t2_idx, n_intersect, nnz);
     };
