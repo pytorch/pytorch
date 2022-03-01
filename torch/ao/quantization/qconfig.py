@@ -237,6 +237,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=0):
                                                                                  quant_max=255,
                                                                                  reduce_range=False),
                               weight=default_fused_wt_fake_quant)
+        else:
+            qconfig = default_qat_qconfig_v2
     # Histogram observer is too slow for quantization aware training
     elif version == 1:
         if backend == 'fbgemm':
