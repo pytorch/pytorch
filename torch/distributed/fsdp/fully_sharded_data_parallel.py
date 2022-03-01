@@ -1419,7 +1419,7 @@ class FullyShardedDataParallel(nn.Module):
                     if not self._require_backward_grad_sync:
                         continue
                     # Set `p.grad` as needed to ensure optimizer correctness
-                    # since optimizers operate on the `grad` attribute.
+                    # since optimizers operate on the `grad` attribute
                     if hasattr(p, "_cpu_grad"):
                         p_assert(
                             p.device == torch.device("cpu"),
