@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir.h>
@@ -9,7 +10,10 @@
 namespace torch {
 namespace lazy {
 
-class TORCH_API LazyTensor {
+class LazyTensor;
+using LazyTensorPtr = c10::intrusive_ptr<LazyTensor>;
+
+class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
  public:
   // This is the core lazy tensor data structure where all the tensor data is
   // held. The lazy tensor is nothing more than a shared pointer to a Data
@@ -43,43 +47,41 @@ class TORCH_API LazyTensor {
     size_t generation = 1;
   };
 
-  static LazyTensor Create(
+  static LazyTensorPtr Create(
       const at::Tensor& tensor,
       const BackendDevice& device);
-  static LazyTensor Create(Value ir_value, const BackendDevice& device);
-  static LazyTensor Create(BackendDataPtr handle);
-  static LazyTensor Create(std::shared_ptr<Data> data);
+  static LazyTensorPtr Create(Value ir_value, const BackendDevice& device);
+  static LazyTensorPtr Create(BackendDataPtr handle);
+  static LazyTensorPtr Create(std::shared_ptr<Data> data);
 
-  // Creates an empty/null tensor.
-  LazyTensor() = default;
-
-  bool is_null() const {
-    return data_ptr() == nullptr;
-  }
-  operator bool() const {
-    return !is_null();
-  }
+  // The default ctor previously created a null LazyTensor (one with no 'data' obj).
+  // Creating a null LazyTensor is no longer possible, since the same can be achieved by
+  // creating a null LazyTensorPtr and it is way too confusing to have to check both
+  // lazy_tensor_ptr && *lazy_tensor_ptr,
+  // so everywhere that used to rely on a LazyTensor obj with a null Data can now rely on
+  // a null LazyTensorPtr instead.
+  LazyTensor() = delete;
 
   size_t generation() const {
     return data()->generation;
   }
 
-  LazyTensor alias() const {
-    return LazyTensor(data_ptr());
+  LazyTensorPtr alias() const {
+    return c10::make_intrusive<LazyTensor>(LazyTensor(data_ptr()));
   }
 
   int64_t size(int64_t dim) const;
 
   at::Tensor ToTensor(bool detached);
 
-  void ShallowCopyTo(LazyTensor* dest) const;
+  void ShallowCopyTo(LazyTensorPtr dest) const;
 
   // Assigns the tensor value to the lazy tensor.
   void SetTensor(at::Tensor tensor);
 
   void UpdateFromTensor(at::Tensor tensor, bool sync);
   void UpdateFromTensorOut(at::Tensor tensor);
-  void UpdateFromTensorOut(const LazyTensor& tensor);
+  void UpdateFromTensorOut(const LazyTensorPtr& tensor);
 
   Data* data() const;
 
@@ -121,10 +123,10 @@ class TORCH_API LazyTensor {
 
   c10::optional<at::Tensor> CurrentTensorData() const;
 
-  std::vector<LazyTensor> MakeOutputTensors(NodePtr node) const;
+  std::vector<LazyTensorPtr> MakeOutputTensors(NodePtr node) const;
 
-  LazyTensor CreateViewTensor(ViewInfo view_info) const;
-  LazyTensor CopyTensorToDevice(const BackendDevice& device);
+  LazyTensorPtr CreateViewTensor(ViewInfo view_info) const;
+  LazyTensorPtr CopyTensorToDevice(const BackendDevice& device);
 
   void ModifyCurrentView(ViewInfo view_info) const;
 
@@ -138,7 +140,7 @@ class TORCH_API LazyTensor {
   explicit LazyTensor(BackendDataPtr handle);
   explicit LazyTensor(std::shared_ptr<Data> data);
 
-  static LazyTensor Create(
+  static LazyTensorPtr Create(
       std::shared_ptr<LazyView> view,
       const BackendDevice& device);
 
@@ -181,34 +183,34 @@ class TORCH_API LazyTensor {
 // Section 1: at::Tensor => LazyTensor.
 // Extracts the LazyTensor out of an at::Tensor. Returns a null LazyTensor
 // if the tensor is not a lazy tensor.
-TORCH_API LazyTensor TryGetLtcTensor(const at::Tensor& tensor);
+TORCH_API LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor);
 
 // Extracts the LazyTensor out of an at::Tensor. Throws an exception
 // if the tensor is not a lazy tensor.
-TORCH_API LazyTensor GetLtcTensor(const at::Tensor& tensor);
+TORCH_API LazyTensorPtr GetLtcTensor(const at::Tensor& tensor);
 
 // Same as above, applied to a list of tensors.
-TORCH_API std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors);
+TORCH_API std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors);
 
 // If tensor is a lazy tensor type, returns the LazyTensor embedded within it,
 // otherwise creates a new lazy tensor type with tensor as data.
-TORCH_API LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
+TORCH_API LazyTensorPtr GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
                                 const BackendDevice& device);
 
-TORCH_API LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device);
+TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device);
 
 // Section 2: LazyTensor => at::Tensor.
 // Creates an ATen tensor from an LazyTensor.
-TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor);
+TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor);
 TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
 template <size_t... Indices>
-auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensor>& tensors, std::index_sequence<Indices...>) {
+auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensorPtr>& tensors, std::index_sequence<Indices...>) {
     return std::make_tuple(CreateAtenFromLtcTensor(tensors[Indices])...);
 }
 
 template <size_t N>
-auto TupleAtenFromLtcTensors(const std::vector<LazyTensor>& tensors) {
+auto TupleAtenFromLtcTensors(const std::vector<LazyTensorPtr>& tensors) {
     return TupleAtenFromLtcTensorsImpl(tensors, std::make_index_sequence<N>{});
 }
 
