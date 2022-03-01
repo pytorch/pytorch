@@ -854,8 +854,36 @@ class FullyShardedDataParallel(nn.Module):
 
     def state_dict(self, *args, **kwargs):
         """
-        The entry point of all three FSDP state_dict APIs.
-        ``self._state_dict_type`` decides which code path to execute.
+        The entry point of all three FSDP state_dict APIs. By default, calling
+        ``state_dict`` on an FSDP module will result in FSDP attempting to bring
+        the entire (nested) model into memory and taking the local model's
+        ``state_dict`` on every rank, which could result in OOM if the model
+        cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
+        available to configure between `state_dict` implementations. User can
+        thus use `with self.state_dict_type(StateDictType.LOCAL_STATE_DICT)`
+        context manager to perform a local checkpoint that will store only local
+        shards of the module. Currently, the only supported implementations are
+        ``StateDictType.LOCAL_STATE_DICT`` and ``StateDictType.FULL_STATE_DICT``
+        (default).
+
+        Example::
+
+        >>> import torch
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        >>> from torch.distributed.fsdp import StateDictType
+        >>> torch.cuda.set_device(device_id)
+        >>> my_module = nn.Linear(...)
+        >>> sharded_module = FSDP(my_module)
+        >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
+        >>>     full_dict = sharded_module.state_dict()
+        >>> full_dict.keys()
+        >>> odict_keys(['weight', 'bias'])
+        >>> # using local state dict
+        >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>>     local_dict = sharded_module.state_dict()
+        >>> local_dict.keys()
+        >>> odict_keys(['flat_param', 'inner.flat_param'])
+        >>> {hi}
 
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
@@ -961,8 +989,40 @@ class FullyShardedDataParallel(nn.Module):
         *args,
     ) -> NamedTuple:
         """
-        The entry point of all three FSDP load_state_dict APIs.
-        ``self._state_dict_type`` decides which code path to execute.
+        The entry point of all three FSDP load_state_dict APIs. By default,
+        calling ``load_state_dict`` on an FSDP module will result in FSDP
+        attempting to load a "full" state_dict, i.e. a state_dict consisting of
+        full, unsharded, unflattened original module parameters. This requires
+        FSDP to load the full parameter context on each rank which could result
+        in GPU OOM. As a result, :func:`state_dict_type` API is available to
+        configure between `load_state_dict` implementations. User can thus use
+        ``with self.state_dict_type(StateDictType.LOCAL_STATE_DICT)`` context
+        manager to load a local state dict checkpoint that will restore only
+        local shards of the module. Currently, the only supported
+        implementations are ``StateDictType.LOCAL_STATE_DICT`` and
+        ``StateDictType.FULL_STATE_DICT`` (default). Please see :func:`state_dict`
+        for documentation around creating an FSDP checkpoint.
+
+        Example::
+
+        >>> import torch
+        >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        >>> from torch.distributed.fsdp import StateDictType
+        >>> torch.cuda.set_device(device_id)
+        >>> my_module = nn.Linear(...)
+        >>> sharded_module = FSDP(my_module)
+        >>> checkpoint = torch.load(PATH)
+        >>> full_state_dict = checkpoint['full_state_dict']
+        >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
+        >>>     sharded_module.load_state_dict(full_state_dict)
+        >>> full_dict.keys()
+        >>> odict_keys(['weight', 'bias'])
+        >>> # using local state dict
+        >>> local_state_dict = checkpoint['local_state_dict]
+        >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>>     sharded_module.load_state_dict(local_state_dict)
+        >>> local_dict.keys()
+        >>> odict_keys(['flat_param', 'inner.flat_param'])
 
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
