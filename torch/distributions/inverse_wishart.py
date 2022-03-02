@@ -193,7 +193,7 @@ class InverseWishart(ExponentialFamily):
         if nu.ge(p - 3).any():
             warnings.warn(
                 """
-                In singular case, Elementwise variance of the Inverse Wishart distribution
+                In singular case, elementwise variance of the Inverse Wishart distribution
                 can be caculated only for ndim > df + 3.
                 """
             )
@@ -206,11 +206,15 @@ class InverseWishart(ExponentialFamily):
             eff_df.ge(3),
             _clamp_with_eps(
                 (
-                    (eff_df + 1) * V.pow(2)
-                    + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
+                    (eff_df + 1) * V.pow(2) + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
                 ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
             ),
-            torch.full_like(eff_df, fill_value=float("Inf")).expand(self._batch_shape + self._event_shape)
+            torch.full_like(
+                eff_df,
+                fill_value=float("Inf"),
+                dtype=eff_df.dtype,
+                device=eff_df.device,
+            ).expand(self._batch_shape + self._event_shape)
         )
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
