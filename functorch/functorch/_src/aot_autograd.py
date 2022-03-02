@@ -9,6 +9,7 @@ from torch.nn.utils import _stateless
 from functorch._C import CompileCache
 from .decompositions import register_decomposition
 from .partitioners import default_partition
+from .named_members_polyfill import _named_parameters, _named_buffers
 from typing import Callable, List, Dict, Any, Tuple, Optional
 
 pytree._register_pytree_node(
@@ -472,40 +473,6 @@ def clear_compile_cache():
     if compile_cache is not None:
         compile_cache.clear()
         compile_cache = None
-
-
-# Polyfilled from pytorch core while we figure out the `remove_duplicate` issues.
-def _named_members(mod, get_members_fn, prefix='', recurse=True, remove_duplicate=True):
-    r"""Helper method for yielding various names + members of modules."""
-    memo = set()
-    modules = mod.named_modules(prefix=prefix, remove_duplicate=remove_duplicate) if recurse else [(prefix, mod)]
-    for module_prefix, module in modules:
-        members = get_members_fn(module)
-        for k, v in members:
-            if v is None or v in memo:
-                continue
-            if remove_duplicate:
-                memo.add(v)
-            name = module_prefix + ('.' if module_prefix else '') + k
-            yield name, v
-
-
-def _named_parameters(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
-    gen = _named_members(
-        mod,
-        lambda module: module._parameters.items(),
-        prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-    for elem in gen:
-        yield elem
-
-
-def _named_buffers(mod, prefix: str = '', recurse: bool = True, remove_duplicate: bool = True):
-    gen = _named_members(
-        mod,
-        lambda module: module._buffers.items(),
-        prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-    for elem in gen:
-        yield elem
 
 
 def aot_module(mod, *args, **kwargs):
