@@ -247,31 +247,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertFalse(m.weight.grad)
         self.assertFalse(m.bias.grad)
 
-    def test_same_dense_param_type(self):
-        """Check that ZeroRedundancyOptimizer raises an exception if the input
-        parameters include sparse tensors or different dense types.
-
-        NOTE: This test should be removed once support for sparse parameters
-        and varying parameter types is added.
-        """
-        self.dist_init(self.rank)
-
-        inputs = [
-            [torch.sparse_coo_tensor(size=(2, 3))],
-            [torch.FloatTensor(1), torch.DoubleTensor(1)],
-            [torch.FloatTensor(1), torch.FloatTensor(1),
-                torch.sparse_coo_tensor(size=(2, 3))]
-        ]
-        for input in inputs:
-            with self.assertRaises(ValueError):
-                ZeroRedundancyOptimizer(input, optimizer_class=SGD, lr=0.1)
-
-
-class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
-    @property
-    def world_size(self):
-        return min(4, max(2, torch.cuda.device_count()))
-
     def test_constructor(self):
         """Check the robustness of the ZeroRedundancyOptimizer constructor by
         passing different values for the ``params`` argument."""
@@ -281,7 +256,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             torch.nn.Linear(5, 10),
             torch.nn.Linear(10, 10),
             torch.nn.Linear(10, 10),
-        ).to(self.device)
+        )
 
         # Test various constructor inputs in the form: (input, expected error)
         ctor_inputs = [
@@ -323,6 +298,30 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             "Expected 2 local optimizer param groups, but got " \
             f"{len(o.optim.param_groups)}"
 
+    def test_same_dense_param_type(self):
+        """Check that ZeroRedundancyOptimizer raises an exception if the input
+        parameters include sparse tensors or different dense types.
+
+        NOTE: This test should be removed once support for sparse parameters
+        and varying parameter types is added.
+        """
+        self.dist_init(self.rank)
+
+        inputs = [
+            [torch.sparse_coo_tensor(size=(2, 3))],
+            [torch.FloatTensor(1), torch.DoubleTensor(1)],
+            [torch.FloatTensor(1), torch.FloatTensor(1),
+                torch.sparse_coo_tensor(size=(2, 3))]
+        ]
+        for input in inputs:
+            with self.assertRaises(ValueError):
+                ZeroRedundancyOptimizer(input, optimizer_class=SGD, lr=0.1)
+
+
+class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
+    @property
+    def world_size(self):
+        return min(4, max(2, torch.cuda.device_count()))
 
     @common_distributed.skip_if_rocm
     def test_step(self):
@@ -487,6 +486,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
+    @common_distributed.skip_if_no_gpu
     def test_multiple_param_groups(self):
         """
         Tests parity between constructing ZeRO with multiple parameter groups

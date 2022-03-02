@@ -322,6 +322,15 @@ def get_type_hint_captures(fn):
         A Dict[str, Any] containing a mapping from the literal annotations used on
         fn to the Python objects they refer to.
     """
+    # First, try to get the source of the function. We'll need to parse it to find the actual string names
+    # that were used to annotate the types, since inspect.signature() will only return the class object that
+    # the annotation refers to, not the string name. If we can't get the source, simply return an empty dict.
+    # This may happen in cases where the function is synthesized dynamically at runtime.
+    try:
+        src = inspect.getsource(fn)
+    except OSError:
+        return {}
+
     # Gather a dictionary of parameter name -> type, skipping any parameters whose annotated
     # types are strings. These are only understood by TorchScript in the context of a type annotation
     # that refers to a class in its own definition, but trying to include a mapping for this in the result
@@ -337,8 +346,6 @@ def get_type_hint_captures(fn):
     # Then, get the literal type annotations from the function declaration
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
-    src = inspect.getsource(fn)
-
     # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
     a = ast.parse(dedent(src))
     if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
@@ -904,7 +911,7 @@ def is_optional(ann):
 
     def is_union_as_optional(ann):
         ann_args = ann.__args__
-        return len(ann_args) == 2 and None in ann_args
+        return len(ann_args) == 2 and (None in ann_args or type(None) in ann_args)
 
     return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
 
@@ -977,7 +984,7 @@ def is_scripting() -> bool:
 
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj) -> str:
+def _qualified_name(obj, mangle_name=True) -> str:
     # This special case allows us to override the qualified name on a type.
     # It's currently used in conjunction with tracing, where we create a
     # fake module to filter only supported attributes. However, since this
@@ -1026,13 +1033,16 @@ def _qualified_name(obj) -> str:
         module_name = module_name.replace("<", "_")
         module_name = module_name.replace(">", "_")
 
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
+    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
+    # does not need mangle the python class name.
+    if mangle_name:
+        # __main__ is a builtin module, so rewrite it to "__torch__".
+        if module_name == "__main__":
+            module_name = "__torch__"
+        else:
+            # Everything else gets a "__torch__" prefix to avoid name collisions
+            # with the names of user values.
+            module_name = "__torch__." + module_name
 
     if "." in name:
         raise RuntimeError(f"Could not get qualified name for class '{name}': "
