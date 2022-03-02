@@ -440,11 +440,11 @@ def _str_intern(inp, *, tensor_contents=None):
     string_repr = _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
 
     # Check if this instance is flagged as a parameter and change the repr accordingly.
-    # Unfortunately, this function has to be aware of this detail.
-    # NB: This is currently skipped for plain tensor parameters to maintain BC. In the future,
-    # this should be done for those as well to produce a valid repr.
-    if isinstance(self, torch.nn.Parameter) and not is_plain_tensor:
-        string_repr = f"Parameter({string_repr})"
+    if isinstance(self, torch.nn.Parameter):
+        # Maintain BC for plain tensor parameter string representation.
+        string_repr = (
+            "Parameter containing:\n{string_repr}" if type(self) is torch.Tensor
+            else f"Parameter({string_repr})")
 
     return string_repr
 

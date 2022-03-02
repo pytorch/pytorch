@@ -43,9 +43,6 @@ def _rebuild_from_type(func, type, args, dict):
     return ret
 
 def _rebuild_from_type_v2(func, new_type, args, state):
-    if new_type is Tensor:
-        return func(*args)
-
     ret = func(*args)
     if type(ret) is not new_type:
         ret = ret.as_subclass(new_type)
@@ -170,9 +167,14 @@ class Tensor(torch._C._TensorBase):
             return new_tensor
 
     def __reduce_ex__(self, proto):
-        if type(self) is Tensor:
-            return self._reduce_ex_internal(proto)
-        if has_torch_function_unary(self):
+        # Maintain FC by serializing plain tensor parameters in the old-style way.
+        if type(self) is Tensor and isinstance(self, torch.nn.Parameter):
+            return (
+                torch._utils._rebuild_parameter,
+                (self.data, self.requires_grad, OrderedDict())
+            )
+
+        if type(self) is not Tensor and has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
         # Get the state of the python subclass

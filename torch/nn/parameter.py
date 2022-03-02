@@ -36,35 +36,11 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.empty(0)
-        if type(data) is torch.Tensor:
-            # For ease of BC maintenance, keep this path for standard Tensor.
-            # Eventually (tm), we should change the behavior for standard Tensor to match.
-            return torch.Tensor._make_subclass(cls, data, requires_grad)
 
-        # Path for custom tensors: set a flag on the instance to indicate parameter-ness.
+        # Set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
         t._is_param = _ParameterTag()
         return t
-
-    # Note: the 3 methods below only apply to standard Tensor. Parameters of custom tensor types
-    # are still considered that custom tensor type and these methods will not be called for them.
-    def __deepcopy__(self, memo):
-        if id(self) in memo:
-            return memo[id(self)]
-        else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
-            memo[id(self)] = result
-            return result
-
-    def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
-
-    def __reduce_ex__(self, proto):
-        # See Note [Don't serialize hooks]
-        return (
-            torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
-        )
 
     __torch_function__ = _disabled_torch_function_impl
 
