@@ -1,0 +1,11 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "intrusive_ptr",
+    srcs = ["intrusive_ptr_benchmark.cpp"],
+    tags = ["benchmark"],
+    deps = [
+        "//c10/util:base",
+        "@google_benchmark//:benchmark",
+    ],
+)
