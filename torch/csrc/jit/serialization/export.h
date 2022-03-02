@@ -71,6 +71,10 @@ class TORCH_API ScriptModuleSerializer {
   explicit ScriptModuleSerializer(
       caffe2::serialize::PyTorchStreamWriter& export_writer)
       : writer_(export_writer), current_source_range_tag_(0) {}
+    explicit ScriptModuleSerializer(
+      caffe2::serialize::PyTorchStreamWriter& export_writer, std::shared_ptr<SerializationStorageContext> storage_context)
+      : writer_(export_writer), storage_context_(storage_context), current_source_range_tag_(0){
+      }
 
   void writeFiles(const std::string& code_dir);
   void serialize(
@@ -79,7 +83,7 @@ class TORCH_API ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info);
   void serialize_unified_format(Module& module, uint64_t script_module_id);
-  SerializationStorageContext& storage_context();
+  std::shared_ptr<SerializationStorageContext> storage_context();
 
   ~ScriptModuleSerializer() = default;
 
@@ -109,7 +113,7 @@ class TORCH_API ScriptModuleSerializer {
   // for ABA memory reuse problem hit when storages are created/destroyed
   // during serialization process. Also used to coordinate sharing of storages
   // between Script and eager modules in torch.package.
-  SerializationStorageContext storage_context_;
+  std::shared_ptr<SerializationStorageContext> storage_context_;
 
   // Uniquely identifies a SourceRange in a model.
   // SourceRanges are associated with Nodes of Graphs.
