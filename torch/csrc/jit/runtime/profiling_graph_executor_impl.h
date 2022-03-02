@@ -1,7 +1,7 @@
 #pragma once
+#include <c10/util/Flags.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
-#include "c10/util/Flags.h"
 
 C10_DECLARE_bool(torch_jit_static_then_dynamic);
 
