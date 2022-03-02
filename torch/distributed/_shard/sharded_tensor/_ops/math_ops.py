@@ -54,14 +54,22 @@ def register_math_op(op):
                 f"torch function '{op.__name__}', with args: {args} and "
                 f"kwargs: {kwargs} not supported yet for ShardedTensor!")
 
+binary_ops = [
+    # add
+    torch.add,
+    Tensor.add,
+    # sub
+    torch.sub,
+    Tensor.sub,
+    Tensor.__rsub__,
+    # mul
+    torch.mul,
+    Tensor.mul,
+    # div
+    torch.div,
+    Tensor.div,
+    Tensor.__rdiv__,
+]
 
-register_math_op(torch.add)
-register_math_op(Tensor.add)
-register_math_op(torch.sub)
-register_math_op(Tensor.sub)
-register_math_op(Tensor.__rsub__)
-register_math_op(torch.mul)
-register_math_op(Tensor.mul)
-register_math_op(torch.div)
-register_math_op(Tensor.div)
-register_math_op(Tensor.__rdiv__)
+for op in binary_ops:
+    register_math_op(op)
