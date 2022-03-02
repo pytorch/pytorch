@@ -288,7 +288,7 @@ def storage_from_cache(cls, key):
     storage_ref = shared_cache.get(key)
     if storage_ref is None:
         return None
-    return torch.UntypedStorage._new_with_weak_ptr(storage_ref.cdata)
+    return torch._UntypedStorage._new_with_weak_ptr(storage_ref.cdata)
 
 
 def rebuild_storage_fd(cls, df, size):
@@ -305,10 +305,10 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size):
-    storage: torch.UntypedStorage = storage_from_cache(cls, handle)
+    storage: torch._UntypedStorage = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
-    storage = torch.UntypedStorage._new_shared_filename(manager, handle, size)
+    storage = torch._UntypedStorage._new_shared_filename(manager, handle, size)
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 

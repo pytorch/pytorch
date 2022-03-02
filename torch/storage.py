@@ -272,8 +272,8 @@ class _TypedStorage:
         return self
 
     def __new__(cls, *args, wrap_storage=None, dtype=None, device=None):
-        if cls == torch.storage.LegacyStorage:
-            raise RuntimeError("Only child classes of LegacyStorage can be instantiated")
+        if cls == torch.storage._LegacyStorage:
+            raise RuntimeError("Only child classes of _LegacyStorage can be instantiated")
 
         if cls == _TypedStorage:
             return super().__new__(cls)
@@ -819,7 +819,7 @@ class _TypedStorage:
 _TypedStorage.type.__doc__ = _type.__doc__
 _TypedStorage.cuda.__doc__ = _cuda.__doc__
 
-class LegacyStorageMeta(type):
+class _LegacyStorageMeta(type):
     dtype: torch.dtype
 
     def __instancecheck__(cls, instance):
@@ -828,7 +828,7 @@ class LegacyStorageMeta(type):
             return (cls_device == instance.device.type) and (cls.dtype == instance.dtype)
         return False
 
-class LegacyStorage(_TypedStorage, metaclass=LegacyStorageMeta):
+class _LegacyStorage(_TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
     def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""

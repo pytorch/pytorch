@@ -6363,11 +6363,11 @@ class TestTorch(TestCase):
             torch.QUInt8Storage,
         ]
 
-        with self.assertRaisesRegex(RuntimeError, r"Only child classes of LegacyStorage can be instantiated"):
-            torch.storage.LegacyStorage()
+        with self.assertRaisesRegex(RuntimeError, r"Only child classes of _LegacyStorage can be instantiated"):
+            torch.storage._LegacyStorage()
 
         for storage_class in torch._storage_classes:
-            if storage_class in [torch.UntypedStorage, torch.cuda.UntypedStorage, torch.TypedStorage]:
+            if storage_class in [torch._UntypedStorage, torch.cuda._UntypedStorage, torch._TypedStorage]:
                 continue
 
             device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
@@ -6400,7 +6400,7 @@ class TestTorch(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
                 storage_class(0, wrap_storage=s._untyped())
 
-            with self.assertRaisesRegex(TypeError, r"must be UntypedStorage"):
+            with self.assertRaisesRegex(TypeError, r"must be _UntypedStorage"):
                 storage_class(wrap_storage=s)
 
             if torch.cuda.is_available():
@@ -6418,47 +6418,47 @@ class TestTorch(TestCase):
                     with self.assertRaisesRegex(RuntimeError, r"Device of 'wrap_storage' must be"):
                         storage_class(wrap_storage=s_other_device._untyped())
 
-            # TypedStorage constructor errors
+            # _TypedStorage constructor errors
             with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
-                torch.TypedStorage(0, wrap_storage=s._untyped(), dtype=dtype)
+                torch._TypedStorage(0, wrap_storage=s._untyped(), dtype=dtype)
 
             with self.assertRaisesRegex(RuntimeError, r"Argument 'dtype' must be specified"):
-                torch.TypedStorage(wrap_storage=s._untyped())
+                torch._TypedStorage(wrap_storage=s._untyped())
 
             with self.assertRaisesRegex(TypeError, r"Argument 'dtype' must be torch.dtype"):
-                torch.TypedStorage(wrap_storage=s._untyped(), dtype=0)
+                torch._TypedStorage(wrap_storage=s._untyped(), dtype=0)
 
             with self.assertRaisesRegex(RuntimeError, r"Argument 'device' should not be specified"):
-                torch.TypedStorage(wrap_storage=s._untyped(), dtype=dtype, device=device)
+                torch._TypedStorage(wrap_storage=s._untyped(), dtype=dtype, device=device)
 
-            with self.assertRaisesRegex(TypeError, r"Argument 'wrap_storage' must be UntypedStorage"):
-                torch.TypedStorage(wrap_storage=s, dtype=dtype)
+            with self.assertRaisesRegex(TypeError, r"Argument 'wrap_storage' must be _UntypedStorage"):
+                torch._TypedStorage(wrap_storage=s, dtype=dtype)
 
             with self.assertRaisesRegex(RuntimeError, r"Storage device not recognized"):
-                torch.TypedStorage(dtype=dtype, device='xla')
+                torch._TypedStorage(dtype=dtype, device='xla')
 
             if torch.cuda.is_available():
                 if storage_class in quantized_storages:
                     with self.assertRaisesRegex(RuntimeError, r"Cannot create CUDA storage with quantized dtype"):
-                        torch.TypedStorage(dtype=dtype, device='cuda')
+                        torch._TypedStorage(dtype=dtype, device='cuda')
 
             with self.assertRaisesRegex(TypeError, r"Argument type not recognized"):
-                torch.TypedStorage(torch.tensor([]), dtype=dtype, device=device)
+                torch._TypedStorage(torch.tensor([]), dtype=dtype, device=device)
 
             with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
-                torch.TypedStorage(0, 0, dtype=dtype, device=device)
+                torch._TypedStorage(0, 0, dtype=dtype, device=device)
 
     def test_storage_error_no_attribute(self):
         storage_classes = [
             torch.cuda.ByteStorage,
             torch.cuda.FloatStorage,
-            torch.cuda.UntypedStorage,
+            torch.cuda._UntypedStorage,
         ]
         for storage_class in storage_classes:
             with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                 storage_class.from_buffer()
 
-            if storage_class == torch.cuda.UntypedStorage:
+            if storage_class == torch.cuda._UntypedStorage:
                 with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
                     storage_class._new_with_weak_ptr()
 

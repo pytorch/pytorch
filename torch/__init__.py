@@ -39,7 +39,7 @@ __all__ = [
     'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
-    'TypedStorage',
+    '_TypedStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
@@ -595,7 +595,7 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, _TypedStorage, LegacyStorage
+from .storage import _StorageBase, _TypedStorage, _LegacyStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage._TypedStorage directly.
@@ -603,87 +603,87 @@ from .storage import _StorageBase, _TypedStorage, LegacyStorage
 class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
-class ByteStorage(LegacyStorage):
+class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(LegacyStorage):
+class DoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(LegacyStorage):
+class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(LegacyStorage):
+class HalfStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(LegacyStorage):
+class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(LegacyStorage):
+class IntStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(LegacyStorage):
+class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(LegacyStorage):
+class CharStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(LegacyStorage):
+class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(LegacyStorage):
+class BFloat16Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(LegacyStorage):
+class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(LegacyStorage):
+class ComplexFloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-class QUInt8Storage(LegacyStorage):
+class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.quint8
 
-class QInt8Storage(LegacyStorage):
+class QInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.qint8
 
-class QInt32Storage(LegacyStorage):
+class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.qint32
 
-class QUInt4x2Storage(LegacyStorage):
+class QUInt4x2Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.quint4x2
 
-class QUInt2x4Storage(LegacyStorage):
+class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
         return torch.quint2x4
@@ -693,7 +693,7 @@ _storage_classes = {
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
-    TypedStorage
+    _TypedStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
