@@ -4353,7 +4353,7 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto pivots_ = pivots.expect_contiguous();
 
   auto LD_ = at::native::borrow_else_clone(
-      result.mT().is_contiguous(), LD, LD, /*row_major=*/false);
+      LD.mT().is_contiguous(), LD, LD, /*row_major=*/false);
   auto result_ = at::native::borrow_else_clone(
       result.mT().is_contiguous(), result, B, /*row_major=*/false);
   if (result.mT().is_contiguous()) {
