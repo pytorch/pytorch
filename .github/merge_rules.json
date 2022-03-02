@@ -35,13 +35,13 @@
    },
    {
       "name": "Android",
-      "patterns": ["android/**",  "test/mobile**"],
+      "patterns": ["android/**",  "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
       "mandatory_app_id": 12274
    },
    {
       "name": "iOS",
-      "patterns": ["ios/**",  "test/mobile**"],
+      "patterns": ["ios/**",  "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
       "mandatory_app_id": 12274
    },
