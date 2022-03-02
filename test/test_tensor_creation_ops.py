@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta, get_all_device_types)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and
+    floating_types, floating_and_complex_types_and, integral_types_and
 )
 
 from torch.utils.dlpack import to_dlpack
