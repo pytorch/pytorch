@@ -13,7 +13,7 @@ def _swap_child_modules(
     module: torch.nn.Module,
     static_mappings: Dict[Callable, Any],
     dynamic_mappings: Dict[Callable, Any],
-    parent_fqn: Optional[str],
+    parent_fqn: Optional[str] = None,
 ) -> None:
     """
     For each direct child of `module`, swaps it using `static_mappings`
