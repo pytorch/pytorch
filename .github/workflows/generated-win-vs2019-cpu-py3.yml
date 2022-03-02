@@ -13,6 +13,7 @@ on:
       - 'ciflow/win/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -131,7 +132,7 @@ jobs:
           rm -rf ./*
   test_default_1_2:
     name: test (default, 1, 2, windows.4xlarge)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
       SHARD_NUMBER: 1
@@ -193,8 +194,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -280,7 +281,7 @@ jobs:
           rm -rf ./*
   test_default_2_2:
     name: test (default, 2, 2, windows.4xlarge)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
       SHARD_NUMBER: 2
@@ -342,8 +343,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
