@@ -74,7 +74,7 @@ namespace detail {
         }
       }
     }
-    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
+    void operator()(at::ArrayRef<c10::optional<at::Tensor>>) {
       // Just checking that the handling of Tensor?[] didn't change.
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -89,7 +89,7 @@ namespace detail {
       }
     }
     template <typename T>
-    void operator()(const T& x) {
+    void operator()(const T&) {
       // do nothing
     }
   };
