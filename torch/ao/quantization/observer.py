@@ -497,7 +497,7 @@ class MinMaxObserver(_MinMaxObserver):
 
 
 
-class MovingAverageMinMaxObserver(_MinMaxObserver):
+class MovingAverageMinMaxObserver(MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
     moving average of the min and max values.
 
@@ -791,7 +791,7 @@ class PerChannelMinMaxObserver(_PerChannelMinMaxObserver):
             factory_kwargs=factory_kwargs,
         )
 
-class MovingAveragePerChannelMinMaxObserver(_PerChannelMinMaxObserver):
+class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
     running per channel min and max values.
 
