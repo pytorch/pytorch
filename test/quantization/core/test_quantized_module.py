@@ -1604,11 +1604,11 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
         num_embeddings = 10
         embedding_dim = 3
         # embedding input
-        ex = torch.LongTensor([[1,2,4,5], [4,3,2,9]])
+        ex = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
 
         # embedding bag input
-        ebx = torch.tensor([1,2,4,5,4,3,2,9], dtype=torch.long)
-        offsets = torch.tensor([0,4], dtype=torch.long)
+        ebx = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9], dtype=torch.long)
+        offsets = torch.tensor([0, 4], dtype=torch.long)
 
         fp_to_ref = {
             nn.Embedding: (nnqr.Embedding, (ex,)),
