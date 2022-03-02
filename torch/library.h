@@ -61,9 +61,7 @@
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/op_registration/op_allowlist.h>
 #include <c10/core/DispatchKey.h>
-#if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
-#endif
 
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/op_registration/op_registration.h>
@@ -196,6 +194,12 @@ class TORCH_API CppFunction final {
         schema_(nullptr),
         debug_() {}
 #endif
+
+  ~CppFunction();
+
+  CppFunction(CppFunction&&) noexcept = default;
+
+  CppFunction& operator=(CppFunction&&) = default;
 
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,

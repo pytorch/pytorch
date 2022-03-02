@@ -535,14 +535,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
       kernel_size, stride, padding, dilation);
 
   const Tensor grad_output_ = grad_output.contiguous();
-  const Tensor input_ = input.contiguous();
-  const Tensor weight_ = weight.contiguous();
 
   Tensor grad_input_ =
       (output_mask[0] ?  grad_input
                       : Tensor());
 
   if (output_mask[0]) {
+    const Tensor weight_ = weight.contiguous();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         grad_output.scalar_type(),
         "conv_depthwise3d",
@@ -577,6 +576,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
   }
 
   if (output_mask[1]) {
+    const Tensor input_ = input.contiguous();
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
         grad_output.scalar_type(),
         "conv_depthwise3d",
@@ -590,15 +590,16 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
                       "Input tensor is too large.");
           TORCH_CHECK(grad_output_.numel() <= int_max,
                       "Output tensor is too large.");
-          TORCH_CHECK(weight_.numel() <= int_max,
+          TORCH_CHECK(weight.numel() <= int_max,
                       "Weight tensor is too large.");
           for (int i = 0; i < 3; ++i) {
             TORCH_CHECK(padding[i] * 2 + input.size(i + 2) <= int_max,
                         "Padded input tensor is too large.");
           }
-          TORCH_CHECK(grad_output_.size(0) * grad_output_.size(2) < int_max - block / C10_WARP_SIZE &&
-                      grad_output_.size(3) <= int_max - C10_WARP_SIZE &&
-                      grad_output_.size(4) <= int_max - C10_WARP_SIZE,
+          int64_t warp_size = at::cuda::warp_size();
+          TORCH_CHECK(grad_output_.size(0) * grad_output_.size(2) < int_max - block / warp_size &&
+                      grad_output_.size(3) <= int_max - warp_size &&
+                      grad_output_.size(4) <= int_max - warp_size,
                       "Output size is too large.");
 
           DWCONV3D_BACKWARD_WEIGHT_DISPATCH_SPECIALIZATION(1, 1)
@@ -678,6 +679,8 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
   );
 
 }
+
+REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backward_cuda);
 
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_SPECIALIZATION
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_OTHERS

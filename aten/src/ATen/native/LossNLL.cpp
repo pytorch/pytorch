@@ -520,23 +520,23 @@ Tensor cross_entropy_loss_label_smoothing(
     int64_t reduction,
     int64_t ignore_index,
     double label_smoothing) {
-
-    auto input = at::log_softmax(self, 1, self.scalar_type());
+    auto class_dim = self.dim() == 1 ? 0 : 1;
+    auto input = at::log_softmax(self, class_dim, self.scalar_type());
     auto nllloss = at::nll_loss_nd(input, target, weight, reduction, ignore_index);
 
-    auto n_classes = input.size(1);
+    auto n_classes = input.size(class_dim);
 
     Tensor smooth_loss;
     if (weight.defined()) {
       // Expand weight to the correct number of dims for broadcasting with input / target
       auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
       std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
-      weight_broadcast_shape[1] = weight.size(0);
+      weight_broadcast_shape[class_dim] = weight.size(0);
       Tensor weight_ = weight.view(weight_broadcast_shape);
 
-      smooth_loss = -(input * weight_).sum(1);
+      smooth_loss = -(input * weight_).sum(class_dim);
     } else {
-      smooth_loss = -input.sum(1);
+      smooth_loss = -input.sum(class_dim);
     }
 
     auto ignore_mask = target == ignore_index;
@@ -591,8 +591,9 @@ Tensor cross_entropy_loss(
     const Tensor& weight_ = *weight_maybe_owned;
     ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, ignore_index, label_smoothing);
   } else {
+    auto class_dim = self.dim() == 1 ? 0 : 1;
     ret = at::nll_loss_nd(
-        at::log_softmax(self, 1, self.scalar_type()),
+        at::log_softmax(self, class_dim, self.scalar_type()),
         target,
         weight,
         reduction,

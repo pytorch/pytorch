@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>
@@ -17,7 +18,6 @@ namespace c10 {
 struct IValue;
 template<class T> class List;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 
@@ -475,4 +475,4 @@ namespace torch {
   template<class T> using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>
+#include <ATen/core/List_inl.h>  // IWYU pragma: keep

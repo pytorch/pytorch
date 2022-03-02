@@ -13,6 +13,9 @@ from .quantization_patterns import (
 from ..qconfig import (
     QConfigAny,
 )
+from ..utils import (
+    MatchAllNode
+)
 from .graph_module import (
     is_observed_standalone_module,
 )
@@ -21,12 +24,6 @@ from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
-
-# TODO: maybe rename this to MatchInputNode
-class MatchAllNode:
-    """ A node pattern that matches all nodes
-    """
-    pass
 
 # Note: The order of patterns is important! match function will take whatever is matched first, so we'll
 # need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.

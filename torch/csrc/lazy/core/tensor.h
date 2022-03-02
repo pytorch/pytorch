@@ -181,26 +181,26 @@ class TORCH_API LazyTensor {
 // Section 1: at::Tensor => LazyTensor.
 // Extracts the LazyTensor out of an at::Tensor. Returns a null LazyTensor
 // if the tensor is not a lazy tensor.
-LazyTensor TryGetLtcTensor(const at::Tensor& tensor);
+TORCH_API LazyTensor TryGetLtcTensor(const at::Tensor& tensor);
 
 // Extracts the LazyTensor out of an at::Tensor. Throws an exception
 // if the tensor is not a lazy tensor.
-LazyTensor GetLtcTensor(const at::Tensor& tensor);
+TORCH_API LazyTensor GetLtcTensor(const at::Tensor& tensor);
 
 // Same as above, applied to a list of tensors.
-std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors);
+TORCH_API std::vector<LazyTensor> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors);
 
 // If tensor is a lazy tensor type, returns the LazyTensor embedded within it,
 // otherwise creates a new lazy tensor type with tensor as data.
-LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
+TORCH_API LazyTensor GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
                                 const BackendDevice& device);
 
-LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device);
+TORCH_API LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device);
 
 // Section 2: LazyTensor => at::Tensor.
 // Creates an ATen tensor from an LazyTensor.
-at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor);
-at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
+TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor);
+TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
 template <size_t... Indices>
 auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensor>& tensors, std::index_sequence<Indices...>) {

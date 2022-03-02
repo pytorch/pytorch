@@ -62,7 +62,7 @@ TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 TORCH_API c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor);
 
 // For variadic template.
-c10::optional<BackendDevice> GetBackendDevice();
+TORCH_API c10::optional<BackendDevice> GetBackendDevice();
 
 template<typename T, typename... Args>
 c10::optional<BackendDevice> GetBackendDevice(const T& tensor, const Args&... forward_tensors) {

@@ -171,7 +171,7 @@ class OpSupports:
             submodules: t.Mapping[str, torch.nn.Module],
             node: torch.fx.Node,
         ) -> bool:
-            for arg in node._input_nodes:
+            for arg in node.all_input_nodes:
                 # escape dtype check for get_attr node
                 if arg.op == "get_attr":
                     continue
@@ -180,6 +180,21 @@ class OpSupports:
                     return False
             return True
         return create_op_support(_decline_if_input_dtype)
+
+    @classmethod
+    def decline_if_node_in_names(cls, disallow_set: t.Set[str]) -> OperatorSupportBase:
+        """
+        If a node has a name that is in the disallow set, reported it as non-supported.
+        """
+        def _decline_if_node_in_names(
+            submodules: t.Mapping[str, torch.nn.Module],
+            node: torch.fx.Node,
+        ) -> bool:
+            if node.name in disallow_set:
+                return False
+            else:
+                return True
+        return create_op_support(_decline_if_node_in_names)
 
 
 def _get_arg_dtype(arg: torch.fx.Node) -> t.Any:
