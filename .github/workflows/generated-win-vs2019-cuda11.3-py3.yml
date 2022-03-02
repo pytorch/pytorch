@@ -203,7 +203,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
+        # Time out the test phase after 270 minutes
         timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
@@ -360,7 +360,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
+        # Time out the test phase after 270 minutes
         timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
@@ -517,7 +517,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
+        # Time out the test phase after 270 minutes
         timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
