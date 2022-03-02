@@ -37,11 +37,13 @@ namespace tensorexpr {
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
       output_bufs_(other.output_bufs_) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
     : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
@@ -50,12 +52,14 @@ LoopNest::LoopNest(
     const std::vector<Tensor>& output_tensors,
     const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
@@ -689,13 +693,6 @@ class FunctionInliner : public IRMutator {
       VarPtr func_callee_arg = producer_index_vars_.at(i);
       ExprPtr func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
-        auto param_val = evalInt(func_caller_param);
-        if (!param_val || *param_val != 0) {
-          // We are implicitly assuming that if you have an index of 0, that
-          // must also be inlined into an index of 0.
-          success_ = false;
-          return nullptr;
-        }
         continue;
       }
       auto iter = inline_mapping_.find(func_callee_arg);
@@ -2316,7 +2313,7 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
   return true;
 }
 
-void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
+void LoopNest::fullUnroll(ForPtr f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
   if (!f) {
     throw malformed_input("unroll attempted on null loop");
@@ -2348,10 +2345,26 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::unroll(ForPtr f) {
+void LoopNest::fullUnroll(ForPtr f) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   StmtPtr unrolled;
-  unroll(f, &unrolled);
+  fullUnroll(f, &unrolled);
+}
+
+void LoopNest::unroll(ForPtr f, int factor, ForPtr* tail) {
+  if (factor < 2) {
+    return;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr inner;
+  splitWithTail(f, factor, &inner, tail);
+  fullUnroll(inner);
+}
+
+void LoopNest::unroll(ForPtr f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr tail;
+  unroll(f, factor, &tail);
 }
 
 bool LoopNest::isNormalized(ForPtr f) {
@@ -2946,7 +2959,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_params,
         reduceOp->reducer()(
             producer,
-            ExprHandle(alloc<Load>(tmp_buf, new_loop_vars_expr)),
+            alloc<Load>(tmp_buf, new_loop_vars_expr),
             tmp_params,
             {}));
 

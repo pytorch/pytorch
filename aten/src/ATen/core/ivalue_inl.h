@@ -586,6 +586,12 @@ struct TORCH_API TupleTypeFactory<TupleType> {
   static TupleTypePtr fallback(const Type& type);
 };
 
+template <>
+struct TORCH_API TupleTypeFactory<c10::DynamicType> {
+  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr fallback(const Type&);
+};
+
 struct TORCH_API Tuple : c10::intrusive_ptr_target {
  private:
   TupleElements elements_;
@@ -1229,7 +1235,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // We need devices to be sorted in order to use ensureIsSubsetOfDevices.
   static std::vector<c10::Device> sortAndDeduplicateDevices(
-      const c10::impl::VirtualGuardImpl& impl,
+      const c10::impl::VirtualGuardImpl& /*impl*/,
       std::vector<c10::Device> devices) {
     std::sort(
       devices.begin(), devices.end(),
@@ -1915,39 +1921,6 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       payload.u.as_intrusive_ptr);
 }
 
-template <typename T>
-inline bool IValue::isListOf() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  if (!isList()) {
-    return false;
-  }
-  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
-  if (ty->kind() == T::Kind) {
-    return true;
-  }
-  return *ty == *T::get();
-}
-
-inline bool IValue::isDoubleList() const {
-  return isListOf<c10::FloatType>();
-}
-
-inline bool IValue::isComplexDoubleList() const {
-  return isListOf<c10::ComplexType>();
-}
-
-inline bool IValue::isTensorList() const {
-  return isListOf<c10::TensorType>();
-}
-
-inline bool IValue::isIntList() const {
-  return isListOf<c10::IntType>();
-}
-
-inline bool IValue::isBoolList() const {
-  return isListOf<c10::BoolType>();
-}
-
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
     : tag(Tag::Tuple), is_intrusive_ptr(true) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
@@ -2219,7 +2192,7 @@ IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
   return IValue(std::move(x));
 }
 template <typename T>
-IValue from_(T&& x, std::false_type) {
+IValue from_(T&& /*x*/, std::false_type) {
   static_assert(
       guts::false_t<T>::value,
       "You are calling from with a type that it doesn't support, and isn't a potential custom class (ie: is an intrusive_ptr)");
@@ -2285,8 +2258,13 @@ struct IValue::TagType<c10::Type> {
   static TORCH_API c10::TypePtr get(const IValue&);
 };
 
+template <>
+struct IValue::TagType<c10::DynamicType> {
+  static TORCH_API c10::TypePtr get(const IValue&);
+};
+
 template <typename T>
-typename T::Ptr IValue::type() const {
+TypePtr IValue::type() const {
   return IValue::TagType<T>::get(*this);
 }
 

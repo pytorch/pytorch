@@ -509,6 +509,7 @@ def kldivloss_with_target_no_reduce_test():
         cpp_var_map={'i': i, 't': '_get_input()'},
         reference_fn=lambda t, *_:
             loss_reference_fns['KLDivLoss'](i.type_as(t), t, reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -523,6 +524,7 @@ def kldivloss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False,
     )
 
@@ -538,6 +540,7 @@ def kldivloss_no_reduce_scalar_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -552,6 +555,7 @@ def kldivloss_with_log_target_no_reduce_test():
         cpp_var_map={'i': i, 't': '_get_input()'},
         reference_fn=lambda t, *_:
             loss_reference_fns['KLDivLoss_log_target'](i.type_as(t), t, reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -566,6 +570,7 @@ def kldivloss_no_reduce_log_target_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False,
     )
 
@@ -581,6 +586,7 @@ def kldivloss_no_reduce_scalar_log_target_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['KLDivLoss_log_target'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -594,6 +600,7 @@ def l1loss_no_reduce_test():
         input_fn=lambda: torch.randn(2, 3, 4),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -607,6 +614,7 @@ def l1loss_no_reduce_complex_test():
         input_fn=lambda: torch.randn(2, 3, 4, dtype=torch.cdouble),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -620,6 +628,7 @@ def l1loss_no_reduce_scalar_test():
         input_fn=lambda: torch.randn(()),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -634,6 +643,7 @@ def mseloss_no_reduce_test():
         input_size=input_size,
         cpp_var_map={'i': '_get_input()', 'target': target},
         reference_fn=lambda i, *_: (i - target).pow(2),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -648,6 +658,7 @@ def mseloss_no_reduce_scalar_test():
         input_size=input_size,
         cpp_var_map={'i': '_get_input()', 'target': target},
         reference_fn=lambda i, *_: (i - target).pow(2),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -869,6 +880,7 @@ def smoothl1loss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -884,6 +896,7 @@ def smoothl1loss_no_reduce_scalar_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -899,6 +912,7 @@ def smoothl1loss_beta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0.5),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -914,6 +928,7 @@ def smoothl1loss_zero_beta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduction='none', beta=0),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -929,6 +944,7 @@ def huberloss_delta_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['HuberLoss'](i, t.type_as(i), reduction='none', delta=0.5),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -1044,6 +1060,7 @@ def softmarginloss_no_reduce_test():
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:
             loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduction='none'),
+        supports_forward_ad=True,
         pickle=False)
 
 
@@ -3699,12 +3716,16 @@ new_module_tests = [
     ),
     dict(
         module_name='GELU',
+        constructor_args=('none',),
+        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
         input_size=(),
         desc='scalar',
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
     dict(
         module_name='GELU',
+        constructor_args=('none',),
+        cpp_constructor_args='torch::nn::GELUOptions().approximate(\"none\")',
         input_size=(3, 2, 5),
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
@@ -6107,6 +6128,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
         self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode', None)
+        self.supports_forward_ad = kwargs.get('supports_forward_ad', False)
+        self.supports_fwgrad_bwgrad = kwargs.get('supports_fwgrad_bwgrad', False)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -6127,12 +6150,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         else:
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
                                            check_batched_grad=self.check_batched_grad,
-                                           fast_mode=self.gradcheck_fast_mode))
+                                           fast_mode=self.gradcheck_fast_mode,
+                                           check_forward_ad=self.supports_forward_ad))
 
         if self.check_gradgrad:
             test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
                                                check_batched_grad=self.check_batched_grad,
-                                               fast_mode=self.gradcheck_fast_mode))
+                                               fast_mode=self.gradcheck_fast_mode,
+                                               check_fwd_over_rev=self.supports_fwgrad_bwgrad))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
