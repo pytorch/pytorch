@@ -26,14 +26,7 @@ from typing import Sequence, List, Union
 def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
-def argumenttype_type(
-        t: Type,
-        *,
-        mutable: bool,
-        binds: ArgName,
-        remove_non_owning_ref_types: bool = False,
-        structured_type_override: bool
-) -> NamedCType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
     # more special cases here, or invert things so cpp.argument_type
     # calls this, or just completely inline the function, please do
@@ -42,22 +35,14 @@ def argumenttype_type(
         t,
         mutable=mutable,
         binds=binds,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
-        structured_type_override=structured_type_override)
+        remove_non_owning_ref_types=remove_non_owning_ref_types)
 
-def argument_type(
-        a: Argument,
-        *,
-        binds: ArgName,
-        remove_non_owning_ref_types: bool = False,
-        structured_type_override: bool
-) -> NamedCType:
+def argument_type(a: Argument, *, binds: ArgName, remove_non_owning_ref_types: bool = False,) -> NamedCType:
     return argumenttype_type(
         a.type,
         mutable=a.is_write,
         binds=binds,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
-        structured_type_override=structured_type_override)
+        remove_non_owning_ref_types=remove_non_owning_ref_types)
 
 def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
@@ -78,16 +63,15 @@ def jit_arguments(func: FunctionSchema) -> List[Argument]:
         func.arguments.kwarg_only,
         func.arguments.out)))
 
-def argument(a: Argument, *, remove_non_owning_ref_types: bool = False, structured_type_override: bool) -> Binding:
+def argument(a: Argument, *, remove_non_owning_ref_types: bool = False) -> Binding:
     return Binding(
         nctype=argument_type(
             a,
             binds=a.name,
-            remove_non_owning_ref_types=remove_non_owning_ref_types,
-            structured_type_override=structured_type_override),
+            remove_non_owning_ref_types=remove_non_owning_ref_types),
         name=a.name,
         argument=a
     )
 
-def arguments(func: FunctionSchema, *, structured_type_override: bool) -> List[Binding]:
-    return [argument(a, structured_type_override=structured_type_override) for a in jit_arguments(func)]
+def arguments(func: FunctionSchema) -> List[Binding]:
+    return [argument(a) for a in jit_arguments(func)]

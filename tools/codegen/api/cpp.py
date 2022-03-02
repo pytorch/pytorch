@@ -69,14 +69,7 @@ def valuetype_type(t: Type, *, binds: ArgName, remove_non_owning_ref_types: bool
 # If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
 # For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
-def argumenttype_type(
-        t: Type,
-        *,
-        mutable: bool,
-        binds: ArgName,
-        remove_non_owning_ref_types: bool = False,
-        structured_type_override: bool
-) -> NamedCType:
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owning_ref_types: bool = False) -> NamedCType:
     # If it's a value type, do the value type translation
     r = valuetype_type(t, binds=binds, remove_non_owning_ref_types=remove_non_owning_ref_types)
     if r is not None:
@@ -100,7 +93,7 @@ def argumenttype_type(
                 return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(tensorT))))
         elif str(t.elem) == 'Scalar':
             return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(scalarT))))
-        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, structured_type_override=structured_type_override)
+        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
@@ -117,14 +110,14 @@ def argumenttype_type(
             return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == 'Tensor?':
             return NamedCType(binds, ConstRefCType(BaseCType(iOptTensorRefListT)))
-        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, structured_type_override=structured_type_override)
+        elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translate a JIT argument into its C++ type
-def argument_type(a: Argument, *, binds: ArgName, structured_type_override: bool) -> NamedCType:
-    return argumenttype_type(a.type, mutable=a.is_write, binds=binds, structured_type_override=structured_type_override)
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
+    return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
 # Translation of a (non-multi) return type from JIT to C++
 # N.B: returntype_type returns a CType, not a NamedCType.
@@ -256,12 +249,12 @@ def default_expr(d: str, t: Type) -> str:
 def argument(
     a: Union[Argument, TensorOptionsArguments, SelfArgument],
     *, cpp_no_default_args: Set[str], method: bool, faithful: bool,
-    has_tensor_options: bool, structured_type_override: bool
+    has_tensor_options: bool
 ) -> List[Binding]:
     def sub_argument(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> List[Binding]:
         return argument(
             a, cpp_no_default_args=cpp_no_default_args, method=method, faithful=faithful,
-            has_tensor_options=has_tensor_options, structured_type_override=structured_type_override)
+            has_tensor_options=has_tensor_options)
 
     if isinstance(a, Argument):
         binds: ArgName
@@ -273,7 +266,7 @@ def argument(
         if a.name not in cpp_no_default_args and a.default is not None:
             default = default_expr(a.default, a.type)
         return [Binding(
-            nctype=argument_type(a, binds=binds, structured_type_override=structured_type_override),
+            nctype=argument_type(a, binds=binds),
             name=a.name,
             default=default,
             argument=a,
@@ -307,7 +300,7 @@ def argument(
 
 def arguments(
     arguments: Arguments,
-    *, faithful: bool, method: bool, cpp_no_default_args: Set[str], structured_type_override: bool
+    *, faithful: bool, method: bool, cpp_no_default_args: Set[str]
 ) -> List[Binding]:
     args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
     if faithful:
@@ -321,5 +314,5 @@ def arguments(
         for r in argument(
             a, faithful=faithful, method=method,
             has_tensor_options=arguments.tensor_options is not None,
-            cpp_no_default_args=cpp_no_default_args, structured_type_override=structured_type_override)
+            cpp_no_default_args=cpp_no_default_args)
     ]

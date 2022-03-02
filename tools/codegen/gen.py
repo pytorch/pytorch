@@ -288,7 +288,7 @@ class ComputeOperators:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
-        sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+        sig = DispatcherSignature.from_schema(f.func)
         name = f.func.name.unambiguous_name()
         call_method_name = 'call'
         redispatch_method_name = 'redispatch'
@@ -385,7 +385,7 @@ class ComputeFunction:
                 sig = sig_group.signature
 
             # See Note [The ATen Operators API]
-            target_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+            target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ', '.join([e.expr for e in exprs])
 
@@ -446,7 +446,7 @@ class ComputeTensorMethod:
             else:
                 sig = sig_group.signature
 
-            target_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+            target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments(), method=True)
             exprs_str = ', '.join([e.expr for e in exprs])
 
@@ -491,7 +491,7 @@ class ComputeRedispatchFunction:
             else:
                 sig = sig_group.signature
 
-            target_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+            target_sig = DispatcherSignature.from_schema(f.func)
             exprs = translate(sig.arguments(), target_sig.arguments())
             exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in exprs])
 
@@ -654,14 +654,14 @@ class ComputeBackendSelect:
             return None
 
         name = native.name(f.func)
-        native_sig = NativeSignature(f.func, structured_type_override=f.part_of_structured_group)
+        native_sig = NativeSignature(f.func)
 
         native_tensor_args = [
             a for a in native_sig.arguments()
             if isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
         ]
 
-        dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+        dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
         sig: Union[NativeSignature, DispatcherSignature]
         sig = dispatcher_sig
@@ -741,16 +741,14 @@ def pythonify_default(s: str) -> object:
 #
 # TODO: Get rid of dynamic_type, after getting tools/autograd
 # to use the new codegen framework
-def dynamic_type(t: Type, structured_type_override: bool) -> str:
+def dynamic_type(t: Type) -> str:
     if isinstance(t, OptionalType):
-        return dynamic_type(t.elem, structured_type_override=structured_type_override)
+        return dynamic_type(t.elem)
     # Note we don't use t.is_tensor_like() here because it would
     # also include Tensor[]
     if str(t) == 'Tensor':
         return 'at::Tensor'
-    return cpp.argumenttype_type(
-        t, mutable=False, binds='__placeholder__',
-        structured_type_override=structured_type_override).cpp_type()
+    return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__').cpp_type()
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
     # This is written out explicitly to ensure that Tensor and
@@ -809,7 +807,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
     returns = []
     for i, (r, name) in enumerate(zip(f.func.returns, names)):
         ret = {
-            'dynamic_type': dynamic_type(r.type, structured_type_override=False),
+            'dynamic_type': dynamic_type(r.type),
             'name': name,
             'type': cpp.return_type(r).cpp_type(),
         }
@@ -826,8 +824,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
 
 # arguments in yaml roughly corresponds to the public C++ API
 def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str],
-                              out_arg_set: Set[str], name_to_field_name: Dict[str, str],
-                              structured_type_override: bool) -> object:
+                              out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
             'annotation': None,
@@ -845,18 +842,16 @@ def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
             cpp_a.argument, schema_order=schema_order,
-            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name,
-            structured_type_override=structured_type_override)
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
 
 def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str],
-                          out_arg_set: Set[str], name_to_field_name: Dict[str, str],
-                          structured_type_override: bool) -> object:
+                          out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
     arg: Dict[str, object] = {
         'annotation': str(a.annotation) if a.annotation else None,
-        'dynamic_type': dynamic_type(a.type, structured_type_override=structured_type_override),
+        'dynamic_type': dynamic_type(a.type),
         'is_nullable': a.type.is_nullable(),
         'name': a.name,
-        'type': cpp.argument_type(a, binds="__placeholder__", structured_type_override=structured_type_override).cpp_type(),
+        'type': cpp.argument_type(a, binds="__placeholder__").cpp_type(),
     }
     if a.default is not None:
         arg['default'] = pythonify_default(cpp.default_expr(a.default, a.type))
@@ -889,8 +884,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     arguments = [
         compute_cpp_argument_yaml(
             cpp_a, schema_order=False,
-            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name,
-            structured_type_override=f.part_of_structured_group)
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
         for cpp_a in cpp_args
     ]
 
@@ -899,8 +893,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     schema_order_arguments = [
         compute_argument_yaml(
             a, schema_order=True,
-            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name,
-            structured_type_override=f.part_of_structured_group)
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
         for a in schema_order_jit_arguments
     ]
 
@@ -908,8 +901,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         # NB: method here doesn't matter
         r.type for a in schema_order_jit_arguments
         for r in cpp.argument(
-            a, method=False, cpp_no_default_args=set(), faithful=False,
-            has_tensor_options=False, structured_type_override=f.part_of_structured_group)
+            a, method=False, cpp_no_default_args=set(), faithful=False, has_tensor_options=False)
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns).cpp_type()
@@ -950,7 +942,7 @@ def has_autogenerated_composite_kernel(f: NativeFunction) -> bool:
 def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[DispatchKey, BackendIndex]) -> str:
     name = dispatcher.name(f.func)
     returns_type = dispatcher.returns_type(f.func.returns).cpp_type_registration_declarations()
-    args = dispatcher.arguments(f.func, structured_type_override=f.part_of_structured_group)
+    args = dispatcher.arguments(f.func)
     args_str = ', '.join(a.no_default().decl_registration_declarations() for a in args)
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
