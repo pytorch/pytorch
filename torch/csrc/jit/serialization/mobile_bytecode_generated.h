@@ -2493,26 +2493,39 @@ inline Module *GetMutableModule(void *buf) {
   return flatbuffers::GetMutableRoot<Module>(buf);
 }
 
+inline torch::jit::mobile::serialization::Module *GetMutableSizePrefixedModule(void *buf) {
+  return flatbuffers::GetMutableSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
+}
+
+inline const char *ModuleIdentifier() {
+  return "PTMF";
+}
+
+inline bool ModuleBufferHasIdentifier(const void *buf) {
+  return flatbuffers::BufferHasIdentifier(
+      buf, ModuleIdentifier());
+}
+
 inline bool VerifyModuleBuffer(
     flatbuffers::Verifier &verifier) {
-  return verifier.VerifyBuffer<torch::jit::mobile::serialization::Module>(nullptr);
+  return verifier.VerifyBuffer<torch::jit::mobile::serialization::Module>(ModuleIdentifier());
 }
 
 inline bool VerifySizePrefixedModuleBuffer(
     flatbuffers::Verifier &verifier) {
-  return verifier.VerifySizePrefixedBuffer<torch::jit::mobile::serialization::Module>(nullptr);
+  return verifier.VerifySizePrefixedBuffer<torch::jit::mobile::serialization::Module>(ModuleIdentifier());
 }
 
 inline void FinishModuleBuffer(
     flatbuffers::FlatBufferBuilder &fbb,
     flatbuffers::Offset<torch::jit::mobile::serialization::Module> root) {
-  fbb.Finish(root);
+  fbb.Finish(root, ModuleIdentifier());
 }
 
 inline void FinishSizePrefixedModuleBuffer(
     flatbuffers::FlatBufferBuilder &fbb,
     flatbuffers::Offset<torch::jit::mobile::serialization::Module> root) {
-  fbb.FinishSizePrefixed(root);
+  fbb.FinishSizePrefixed(root, ModuleIdentifier());
 }
 
 }  // namespace serialization

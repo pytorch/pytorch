@@ -10,6 +10,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -503,6 +504,48 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 } // namespace
 
+enum class InputFileType {
+  UnknownFileType = 0,
+  ZipFileType,
+  FlatbufferFileType,
+};
+
+InputFileType getFileType(std::istream& in) {
+  constexpr size_t kMagicSize = 4;
+  // the flatbuffer file has magic bytes from pos 4...7
+  constexpr size_t minLengthOfStream = 8;
+
+  in.seekg(0, std::ios::end);
+  int length = in.tellg();
+  in.seekg(0, std::ios::beg);
+
+  if (length < minLengthOfStream) {
+    return InputFileType::UnknownFileType;
+  }
+
+  char buffer[kMagicSize + 1];
+  in.seekg(std::ios::beg);
+  in.read(buffer, kMagicSize);
+  buffer[kMagicSize] = '\0';
+  const char zip_magic_bytes[kMagicSize + 1] = {'P', 'K', 3, 4};
+  in.seekg(std::ios::beg);
+
+  if (strncmp(zip_magic_bytes, buffer, kMagicSize) == 0) {
+    // Magic header for a zip file, which we use to store pickled sub-files.
+    return InputFileType::ZipFileType;
+  } else {
+    return InputFileType::FlatbufferFileType;
+  }
+}
+
+InputFileType getFileType(const std::string& filename) {
+  std::ifstream in(filename);
+
+  auto type = getFileType(in);
+  in.close();
+  return type;
+}
+
 // Forward declare so that _load_for_mobile() overloads can
 // call this method directly.
 mobile::Module _load_for_mobile_impl(
@@ -536,18 +579,32 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  return module;
+  auto type = getFileType(in);
+  if (type == InputFileType::ZipFileType) {
+    std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+    auto module = _load_for_mobile(std::move(rai), device, extra_files);
+    return module;
+  } else if (type == InputFileType::FlatbufferFileType) {
+    return load_mobile_module(in, device, extra_files);
+  } else {
+    TORCH_CHECK(false, "Format error");
+  }
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  return module;
+  auto type = getFileType(filename);
+  if (type == InputFileType::ZipFileType) {
+    std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+    auto module = _load_for_mobile(std::move(rai), device, extra_files);
+    return module;
+  } else if (type == InputFileType::FlatbufferFileType) {
+    return load_mobile_module(filename, device, extra_files);
+  } else {
+    TORCH_CHECK(false, "Format error");
+  }
 }
 
 mobile::Module _load_for_mobile(
@@ -555,10 +612,17 @@ mobile::Module _load_for_mobile(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
-  return module;
+  auto type = getFileType(filename);
+  if (type == InputFileType::ZipFileType) {
+    std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+    auto module = _load_for_mobile_impl(
+        std::move(rai), device, extra_files, module_load_options);
+    return module;
+  } else if (type == InputFileType::FlatbufferFileType) {
+    return load_mobile_module(filename, device, extra_files);
+  } else {
+    TORCH_CHECK(false, "Format error");
+  }
 }
 
 mobile::Module _load_for_mobile(

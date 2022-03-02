@@ -60,6 +60,16 @@ TORCH_API void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files);
 
+TORCH_API mobile::Module load_mobile_module(
+    const std::string& filename,
+    const c10::optional<at::Device>,
+    ExtraFilesMap& extra_files);
+
+TORCH_API mobile::Module load_mobile_module(
+    std::istream& in,
+    const c10::optional<at::Device>,
+    ExtraFilesMap& extra_files);
+
 class FlatbufferLoader {
  public:
   FlatbufferLoader();
