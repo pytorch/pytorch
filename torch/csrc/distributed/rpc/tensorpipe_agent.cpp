@@ -367,7 +367,7 @@ void TensorPipeAgent::checkAndSetStaticGroup(
       store->check(std::vector<std::string>{isStaticGroupKey});
   if (isStaticGroupKeyExists) {
     std::vector<uint8_t> isStaticGroupVector = store->get(isStaticGroupKey);
-    bool storeIsStaticGroup;
+    bool storeIsStaticGroup = false;
     std::istringstream(std::string(
         (char*)isStaticGroupVector.data(), isStaticGroupVector.size())) >>
         std::boolalpha >> storeIsStaticGroup;
