@@ -193,6 +193,25 @@ class ArrayRef final {
     debugCheckNullptrInvariant();
   }
 
+  //template <typename U, typename T1 = T, size_t N,
+  template <typename T1 = T, typename T2, typename U,
+  typename = std::enable_if_t<std::is_same<SymbolicOrConcreteInt, T1>::value && 
+    std::is_same<int64_t, T2>::value>>
+  //typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
+  ArrayRef(const SmallVectorTemplateCommon<T2, U>& Vec):
+    Data(reinterpret_cast<const c10::SymbolicOrConcreteInt*>(Vec.data())), Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
+
+
+  template <typename T1 = T, typename T2,
+  typename = std::enable_if_t<std::is_same<SymbolicOrConcreteInt, T1>::value && 
+    std::is_same<int64_t, T2>::value>>
+  //typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
+  ArrayRef(const std::vector<T2>& Vec):
+    Data(reinterpret_cast<const c10::SymbolicOrConcreteInt*>(Vec.data())), Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
 
 
 
