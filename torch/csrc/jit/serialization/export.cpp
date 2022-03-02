@@ -21,9 +21,9 @@
 #include <atomic>
 
 #include <onnx/checker.h>
-#include <onnx/shape_inference/implementation.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
+#include <onnx/shape_inference/implementation.h>
 
 #include <fstream>
 #include <memory>
@@ -560,7 +560,8 @@ void GraphEncoder::TensorTypeToONNXType(
     const std::unordered_map<
         std::string,
         std::unordered_map<int64_t, std::string>>& dynamic_axes,
-    onnx::TypeProto_Tensor* onnx_tensor_type) {
+    onnx::TypeProto_Tensor* onnx_tensor_type,
+    bool assign_dim_param) {
   if (tensor_type->dim()) {
     onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
     auto sizes = tensor_type->symbolic_sizes().sizes().value();
@@ -574,7 +575,7 @@ void GraphEncoder::TensorTypeToONNXType(
         }
       } else if (sizes[i].is_static()) {
         shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
-      } else {
+      } else if (assign_dim_param) {
         if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
           symbol_dim_map_[sizes[i]] =
               dim_name_prefix + name + "_dim_" + std::to_string(i);
@@ -605,12 +606,19 @@ void GraphEncoder::EncodeValueInfoType(
       // Encode type if either shape or dtype exists.
       onnx::TypeProto_Tensor* onnx_tensor_type =
           onnx_type->mutable_tensor_type();
+      // Do not assign dim_param for sequence tensor type.
+      // Sequence of tensors could differ in dimension size.
+      // Use a dimension with neither dim_value nor dim_param set
+      // to denote an unknown dimension.
+      // Create and assign dim_param for normal tensor type.
+      auto is_sequence_tensor = static_cast<bool>(n->type()->cast<ListType>());
       TensorTypeToONNXType(
           tensor_type,
           dim_name_prefix,
           n->debugName(),
           dynamic_axes,
-          onnx_tensor_type);
+          onnx_tensor_type
+          !is_sequence_tensor);
     }
   } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
     onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
@@ -1352,7 +1360,6 @@ void check_onnx_proto(const std::string& proto_string, bool full_check) {
   if (full_check) {
     onnx::shape_inference::InferShapes(model);
   }
-
 }
 
 } // namespace jit
