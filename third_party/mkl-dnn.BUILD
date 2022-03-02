@@ -109,12 +109,14 @@ cc_library(
         "third_party/oneDNN/src/cpu/x64/xbyak/",
     ],
     visibility = ["//visibility:public"],
-    linkopts = [
-        "-lgomp",
-    ],
-    deps = [
-        "@mkl",
-    ] + select({
+    linkopts = select({
+        "@platforms//os:linux": ["-lgomp"],
+        "@platforms//os:macos": [],
+    }),
+    deps = ["@mkl"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:macos": ["@openmp"],
+    }) + select({
         "@//tools/config:thread_sanitizer": [],
         "//conditions:default": ["@tbb"],
     }),
