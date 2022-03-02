@@ -5,7 +5,6 @@
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/deploy/noop_environment.h>
 #include <torch/csrc/jit/serialization/import.h>
-#include <torch/csrc/deploy/ArrayRef.h>
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -129,7 +128,7 @@ struct TORCH_API InterpreterManager {
 
   // use to make sure something gets run on all interpreters, such as loading or
   // unloading a model eagerly
-  multipy::ArrayRef<Interpreter> allInstances() {
+  at::ArrayRef<Interpreter> allInstances() {
     TORCH_DEPLOY_TRY
     return instances_;
     TORCH_DEPLOY_SAFE_CATCH_RETHROW
@@ -185,7 +184,7 @@ struct TORCH_API ReplicatedObj {
   ReplicatedObj() : pImpl_(nullptr) {}
   InterpreterSession acquireSession(
       const Interpreter* onThisInterpreter = nullptr) const;
-  at::IValue operator()(multipy::ArrayRef<at::IValue> args) const {
+  at::IValue operator()(at::ArrayRef<at::IValue> args) const {
     TORCH_DEPLOY_TRY
     auto I = acquireSession();
     return I.self(args).toIValue();
