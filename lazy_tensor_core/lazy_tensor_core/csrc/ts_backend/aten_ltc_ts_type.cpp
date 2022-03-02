@@ -20,14 +20,12 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-
 namespace torch_lazy_tensors {
 namespace {
 
 at::Tensor CreateLtcTensor(const at::Tensor& tensor,
                            const c10::optional<torch::lazy::BackendDevice>& device) {
   if (tensor.defined() && device) {
-
     return torch::lazy::CreateAtenFromLtcTensor(torch::lazy::LazyTensor::Create(tensor, *device));
   }
   return tensor;
@@ -127,9 +125,7 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
 }
 
 at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
-  std::cout << "Clone " << std::endl;
   auto self_lt = torch::lazy::TryGetLtcTensor(self);
-  std::cout << "Clone ... got self_lt" << std::endl;
   return torch::lazy::CreateAtenFromLtcTensor(self_lt->Create(self_lt->GetIrValue(), self_lt->GetDevice()));
 }
 
@@ -234,16 +230,13 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     TORCH_LAZY_FN_COUNTER("lazy::");
     auto lazy_self = torch::lazy::TryGetLtcTensor(self);
     if (!lazy_self && device && device->type() == c10::kLazy) {
-      // std::cout << "to_copy 1 - to lazy -" << std::endl;
-      // this is a valid '.to(lazy)' call, so it's the one case where we want to support non-lazy self
+      // Case 1: eager->lazy (a rare place where we allow non-lazy input and create new lazy tensor)
       auto eager_tensor = self.to(options, /*non_blocking=*/false, /*copy=*/true);
-      // std::cout << "...to_copy 1 - to lazy - moved eager tensor to options" << eager_tensor << std::endl;
       lazy_self = torch::lazy::GetOrCreateLtcTensor(eager_tensor,
                                                     torch::lazy::atenDeviceToBackendDevice(*device));
-      // std::cout << "...to_copy 1 - to lazy - created lazy_self" << std::endl;
       return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
     } else if(device && device->type() != c10::kLazy) {
-      // std::cout << "to_copy 2 - to device " << *device << ", dtype " << *dtype << std::endl;
+      // Case 2: lazy->eager (forces a graph break since we are materializing a tensor)
       TORCH_INTERNAL_ASSERT(lazy_self);
       auto eager_tensor = lazy_self.ToTensor(/*detached=*/true);
       options = options.device(device);
@@ -251,9 +244,9 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/false, /*copy=*/true);
       return moved_eager_tensor;
     } else {
-      // std::cout << "to_copy 3 - to dtype -" << std::endl;
-      // We are capturing _to_copy as part of lazy IR.
-      // It will be executed with real eager tensors, not lazy tensors.
+      // Case 3: lazy->lazy (special case: keep the _to_copy INSIDE the lazy graph)
+
+      // Note: captured _to_copy will be executed with real eager tensors, not lazy tensors.
       // We DO NOT want to burn 'lazy:0' as the device into this captured IR, or we will try to
       // convert an eager tensor back to a lazy one inside the torchscript executor
       TORCH_INTERNAL_ASSERT(!device || device->type() == c10::kLazy);
@@ -293,7 +286,6 @@ at::Tensor LazyNativeFunctions::empty(
                                   .pinned_memory(pin_memory)
                                   .dtype(dtype);
   auto x_result = at::empty(size, options, memory_format);
-  // std::cout << "empty: " << x_result.device() << std::endl;
   return CreateLtcTensor(x_result, GetLtcDevice(device));
 }
 
