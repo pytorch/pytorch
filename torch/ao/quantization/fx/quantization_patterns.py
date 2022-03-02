@@ -1233,6 +1233,8 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             return quantized_graph.node_copy(node, load_arg(quantized=None))
 
+        act_dtype, weight_dtype, compute_dtype = dtypes
+        activation = load_arg(quantized=act_dtype)(node.args[0])
         module = modules[str(node.target)]
         qmodule_cls = get_dynamic_quant_module_class(type(module))
         qmodule = qmodule_cls.from_float(module)
