@@ -277,7 +277,6 @@ class FullyShardedDataParallel(nn.Module):
             if param_init_fns is None:
                 raise ValueError("Must specify module init function")
 
-            print(f"About to initialize module. Current param is {next(module.parameters())[0]}")
             # Will call nn.utils.materialize_module(m)
             if isinstance(param_init_fns, dict):
                 param_init_fns[module](module)
@@ -285,7 +284,6 @@ class FullyShardedDataParallel(nn.Module):
                 assert callable(param_init_fns)
                 param_init_fns(module)
 
-            print(f"Done initializing module. Param is {next(module.parameters())[0]}")
 
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
