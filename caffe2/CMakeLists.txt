@@ -1124,12 +1124,15 @@ endif()
       DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
   endif()
 
-
   if(BUILD_TEST)
     if(BUILD_LITE_INTERPRETER)
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/lightweight_dispatch
+        ${CMAKE_BINARY_DIR}/test_codegen_unboxing
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
