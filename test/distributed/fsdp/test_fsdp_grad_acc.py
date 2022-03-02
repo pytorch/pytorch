@@ -185,7 +185,7 @@ class TestGradAcc(FSDPTest):
             [(True, 4)],
             [(False, 4)],
             [(True, 2), (False, 2), (True, 2)],
-            [(False, 2), (True, 2), (False ,2)],
+            [(False, 2), (True, 2), (False, 2)],
         ]
     )
     @parametrize(
