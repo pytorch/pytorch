@@ -379,7 +379,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState_.IDLE)
-        with self._summon_full_params(recurse=False):
+        with self.summon_full_params(recurse=False, writeback=True):
             ret = super().apply(fn)
 
         # Reset lazy init that might be called by summon_full_params, since
@@ -894,7 +894,7 @@ class FullyShardedDataParallel(nn.Module):
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
-                with self._summon_full_params(recurse=False, writeback=False):
+                with self.summon_full_params(recurse=False, writeback=False):
                     state_dict = super().state_dict(*args, **kwargs)
             else:
                 state_dict = super().state_dict(*args, **kwargs)
@@ -1030,7 +1030,7 @@ class FullyShardedDataParallel(nn.Module):
         torch.cuda.synchronize()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Note that it needs writeback=True to persist
-            with self._summon_full_params():
+            with self.summon_full_params(writeback=True):
                 return super().load_state_dict(state_dict, *args)
 
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
@@ -1110,24 +1110,25 @@ class FullyShardedDataParallel(nn.Module):
         return [p for p in self.params if not _is_full_param_in_use(p)]
 
     @contextlib.contextmanager
-    def _summon_full_params(
+    def summon_full_params(
         self, recurse: bool = True, writeback: bool = True
     ) -> Generator:
-        """
-        A context manager to expose full params for the current FSDP instance.
-        Can be useful *after* forward/backward for a model to get the params for
-        additional processing or checking.
+        r""" A context manager to expose full params for the current FSDP
+        instance. Can be useful *after* forward/backward for a model to get
+        the params for additional processing or checking.
+
         .. note:: This can be used on inner FSDPs.
         .. note:: This can *not* be used within a forward or backward pass. Nor
             can forward and backward be started from within this context.
-        .. note:: Parameters will revert to their local shards after the context manager
-            exits, storage behavior is the same as forward.
+        .. note:: Parameters will revert to their local shards after the context
+            manager exits, storage behavior is the same as forward.
         .. note:: The full parameters can be modified, but only the portion
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
             changes will be discarded). In the case where FSDP does not shard
             the parameters, currently only when world_size == 1, the
             modification is persisted regardless of ``writeback``.
+
         Args:
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True)
@@ -1141,7 +1142,7 @@ class FullyShardedDataParallel(nn.Module):
                 for module in self.modules():
                     if isinstance(module, FullyShardedDataParallel):
                         stack.enter_context(
-                            module._summon_full_params(
+                            module.summon_full_params(
                                 recurse=False, writeback=writeback
                             )
                         )
