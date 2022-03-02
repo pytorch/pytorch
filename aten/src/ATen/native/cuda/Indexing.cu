@@ -170,28 +170,141 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 }
 
 
+// This function combines the list of index tensors into one tensor that
+// contains linear indices into `self`. By linear index, we mean the index into
+// a flattened `self` tensor. So, if we had a (4, 5) sized tensor and one
+// element of `index` corresponds with index [3, 2] of `self`, the
+// corresponding linear index is 3 * 4 + 2 = 14
+//
+// Args:
+//
+//   self   The input tensor on which the index_put operation is being performed
+//
+//   orig   The original list of tensors containing the indices of the index_put operation
+//
+//   check_range  If true, index values are checked to make sure they are
+//                within the size limits of `self`. This does not need to be
+//                done for backward calls since it was already done in forward.
+//
+// Result:
+//
+//   linearIndex  Tensor containing linearized index values
+//
+//   self
+//
+//   nElemBefore
+//
+//   strideBefore
+//
+//   nElemAfter
+//
+//   inversePerm
 static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, const c10::List<c10::optional<at::Tensor>>& orig, bool check_range) {
   checkIndexTensorTypes(orig);
+
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
+
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
-  // add missing null Tensors so that it matches self.dim()
-  while (indices.size() < (size_t)self.dim()) {
-    indices.emplace_back();
+
+  // Get common index tensor shape
+  std::vector<int64_t> broadcast_shape;
+  for (int dim = 0; dim < indices.size(); dim++) {
+    Tensor index = indices[dim];
+    if (index.defined()) {
+      broadcast_shape = index.sizes().vec();
+      break;
+    }
   }
-  // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the front
-  std::vector<int64_t> inversePerm;
-  if (!hasContiguousSubspace(indices)) {
-    std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
+
+  bool found_null_indices = false;
+
+  // Replace undefined tensors with arange tensors, and expand defined tensors
+  // accordingly
+  for (int dim = 0; dim < indices.size(); dim++) {
+    Tensor index = indices[dim];
+
+    if (!index.defined()) {
+      found_null_indices = true;
+
+      index = at::arange(0, self.size(dim));
+      for (int i = 0; i < broadcast_shape.size(); i++) {
+        if (i < dim) {
+          index = index.unsqueeze(0);
+        } else {
+          index = index.unsqueeze(-1);
+        }
+      }
+      broadcast_shape.insert(broadcast_shape.begin()+dim, self.size(dim));
+      indices[dim] = index.expand(broadcast_shape);
+
+      for (int other_dim = 0; other_dim < indices.size(); other_dim++) {
+        if ((other_dim != dim) && (indices[other_dim].defined())) {
+          indices[other_dim] = indices[other_dim].unsqueeze(dim);
+        }
+      }
+    }
   }
+
+  if (found_null_indices) {
+
+    for (int dim = 0; dim < indices.size(); dim++) {
+      indices[dim] = indices[dim].expand(broadcast_shape);
+    }
+  }
+
+
+  auto self_size = self.sizes().vec();
+  std::vector<at::Tensor> indices_expanded;
+
+  // Append index tensors until we have one for each dimension of `self`,
+  // and unsqueeze and expand existing index tensors accordingly.
+  if (self.dim() == indices.size()) {
+    indices_expanded = indices;
+  } else {
+    std::vector<int64_t> append_sizes(self_size.begin() + indices.size(), self_size.end());
+
+    // Determine the common size that all index tensors need to be unsqueezed
+    // and expanded into
+    std::vector<int64_t> expand_size(indices[0].sizes().vec());
+    expand_size.insert(expand_size.end(), append_sizes.begin(), append_sizes.end());
+
+    // Unsqueeze and expand existing index tensors
+    for (auto index : indices) {
+      for (int i = 0; i < append_sizes.size(); i++) {
+        index = index.unsqueeze(-1);
+      }
+      index = index.expand(expand_size);
+      indices_expanded.push_back(index);
+    }
+
+    std::vector<int64_t> size_before = indices[0].sizes().vec();
+
+    // Append remaining index tensors
+    for (int64_t append_size : append_sizes) {
+      Tensor index = at::arange(0, append_size, indices[0].options());
+
+      for (int i = 0; i < size_before.size(); i++) {
+        index = index.unsqueeze(0);
+      }
+
+      while (index.dim() < expand_size.size()) {
+        index = index.unsqueeze(-1);
+      }
+
+      index = index.expand(expand_size);
+      indices_expanded.push_back(index);
+      size_before.push_back(append_size);
+    }
+  }
+
+  // Combine the index tensors into one linear index tensor
   int64_t nElemBefore, strideBefore, nElemAfter;
   Tensor linearIndex;
-  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices, check_range);
-  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
+  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices_expanded, check_range);
+  return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, std::vector<int64_t>());
 }
-
 
 void index_put_with_sort_kernel_thrust_helper(Tensor &linearIndex, Tensor &orig_indices, Tensor &sorted_indices, int64_t num_indices);
 
@@ -218,81 +331,66 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
 
-  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
-    auto expanded_size = at::DimVector(expandedValue.sizes());
-    auto size1 = expandedValue.sizes();
-    auto size2 = linearIndex.sizes();
-    if (are_expandable(size1, size2)) {
-      expanded_size = infer_size_dimvector(size1, size2);
-    }
-    if (nElemBefore > 1) {
-      expanded_size.insert(expanded_size.begin(), nElemBefore);
-    }
-    expandedValue = expandedValue.expand(expanded_size);
+  expandedValue = value.expand(linearIndex.sizes()).contiguous();
+
+  TORCH_INTERNAL_ASSERT(
+      num_indices*sliceSize*nElemBefore == expandedValue.numel());
+
+  if (num_indices == 0) {
+    return;
   }
-  expandedValue = expandedValue.contiguous();
 
-  if (num_indices > 0 && sliceSize > 0) {
-      const bool permuted = !src.is_contiguous();
-      auto src_ = permuted ? src.contiguous() : src;
-      linearIndex = linearIndex.reshape(-1);
-      auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  linearIndex = linearIndex.flatten();
+  expandedValue = expandedValue.flatten();
+  Tensor self_flat = self.flatten();
 
-      linearIndex.divide_(sliceSize, "trunc");
+  auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-      // cub on CUDA <= 11.2 have a bug that for small sizes
-      // cub's sort can be much slower than thrust's merge sort
-      // this bug is fixed in CUDA 11.3
+  // Sort the indices
+
+  // cub on CUDA <= 11.2 have a bug that for small sizes
+  // cub's sort can be much slower than thrust's merge sort
+  // this bug is fixed in CUDA 11.3
 #if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
-      if (num_indices < 50000) {
-        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
-      } else
+  if (num_indices < 50000) {
+    index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+  } else
 #endif
-      {
-      // Sort the inputs into sorted with the corresponding indices
-      auto range = at::arange(num_indices, linearIndex.options());
-      // linearIndex can not be negative, and we take advantage of this
-      // fact to sort on less bits for better performance.
-      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
-      cuda::cub::radix_sort_pairs(
-        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
-        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
-        num_indices, false, 0, nbits);
-      }
-
-      TORCH_INTERNAL_ASSERT(
-          linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
-          "number of flattened indices did not match number of elements in the value tensor: ",
-          linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
-      const int UNROLL = 4;
-      const int indices_per_block = 4;
-      const int warp_size = at::cuda::warp_size();
-      dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
-           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
-           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
-      dim3 block(warp_size, indices_per_block);
-
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      expandedValue.scalar_type(), "indexing_backward", [&] {
-        indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-          sorted_indices.data_ptr<int64_t>(),
-          orig_indices.data_ptr<int64_t>(),
-          expandedValue.data_ptr<scalar_t>(),
-          src_.data_ptr<scalar_t>(),
-          num_indices,
-          sliceSize,
-          strideBefore,
-          nElemBefore,
-          accumulate);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
-
-      if (permuted) {
-        self.copy_(src_.permute(inversePerm));
-      }
+  {
+  // linearIndex can not be negative, and we take advantage of this
+  // fact to sort on less bits for better performance.
+  auto range = at::arange(num_indices, linearIndex.options());
+  int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
+  cuda::cub::radix_sort_pairs(
+    linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
+    range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+    num_indices, false, 0, nbits);
   }
+
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  const int UNROLL = 4;
+  const int indices_per_block = 4;
+  const int warp_size = at::cuda::warp_size();
+  dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
+       std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
+       std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+  dim3 block(warp_size, indices_per_block);
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+  expandedValue.scalar_type(), "indexing_backward", [&] {
+    indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+      sorted_indices.data_ptr<int64_t>(),
+      orig_indices.data_ptr<int64_t>(),
+      expandedValue.data_ptr<scalar_t>(),
+      src.data_ptr<scalar_t>(),
+      num_indices,
+      sliceSize,
+      strideBefore,
+      nElemBefore,
+      accumulate);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
 }
 
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);

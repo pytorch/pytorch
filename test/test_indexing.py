@@ -820,6 +820,21 @@ class TestIndexing(TestCase):
         out_cpu = t2.index_put_(indices, value, accumulate=True)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
+    @onlyNativeDeviceTypes
+    def test_index_put_value_vector(self, device):
+        t = torch.zeros(5, 5, device=device)
+        idx = torch.tensor([0, 1, 1], device=device)
+        v = torch.ones((5,), device=device)
+        res = torch.index_put(t, (idx, ), v, accumulate=True)
+        res_expected = torch.tensor([
+            [1, 1, 1, 1, 1],
+            [2, 2, 2, 2, 2],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+        ], device=device, dtype=torch.float)
+        self.assertEqual(res, res_expected)
+
     @onlyCUDA
     def test_index_put_accumulate_with_optional_tensors(self, device):
         # TODO: replace with a better solution.
@@ -848,6 +863,31 @@ class TestIndexing(TestCase):
         out_cpu = func(t, indices, value1d)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
+        @torch.jit.script
+        def func(input, index_dim1, index_dim3, values):
+            indices = [
+                None,
+                index_dim1,
+                None,
+                index_dim3,
+                None,
+            ]
+            return input.index_put(indices, values, accumulate=True)
+
+        input = torch.zeros(6, 6, 6, 6, 6, 6, device=device)
+        index_dim1 = torch.tensor([[2], [3]], device=device)
+        index_dim3 = torch.tensor([5, 0, 1], device=device)
+        values0d = torch.tensor(10.0, device=device)
+        values1d = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], device=device)
+
+        out_cuda = func(input, index_dim1, index_dim3, values0d)
+        out_cpu = func(input.cpu(), index_dim1.cpu(), index_dim3.cpu(), values0d.cpu())
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        out_cuda = func(input, index_dim1, index_dim3, values1d)
+        out_cpu = func(input.cpu(), index_dim1.cpu(), index_dim3.cpu(), values1d.cpu())
+        self.assertEqual(out_cuda.cpu(), out_cpu)
+
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
         for i in range(1, 512):
@@ -867,6 +907,164 @@ class TestIndexing(TestCase):
                 input_list[i] += v
 
             self.assertEqual(output, input_list)
+
+    # Test that calling index_put with indices and values expanded into
+    # a common shape gives the same result as calling it without expansion
+    @onlyNativeDeviceTypes
+    def test_index_put_broadcasting(self, device):
+        def get_broadcast_shape(indices):
+            r = indices[0]
+            for t in indices[1:]:
+                try:
+                    r = r + t
+                except RuntimeError as e:
+                    raise RuntimeError(
+                        "shapes are not broadcastable: "
+                        f"{r.shape} and {t.shape}")
+            return r.shape
+
+        # Expand each index tensor into the same size
+        def broadcast_indices(indices):
+            broadcast_shape = get_broadcast_shape(indices)
+            indices_broadcasted = []
+            for t in indices:
+                indices_broadcasted.append(t.expand(broadcast_shape))
+            return tuple(indices_broadcasted)
+
+        # Append index tensors and expand existing ones to match the number of
+        # dimensions in the input
+        def expand_indices_to_input(input, indices):
+            assert input.dim() >= len(indices)
+
+            indices_broadcasted = broadcast_indices(indices)
+            if input.dim() == len(indices):
+                return indices_broadcasted
+            append_sizes = tuple(input.size()[len(indices):])
+            expand_size = tuple(indices_broadcasted[0].size()) + append_sizes
+            indices_expanded = []
+
+            for index in indices_broadcasted:
+                for _ in range(len(append_sizes)):
+                    index = index.unsqueeze(-1)
+                index = index.expand(expand_size)
+                indices_expanded.append(index)
+
+            size_before = tuple(indices_broadcasted[0].size())
+
+            for append_size in append_sizes:
+                index = torch.arange(0, append_size, device=device)
+                for _ in size_before:
+                    index = index.unsqueeze(0)
+
+                while index.dim() < len(expand_size):
+                    index = index.unsqueeze(-1)
+
+                index = index.expand(expand_size)
+                indices_expanded.append(index)
+                size_before = size_before + (append_size,)
+
+            return indices_expanded
+
+        # Test implementation of `index_put`
+        def index_put_check(input, indices_expanded, values_expanded, accumulate=False):
+            # Indices and values must have already been expanded to the same shape
+            assert indices_expanded[0].shape == values_expanded.shape
+            for index in indices_expanded[1:]:
+                assert indices_expanded[0].shape == index.shape
+
+            res = input.clone()
+
+            indices_flat = tuple(index.flatten() for index in indices_expanded)
+            values_flat = values_expanded.flatten()
+
+            coordinates_visited = []
+
+            for value_idx in range(values_flat.numel()):
+                value = values_flat[value_idx]
+                coordinate = tuple(index[value_idx].item() for index in indices_flat)
+                if coordinate in coordinates_visited:
+                    raise RuntimeError(
+                        f"Coordinate is visited more than once: {coordinate}")
+
+                if accumulate:
+                    res[coordinate] = res[coordinate] + value
+                else:
+                    res[coordinate] = value
+
+                coordinates_visited.append(coordinate)
+
+            return res
+
+        def run_test(input, indices, values):
+            for accumulate in [False, True]:
+                res0 = torch.index_put(input, indices, values, accumulate=accumulate)
+
+                indices_expanded = expand_indices_to_input(input, indices)
+                values_expanded = values.expand(indices_expanded[0].size())
+
+                # Check that `index_put` result matches the test implementation
+                res1 = index_put_check(input, indices_expanded, values_expanded, accumulate=accumulate)
+                self.assertEqual(res0, res1)
+
+                # Check that `index_put` gives the same result with expanded
+                # indices and values
+                res2 = torch.index_put(input, indices_expanded, values_expanded, accumulate=accumulate)
+                self.assertEqual(res0, res2)
+
+        test_cases = [
+            # (input, indices, values)
+            (
+                torch.randn(6, 6, device=device),
+                (
+                    torch.tensor([[2], [5]], device=device),
+                    torch.tensor([3, 5, 0], device=device),
+                ),
+                torch.randn(2, 3, device=device),
+
+            ),
+            (
+                torch.randn(6, 6, 2, device=device),
+                (
+                    torch.tensor([[2], [5]], device=device),
+                    torch.tensor([3, 5, 0], device=device),
+                ),
+                torch.randn(3, 1, device=device),
+
+            ),
+            (
+                torch.randn(6, 6, 3, 2, device=device),
+                (
+                    torch.tensor([[2], [5]], device=device),
+                    torch.tensor([3, 5, 0], device=device),
+                ),
+                torch.randn(3, 1, device=device),
+
+            ),
+            (
+                torch.randn(6, 6, 6, 6, 6, device=device),
+                (
+                    torch.tensor([[[3]]], device=device),
+                    torch.tensor([[[4], [2], [0], [5]]], device=device),
+                    torch.tensor([2], device=device),
+                    torch.tensor([[3, 4], [2, 1], [0, 5], [0, 2]], device=device),
+                    torch.tensor([[[0]], [[1]]], device=device),
+                ),
+                torch.randn(2, 4, 2, device=device),
+            ),
+            (
+                torch.randn(6, 6, 6, 6, 6, device=device),
+                (
+                    torch.tensor([[[3]]], device=device),
+                    torch.tensor([[[4], [2], [0], [5]]], device=device),
+                    torch.tensor([2], device=device),
+                    torch.tensor([[3, 4], [2, 1], [0, 5], [0, 2]], device=device),
+                ),
+                torch.randn(1, 4, 2, 6, device=device),
+            ),
+        ]
+
+        for input, indices, values in test_cases:
+            run_test(input, indices, values)
 
     def test_multiple_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
