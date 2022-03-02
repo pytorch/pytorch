@@ -21,6 +21,7 @@ from .pattern_utils import (
 from .backend_config.utils import get_fusion_pattern_to_fuse_handler_cls
 from .backend_config.utils import get_fuser_method_mapping
 from .backend_config.utils import get_fusion_pattern_to_root_node_getter
+from .backend_config.utils import get_fusion_pattern_to_extra_inputs_getter
 
 from .fusion_patterns import *  # noqa: F401,F403
 
@@ -50,10 +51,12 @@ def fuse(
             get_default_fusion_patterns(), additional_fusion_patterns)
         fuser_method_mapping = None
         fusion_pattern_to_root_node_getter = {}
+        fusion_pattern_to_extra_inputs_getter = {}
     else:
         fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
         fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
         fusion_pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config_dict)
+        fusion_pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config_dict)
     # find fusion
     fusion_pairs = _find_matches(
         input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
@@ -80,10 +83,14 @@ def fuse(
             assert obj is not None
             root_node_getter = fusion_pattern_to_root_node_getter.get(pattern, default_root_node_getter)
             root_node = root_node_getter(matched_node_pattern)  # type: ignore[index]
+            extra_inputs_getter = fusion_pattern_to_extra_inputs_getter.get(pattern, None)
+            extra_inputs = []
+            if extra_inputs_getter is not None:
+                extra_inputs = extra_inputs_getter(matched_node_pattern)
             # TODO: add validation that root_node is a module and has the same type
             # as the root_module in the configuration
             env[node.name] = obj.fuse(
-                load_arg, named_modules, fused_graph, root_node, matched_node_pattern,  # type: ignore[arg-type]
+                load_arg, named_modules, fused_graph, root_node, extra_inputs, matched_node_pattern,  # type: ignore[arg-type]
                 fuse_custom_config_dict, fuser_method_mapping, is_qat)
         elif maybe_last_node is None or node_subpattern is MatchAllNode:
             env[node.name] = fused_graph.node_copy(node, load_arg)
