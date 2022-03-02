@@ -189,8 +189,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 270
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
             .jenkins/pytorch/win-test.sh
       !{{ common.upload_downloaded_files(name='windows', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
