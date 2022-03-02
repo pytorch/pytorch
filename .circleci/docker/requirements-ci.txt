@@ -1,6 +1,6 @@
 # Python dependencies required for unit tests
 
-#awscli==1.6
+#awscli
 #Description: AWS command line interface
 #Pinned versions: 1.6
 #test that import:
@@ -15,7 +15,7 @@ click
 #Pinned versions:
 #test that import:
 
-coremltools==5.0b5
+coremltools
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
 #test that import:
@@ -31,12 +31,12 @@ expecttest==0.1.3
 #Pinned versions: 0.1.3
 #test that import:
 
-flatbuffers==2.0
+#flatbuffers
 #Description: cross platform serialization library
 #Pinned versions: 2.0
 #test that import:
 
-future
+#future
 #Description: compatibility layer between python 2 and python 3
 #Pinned versions:
 #test that import:
@@ -47,7 +47,7 @@ hypothesis==4.53.2
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
 
-junitparser==2.1.1
+#junitparser
 #Description: unitparser handles JUnit/xUnit Result XML files
 #Pinned versions: 2.1.1
 #test that import:
@@ -57,30 +57,30 @@ librosa>=0.6.2
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
 
-mkl
+#mkl
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions:
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
 
-mkl-devel
+#mkl-devel
 # see mkl
 
-mock
+#mock
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
 #test that import: test_module_init.py, test_modules.py, test_nn.py,
 #test_testing.py
 
-MonkeyType
+#MonkeyType
 #Description: collects runtime types of function arguments and return
 #values, and can automatically generate stub files
 #Pinned versions:
 #test that import:
 
-#mypy==0.812
+mypy==0.812
 #Description: linter
 #Pinned versions: 0.812
 # Pin MyPy version because new errors are likely to appear with each release
