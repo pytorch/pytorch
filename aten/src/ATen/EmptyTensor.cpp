@@ -13,12 +13,6 @@ static c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   return c10::GetCPUAllocator();
 }
 
-void check_size_nonnegative(IntArrayRef size) {
-  for (auto x: size) {
-    TORCH_CHECK(x >= 0, "Trying to create tensor with negative dimension ", x, ": ", size);
-  }
-}
-
 size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,

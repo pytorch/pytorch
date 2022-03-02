@@ -207,6 +207,8 @@ void lapackLdlSolveSymmetric(
     int ldb,
     int* info);
 
+template<class scalar_t, class value_t=scalar_t>
+void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda, value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 #endif
 
 #if AT_BUILD_WITH_BLAS()
@@ -292,6 +294,16 @@ using ldl_factor_fn = void (*)(
     bool /*upper*/,
     bool /*hermitian*/);
 DECLARE_DISPATCH(ldl_factor_fn, ldl_factor_stub);
+
+using svd_fn = void (*)(
+    const Tensor& /*A*/,
+    const bool /*full_matrices*/,
+    const bool /*compute_uv*/,
+    const Tensor& /*U*/,
+    const Tensor& /*S*/,
+    const Tensor& /*Vh*/,
+    const Tensor& /*info*/);
+DECLARE_DISPATCH(svd_fn, svd_stub);
 
 using ldl_solve_fn = void (*)(
     const Tensor& /*factors*/,

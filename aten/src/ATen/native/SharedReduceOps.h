@@ -11,8 +11,8 @@
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
-#include <aten/src/ATen/hip/DeviceUtils.cuh>
-#include <aten/src/ATen/native/hip/DeviceSqrt.cuh>
+#include <ATen/hip/DeviceUtils.cuh>
+#include <ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
 #include <thrust/pair.h>

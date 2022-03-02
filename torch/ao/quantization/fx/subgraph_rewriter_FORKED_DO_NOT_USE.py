@@ -359,10 +359,27 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             # Populate `val_map`
             val_map[replacement_node] = original_graph_node
 
+        # Copy the stack trace from the original graph to the replacement graph.
+        # Currently this is using a naive strategy:
+        # 1. find the first node with non-null stack trace in the original graph
+        # 2. if found, copy this stack trace to every node in the replacement graph
+        first_stack_trace = None
+        for pn, gn in match.nodes_map.items():
+            if gn.stack_trace is not None:
+                first_stack_trace = gn.stack_trace
+                break
+        if first_stack_trace is not None:
+            for node in replacement_graph.nodes:
+                node.stack_trace = first_stack_trace
+
         # Copy the replacement graph over
         with original_graph.inserting_before(subgraph_output):
             copied_output = original_graph.graph_copy(replacement_graph,
                                                       val_map)
+
+        # Clear out stack traces to prevent interference with next match
+        for node in replacement_graph.nodes:
+            node.stack_trace = None
 
         # Hook the output Node of the replacement subgraph in to the
         # original Graph at the correct location
