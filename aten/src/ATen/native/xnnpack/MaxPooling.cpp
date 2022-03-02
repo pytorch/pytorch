@@ -88,7 +88,7 @@ bool use_max_pool2d(
   const bool output_size_eq = (pt_outputHeight == xnnpack_outputHeight) &&
     (pt_outputWidth == xnnpack_outputWidth);
 
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
       // Input
       (4 == input.dim()) &&
       (input.device().is_cpu()) &&

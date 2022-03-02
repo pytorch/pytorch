@@ -36,7 +36,7 @@ bool available(
     const float output_min,
     const float output_max) {
          // XNNPACK
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
          // Weight
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
