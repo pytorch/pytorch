@@ -1,6 +1,11 @@
 #pragma once
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include "c10/util/Flags.h"
+
+C10_DECLARE_bool(torch_jit_static_then_dynamic);
+
+C10_DECLARE_bool(torch_jit_always_dynamic);
 
 namespace torch {
 namespace jit {
@@ -44,6 +49,8 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+  FusionStrategy fusion_strategy_;
+
   // this plan is used if getGraphExecutorOptimize is unset
   c10::optional<ExecutionPlan> fallback_plan_;
   // fallback functions are inserted for tensorexpr fusion groups
