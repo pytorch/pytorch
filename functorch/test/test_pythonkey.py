@@ -41,6 +41,14 @@ except ImportError:
                   "`--no-deps` to avoid overwriting the pytorch installation",
                   UserWarning)
 
+USE_NETWORKX = False
+try:
+    import networkx  # noqa: F401
+    USE_NETWORKX = True
+except ImportError:
+    warnings.warn("Some tests use networkx but it was not installed",
+                  UserWarning)
+
 # NB: numpy is a testing dependency!
 
 
@@ -424,6 +432,7 @@ class TestEagerFusionOpInfo(TestCase):
 
 
 class TestPartitioning(TestCase):
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_recompute_partitioning(self):
         def fn(a, b):
             return torch.sin(torch.sin(a)) + b
