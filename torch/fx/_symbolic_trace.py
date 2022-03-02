@@ -478,6 +478,12 @@ class Tracer(TracerBase):
                         val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
+        if isinstance(attr_val, torch.Tensor):
+            for n, p in self.root.named_buffers():
+                if attr_val is p:
+                    if n not in parameter_proxy_cache:
+                        parameter_proxy_cache[n] = self.create_proxy("get_attr", n, (), {})
+                    return parameter_proxy_cache[n]
 
         return attr_val
 
