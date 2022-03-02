@@ -787,6 +787,8 @@ class FullyShardedDataParallel(nn.Module):
 
             currently_local_params = self._collect_local_params()
             self._rebuild_full_params()
+            # Wait for all_gather to finish before computation
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
             # FSDP now has the full flattened parameter. Unflatten it to get the
             # full parameters.
