@@ -209,7 +209,24 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   }
 
   std::unordered_set<std::string> unsupported_op_names;
-  const int64_t model_version = 0x6L;
+  /* const*/ int32_t model_version = module_->version();
+  // TODO(@pavithran) remove this when all models are regenerated with valid
+  // bytecode version
+  if (model_version == 0) {
+    // the model file was generated without bytecode_version
+    // the default value is zero, so we hardcode it to
+    // 0x6L for now
+    model_version = 0x6L;
+  }
+  TORCH_CHECK(
+      caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
+      "The version number can only be between ",
+      caffe2::serialize::kMinSupportedBytecodeVersion,
+      " and ",
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      " cannot be: ",
+      model_version);
   for (const auto* op : *method->operators()) {
     c10::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {

@@ -354,7 +354,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
 
   auto mod = CreateModule(
       fbb,
-      0, /* version */
+      caffe2::serialize::kProducedBytecodeVersion, /* version */
       extra_files_offset, /* extra_files */
       functions_offset,
       ivalue_index,
