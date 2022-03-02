@@ -204,9 +204,6 @@ cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
     "USE_CUDA;BUILD_TEST" OFF)
 cmake_dependent_option(
-  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
-    "USE_STATIC_CUDNN" OFF)
-cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
@@ -285,7 +282,14 @@ option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
-option(USE_XNNPACK "Use XNNPACK" ON)
+# option USE_XNNPACK: try to enable xnnpack by default.
+set(XNNPACK_MIN_CMAKE_VER 3.12)
+cmake_dependent_option(
+    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
+    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
+if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
+  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
+endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
@@ -431,8 +435,14 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(STATIC_DISPATCH_BACKEND "" CACHE STRING
-    "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+    STATIC_DISPATCH_BACKEND
+    "Name of the backend for which static dispatch code is generated, e.g.: CPU."
+    "")
+option(USE_LIGHTWEIGHT_DISPATCH "Enable codegen unboxing for ATen ops, need to work with static dispatch in order to work properly." OFF)
+if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
+  message(FATAL_ERROR "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
+endif()
 option(
   TRACING_BASED
   "Master flag to build Lite Interpreter with tracing build option"

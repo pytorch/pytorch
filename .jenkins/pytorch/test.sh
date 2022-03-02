@@ -570,6 +570,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
   test_distributed
   test_rpc
+elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
+  test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 else

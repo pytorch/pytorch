@@ -90,7 +90,7 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.7-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
     GCC_VERSION=5
     PROTOBUF=yes
     DB=yes
@@ -114,17 +114,6 @@ case "$image" in
   pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
-  pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.1
-    CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.7
     CMAKE_VERSION=3.10.3
     GCC_VERSION=7
@@ -232,16 +221,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3.7-gcc9)
-    CUDA_VERSION=11.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.9
     ;;
   pytorch-linux-bionic-rocm4.3.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7
