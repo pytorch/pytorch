@@ -239,7 +239,6 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                               weight=default_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
-
     # Use the fused observe + fake_quant modules for doing QAT.
     elif version == 1:
         if backend == 'fbgemm':
