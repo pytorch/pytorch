@@ -17,6 +17,12 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         non_deterministic: Whether to return pathname in sorted order or not.
             If ``False``, the results yielded from each root directory will be sorted
         length: Nominal length of the datapipe
+
+    Example:
+        >>> from torchdata.datapipes.iter import FileLister
+        >>> dp = FileLister(root=".", recursive=True)
+        >>> list(dp)
+        ['example.py', './data/data.tar']
     """
 
     def __init__(

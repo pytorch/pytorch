@@ -156,15 +156,15 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
 }
 
 TORCH_IMPL_FUNC(gelu_out_cuda) (
-    const Tensor& /*self*/, const Tensor& /*result*/
-  ) {
-  GeluCUDAKernelImpl(*this);
+  const Tensor& /*self*/, c10::string_view approximate, const Tensor& /*result*/
+) {
+  GeluCUDAKernelImpl(*this, get_gelutype_enum(approximate));
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
-    const Tensor& /*grad*/, const Tensor& /*self*/, const Tensor& /*grad_input*/
-  ) {
-  GeluBackwardCUDAKernelImpl(*this);
+  const Tensor& /*grad*/, const Tensor& /*self*/, c10::string_view approximate, const Tensor& /*grad_input*/
+) {
+  GeluBackwardCUDAKernelImpl(*this, get_gelutype_enum(approximate));
 }
 
 }}  // namespace at::native

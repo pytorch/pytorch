@@ -214,6 +214,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         'pixel_shuffle',
         'pixel_unshuffle',
         'channel_shuffle',
+        'native_channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
@@ -482,8 +483,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
-        'set_': ['def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...',
-                 'def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...'],
+        'set_': ['def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...',
+                 'def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
         'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
