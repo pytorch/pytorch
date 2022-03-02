@@ -4346,10 +4346,6 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
     return;
   }
 
-  Tensor B_broadcast;
-  std::tie(B_broadcast, std::ignore) =
-      _linalg_broadcast_batch_dims(B, LD, /*don't check errors*/ nullptr);
-
   auto pivots_ = pivots.expect_contiguous();
 
   auto LD_ = at::native::borrow_else_clone(
@@ -4357,7 +4353,7 @@ TORCH_IMPL_FUNC(linalg_ldl_solve_out)
   auto result_ = at::native::borrow_else_clone(
       result.mT().is_contiguous(), result, B, /*row_major=*/false);
   if (result.mT().is_contiguous()) {
-    result_->copy_(B_broadcast);
+    result_->copy_(B);
   }
 
   ldl_solve_stub(
