@@ -128,7 +128,7 @@ class ITensorListIterator
     unboxed_iterator_type unboxed_iterator;
     void* _init_ptr;
     Payload() : _init_ptr(nullptr) {}
-    ~Payload() = default;
+    ~Payload() {}
   };
 
  public:
@@ -219,7 +219,7 @@ class ITensorList {
     const boxed_type* boxed;
     unboxed_type unboxed;
     Payload() : boxed(nullptr) {}
-    ~Payload() = default;
+    ~Payload() {};
   };
 
  public:
