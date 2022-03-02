@@ -288,7 +288,7 @@ using lu_solve_trans_fn = void (*)(
 DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
 
 using ldl_factor_fn = void (*)(
-    const Tensor& /*factors*/,
+    const Tensor& /*LD*/,
     const Tensor& /*pivots*/,
     const Tensor& /*info*/,
     bool /*upper*/,
@@ -306,7 +306,7 @@ using svd_fn = void (*)(
 DECLARE_DISPATCH(svd_fn, svd_stub);
 
 using ldl_solve_fn = void (*)(
-    const Tensor& /*factors*/,
+    const Tensor& /*LD*/,
     const Tensor& /*pivots*/,
     const Tensor& /*result*/,
     bool /*upper*/,
