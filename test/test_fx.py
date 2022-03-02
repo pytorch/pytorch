@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
-from torch.fx.node import Target, Argument
+from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
@@ -101,6 +101,11 @@ wrap('len')
 
 wrap('getattr')
 
+def wrapped_named_tup(p1, *, p2):
+    return p1.x + p2.y
+
+wrap(wrapped_named_tup)
+
 @wrap
 def wrapped_via_decorator(a):
     return a + 1
@@ -124,6 +129,9 @@ def wrapper_fn(x):
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
+
+    def _custom_fx_repr_fn(self) -> str:
+        return f"Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
 
 # for testing pytrees
 class Foo(object):  # noqa: B209
@@ -2260,6 +2268,40 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(NamedTupReturn())
         input = torch.rand(3, 4)
         self.assertEqual(traced(input), Pair(input, input))
+
+    def test_named_tuple_inlined(self):
+        class NamedTupMod(torch.nn.Module):
+            def forward(self, inp):
+                return wrapped_named_tup(Pair(inp, 1.2), p2=Pair(3.4, inp))
+
+        m = NamedTupMod()
+        input = torch.rand(3, 4)
+        ref = m(input)
+        traced = symbolic_trace(m)
+
+        res = traced(input)
+        self.assertEqual(ref, res)
+
+        # Check Pair NamedTuple works when inlined into the function call.
+        ph = call_func = None
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                ph = node
+            elif node.op == "call_function" and node.target == wrapped_named_tup:
+                node.update_arg(0, Pair(ph, 1.2))
+                node.update_kwarg("p2", Pair(3.4, ph))
+                call_func = node
+                break
+        self.assertTrue(call_func is not None)
+        self.assertTrue(isinstance(call_func.args[0], Pair))
+        self.assertTrue(isinstance(call_func.kwargs["p2"], Pair))
+        self.assertEqual(_format_arg(call_func.args[0]), "Pair(x=%inp, y=1.2)")
+        self.assertEqual(_format_arg(call_func.kwargs["p2"]), "Pair(x=3.4, y=%inp)")
+
+        traced.graph.eliminate_dead_code()
+        traced.recompile()
+        res = traced(input)
+        self.assertEqual(ref, res)
 
     def test_return_type_exists(self):
         class ReturnTypeModule(torch.nn.Module):
