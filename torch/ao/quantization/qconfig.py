@@ -223,7 +223,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
     Return:
         qconfig
     """
-    # Use the fused observer + fake_quant modules for doing QAT.
+    # Histogram observer is too slow for quantization aware training
     if version == 0:
         if backend == 'fbgemm':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
