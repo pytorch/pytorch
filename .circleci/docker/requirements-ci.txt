@@ -10,17 +10,17 @@ boto3==1.19.12
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-click
+#click
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
 
-coremltools
+#coremltools
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
 #test that import:
 
-dataclasses
+#dataclasses
 #Description: Provides decorators for auto adding special methods to user classes
 #Pinned versions:
 #test that import:
@@ -80,7 +80,7 @@ librosa>=0.6.2
 #Pinned versions:
 #test that import:
 
-#mypy==0.812
+mypy==0.812
 #Description: linter
 #Pinned versions: 0.812
 # Pin MyPy version because new errors are likely to appear with each release
