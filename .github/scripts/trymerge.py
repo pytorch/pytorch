@@ -254,7 +254,8 @@ class GitHubPR:
         return list(reviews.items())
 
     def get_approved_by(self) -> List[str]:
-        return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
+        # Prefix with @ to make the usernames clickable in Github UI
+        return [f"@{login}" for (login, state) in self._get_reviewers() if state == "APPROVED"]
 
     def get_commit_count(self) -> int:
         return int(self.info["commits"]["totalCount"])
