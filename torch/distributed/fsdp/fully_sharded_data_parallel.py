@@ -2,6 +2,7 @@ import contextlib
 import functools
 import traceback
 from contextlib import contextmanager
+import warnings
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import (
@@ -208,7 +209,11 @@ class FullyShardedDataParallel(nn.Module):
             This is an experimental feature that is subject to change in the
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
-            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch``.
+            Pros and cons of each algorithm is explained in the class ``BackwardPrefetch_``.
+        param_init_fns: Optional[Union[Dict[torch.nn.Module, Callable], Callable]]: If meta
+            module is passed in, must pass in a dict mapping module to function
+            to initialize the module, or a single function that will be used
+            for all modules.
     """
 
     def __init__(
@@ -218,6 +223,7 @@ class FullyShardedDataParallel(nn.Module):
         cpu_offload: Optional[CPUOffload] = None,
         fsdp_auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
+        param_init_fns=None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -230,6 +236,7 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
+#            self._rank0_print(f"Call to Recursive wrap")
             _recursive_wrap(
                 module,
                 auto_wrap_policy=fsdp_auto_wrap_policy,
@@ -246,11 +253,38 @@ class FullyShardedDataParallel(nn.Module):
                 # enabled, as this recursive call handles all wrapping,
                 # including for nested children.
                 fsdp_auto_wrap_policy=None,
+                param_init_fns=param_init_fns,
             )
 
+        self._rank0_print(f"Wrapping {module}")
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
+
+        # Check if meta device
+        is_meta_module = any(t.is_meta for t in module.parameters())
+
+        if is_meta_module:
+            self._rank0_print(f"Got meta module {module}")
+            # Materialize the module first.
+            self._rank0_print(f"Materializing it on {torch.cuda.current_device()}")
+            dev = torch.cuda.current_device()
+            module.to_empty(device=dev)
+
+            # Initialize parameters according to the user lambda.
+            if param_init_fns is None:
+                raise ValueError("Must specify module init function")
+
+            print(f"About to initialize module. Current param is {next(module.parameters())[0]}")
+            # Will call nn.utils.materialize_module(m)
+            if isinstance(param_init_fns, dict):
+                param_init_fns[module](module)
+            else:
+                assert callable(param_init_fns)
+                param_init_fns(module)
+
+            print(f"Done initializing module. Param is {next(module.parameters())[0]}")
+
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
@@ -338,6 +372,11 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+    def _rank0_print(self, msg, process_group=None):
+        rank = dist.get_rank(process_group) if process_group is not None else dist.get_rank()
+        if rank == 0:
+            print(msg)
 
     @classmethod
     def _check_wrapped(cls, begin_module, check_fn, err_fn):
