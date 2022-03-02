@@ -194,8 +194,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 270
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -343,8 +343,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 270
+        # Time out the test phase after 240 minutes
+        timeout-minutes: 240
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload

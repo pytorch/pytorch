@@ -396,7 +396,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   return fast_ops.count(op_name) > 0;
 }
 
-std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
+SROperator getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SROperatorRegistry()->Has(op_name) && !disableUnsafeMathOp(op_name)) {
     return SROperatorRegistry()->Create(op_name)->Generate(n);
