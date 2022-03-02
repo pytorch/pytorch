@@ -252,7 +252,17 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       return moved_eager_tensor;
     } else {
       // std::cout << "to_copy 3 - to dtype -" << std::endl;
-      // We're not changing the device, but we may want to capture the to.dtype as part of the IR graph
+      // We are capturing _to_copy as part of lazy IR.
+      // It will be executed with real eager tensors, not lazy tensors.
+      // We DO NOT want to burn 'lazy:0' as the device into this captured IR, or we will try to
+      // convert an eager tensor back to a lazy one inside the torchscript executor
+      TORCH_INTERNAL_ASSERT(!device || device->type() == c10::kLazy);
+      TORCH_INTERNAL_ASSERT(!device || !device->has_index() || device->index() == self.device().index());
+      device = c10::nullopt;
+      // TODO(whc)
+      // However, it remains a question whether we should insist that device is ignored here,
+      // or we should (1) assert type=lazy, (2) map lazy:ordinal to eager:ordinal, (3) burn that in
+
       auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
       TORCH_INTERNAL_ASSERT(shapes.size() == 1);
       auto node = torch::lazy::MakeNode<ir::ops::ToCopy>(lazy_self.GetIrValue(),
