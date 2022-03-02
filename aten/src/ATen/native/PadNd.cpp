@@ -109,7 +109,7 @@ Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
         "Negative padding value is resulting in an empty dimension");
   }
 
-  auto out = at::empty(out_shape, self.options());
+  auto out = self.new_empty(out_shape, self.options());
 
   // Put original array into the padded array
   Tensor out_slice = out;

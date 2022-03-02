@@ -401,6 +401,8 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         enable_force_on_cpu_test=True,
+        # TODO: Revert back to default value after https://github.com/pytorch/pytorch/issues/73489 is closed
+        timeout_after=270,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
