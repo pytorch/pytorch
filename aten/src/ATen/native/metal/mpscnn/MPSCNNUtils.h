@@ -13,12 +13,12 @@ struct LaunchParams {
   MTLSize threadsPerGrid; // iOS 11.0
 };
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 LaunchParams spatialPointwiseKernelLaunchParams(
     id<MTLComputePipelineState> pipeline,
     MPSImage* im);
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 LaunchParams spatialPointwiseKernelLaunchParams(
     id<MTLComputePipelineState> pipeline,
     NSUInteger numberOfImages,
@@ -26,7 +26,7 @@ LaunchParams spatialPointwiseKernelLaunchParams(
     NSUInteger height,
     NSUInteger width);
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 static inline std::string kernelFor(
     MPSImage* image,
     const std::string& arrayKernel,
