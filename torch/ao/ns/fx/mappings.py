@@ -74,6 +74,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Linear,
             nnq.Linear,
             nni.LinearReLU,
+            nni.LinearBn1d,
             nniq.LinearReLU,
             nniqd.LinearReLU,
             nnqat.Linear,
