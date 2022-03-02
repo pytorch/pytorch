@@ -8845,7 +8845,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormBackward_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
-  const size_t NORM_SIZE = 1024;
+  const int64_t NORM_SIZE = 1024;
   std::vector<int64_t> shape{8, 56, NORM_SIZE};
   std::vector<int64_t> norm_shape{NORM_SIZE};
 
@@ -8971,7 +8971,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormalization_CUDA) {
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
 
-  size_t NORM_SIZE = 1024;
+  int64_t NORM_SIZE = 1024;
   const float kEps = 1e-6;
   Double* eps_ptr = IrBuilder::create<Double>(kEps);
 
