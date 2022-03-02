@@ -23,7 +23,9 @@ c10::Dict<c10::IValue, c10::IValue> create_compile_spec(
     const std::string& method_name,
     const std::string& model_name,
     const std::string& input_shapes,
-    const std::string& input_types) {
+    const std::string& input_types,
+    const std::string& memory_formats,
+    const std::string& dynamic_sizes) {
   c10::Dict<c10::IValue, c10::IValue> method_spec(
       c10::StringType::get(), c10::AnyType::get());
 
@@ -33,6 +35,8 @@ c10::Dict<c10::IValue, c10::IValue> create_compile_spec(
   method_spec.insert("model_version", "v1");
   method_spec.insert("asmfile", "fake_nnc_model.s");
   method_spec.insert("arch", "x86-64");
+  method_spec.insert("memory_formats", memory_formats);
+  method_spec.insert("dynamic_sizes", dynamic_sizes);
 
   c10::Dict<c10::IValue, c10::IValue> compile_spec(
       c10::StringType::get(), c10::AnyType::get());
@@ -63,7 +67,7 @@ REGISTER_NNC_KERNEL(
 
 TEST(NNCBackendTest, AOTCompileThenExecute) {
   torch::jit::Module m("m");
-  auto param = torch::ones({});
+  auto param = torch::ones({1});
   m.register_parameter("param", param, false);
   m.define(R"(
     def forward(self, input):
@@ -77,7 +81,7 @@ TEST(NNCBackendTest, AOTCompileThenExecute) {
 
   // Compile the model with NNC.
   auto compile_spec = create_compile_spec(
-      "forward", "_add_kernel_nnc_fake_model", "4,4", "float");
+      "forward", "_add_kernel_nnc_fake_model", "4,4", "float", "", "");
   auto any_dict_ty =
       c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
   auto frozen_m = torch::jit::freeze_module(m.clone());
