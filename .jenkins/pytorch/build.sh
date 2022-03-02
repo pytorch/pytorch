@@ -192,14 +192,14 @@ if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
 fi
 
 echo $PATH
-ll /opt/cache/bin
+ls /opt/cache/bin
 echo "env ---------------------------"
 env
 which g++
 which c++
 sccache nvcc --version
 which nvcc
-ll /opt/cache/lib
+ls /opt/cache/lib
 
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
