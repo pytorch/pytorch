@@ -166,7 +166,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
 
     if (is_per_channel && ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
       TORCH_INTERNAL_ASSERT(
-          "Per channel quantized weights are not supported for XZP kernels");
+          false, "Per channel quantized weights are not supported for XZP kernels");
     }
 
     pytorch_qnnp_operator_t convolution{nullptr};
@@ -175,7 +175,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         calloc(1, sizeof(struct pytorch_qnnp_operator)));
     if (convolution == nullptr) {
       TORCH_INTERNAL_ASSERT(
-          "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
+          false, "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
           sizeof(struct pytorch_qnnp_operator));
     }
 
@@ -449,7 +449,7 @@ C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scal
       weight_zp[i] = (uint8_t)(per_channel_zero_points[i] + 128);
     }
   } else {
-    TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
+    TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
   }
   at:: Tensor weight_scales =
     at::empty(
@@ -470,7 +470,7 @@ C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scal
       weight_scales_data[i] = static_cast<float>(per_channel_scales[i]);
     }
   } else {
-    TORCH_INTERNAL_ASSERT("Unsupported quantization scheme.");
+    TORCH_INTERNAL_ASSERT(false, "Unsupported quantization scheme.");
   }
   for (const auto i : c10::irange(num_output_channels, num_output_channels_padded)) {
     weight_scales_data[i] = 1.f;

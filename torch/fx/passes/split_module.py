@@ -258,7 +258,6 @@ def split_module(
         base_mod_attrs[submod_name] = torch.fx.graph_module.GraphModule(partition.targets, partition.graph)  # noqa: B950
 
         # Emit call in base graph to this submodule
-
         output_val = base_mod_graph.call_module(submod_name, tuple(base_mod_env[name] for name in partition.inputs))
         if len(partition.outputs) > 1:
             # Unpack multiple return values from submodule

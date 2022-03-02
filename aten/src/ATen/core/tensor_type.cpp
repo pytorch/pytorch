@@ -140,7 +140,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     // case 1.b. short cut contiguous
     std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
   } else {
-    std::iota(stride_indices.begin(), stride_indices.end(), 0);
+    std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
     // case 2.
     //
     // For broadcasted dimension where stride is 0, we have to stick to
