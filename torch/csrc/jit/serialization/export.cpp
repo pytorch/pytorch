@@ -361,7 +361,8 @@ class GraphEncoder {
       const std::unordered_map<
           std::string,
           std::unordered_map<int64_t, std::string>>& dynamic_axes,
-      onnx::TypeProto_Tensor* onnx_tensor_type);
+      onnx::TypeProto_Tensor* onnx_tensor_type,
+      bool assign_dim_param = true);
 
   SymbolDimMap symbol_dim_map_;
   onnx::ModelProto model_proto_;
@@ -617,7 +618,7 @@ void GraphEncoder::EncodeValueInfoType(
           dim_name_prefix,
           n->debugName(),
           dynamic_axes,
-          onnx_tensor_type
+          onnx_tensor_type,
           !is_sequence_tensor);
     }
   } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
