@@ -561,6 +561,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nni.ConvReLU2d,
         nni.ConvReLU3d,
         nni.LinearReLU,
+        nni.LinearBn1d,
         nni.ConvBn1d,
         nni.ConvBn2d,
         nni.ConvBn3d,

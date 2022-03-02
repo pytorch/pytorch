@@ -3762,9 +3762,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for quant_type in [QuantType.STATIC, QuantType.QAT]:
             model = LinearBnModel()
             quantized_node = ns.call_module(nnq.Linear)
-            result_dict = self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
-            # TODO(andrew): do we need this check?
-            # self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
+            self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
     def test_functional_linear(self):
