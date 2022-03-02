@@ -125,7 +125,7 @@ class TORCH_API LazyGraphExecutor {
 
   ComputationCache* GetComputationCache();
 
-  hash_t GetGraphHash(const std::vector<LazyTensor>& tensors);
+  hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
 
  private:
   struct SyncTensorsConfig {

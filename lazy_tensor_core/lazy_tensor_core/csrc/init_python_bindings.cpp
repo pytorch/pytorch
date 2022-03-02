@@ -702,7 +702,7 @@ void InitLtcModuleBindings(py::module m) {
           std::vector<Node*> roots;
           for (auto& tensor : tensors) {
             auto xtensor = TryGetLtcTensor(tensor);
-            roots.push_back(xtensor.GetIrValue().node.get());
+            roots.push_back(xtensor->GetIrValue().node.get());
           }
           auto post_order = Util::ComputePostOrder(roots);
           std::vector<int64_t> tensor_ids;
@@ -733,7 +733,7 @@ void InitLtcModuleBindings(py::module m) {
           return std::make_pair(tensor_ids, ivalues);
         });
   m.def("_get_graph_hash", [](const std::vector<at::Tensor>& tensors) {
-    std::vector<LazyTensor> xtensors;
+    std::vector<LazyTensorPtr> xtensors;
     for (auto& tensor : tensors) {
       xtensors.push_back(TryGetLtcTensor(tensor));
     }

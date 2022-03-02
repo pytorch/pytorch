@@ -1096,7 +1096,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
   return result_tensors_data;
 }
 
-hash_t LazyGraphExecutor::GetGraphHash(const std::vector<LazyTensor>& tensors) {
+hash_t LazyGraphExecutor::GetGraphHash(const std::vector<LazyTensorPtr>& tensors) {
   SyncTensorsConfig config;
   config.sync_ltc_data = false;
 
