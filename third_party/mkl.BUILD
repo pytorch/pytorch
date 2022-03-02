@@ -17,8 +17,5 @@ cc_library(
         "//conditions:default": ["libmkl_tbb_thread.so"],
     }),
     visibility = ["//visibility:public"],
-    deps = select({
-        "@platforms//os:linux": ["@mkl_headers_linux//:mkl_headers"],
-        "@platforms//os:macos": ["@mkl_headers_macos//:mkl_headers"],
-    })
+    deps = ["@mkl_headers"],
 )
