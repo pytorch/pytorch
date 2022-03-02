@@ -209,7 +209,20 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
       auto np_arr_is_contiguous = PyArray_IS_C_CONTIGUOUS(np_arr);
       if (np_arr_is_contiguous) {
         // take fast-path for contiguous array.
+
+        // checks
         TORCH_CHECK(at::can_cast(np_type, scalarType), "Can't cast from ", np_type, " to ", scalarType);
+        IntArrayRef expected_shape = c10::makeArrayRef(sizes.cbegin() + dim + 1, sizes.cend());
+        auto expected_dim = expected_shape.size();
+        auto np_arr_ndim = PyArray_NDIM(np_arr);
+        TORCH_CHECK(np_arr_ndim == expected_dim,
+                    "Expected NumPy array to be ", expected_dim, "-D but found ", np_arr_ndim, "-D");
+
+        auto np_arr_shape = IntArrayRef{PyArray_DIMS(np_arr), np_arr_ndim};
+        TORCH_CHECK(np_arr_shape == expected_shape,
+                    "Expected NumPy array of shape ", expected_shape, " but found ", np_arr_shape);
+
+        // copy data
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, scalarType, "tensor_new", [&] {
           using dest_t = scalar_t;
           AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, np_type, "tensor_new", [&] {
@@ -223,6 +236,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
               }
           });
         });
+        // move to next element in the sequence
         continue;
       } else {
         TORCH_WARN_ONCE(
