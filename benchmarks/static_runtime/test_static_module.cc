@@ -569,6 +569,22 @@ TEST(StaticRuntime, KWargsAPI_2) {
   }
 }
 
+TEST(StaticRuntime, KWargsAPI_Optional) {
+  const auto src = R"JIT(
+    def forward(self, x, y, z: Optional[Tensor] = None):
+        return True
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  const auto kwargs = std::unordered_map<std::string, IValue>{
+      {"x", at::randn({1})}, {"y", at::randn({1})}};
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_TRUE(smod({}, kwargs).toBool());
+}
+
 TEST(StaticRuntime, CleanUpMemory) {
   const int embedding_size = 32;
   const int num_features = 50;
