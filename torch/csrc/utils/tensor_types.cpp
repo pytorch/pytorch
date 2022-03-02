@@ -83,11 +83,18 @@ at::TensorOptions options_from_string(const std::string& str) {
 
 std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
   std::vector<std::pair<Backend, ScalarType>> ret;
-  // can't easily iterate over enum classes
+
+  // Can't easily iterate over enum classes.
   std::vector<Backend> backends = { Backend::CPU, Backend::CUDA, Backend::SparseCPU, Backend::SparseCUDA };
-  std::vector<ScalarType> scalar_types = { ScalarType::Byte, ScalarType::Char, ScalarType::Double, ScalarType::Float,
-                                           ScalarType::Int, ScalarType::Long, ScalarType::Short, ScalarType::Half,
-                                           ScalarType::Bool, ScalarType::BFloat16};
+  // Try to keep in sync with ScalarType.  Note how this doesn't use
+  // AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS as ScalarType does because
+  // this list is used for initializing empty tensors, and that doesn't work
+  // with qint.
+  std::vector<ScalarType> scalar_types = {
+    #define DEFINE_ENUM(_1, n) ScalarType::n,
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ENUM)
+  };
+
   for (auto& backend : backends) {
     for (auto& scalar_type : scalar_types) {
       // there is no sparse bool type.
