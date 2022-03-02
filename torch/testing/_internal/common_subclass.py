@@ -181,8 +181,7 @@ class SparseTensor(WrapperTensor):
 # Example non-wrapper subclass that stores extra state.
 class NonWrapperTensor(torch.Tensor):
     def __new__(cls, data):
-        t = data.clone()
-        t.__class__ = cls
+        t = torch.Tensor._make_subclass(cls, data)
         t.extra_state = {
             'last_func_called': None
         }
