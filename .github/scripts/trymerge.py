@@ -254,8 +254,7 @@ class GitHubPR:
         return list(reviews.items())
 
     def get_approved_by(self) -> List[str]:
-        # Prefix with @ to make the usernames clickable in Github UI
-        return [f"@{login}" for (login, state) in self._get_reviewers() if state == "APPROVED"]
+        return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
 
     def get_commit_count(self) -> int:
         return int(self.info["commits"]["totalCount"])
@@ -343,9 +342,11 @@ class GitHubPR:
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo)
 
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(f"https://github.com/{login}" for login in approved_by())
             repo.cherry_pick(rev)
             msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
-            msg += f"\nApproved by: {', '.join(approved_by)}\n"
+            msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
@@ -354,9 +355,11 @@ class GitHubPR:
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(f"https://github.com/{login}" for login in self.get_approved_by())
             msg = self.get_title() + "\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
-            msg += f"Approved by: {', '.join(self.get_approved_by())}\n"
+            msg += f"Approved by: {approved_by_urls}\n"
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
