@@ -186,9 +186,10 @@ class InverseWishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         if nu.le(p + 3).any():
-            raise ValueError(
-                "Elementwise variance of the Inverse Wishart distribution can be caculated only for df > ndim + 3."
+            warnings.warn(
+                "Elementwise variance of the Inverse Wishart distribution is finite only for df > ndim + 3."
             )
+
         if nu.ge(p - 3).any():
             warnings.warn(
                 """
@@ -196,14 +197,21 @@ class InverseWishart(ExponentialFamily):
                 can be caculated only for ndim > df + 3.
                 """
             )
+
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
         eff_df = (nu - p).view(self._batch_shape + (1, 1))
 
-        return (
-            (eff_df + 1) * V.pow(2)
-            + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
-        ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3)).clamp(min=1e-10)
+        return torch.where(
+            eff_df.ge(3),
+            _clamp_with_eps(
+                (
+                    (eff_df + 1) * V.pow(2)
+                    + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
+                ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
+            ),
+            torch.full_like(eff_df, fill_value=float("Inf")).expand(self._batch_shape + self._event_shape)
+        )
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
