@@ -3290,6 +3290,36 @@ class TestVmapOperatorsOpInfo(TestCase):
                         self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
         check_vmap_fallback(self, test, op)
 
+    def test_conv_double_backward(self, device):
+        images = torch.randn(2, 1, 5, 5, device=device)
+        weight = torch.randn(2, 1, 2, 2, device=device)
+        bias = torch.randn(2, device=device)
+        ggI = torch.randn_like(images)
+        ggW = torch.randn_like(weight)
+        ggb = torch.randn_like(bias)
+        stride = (1, 1)
+        padding = (0, 0)
+        dilation = (1, 1)
+        transposed = False
+        output_padding = (0, 0)
+        groups = 1
+        output_mask = (True, True, True)
+        gO = torch.randn_like(F.conv2d(images, weight, bias, stride, padding, dilation, groups))
+
+        args = (
+            ggI, ggW, ggb, gO, weight, images, stride, padding, dilation,
+            transposed, output_padding, groups, output_mask,
+        )
+        op = torch.ops.aten._convolution_double_backward
+
+        generator = get_fallback_and_vmap_exhaustive(op, args, {})
+
+        def test():
+            for loop_out, batched_out in generator:
+                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+
+        check_vmap_fallback(self, test, op)
+
     def test_isnan(self, device):
         test = functools.partial(_vmap_test, check_propagates_grad=False)
 
