@@ -80,7 +80,7 @@ librosa>=0.6.2
 #Pinned versions:
 #test that import:
 
-mypy==0.812
+#mypy==0.812
 #Description: linter
 #Pinned versions: 0.812
 # Pin MyPy version because new errors are likely to appear with each release
