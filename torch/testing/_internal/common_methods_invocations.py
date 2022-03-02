@@ -14327,7 +14327,8 @@ op_db: List[OpInfo] = [
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
-               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"), 'TestSparseCSR', 'test_sparse_csr_consistency'),
+               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
+                            'TestSparseCSR', 'test_sparse_csr_consistency'),
            )
            ),
     OpInfo('logcumsumexp',
