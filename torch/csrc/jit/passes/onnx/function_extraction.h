@@ -57,6 +57,13 @@ TORCH_API NodeAttrNameMap ONNXFunctionExtraction(
     std::shared_ptr<Graph>& graph,
     const std::unordered_set<std::string>& module_names,
     const std::vector<std::string>& param_names);
+
+TORCH_API void ONNXClearScopeRecords();
+
+TORCH_API void ONNXTrackScopeAttributes(
+    std::shared_ptr<Graph>& graph,
+    std::map<std::string, IValue>& attributes);
+
 } // namespace onnx
 
 } // namespace jit
