@@ -63,12 +63,12 @@ class BisectPercentileOp final : public Operator<Context> {
     const auto batch_size = raw.size(0);
     const auto num_features = raw.size(1);
     CAFFE_ENFORCE_EQ(num_features, pct_lens_.size());
-    const float* raw_data = raw.template data<float>();
+    const float *const raw_data = raw.template data<float>();
 
     // Output
 
-    auto* pct = Output(PCT, raw.sizes(), at::dtype<float>());
-    float* pct_output = pct->template mutable_data<float>();
+    auto *const pct = Output(PCT, raw.sizes(), at::dtype<float>());
+    float *const pct_output = pct->template mutable_data<float>();
 
     // Compute percentile for each raw feature value
     int feature_start_index = 0;
@@ -108,13 +108,13 @@ class BisectPercentileOp final : public Operator<Context> {
   vector<int> index;
   vector<std::map<float, float>> fast_pct;
 
-  const float kEPSILON = 1e-10;
+  static constexpr float kEPSILON = 1e-10;
 
-  int binary_search(
+  int64_t binary_search(
       const std::vector<float>::iterator& data,
-      int lo,
-      int hi,
-      float val) {
+      int64_t lo,
+      int64_t hi,
+      const float val) {
     while (lo < hi) {
       const auto mid = lo + (hi - lo) / 2;
       const bool low_cond = (data[mid] <= val);
@@ -145,20 +145,18 @@ class BisectPercentileOp final : public Operator<Context> {
       return 1.;
     }
 
-    float result;
     // Interpolation by binary search
     const auto k = binary_search(pct_raw_it, 0, size - 1, val);
 
     if (pct_raw_it[k] == val) {
       // Exact match
-      result = pct_mapping_it[k];
+      return pct_mapping_it[k];
     } else {
       // interpolation
-      float w = (val - pct_raw_it[k]) /
+      const float w = (val - pct_raw_it[k]) /
           (pct_raw_it[k + 1] - pct_raw_it[k] + kEPSILON);
-      result = (1 - w) * pct_upper_it[k] + w * pct_lower_it[k + 1];
+      return (1 - w) * pct_upper_it[k] + w * pct_lower_it[k + 1];
     }
-    return result;
   }
 };
 
