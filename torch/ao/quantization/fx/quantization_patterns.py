@@ -21,7 +21,6 @@ from ..utils import (
     get_qconfig_dtypes,
     activation_dtype,
     get_qparam_dict,
-    check_node,
 )
 
 from torch.ao.quantization.quantize import (
@@ -950,7 +949,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     self.linear_node)
         else:  # call_function
             assert self.linear_node.op == 'call_function'
-            if is_reference:
+            if is_reference or self.linear_node.target == torch.nn.functional.linear and\
+                    dtypes in [(torch.quint8, torch.qint8, None)]:
                 quantized_input_dtypes = [torch.float, torch.float]
                 if activation_int8_quantized:
                     quantized_input_dtypes[0] = torch.quint8
@@ -987,7 +987,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         modules,
                         quantized_graph,
                         node_name_to_scope,
-                        is_input=False)
+                        is_input=False,
+                        output_prefix="")
                 else:
                     # output for dynamically quantized linear op is not quantized
                     return op_out
@@ -1247,6 +1248,8 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             return quantized_graph.node_copy(node, load_arg(quantized=None))
 
+        act_dtype, weight_dtype, compute_dtype = dtypes
+        activation = load_arg(quantized=act_dtype)(node.args[0])
         module = modules[str(node.target)]
         qmodule_cls = get_dynamic_quant_module_class(type(module))
         qmodule = qmodule_cls.from_float(module)
@@ -1493,19 +1496,17 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
 
-        is_call_function, is_call_method, is_call_module = check_node(node, modules)
-        if is_reference or (is_call_function or is_call_method or is_call_module):
-            # when activation dtype is torch.float, the node does not require
-            # observation
-            # e.g. dynamic quantization or weight_only quantization
-            act_dtype = activation_dtype(qconfig)
-            if act_dtype == torch.float:
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return op_out
-            else:
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
+        # when activation dtype is torch.float, the node does not require
+        # observation
+        # e.g. dynamic quantization or weight_only quantization
+        act_dtype = activation_dtype(qconfig)
+        if act_dtype == torch.float:
+            op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+            return op_out
+        else:
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            if activation_post_process is not None:
                 # make sure the input is quantized to act_dtype
                 load_arg(quantized={0: act_dtype})(node.args)
                 args = list(load_arg(quantized=torch.float)(node.args))
@@ -1515,8 +1516,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                     op_out,
                     activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
-        else:
-            return quantized_graph.node_copy(node, load_arg(quantized=None))
+            else:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self,
