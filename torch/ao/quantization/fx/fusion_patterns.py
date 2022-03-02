@@ -27,6 +27,7 @@ class FuseHandler(ABC):
              named_modules: Dict[str, torch.nn.Module],
              fused_graph: Graph,
              root_node: Node,
+             extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
@@ -69,6 +70,7 @@ class DefaultFuseHandler(FuseHandler):
              named_modules: Dict[str, torch.nn.Module],
              fused_graph: Graph,
              root_node: Node,
+             extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
@@ -119,6 +121,12 @@ class DefaultFuseHandler(FuseHandler):
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
         fused_module = fuser_method(is_qat, *matched_modules)
-        # TODO: maybe add a pass to cleanup bn modules?
         setattr(named_modules[module_parent_name], module_name, fused_module)
-        return fused_graph.node_copy(root_node, load_arg)
+        extra_args = []
+        for input in extra_inputs:
+            extra_args.append(load_arg(input))
+        node = fused_graph.node_copy(root_node, load_arg)
+        args = list(node.args)
+        args.extend(extra_args)
+        node.args = tuple(args)
+        return node
