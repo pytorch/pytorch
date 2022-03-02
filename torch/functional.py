@@ -120,11 +120,15 @@ def broadcast_shapes(*shapes):
                 if shape[i] < 0:
                     raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
                                        .format(shape[i], shape[i]))
+                if not isinstance(shape[i], int):
+                    raise RuntimeError("Input shapes should be of type ints, a tuple of ints, or a list of ints.")
                 if shape[i] == 1 or shape[i] == result[i]:
                     continue
                 if result[i] != 1:
                     raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
                 result[i] = shape[i]
+        else:
+            raise RuntimeError("Input shapes should be of type ints, a tuple of ints, or a list of ints/")
     return torch.Size(result)
 
 def split(tensor, split_size_or_sections, dim=0):
