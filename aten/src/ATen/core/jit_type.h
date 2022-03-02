@@ -9,6 +9,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
+#include <c10/util/ArrayRef.h>
 
 #include <array>
 #include <memory>
@@ -1229,6 +1230,24 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
+struct SymbolicOrConcreteIntType;
+using SymbolicOrConcreteIntTypePtr = SingletonTypePtr<SymbolicOrConcreteIntType>;
+
+struct TORCH_API SymbolicOrConcreteIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "BoxedInt";
+  }
+  static const TypeKind Kind = TypeKind::SymbolicOrConcreteIntType;
+  // global singleton
+  static SymbolicOrConcreteIntTypePtr get();
+
+ private:
+  SymbolicOrConcreteIntType() : Type(TypeKind::SymbolicOrConcreteIntType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1687,6 +1706,12 @@ struct getTypePtr_<int64_t> final {
   }
 };
 template <>
+struct getTypePtr_<c10::SymbolicOrConcreteInt> final {
+  static decltype(auto) call() {
+    return SymbolicOrConcreteIntType::get();
+  }
+};
+template <>
 struct getTypePtr_<c10::ScalarType> final {
   static decltype(auto) call() {
     return IntType::get();
@@ -2031,25 +2056,6 @@ struct TORCH_API AnyClassType : public Type {
 private:
   AnyClassType()
   : Type(TypeKind::AnyClassType) {}
-};
-
-
-struct SymbolicOrConcreteIntType;
-using SymbolicOrConcreteIntTypePtr = SingletonTypePtr<SymbolicOrConcreteIntType>;
-
-struct TORCH_API SymbolicOrConcreteIntType : public Type {
-  bool equals(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  std::string str() const override {
-    return "Any";
-  }
-  static const TypeKind Kind = TypeKind::SymbolicOrConcreteIntType;
-  // global singleton
-  static SymbolicOrConcreteIntTypePtr get();
-
- private:
-  SymbolicOrConcreteIntType() : Type(TypeKind::SymbolicOrConcreteIntType) {}
 };
 
 template<>

@@ -35,6 +35,7 @@ struct TORCH_API SymbolicIntImpl {
 
   // I can't overload + for primitive types
   int64_t virtual add(int64_t s1, int64_t s2) = 0;
+  bool virtual equal(int64_t s1, int64_t s2) = 0;
 };
 
 
@@ -65,6 +66,11 @@ public:
     return impl_->isSymbolicInt(data_);
   }
 
+  bool operator==(const SymbolicOrConcreteInt& p2)
+  {
+      return SymbolicOrConcreteInt::impl_->equal(this->data_, p2.data_);
+  }
+
   SymbolicOrConcreteInt operator+(SymbolicOrConcreteInt sci) {
 
     // TODO: is there a way to force a conversion to "SymbolicInt" w/e it is
@@ -80,6 +86,8 @@ public:
     }
   }
 };
+
+
 
 class SymbolicInt {
 
@@ -207,7 +215,6 @@ class ArrayRef final {
   template <typename T1 = T, typename T2,
   typename = std::enable_if_t<std::is_same<SymbolicOrConcreteInt, T1>::value && 
     std::is_same<int64_t, T2>::value>>
-  //typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
   ArrayRef(const std::vector<T2>& Vec):
     Data(reinterpret_cast<const c10::SymbolicOrConcreteInt*>(Vec.data())), Length(Vec.size()) {
     debugCheckNullptrInvariant();

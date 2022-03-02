@@ -65,6 +65,17 @@ int64_t LazySymbolicIntImpl::add(int64_t s1, int64_t s2) {
   return -(dim_map.putNode(add) + 1);
 }
 
+int64_t LazySymbolicIntImpl::equal(int64_t s1, int64_t s2) {
+  if (s1 == s2) {
+    return true;
+  }
+
+  TORCH_CHECK("Not Yet Implement!");
+  return false;
+  // 2. we can compare graphs here?
+  // 3. we actually need to materialize to give the correct answer
+}
+
 LazySymbolicIntImpl* GetLazySymbolicIntImpl() {
   static LazySymbolicIntImpl impl_;
   return &impl_;

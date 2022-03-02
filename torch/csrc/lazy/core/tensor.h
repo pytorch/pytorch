@@ -25,6 +25,8 @@ struct TORCH_API LazySymbolicIntImpl: public c10::SymbolicIntImpl {
 
   // We can't overload + for primitive types, so we have to use"add"
   int64_t virtual add(int64_t s1, int64_t s2) override;
+
+  int64_t virtual equal(int64_t s1, int64_t s2) override;
 }; 
 
 TORCH_API LazySymbolicIntImpl* GetLazySymbolicIntImpl();

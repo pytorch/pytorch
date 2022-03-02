@@ -809,7 +809,7 @@ IntArrayRef AssertConcreteSizes(c10::ArrayRef<c10::SymbolicOrConcreteInt> ar) {
 
 
 Tensor expand(const Tensor& self, c10::ArrayRef<c10::SymbolicOrConcreteInt> boxed_size, bool /*unused*/) {
-    IntArrayRef size = c10::AssertConcreteSizes(boxed_size); 
+    IntArrayRef size = AssertConcreteSizes(boxed_size); 
     TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
