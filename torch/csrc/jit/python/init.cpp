@@ -17,7 +17,6 @@
 #include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
@@ -308,9 +307,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_swap_functional_linear",
           [](Module& module) { SwapFunctionalLinear(module); })
-      .def(
-          "_jit_load_decompositions",
-          []() { loadDecompositionFunctions(); })
       .def(
           "_jit_pass_quant_finalize",
           [](Module& module,
