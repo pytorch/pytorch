@@ -4842,8 +4842,8 @@ Tensor batch_norm_jvp(
         running_mean.has_value() && running_var.has_value(),
         "Expect running_mean and running_var to have value when train=false");
     TORCH_CHECK(
-        !running_mean.value()._fw_grad(/*level=*/0).defined() && !running_mean.value()._fw_grad(/*level=*/0).defined(),
-        "batch_norm_jvp expects running_mean and running_var to not have forward grad defined");
+        !running_mean.value()._fw_grad(/*level=*/0).defined() && !running_var.value()._fw_grad(/*level=*/0).defined(),
+        "batch_norm is not differentiable wrt running_mean and running_var, they cannot have forward grad defined");
     mean_p = running_mean.value().view(view_size);
     invstd_p = (1 / at::sqrt(running_var.value() + at::Scalar(eps))).view(view_size);
     result_t = input_t * invstd_p;
