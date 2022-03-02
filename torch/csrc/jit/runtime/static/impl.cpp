@@ -561,7 +561,7 @@ StaticModule::StaticModule(
   value_buffer_size_ +=
       prepareBlockInfo(graph_->block(), values_index_offset, value_to_index);
 
-  prepareProcessedNodes(graph_->block(), value_to_index, alias_db);
+  prepareStaticNodeInfos(graph_->block(), value_to_index, alias_db);
 
   for (auto& block_and_info : block_infos_) {
     auto& block_info = block_and_info.second;
@@ -646,7 +646,7 @@ void StaticModule::prepareFunctionsAndConstants(
   }
 }
 
-size_t StaticModule::prepareProcessedNodes(
+size_t StaticModule::prepareStaticNodeInfos(
     Block* block,
     const FastMap<const Value*, uint32_t>& value_to_index,
     const AliasDb& alias_db,
@@ -654,7 +654,7 @@ size_t StaticModule::prepareProcessedNodes(
   const auto node_start = node_idx;
 
   auto& block_info = block_infos_.at(block);
-  std::vector<ProcessedNode> nodes;
+  std::vector<StaticNodeInfo> nodes;
   FastMap<Node*, bool> node_has_out_variant;
 
   for (auto* node : block->nodes()) {
@@ -664,7 +664,7 @@ size_t StaticModule::prepareProcessedNodes(
 
     for (auto* sub_block : node->blocks()) {
       node_idx +=
-          prepareProcessedNodes(sub_block, value_to_index, alias_db, node_idx);
+          prepareStaticNodeInfos(sub_block, value_to_index, alias_db, node_idx);
     }
     ProcessedNodeInputs input_indices(node->inputs().size());
     for (const auto input_idx : c10::irange(node->inputs().size())) {
@@ -699,7 +699,7 @@ size_t StaticModule::prepareProcessedNodes(
 }
 
 void BlockInfo::set_nodes(
-    std::vector<ProcessedNode> nodes,
+    std::vector<StaticNodeInfo> nodes,
     const FastMap<Node*, bool>& node_has_out_variant) {
   nodes_ = std::move(nodes);
 
@@ -723,7 +723,7 @@ void BlockInfo::prepare_for_memory_planner(
       block_.outputs().begin(), block_.outputs().end());
 
   // collect register indices of outputs of ops with out variant
-  for (ProcessedNode& pnode : nodes_) {
+  for (StaticNodeInfo& pnode : nodes_) {
     if (!pnode.has_out_variant()) {
       continue;
     }
@@ -820,10 +820,11 @@ BlockRunner::BlockRunner(
       // TODO(T108633124): Turn on manage output tensors for sub-blocks.
       manage_output_tensors_enabled_(
           is_root_block_ && sm.opts().manage_output_tensors),
-      values_(values),
-      nodes_(block_info_.nodes()) {
-  for (auto& n : nodes_) {
-    n.set_values(values_.data());
+      values_(values) {
+  nodes_.reserve(block_info_.nodes().size());
+  IValue* values_data = values_.data();
+  for (auto& pre_pnode : block_info_.nodes()) {
+    nodes_.emplace_back(pre_pnode, values_data);
   }
 
   for (auto index : block_info_.block_output_indices()) {
@@ -1817,7 +1818,7 @@ ProcessedFunction::ProcessedFunction(
   }
 }
 
-ProcessedNode::ProcessedNode(
+StaticNodeInfo::StaticNodeInfo(
     Node* node,
     ProcessedFunction* fn,
     ProcessedNodeInputs inputs,
