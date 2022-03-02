@@ -1,5 +1,4 @@
-from .linear_relu import LinearReLU
-from .linear_fused import LinearBn1d
+from .linear_fused import LinearBn1d, LinearReLU
 from .conv_fused import (
     ConvBn1d,
     ConvBn2d,
