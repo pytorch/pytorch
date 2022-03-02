@@ -285,6 +285,14 @@ if dist.is_available():
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
+    try:
+        import torch_ucc
+        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "TEST_REPORT_SOURCE_OVERRIDE": "ucc-gloo",
+        }
+    except ImportError:
+        pass
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {
@@ -323,6 +331,7 @@ DISTRIBUTED_TESTS = [
     "distributed/test_c10d_nccl",
     "distributed/test_c10d_spawn_gloo",
     "distributed/test_c10d_spawn_nccl",
+    "distributed/test_ucc",
     "distributed/test_store",
     "distributed/test_pg_wrapper",
     "distributed/algorithms/test_join",
@@ -566,6 +575,8 @@ def test_distributed(test_module, test_directory, options):
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
+        if test_module == "distributed/test_ucc" and backend != "ucc":
+            continue
         if sys.platform == "win32" and backend != "gloo":
             continue
         if backend == "mpi" and not mpi_available:
@@ -646,6 +657,7 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_spawn_gloo": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_spawn_nccl": get_run_test_with_subprocess_fn(),
     "distributed/test_store": get_run_test_with_subprocess_fn(),
+    "distributed/test_ucc": test_distributed,
     "distributed/test_pg_wrapper": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
