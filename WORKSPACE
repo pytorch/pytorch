@@ -157,22 +157,46 @@ new_local_repository(
     path = "third_party/tensorpipe",
 )
 
-http_archive(
+local_repository(
     name = "mkl",
+    path = "third_party/mkl/",
+)
+
+http_archive(
+    name = "mkl_linux",
     build_file = "//third_party:mkl.BUILD",
     strip_prefix = "lib",
     sha256 = "59154b30dd74561e90d547f9a3af26c75b6f4546210888f09c9d4db8f4bf9d4c",
     urls = [
-        "https://anaconda.org/anaconda/mkl/2020.0/download/linux-64/mkl-2020.0-166.tar.bz2",
+            "https://anaconda.org/anaconda/mkl/2020.0/download/linux-64/mkl-2020.0-166.tar.bz2",
     ],
 )
 
 http_archive(
-    name = "mkl_headers",
+    name = "mkl_macos",
+    build_file = "//third_party:mkl.BUILD",
+    strip_prefix = "lib",
+    sha256 = "b45713c9f72d225e28d489bd6e9f4dc02622e6b4e4253050ebc026db4d292247",
+    urls = [
+        "https://anaconda.org/anaconda/mkl/2020.0/download/osx-64/mkl-2020.0-166.tar.bz2",
+    ],
+)
+
+http_archive(
+    name = "mkl_headers_linux",
     build_file = "//third_party:mkl_headers.BUILD",
     sha256 = "2af3494a4bebe5ddccfdc43bacc80fcd78d14c1954b81d2c8e3d73b55527af90",
     urls = [
         "https://anaconda.org/anaconda/mkl-include/2020.0/download/linux-64/mkl-include-2020.0-166.tar.bz2",
+    ],
+)
+
+http_archive(
+    name = "mkl_headers_macos",
+    build_file = "//third_party:mkl_headers.BUILD",
+    sha256 = "91f4a58d3d41f8ea0914b577b3319b85f2fa01ad3d07bfc45741de27a017dd8f",
+    urls = [
+        "https://anaconda.org/anaconda/mkl-include/2020.0/download/osx-64/mkl-include-2020.0-166.tar.bz2",
     ],
 )
 
