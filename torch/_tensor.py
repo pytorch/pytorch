@@ -862,7 +862,7 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
-        return eval(self.storage().type())
+        return self.storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
