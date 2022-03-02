@@ -1637,7 +1637,7 @@ TensorExprKernel::TensorExprKernel(
   }
 }
 
-void TensorExprKernel::run(Stack& stack) {
+void TensorExprKernel::run(Stack& stack) const {
   if (!use_fallback_ && !allow_fallback_) {
     runKernel(stack);
   } else if (!use_fallback_ && allow_fallback_) {
@@ -1654,7 +1654,7 @@ void TensorExprKernel::run(Stack& stack) {
 void TensorExprKernel::getStaticOutputSizesAndStrides(
     const at::ArrayRef<IValue>& inputs,
     std::vector<std::vector<int64_t>>* sizes,
-    std::vector<std::vector<int64_t>>* strides) {
+    std::vector<std::vector<int64_t>>* strides) const {
   TORCH_INTERNAL_ASSERT(has_symbolic_shapes_);
   // If there are symbolic shapes, then the output tensor size wouldn't have
   // been computed at compile time. That has to be done here by using the
@@ -1699,7 +1699,7 @@ void TensorExprKernel::getStaticOutputSizesAndStrides(
 
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs) {
+    std::vector<at::Tensor>& outputs) const {
   // TODO: preallocate `runArgs` during compilation and fill in values where
   // possible (e.g. for constant tensors)
   std::vector<CodeGen::CallArg> runArgs;
@@ -1766,7 +1766,7 @@ StmtPtr TensorExprKernel::getCodeGenStmt() {
   return codegen_->stmt();
 }
 
-void TensorExprKernel::runKernel(Stack& stack) {
+void TensorExprKernel::runKernel(Stack& stack) const {
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
   std::vector<at::Tensor> outputs;
@@ -1793,7 +1793,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
 
 void TensorExprKernel::runFast(
     const std::vector<void*>& inputs,
-    const std::vector<void*>& outputs) {
+    const std::vector<void*>& outputs) const {
   std::vector<void*> args(inputs);
   args.reserve(inputs.size() + outputs.size() + constants_.size());
   args.insert(args.end(), outputs.begin(), outputs.end());
@@ -1807,7 +1807,7 @@ void TensorExprKernel::runFast(
   codegen_->call_raw(args);
 }
 
-void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
+void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
   TORCH_INTERNAL_ASSERT(
       device_ == at::kCPU,
       "Pre-allocated output tensors are supported only on CPUs.");
