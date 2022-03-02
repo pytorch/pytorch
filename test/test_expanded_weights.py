@@ -193,8 +193,8 @@ class TestExpandedWeightFunctional(TestCase):
 
     def test_expanded_weight_error(self, device):
         batch_size = 3
-        sample_input = make_tensor((batch_size, 4), device, torch.float32, requires_grad=True)
-        sample_weight = make_tensor((4), device, torch.float32, requires_grad=True)
+        sample_input = make_tensor((batch_size, 4), dtype=torch.float32, device=device, requires_grad=True)
+        sample_weight = make_tensor((4), dtype=torch.float32, device=device, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, r"Expanded Weights encountered but cannot handle function"):
             torch.add(sample_input, ExpandedWeight(sample_weight, batch_size))
 
