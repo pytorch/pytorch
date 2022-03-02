@@ -329,8 +329,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -583,8 +585,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1331,8 +1335,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1585,8 +1591,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1839,8 +1847,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -2093,8 +2103,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
