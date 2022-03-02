@@ -201,6 +201,25 @@ http_archive(
 )
 
 http_archive(
+    name = "rules_foreign_cc",
+    sha256 = "92c98ef22ff2161ed2c2966be09c73c5f34557887f358b1236e25959f77e3e9d",
+    strip_prefix = "rules_foreign_cc-33bce66655fa5433c655315824c815e8b6a574d6",
+    url = "https://github.com/bazelbuild/rules_foreign_cc/archive/33bce66655fa5433c655315824c815e8b6a574d6.tar.gz",
+)
+
+load("@rules_foreign_cc//foreign_cc:repositories.bzl", "rules_foreign_cc_dependencies")
+
+rules_foreign_cc_dependencies()
+
+http_archive(
+    name = "openmp",
+    build_file = "//third_party:openmp.BUILD",
+    sha256 = "6b79261371616c31fea18cd3ee1797c79ee38bcaf8417676d4fa366a24c96b4f",
+    strip_prefix = "openmp-13.0.1.src/",
+    urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-13.0.1/openmp-13.0.1.src.tar.xz"],
+)
+
+http_archive(
     name = "rules_python",
     url = "https://github.com/bazelbuild/rules_python/releases/download/0.0.1/rules_python-0.0.1.tar.gz",
     sha256 = "aa96a691d3a8177f3215b14b0edc9641787abaaa30363a080165d06ab65e1161",
