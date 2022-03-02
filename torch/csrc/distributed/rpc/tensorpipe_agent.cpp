@@ -354,6 +354,33 @@ void TensorPipeAgent::prepareNames() {
   }
 }
 
+void TensorPipeAgent::checkAndSetStaticGroup(
+    const c10::intrusive_ptr<::c10d::Store>& store) {
+  std::string isStaticGroupKey("rpcIsStaticGroup");
+  bool isStaticGroupKeyExists =
+      store->check(std::vector<std::string>{isStaticGroupKey});
+  if (isStaticGroupKeyExists) {
+    std::vector<uint8_t> isStaticGroupVector = store->get(isStaticGroupKey);
+    bool storeIsStaticGroup;
+    std::istringstream(std::string(
+        (char*)isStaticGroupVector.data(), isStaticGroupVector.size())) >>
+        std::boolalpha >> storeIsStaticGroup;
+    TORCH_CHECK(
+        isStaticGroup_ == storeIsStaticGroup,
+        fmt::format(
+            "RPC group behavior is different than expected. isStaticGroup_ is initialized with {} while store is {}",
+            isStaticGroup_,
+            storeIsStaticGroup))
+  } else {
+    std::string isStaticGroupStr;
+    isStaticGroupStr = isStaticGroup_ ? "true" : "false";
+    std::vector<uint8_t> isStaticGroupVec(
+        (uint8_t*)isStaticGroupStr.c_str(),
+        (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
+    store->set(isStaticGroupKey, isStaticGroupVec);
+  }
+}
+
 TensorPipeAgent::TensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
     std::string selfName,
@@ -381,9 +408,11 @@ TensorPipeAgent::TensorPipeAgent(
     worldSize_ = worldSize.value();
     isStaticGroup_ = true;
   } else {
-    // TODO: get current world size from store
     isStaticGroup_ = false;
   }
+
+  // check the static group attribute against store
+  checkAndSetStaticGroup(store);
 
   // collect worker names
   prepareNames();
