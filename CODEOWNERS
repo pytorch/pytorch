@@ -12,7 +12,6 @@
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/native_functions.yaml @ezyang
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
