@@ -15,6 +15,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     BackwardPrefetch,
 )
 from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
     default_auto_wrap_policy,
     enable_wrap,
     wrap,
@@ -256,6 +257,16 @@ class TestAutoWrap(TestCase):
         self.assertTrue(layer.process_group is new_process_group)
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
+
+    def test_always_wrap(self):
+        """
+        Test to ensure that if `always_wrap_policy` is
+        passed into FSDP, all submodules are wrapped.
+        """
+        seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
+        model = FSDP(sequential, process_group=self.process_group, fsdp_auto_wrap_policy=always_wrap_policy)
+        for mod in model.modules():
+            self.assertTrue(isinstance(mod, FSDP))
 
     def test_auto_wrap_api(self):
         """
