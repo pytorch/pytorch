@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes)
+    (instantiate_device_type_tests, ops, onlyNativeDeviceTypes, precisionOverride)
 
 
 def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
@@ -216,9 +216,6 @@ class mask_layouts(_TestParametrizer):
             elif layout == torch.sparse_csr:
                 if not op.supports_sparse_csr:
                     raise unittest.SkipTest(f"{op.name} does not support inputs with {layout_name} layout")
-                if device != 'cpu':
-                    raise unittest.SkipTest(
-                        f"masked reduction on a sparse CSR tensor using {device} storage is not yet implemented")
                 sample_inputs_func = op.sample_inputs_sparse_csr
             else:
                 raise NotImplementedError(f'{layout}')
@@ -267,6 +264,7 @@ class TestMasked(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_references)
+    @precisionOverride({torch.bfloat16: 5e-4, torch.float16: 5e-4})
     def test_reference_masked(self, device, dtype, op):
         op_name = op.name.rsplit('.', 1)[-1]
         ref_op = reference_functions[op_name]
@@ -285,6 +283,7 @@ class TestMasked(TestCase):
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(masked_ops_with_non_strided_support)
+    @precisionOverride({torch.bfloat16: 5e-3, torch.float16: 5e-3})
     def test_mask_layout(self, layout, device, dtype, op, sample_inputs):
         for sample in sample_inputs:
             t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs

@@ -687,39 +687,48 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
   }
 }
 
-  /*
+/*
     Reductions on sparse CSR tensors using masked semantics.
 
     - A CSR tensor is a 2D tensor that is specified by a 3-tuple
       (crow_indices, col_indices, values).
 
-    - To support a reduction operator op on CSR tensors, define the
-      following functions:
+    - To support a reduction operator on a CSR tensor, define:
 
-        template <typename scalar_t>
-        scalar_t reduce_op(const scalar_t& lhs, const scalar_t& rhs) { return lhs op rhs; }
+template <typename scalar_t>
+struct Reduction...Op {
+  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+    return a ... b;
+  }
+  inline scalar_t identity() const { return ...; }
+};
 
-        Tensor _sparse_csr_op(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) { ... }
+Tensor _sparse_csr_..._cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+  ...
+      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, Reduction...Op<scalar_t>());
+  ...
+  return result;
+}
 
-      and add the following lines
+      and add the following
 
         - func: _sparse_csr_op.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
           dispatch:
-            SparseCsrCPU: _sparse_csr_op
+            SparseCsrCUDA: _sparse_csr_..._cpu
 
-      to native_functions.yaml file.
+      to native_functions.yaml
 
-      Use reduce_plus and _sparse_csr_sum implementations as templates.
+      Use ReductionAddOp and _sparse_csr_sum implementation as an example.
 
     - Since a CSR tensor dimensionality is always 2, only reductions
       with keepdim=True can be supported.
 
-  */
+*/
 
 namespace {
 
-template <typename scalar_t>
-Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, scalar_t identity, scalar_t (*rop)(const scalar_t& a, const scalar_t& b)) {
+template <typename scalar_t, typename ReductionOp>
+Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop) {
   /*
     Consider the following sparse tensor:
 
@@ -745,14 +754,14 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, scalar_t identi
       new_col_indices = [0, 2, 3]
       new_values = [rop(1, 4], rop(3, 5), 2]
 
-    In general, the result CSR data can be computed as follows:
+    In general, the CSR representation data can be computed as follows:
 
       new_col_indices, col_map = col_indices.unique(sorted=True, return_inverse=True)
       nnz = new_col_indices.numel()
       new_crow_indices = [0, nnz]
       new_values.resize(nnz); new_values.fill_(identity)
       for i in range(col_indices.numel()):
-          new_values[col_map[i] = rop(new_values[col_map[i], values[i])
+          new_values[col_map[i]] = rop(new_values[col_map[i], values[i])
    */
 
   Tensor col_indices = sparse.col_indices();
@@ -766,7 +775,7 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, scalar_t identi
     Calling at::_unique constitutes the main bottleneck of this
     function. However, it is still about 5x faster than using the
     invariant:
-      csr.sum(dim=0) == csr.transpose(0, 1).sum(dim=1
+      csr.sum(dim=0) == csr.transpose(0, 1).sum(dim=1)
   */
   std::tie(new_col_indices, columns_map) = at::_unique(col_indices, true, true);
   auto nnz = new_col_indices.numel();
@@ -776,22 +785,22 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, scalar_t identi
   new_crow_indices[1] = nnz;
 
   Tensor new_values = at::empty({nnz}, values.options());
-  new_values.fill_(identity);
+  new_values.fill_(rop.identity());
 
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "reduce_sparse_csr_dim0_cpu_indices",
                           [&]() {
-    index_t* columns_map_ptr = columns_map.data_ptr<index_t>();
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
+                            index_t* columns_map_ptr = columns_map.data_ptr<index_t>();
+                            scalar_t* values_ptr = values.data_ptr<scalar_t>();
+                            scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
 
-    // There is no point in parallelizing the following for-loop
-    // because about 99.3% of the computation time is spent in the
-    // at::_unique call above.
-    for (int64_t i=0; i<numel; i++) {
-      index_t col = columns_map_ptr[i];
-      scalar_t val = values_ptr[i];
-      new_values_ptr[col] = rop(new_values_ptr[col], val);
-    }
+                            // There is no point in parallelizing the following for-loop
+                            // because about 99.3% of the computation time is spent in the
+                            // at::_unique call above.
+                            for (int64_t i=0; i<numel; i++) {
+                              index_t col = columns_map_ptr[i];
+                              scalar_t val = values_ptr[i];
+                              new_values_ptr[col] = rop(new_values_ptr[col], val);
+                            }
                           });
   return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
                                                {1, sparse.size(1)},
@@ -800,8 +809,8 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, scalar_t identi
                                                new_values.device());
 }
 
-template <typename scalar_t>
-Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, scalar_t identity, scalar_t (*rop)(const scalar_t& a, const scalar_t& b)) {
+template <typename scalar_t, typename ReductionOp>
+Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop) {
   /*
     Consider the following sparse tensor:
 
@@ -852,7 +861,6 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, scalar_t identi
   Tensor values = sparse.values();
   auto nrows = sparse.size(0);
   auto numel = values.numel();
-  auto grain_size = (nrows > numel ? 1 : internal::GRAIN_SIZE / (numel / nrows));  // TODO: grain size may require some tuning.
 
   Tensor new_crow_indices = at::empty({crow_indices.numel()}, ioptions);
   Tensor new_col_indices = at::empty({}, ioptions);
@@ -883,7 +891,7 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, scalar_t identi
     at::parallel_for(
         0,
         nrows,
-        grain_size,
+        internal::GRAIN_SIZE,
         [&](int64_t irow_start, int64_t irow_end) {
             index_t i_end = crow_indices_ptr[irow_start];
             for (index_t h = irow_start; h < irow_end; ++h) {
@@ -907,8 +915,8 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, scalar_t identi
                                                new_values.device());
 }
 
-template <typename scalar_t>
-Tensor reduce_sparse_csr_dim01_cpu_template(const Tensor& sparse, scalar_t identity, scalar_t (*rop)(const scalar_t& a, const scalar_t& b)) {
+template <typename scalar_t, typename ReductionOp>
+Tensor reduce_sparse_csr_dim01_cpu_template(const Tensor& sparse, ReductionOp rop) {
 
   auto ioptions = sparse.col_indices().options();
   Tensor values = sparse.values();
@@ -930,7 +938,7 @@ In [4]: %timeit torch.sum(t.values())
                                        0,
                                        numel,
                                        internal::GRAIN_SIZE,
-                                       identity,
+                                       rop.identity(),
                                        [&](int64_t i_start, int64_t i_end, scalar_t identity) {
                                          scalar_t res = identity;
                                          for (int64_t i=i_start; i<i_end; i++) {
@@ -957,26 +965,26 @@ In [4]: %timeit torch.sum(t.values())
                                                new_values.device());
 }
 
-template <typename scalar_t>
-Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t> dims, scalar_t identity, scalar_t (*rop)(const scalar_t& a, const scalar_t& b)) {
+template <typename scalar_t, typename ReductionOp>
+Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t> dims, ReductionOp rop) {
   if (dims.size() == 1) {
     if (dims[0] == 0) {
-      return reduce_sparse_csr_dim0_cpu_template(sparse, identity, rop);
+      return reduce_sparse_csr_dim0_cpu_template<scalar_t>(sparse, rop);
     } else {
       TORCH_INTERNAL_ASSERT(dims[0] == 1);
-      return reduce_sparse_csr_dim1_cpu_template(sparse, identity, rop);
+      return reduce_sparse_csr_dim1_cpu_template<scalar_t>(sparse, rop);
     }
   } else if (dims.size() == 2) {
     TORCH_INTERNAL_ASSERT(((dims[0] == 0 && dims[1] == 1) || (dims[0] == 1 && dims[1] == 0)));
-    return reduce_sparse_csr_dim01_cpu_template(sparse, identity, rop);
+    return reduce_sparse_csr_dim01_cpu_template<scalar_t>(sparse, rop);
   }
   TORCH_INTERNAL_ASSERT(dims.size() == 0);
   // effective after gh-29137 has been resolved
   return sparse.clone();
 }
 
-template <typename scalar_t>
-Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_sum, bool keepdim, scalar_t identity, scalar_t (*rop)(const scalar_t& a, const scalar_t& b)) {
+template <typename scalar_t, typename ReductionOp>
+Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_sum, bool keepdim, ReductionOp rop) {
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
   TORCH_CHECK(keepdim, "reduction operations on CSR tensors with keepdim=False is unsupported");
   TORCH_INTERNAL_ASSERT(sparse.device() == kCPU);
@@ -990,24 +998,27 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
     dims.emplace_back(0);
     dims.emplace_back(1);
   }
-  return reduce_sparse_csr_cpu_template(sparse, dims, identity, rop);
+  return reduce_sparse_csr_cpu_template<scalar_t>(sparse, dims, rop);
 }
 
 template <typename scalar_t>
-scalar_t reduce_plus(const scalar_t& lhs, const scalar_t& rhs) {
-  return lhs + rhs;
-}
+struct ReductionAddOp {
+  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+    return a + b;
+  }
+  inline scalar_t identity() const { return 0; }
+};
 
 }  // namespace
 
-Tensor _sparse_csr_sum(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
     kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cpu",
     [&] {
-      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, scalar_t(0), reduce_plus);
+      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, ReductionAddOp<scalar_t>());
     });
   return result;
 }

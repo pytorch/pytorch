@@ -965,6 +965,13 @@ def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
     # Test reducing inner and outer most dimensions
     yield {'dim': 0, 'keepdim': True}
     yield {'dim': -1, 'keepdim': False}
+    # Reductions of CSR tensors use different implementations for
+    # inner and/or outer dimensions. So, as a minimum of testing CSR
+    # implementations the following kwargs must be generated:
+    #   dict(dim=0, keepdim=True)
+    #   dict(dim=1, keepdim=True)
+    #   dict(dim=(0, 1), keepdim=True)
+    yield {'dim': -1, 'keepdim': True}
 
     # Test reducing middle dimension
     if ndim > 2:
@@ -2587,6 +2594,7 @@ def sample_inputs_normal_tensor_first(self, device, dtype, requires_grad, **kwar
         ([3], [3], {}),
         ([3, 4, 2], [3, 4, 2], {}),
         ([2, 3], 1.1, {}),
+        ([1, 2, 3], [5, 2, 3], {}),  # broadcasting
     ]
 
     return sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs)
@@ -14325,6 +14333,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
+               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"), 'TestSparseCSR', 'test_sparse_csr_consistency'),
            )
            ),
     OpInfo('logcumsumexp',
@@ -15306,7 +15316,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         decorators=[
-            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
+                                            torch.bfloat16: tol(atol=1e-03, rtol=1e-03)}),
                          'TestReductions', 'test_reference_masked'),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestReductions', 'test_ref_small_input'),

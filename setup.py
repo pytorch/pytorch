@@ -506,6 +506,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
+        if cmake_cache_vars['STATIC_DISPATCH_BACKEND']:
+            report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
+        if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
+            report('-- Using lightweight dispatch')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -981,6 +985,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.h',
                 'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
