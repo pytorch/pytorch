@@ -529,6 +529,17 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        build_generates_artifacts=False,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-py3.7-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -1064,20 +1075,20 @@ def main() -> None:
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
-    # template_and_workflows = [
-    #     (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-    #     (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
-    #     (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
-    #     (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
-    #     (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
-    #     (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
-    #     (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-    #     (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
-    #     (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
-    #     (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
-    #     (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
-    #     (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
-    # ]
+    template_and_workflows = [
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
+        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
+        (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
+        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
+        (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
+        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
+        (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
+        (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
+    ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
     for w in existing_workflows:
@@ -1087,13 +1098,13 @@ def main() -> None:
             print(f"Error occurred when deleting file {w}: {e}")
 
     ciflow_ruleset = CIFlowRuleset()
-    # for template, workflows in template_and_workflows:
-    #     # added Iterable check to appease the mypy gods
-    #     if not isinstance(workflows, Iterable):
-    #         raise Exception(f"How is workflows not iterable? {workflows}")
-    #     for workflow in workflows:
-    #         workflow.generate_workflow_file(workflow_template=template)
-    #         ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+    for template, workflows in template_and_workflows:
+        # added Iterable check to appease the mypy gods
+        if not isinstance(workflows, Iterable):
+            raise Exception(f"How is workflows not iterable? {workflows}")
+        for workflow in workflows:
+            workflow.generate_workflow_file(workflow_template=template)
+            ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
     ciflow_ruleset.generate_json()
 
 
