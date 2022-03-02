@@ -185,6 +185,7 @@ class CIWorkflow:
     enable_xla_test: bool = False
     enable_noarch_test: bool = False
     enable_force_on_cpu_test: bool = False
+    enable_deploy_test: bool = False
 
     def __post_init__(self) -> None:
         if not self.build_generates_artifacts:
@@ -294,6 +295,8 @@ class CIWorkflow:
             configs["xla"] = {"num_shards": 1, "runner": self.test_runner_type}
         if self.enable_noarch_test:
             configs["noarch"] = {"num_shards": 1, "runner": self.test_runner_type}
+        if self.enable_deploy_test:
+            configs["deploy"] = {"num_shards": 1, "runner": self.test_runner_type}
 
         for name, config in configs.items():
             for shard in range(1, config["num_shards"] + 1):
@@ -527,8 +530,9 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_DEFAULT},
         ),
-        enable_default_test = False,
+        enable_default_test=False,
         enable_distributed_test=False,
+        enable_deploy_test=True,
     ),
     CIWorkflow(
         arch="linux",
