@@ -16,7 +16,8 @@ from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db,
     foreach_reduce_op_db)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, all_types_and, integral_types, complex_types, floating_types_and, floating_types,
+    all_types_and_complex_and, all_types_and, integral_types, complex_types,
+    floating_types_and, floating_types, integral_types_and,
 )
 
 # Includes some values such that N * N won't be a multiple of 4,

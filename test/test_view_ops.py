@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, complex_types, all_types_and,
+    all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types_and,
 )
 
 # TODO: replace this with make_tensor() in common_utils.py
