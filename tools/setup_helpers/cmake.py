@@ -278,7 +278,8 @@ class CMake:
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
              'WERROR',
-             'OPENSSL_ROOT_DIR')
+             'OPENSSL_ROOT_DIR',
+             'STATIC_DISPATCH_BACKEND')
         })
 
         # Aliases which are lower priority than their canonical option
@@ -289,7 +290,6 @@ class CMake:
             'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
             'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
         }
-
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
             # because we currently have no reliable way to get the list of all build options we have specified in
