@@ -116,15 +116,15 @@ class TestFSDPStateDict(FSDPTest):
             # zero the model to ensure parameters are different.
             _zero_model(model_new)
 
-            with model._summon_full_params(), model_new._summon_full_params():
+            with model.summon_full_params(), model_new.summon_full_params():
                 params = list(model.parameters())
                 params_new = list(model_new.parameters())
                 self.assertNotEqual(params, params_new)
 
             # Verify parameters are the same in the new model.
             model_new.load_state_dict(fsdp_state_dict)
-            with model_new._summon_full_params():
-                with model._summon_full_params():
+            with model_new.summon_full_params():
+                with model.summon_full_params():
                     params = list(model.parameters())
                     params_new = list(model_new.parameters())
                     self.assertEqual(params, params_new)
@@ -255,7 +255,7 @@ class TestFSDPStateDict(FSDPTest):
             optim.step()
             optim.zero_grad()
 
-        with model._summon_full_params():
+        with model.summon_full_params():
             fsdp_params = deepcopy(list(model.parameters()))
 
         # get FSDP state_dict. Note that by default we return state_dict.
