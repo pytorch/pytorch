@@ -2,24 +2,35 @@ def define_targets(rules):
     rules.test_suite(
         name = "tests",
         tests = [
-            ":core_and_typeid_tests",
+            ":core_tests",
+            ":typeid_test",
             ":util_base_tests",
         ],
         visibility = ["//:__pkg__"],
     )
 
     rules.cc_test(
-        name = "core_and_typeid_tests",
+        name = "core_tests",
         size = "small",
         srcs = rules.glob([
             "core/*.cpp",
             "core/impl/*.cpp",
-        ]) + ["util/typeid_test.cpp"],
+        ]),
         copts = ["-Wno-deprecated-declarations"],
         deps = [
             "@com_google_googletest//:gtest_main",
             "//c10/core:base",
             "//c10/util:base",
+        ],
+    )
+
+    rules.cc_test(
+        name = "typeid_test",
+        size = "small",
+        srcs = ["util/typeid_test.cpp"],
+        copts = ["-Wno-deprecated-declarations"],
+        deps = [
+            "@com_google_googletest//:gtest_main",
             "//c10/util:typeid",
         ],
     )
