@@ -16,4 +16,5 @@ rules = struct(
     if_cuda = if_cuda,
     requires_cuda_enabled = requires_cuda_enabled,
     select = select,
+    test_suite = native.test_suite,
 )
