@@ -53,6 +53,55 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   }
 }
 
+Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  auto cur_level = maybe_layer->layerId();
+  RandomnessType randomness = maybe_layer->randomness();
+
+  Tensor self_value;
+  optional<int64_t> self_bdim;
+  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+
+  Tensor other_value;
+  optional<int64_t> other_bdim;
+  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(p_, cur_level);
+
+  check_randomness(randomness, other_bdim.has_value());
+
+  if (!self_bdim && other_bdim) {
+    vmapIncompatibleInplaceError("inplace arithmetic");
+  }
+
+  // compute max logical rank
+  auto self_logical_rank = rankWithoutBatchDim(self_value, self_bdim);
+  auto other_logical_rank = rankWithoutBatchDim(other_value, other_bdim);
+  auto max_logical_rank = std::max(self_logical_rank, other_logical_rank);
+
+  auto self_ = moveBatchDimToFront(self_value, self_bdim);
+  auto other_ = moveBatchDimToFront(other_value, other_bdim);
+
+  // If the dimensions aren't aligned, we need to line them up.
+  // Tensor[B, 3] + Tensor[2, 5, 3] -> Tensor[B, 1, 1, 3] + Tensor[2, 5, 3]
+  // Note that only tensors that have a batch dim need to be modified.
+  // Tensor[B, 2, 3, 5] + Tensor[5] -> no changes needed
+  self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
+  other_ = maybePadToLogicalRank(other_, other_bdim, max_logical_rank);
+  TORCH_CHECK(
+    !(randomness == RandomnessType::Different && !self_bdim),
+    "vmap: Cannot ask for different inplace randomness on an unbatched tensor. This will appear like same randomness. ",
+    "If this is necessary for your usage, please file an issue with functorch.");
+  if (randomness == RandomnessType::Same && self_bdim) {
+    auto intermediate = empty(self.sizes(), self.options());
+    intermediate.bernoulli_(other_, gen);
+    self.copy_(intermediate); // batching should make this just work out...
+    return self;
+  } else {
+    self_.bernoulli_(other_, gen);
+    return self;
+  }
+}
+
 template <typename F, F Func, typename... ExtraArgs>
 Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
@@ -266,6 +315,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   RANDINT_BATCH_RULE2(randint, generator);
   RAND_TWO_LEADING_SCALARS_BATCH_RULE(randint, low);
   RAND_TWO_LEADING_SCALARS_BATCH_RULE(randint, low_generator);
+
+  m.impl("bernoulli_.Tensor", at::functorch::bernoulli_inplace_Tensor_batching_rule);
 
   RANDPERM_BATCH_RULE(randperm);
   RANDPERM_BATCH_RULE2(randperm, generator);
