@@ -23,6 +23,10 @@ target_include_directories(
 
 target_link_libraries(test_lite_interpreter_runtime PRIVATE torch gtest backend_with_compiler_runtime)
 
+if(LINUX)
+  target_link_libraries(test_lite_interpreter_runtime PRIVATE "-Wl,--no-as-needed,$<TARGET_FILE:backend_with_compiler_runtime>,--as-needed")
+endif()
+
 if(INSTALL_TEST)
   install(TARGETS test_lite_interpreter_runtime DESTINATION bin)
   # Install PDB files for MSVC builds

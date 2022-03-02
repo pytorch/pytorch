@@ -214,6 +214,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         'pixel_shuffle',
         'pixel_unshuffle',
         'channel_shuffle',
+        'native_channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
