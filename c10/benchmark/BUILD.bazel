@@ -1,11 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("//:tools/bazel.bzl", "rules")
+load(":build.bzl", "define_targets")
 
-cc_binary(
-    name = "intrusive_ptr",
-    srcs = ["intrusive_ptr_benchmark.cpp"],
-    tags = ["benchmark"],
-    deps = [
-        "//c10/util:base",
-        "@google_benchmark//:benchmark",
-    ],
-)
+define_targets(rules = rules)
