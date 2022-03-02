@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -35,7 +36,7 @@ static void setupSoftmaxDropout(
   auto attention_scores = makeContigTensor(4, dtype);
   auto attention_mask = makeContigTensor(4, dtype);
 
-  Double* divisor = new Double();
+  Double* divisor = IrBuilder::create<Double>();
 
   fusion->addInput(attention_scores);
   fusion->addInput(attention_mask);
@@ -49,8 +50,8 @@ static void setupSoftmaxDropout(
   attention_scores = div(attention_scores, divisor);
   attention_scores = add(attention_scores, attention_mask);
   auto attention_probs = softmax(attention_scores, kReductionAxis);
-  auto prob = new Double(kDropoutProbability);
-  auto scale = new Double(kScale);
+  auto prob = IrBuilder::create<Double>(kDropoutProbability);
+  auto scale = IrBuilder::create<Double>(kScale);
   auto dropout_results = dropout(attention_probs, prob, scale);
   auto output = dropout_results.output;
 
