@@ -1956,6 +1956,8 @@ t1.start()
 t2.start()
 """])
 
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -3007,7 +3009,6 @@ torch.cuda.synchronize()
                     x = torch.randn((B, T, F), device="cuda", dtype=input_dtype)
                 elif input_layout == "packed":
                     batch_first = False
-                    x = torch.randn((T, B, F), device="cuda", dtype=input_dtype)
                     x = torch.nn.utils.rnn.pack_padded_sequence(torch.randn((T, B, F),
                                                                             device="cuda", dtype=input_dtype),
                                                                 lengths=(3, 2, 1, 3),

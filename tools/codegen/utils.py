@@ -4,6 +4,7 @@ import hashlib
 import os
 import re
 import textwrap
+from argparse import Namespace
 from typing import Tuple, List, Iterable, Iterator, Callable, Sequence, TypeVar, Optional, Dict, Any, Union, Set, NoReturn
 from enum import Enum
 
@@ -235,3 +236,10 @@ class FileManager:
         content = 'set({}\n    {})'.format(
             variable_name, '\n    '.join('"' + name + '"' for name in sorted(self.filenames)))
         self._write_if_changed(filename, content)
+
+
+# Helper function to generate file manager
+def make_file_manager(options: Namespace, install_dir: Optional[str] = None) -> FileManager:
+    template_dir = os.path.join(options.source_path, "templates")
+    install_dir = install_dir if install_dir else options.install_dir
+    return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.dry_run)

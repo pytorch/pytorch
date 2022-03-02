@@ -2157,6 +2157,26 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_OPERATOR_FUNCTOR(aten::mse_loss, aten_mse_loss, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& target = p_node->Input(1).toTensor();
+      const auto reduction = p_node->Input(2).toInt();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = at::cpu::mse_loss(self, target, reduction);
+        return;
+      }
+      auto& out = p_node->Output(0).toTensor();
+      fastResizeToZero(out);
+      at::cpu::mse_loss_out(out, self, target, reduction);
+    };
+  }
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 REGISTER_OPERATOR_FUNCTOR(
     aten::nll_loss_backward,
     aten_nll_loss_backward,
