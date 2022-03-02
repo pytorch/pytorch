@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/ITensorList.h>
 
 namespace at { namespace native {
 
