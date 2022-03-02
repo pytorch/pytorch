@@ -4,6 +4,7 @@
 
 import multiprocessing
 import os
+import platform
 import re
 from subprocess import check_call, check_output, CalledProcessError
 import sys
@@ -220,8 +221,11 @@ class CMake:
                           'in the build steps carefully.')
                     sys.exit(1)
             if IS_64BIT:
-                args.append('-Ax64')
-                toolset_dict['host'] = 'x64'
+                if platform.machine() == 'ARM64':
+                    args.append('-A ARM64')
+                else:
+                    args.append('-Ax64')
+                    toolset_dict['host'] = 'x64'
             if toolset_dict:
                 toolset_expr = ','.join(["{}={}".format(k, v) for k, v in toolset_dict.items()])
                 args.append('-T' + toolset_expr)
@@ -274,7 +278,8 @@ class CMake:
              'ONNX_NAMESPACE',
              'ATEN_THREADING',
              'WERROR',
-             'OPENSSL_ROOT_DIR')
+             'OPENSSL_ROOT_DIR',
+             'STATIC_DISPATCH_BACKEND')
         })
 
         # Aliases which are lower priority than their canonical option
@@ -285,7 +290,6 @@ class CMake:
             'CMAKE_CUDA_COMPILER': 'CUDA_NVCC_EXECUTABLE',
             'CUDACXX': 'CUDA_NVCC_EXECUTABLE'
         }
-
         for var, val in my_env.items():
             # We currently pass over all environment variables that start with "BUILD_", "USE_", and "CMAKE_". This is
             # because we currently have no reliable way to get the list of all build options we have specified in
