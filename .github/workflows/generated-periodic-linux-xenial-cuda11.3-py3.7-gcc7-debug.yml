@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug
+name: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug
 
 on:
   push:
@@ -15,8 +15,8 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
+  BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
@@ -35,7 +35,7 @@ env:
   PYTORCH_RETRY_TEST_CASES: 1
   DEBUG: 1
 concurrency:
-  group: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-build
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -158,8 +158,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -255,7 +256,7 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-test
       TEST_CONFIG: distributed
       SHARD_NUMBER: 1
       NUM_TEST_SHARDS: 1
@@ -321,10 +322,15 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -348,8 +354,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -471,7 +478,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test
+          JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -505,7 +512,7 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-test
       TEST_CONFIG: default
       SHARD_NUMBER: 1
       NUM_TEST_SHARDS: 2
@@ -571,10 +578,15 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -598,8 +610,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -721,7 +734,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test
+          JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -755,7 +768,7 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-test
       TEST_CONFIG: default
       SHARD_NUMBER: 2
       NUM_TEST_SHARDS: 2
@@ -821,10 +834,15 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -848,8 +866,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -971,7 +990,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug-test
+          JOB_BASE_NAME: periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
