@@ -35,7 +35,6 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
-
 _gate_torchscript_serialization = True
 
 ActionHook = Callable[["PackageExporter", str], None]
@@ -106,6 +105,13 @@ class _PatternInfo:
 class EmptyMatchError(Exception):
     """This is an exception that is thrown when a mock or extern is marked as
     ``allow_empty=False``, and is not matched with any module during packaging.
+    """
+
+    pass
+
+class BadPackageError(Exception):
+    """This is an exception that is thrown when an imporperly defined package is
+    being interned.
     """
 
     pass
@@ -209,9 +215,10 @@ class PackageExporter:
         # - Each directed edge (u, v) means u depends on v.
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
-        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
-        self.storage_context = self.script_module_serializer.storage_context()
+        # self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
 
+        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file, torch._C.SerializationStorageContext() )
+        self.storage_context = self.script_module_serializer.storage_context()
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
         # The real type signature is OrderedDict[int, Callable[[PackageExporter, str], None]]
@@ -494,6 +501,29 @@ class PackageExporter:
 
         self._intern_module(module_name, dependencies)
 
+    def _is_package(
+        self,
+        module_obj: types.ModuleType
+    ):
+        """Checks if module_obj is a package and throws an error, if module_obj is an
+            invalid package.
+        """
+        error = BadPackageError(f"{module_obj.__name__} is an improperly formed package "
+                                f",so it cannot be interned. Please mock or extern {module_obj.__name__}.")
+        if not hasattr(module_obj, "__path__"):
+            return False
+        elif isinstance(module_obj.__path__, list):  # type: ignore [attr-defined]
+            return True
+        try:
+            for i in module_obj.__name__:
+                break
+            if (not hasattr(module_obj, "__file__")) or (module_obj.__file__ is None):
+                return True
+        except TypeError:
+            raise error
+        else:
+            raise error
+
     def _intern_module(
         self,
         module_name: str,
@@ -512,7 +542,7 @@ class PackageExporter:
         module_name = demangle(module_name)
 
         # Find dependencies of this module and require them as well.
-        is_package = hasattr(module_obj, "__path__")
+        is_package = self._is_package(module_obj)
         source = self._get_source_of_module(module_obj)
         if source is None:
             # Couldn't find a source!  Add it to our dependency graph as broken
@@ -607,7 +637,8 @@ class PackageExporter:
                             f"Object '{field}' from module {module} was mocked out during packaging "
                             f"but is being used in resource - {resource} in package {package}. "
                             "If this error is happening during 'save_pickle', please ensure that your "
-                            "pickled object doesn't contain any mocked objects."
+                            "pickled object doesn't contain any mocked objects. Try interning or externing"
+                            f"{module} if {field} is supposed to be in the package."
                         )
                     else:
                         return

@@ -11,9 +11,13 @@ namespace jit {
 class TORCH_API SerializationStorageContext {
  public:
   explicit SerializationStorageContext() = default;
-  SerializationStorageContext operator=(const SerializationStorageContext&) =
-      delete;
-  SerializationStorageContext(const SerializationStorageContext&) = delete;
+  // explicit SerializationStorageContext(const SerializationStorageContext& ref){
+  //   *this = ref;
+  // }
+  // SerializationStorageContext operator=(const SerializationStorageContext&) =
+  //     delete;
+  // SerializationStorageContext(const SerializationStorageContext&) = delete;
+  // SerializationStorageContext(SerializationStorageContext&&) = default;
 
   uint64_t getOrAddStorage(c10::Storage storage) {
     if (!hasStorage(storage)) {
@@ -61,6 +65,7 @@ class TORCH_API DeserializationStorageContext {
   DeserializationStorageContext operator=(
       const DeserializationStorageContext&) = delete;
   DeserializationStorageContext(const DeserializationStorageContext&) = delete;
+  DeserializationStorageContext(DeserializationStorageContext&&) noexcept = default;
 
   void addStorage(const std::string& name, c10::Storage storage) {
     TORCH_INTERNAL_ASSERT(!hasStorage(name));
