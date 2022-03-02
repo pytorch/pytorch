@@ -1444,18 +1444,16 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
 }
 
 TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
-  c10::MaybeOwned<Tensor> in = c10::MaybeOwned<Tensor>::borrowed(self);
   auto iter =
-      meta::make_reduction(*in, result, dim, keepdim, self.scalar_type());
+      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     min_values_stub(iter.device_type(), iter);
   }
 }
 
 TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
-  c10::MaybeOwned<Tensor> in = c10::MaybeOwned<Tensor>::borrowed(self);
   auto iter =
-      meta::make_reduction(*in, result, dim, keepdim, self.scalar_type());
+      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     max_values_stub(iter.device_type(), iter);
   }
