@@ -343,7 +343,7 @@ class GitHubPR:
                 find_matching_merge_rule(pr, repo)
 
             # Adding the url here makes it clickable within the Github UI
-            approved_by_urls = ', '.join(f"https://github.com/{login}" for login in approved_by())
+            approved_by_urls = ', '.join(f"https://github.com/{login}" for login in approved_by)
             repo.cherry_pick(rev)
             msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
             msg += f"\nApproved by: {approved_by_urls}\n"
