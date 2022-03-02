@@ -887,7 +887,7 @@ It also returns the :attr:`info` tensor returned by `LAPACK's sytrf`_.
 A positive integer indicates the diagonal element of :math:`D` that is zero.
 Division by 0 will occur if the result is used for solving a system of linear equations.
 ``info`` filled with zeros indicates that the factorization was successful.
-If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
+If ``check_errors=True`` and ``info`` contains positive integers, then a `RuntimeError` is thrown.
 
 """ + fr"""
 .. note:: {common_notes["sync_note_ex"]}
