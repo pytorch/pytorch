@@ -18,7 +18,7 @@ genrule(
         "onnx/onnx_onnx_torch-ml.proto",
         "onnx/onnx-ml.pb.h",
     ],
-    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx -m >/dev/null && sed -i 's/onnx_onnx_torch-ml.pb.h/onnx\\/onnx_onnx_torch-ml.pb.h/g' $(@D)/onnx/onnx-ml.pb.h",
+    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx -m >/dev/null && sed -i.bak 's/onnx_onnx_torch-ml.pb.h/onnx\\/onnx_onnx_torch-ml.pb.h/g' $(@D)/onnx/onnx-ml.pb.h",
     tools = [":gen_proto"],
 )
 
@@ -28,7 +28,7 @@ genrule(
         "onnx/onnx-operators_onnx_torch-ml.proto",
         "onnx/onnx-operators-ml.pb.h",
     ],
-    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx-operators -m >/dev/null && sed -i 's/onnx-operators_onnx_torch-ml.pb.h/onnx\\/onnx-operators_onnx_torch-ml.pb.h/g' $(@D)/onnx/onnx-operators-ml.pb.h",
+    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx-operators -m >/dev/null && sed -i.bak 's/onnx-operators_onnx_torch-ml.pb.h/onnx\\/onnx-operators_onnx_torch-ml.pb.h/g' $(@D)/onnx/onnx-operators-ml.pb.h",
     tools = [":gen_proto"],
 )
 
@@ -38,7 +38,7 @@ genrule(
         "onnx/onnx-data_onnx_torch.proto",
         "onnx/onnx-data.pb.h",
     ],
-    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx-data -m >/dev/null && sed -i 's/onnx-data_onnx_torch.pb.h/onnx\\/onnx-data_onnx_torch.pb.h/g' $(@D)/onnx/onnx-data.pb.h",
+    cmd = "$(location :gen_proto) -p onnx_torch -o $(@D)/onnx onnx-data -m >/dev/null && sed -i.bak 's/onnx-data_onnx_torch.pb.h/onnx\\/onnx-data_onnx_torch.pb.h/g' $(@D)/onnx/onnx-data.pb.h",
     tools = [":gen_proto"],
 )
 
