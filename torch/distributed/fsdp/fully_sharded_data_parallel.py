@@ -751,16 +751,15 @@ class FullyShardedDataParallel(nn.Module):
         its descendant FSDP modules.
         .. note:: This API should be called for only the root FSDP module.
         .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
-
         .. note:: This API enables users to transparently use the conventional
         ``state_dict`` API to take model checkpoints in cases where the root
         FSDP module is wrapped by another ``nn.Module``. For example, the
         following will ensure `state_dict`  is called on all non-FSDP instances,
         while dispatching into `local_state_dict` implementation for FSDP:
-            >>> model = DDP(FSDP(...))
-            >> fsdp_root = model.module
-            >>> with fsdp_root.state_dict_type(StateDictType.LOCAL_STATE_DICT):
-            >>>     checkpoint = model.state_dict()
+        >>> model = DDP(FSDP(...))
+        >> fsdp_root = model.module
+        >>> with fsdp_root.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>>     checkpoint = model.state_dict()
         Args:
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """

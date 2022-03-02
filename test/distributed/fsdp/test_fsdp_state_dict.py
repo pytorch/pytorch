@@ -200,8 +200,7 @@ class TestFSDPStateDict(FSDPTest):
         with model.state_dict_type(enum_val):
             return model.load_state_dict(state_dict)
 
-    def _dist_train(
-        self, wrap_fsdp: bool, state_dict_type: str = ""):
+    def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
         # TODO: Move this test to common_fsdp.
         model = self._initialize_model(wrap_fsdp)
         optim = SGD(model.parameters(), lr=0.1)
