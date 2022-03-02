@@ -168,13 +168,13 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
 }
 
 std::string GetTensorTextGraph(at::Tensor tensor) {
-  torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
-  return torch::lazy::DumpUtil::ToText({xtensor.GetIrValue().node.get()});
+  torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(tensor);
+  return torch::lazy::DumpUtil::ToText({lazy_tensor->GetIrValue().node.get()});
 }
 
 std::string GetTensorDotGraph(at::Tensor tensor) {
-  torch::lazy::LazyTensor xtensor = torch::lazy::TryGetLtcTensor(tensor);
-  return torch::lazy::DumpUtil::ToDot({xtensor.GetIrValue().node.get()});
+  torch::lazy::LazyTensorPtr lazy_tensor = torch::lazy::TryGetLtcTensor(tensor);
+  return torch::lazy::DumpUtil::ToDot({lazy_tensor->GetIrValue().node.get()});
 }
 
 void TestBackward(
