@@ -261,15 +261,17 @@ class FullyShardedDataParallel(nn.Module):
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
 
-        # Check if meta device
-        is_meta_module = any(t.is_meta for t in module.parameters())
+        # Check if meta device.
+        # Right now this check is just if user has
+        # specified param_init_fns, implying it is a
+        # meta module. Will make it more user friendly
+        # as part of flushing out the API.
+        is_meta_module = param_init_fns is not None
 
         if is_meta_module:
             self._rank0_print(f"Got meta module {module}")
             # Materialize the module first.
             self._rank0_print(f"Materializing it on {torch.cuda.current_device()}")
-            dev = torch.cuda.current_device()
-            module.to_empty(device=dev)
 
             # Initialize parameters according to the user lambda.
             if param_init_fns is None:
