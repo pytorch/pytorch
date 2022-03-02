@@ -232,6 +232,8 @@ class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 
+using SROperator = std::function<void(ProcessedNode*)>;
+
 // A `BlockInfo` instance stores all of the shared state that each
 // `BlockRunner` will need to access. Most of this information is
 // read-only and shared between threads.
@@ -765,7 +767,7 @@ class TORCH_API ProcessedFunction {
   }
 
  private:
-  std::function<void(ProcessedNode*)> f_;
+  SROperator f_;
   Kind kind_{ProcessedFunction::Kind::kOutVariant};
   bool check_memory_overlap_{false};
   size_t num_outputs_{0};
