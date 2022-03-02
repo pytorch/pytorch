@@ -214,7 +214,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
         TORCH_CHECK(at::can_cast(np_type, scalarType), "Can't cast from ", np_type, " to ", scalarType);
         IntArrayRef expected_shape = c10::makeArrayRef(sizes.cbegin() + dim + 1, sizes.cend());
         auto expected_dim = expected_shape.size();
-        auto np_arr_ndim = PyArray_NDIM(np_arr);
+        size_t np_arr_ndim = PyArray_NDIM(np_arr);
         TORCH_CHECK(np_arr_ndim == expected_dim,
                     "Expected NumPy array to be ", expected_dim, "-D but found ", np_arr_ndim, "-D");
 
