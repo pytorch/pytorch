@@ -1,10 +1,10 @@
 import torch
-from torch.fx.graph import Node
+from torch.fx.graph import Node, Graph
 from .pattern_utils import (
     register_fusion_pattern,
 )
 from ..utils import _parent_name
-from .quantization_types import QuantizerCls, NodePattern, Pattern
+from .quantization_types import NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
@@ -18,13 +18,14 @@ from .match_utils import MatchAllNode
 class FuseHandler(ABC):
     """ Base handler class for the fusion patterns
     """
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, node: Node):
         pass
 
     @abstractmethod
     def fuse(self,
-             quantizer: QuantizerCls,
              load_arg: Callable,
+             named_modules: Dict[str, torch.nn.Module],
+             fused_graph: Graph,
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
@@ -60,13 +61,13 @@ class FuseHandler(ABC):
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
-            quantizer: QuantizerCls,
             node: Node):
-        super().__init__(quantizer, node)
+        super().__init__(node)
 
     def fuse(self,
-             quantizer: QuantizerCls,
              load_arg: Callable,
+             named_modules: Dict[str, torch.nn.Module],
+             fused_graph: Graph,
              root_node: Node,
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any],
@@ -74,7 +75,7 @@ class DefaultFuseHandler(FuseHandler):
              is_qat: bool) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
-        root_module = quantizer.modules[root_node.target]
+        root_module = named_modules[str(root_node.target)]
         assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
         "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
         def get_modules(pattern):
@@ -92,7 +93,7 @@ class DefaultFuseHandler(FuseHandler):
             else:
                 n = pattern
                 if n.op == "call_module":
-                    return quantizer.modules[n.target]
+                    return named_modules[n.target]
                 elif n.op == "call_function" and n.target == torch.nn.functional.relu:
                     relu = torch.nn.ReLU()
                     relu.training = root_module.training
@@ -119,5 +120,5 @@ class DefaultFuseHandler(FuseHandler):
         # as input
         fused_module = fuser_method(is_qat, *matched_modules)
         # TODO: maybe add a pass to cleanup bn modules?
-        setattr(quantizer.modules[module_parent_name], module_name, fused_module)
-        return quantizer.fused_graph.node_copy(root_node, load_arg)
+        setattr(named_modules[module_parent_name], module_name, fused_module)
+        return fused_graph.node_copy(root_node, load_arg)
