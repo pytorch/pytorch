@@ -6,7 +6,7 @@
 
 #include <c10d/logging.h>
 
-#include <c10d/debug.hpp>
+#include <c10d/debug.h>
 
 namespace c10d {
 namespace detail {

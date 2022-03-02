@@ -1663,6 +1663,7 @@ cc_library(
             "torch/*.h",
             "torch/csrc/**/*.h",
             "torch/csrc/distributed/c10d/*.hpp",
+            "torch/csrc/distributed/c10d/debug.h",
             "torch/lib/libshm/*.h",
             "torch/csrc/generic/*.cpp",
         ],
