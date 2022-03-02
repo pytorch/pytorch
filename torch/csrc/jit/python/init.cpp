@@ -21,13 +21,13 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
+#include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
-#include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_concat_linear.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
