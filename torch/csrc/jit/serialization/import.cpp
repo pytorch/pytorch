@@ -110,6 +110,28 @@ class ScriptModuleDeserializer final {
             },
             reader_->version()) {}
 
+  ScriptModuleDeserializer(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<PyTorchStreamReader> reader,
+    std::string pickle_dir_prefix,
+    std::string tensor_dir_prefix,
+    std::string code_dir_prefix,
+    std::shared_ptr<DeserializationStorageContext> storage_context)
+    : compilation_unit_(std::move(cu)),
+      reader_(std::move(reader)),
+      storage_context_(std::move(storage_context)),
+      code_prefix_(std::move(code_dir_prefix)),
+      pickle_dir_prefix_(std::move(pickle_dir_prefix)),
+      tensor_dir_prefix_(std::move(tensor_dir_prefix)),
+      source_importer_(
+          compilation_unit_,
+          &constants_table_,
+          [this](const std::string& qualifier) {
+            return findSourceInArchiveFromQualifier(
+                *reader_, code_prefix_, qualifier);
+          },
+          reader_->version()) {}
+
   Module deserialize(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
@@ -307,6 +329,7 @@ Module import_ir_module(
       std::move(reader),
       /* pickle_dir_prefix = */ ".data/ts_code/" + ts_id + "/",
       /* tensor_dir_prefix = */ ".data/",
+      /* code_dir_prefix = */ ".data/ts_code/code/" + ts_id + "/",
       storage_context);
   ExtraFilesMap extra_files;
   return deserializer.deserialize(device, extra_files);

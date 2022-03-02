@@ -482,10 +482,10 @@ void ScriptModuleSerializer::writeArchive(
         // returns a string to use in picker.cpp as storage obj key
         if (use_storage_context) {
           bool already_serialized =
-              storage_context_.hasStorage(tensor.storage());
+              storage_context_->hasStorage(tensor.storage());
           std::string tensor_name =
               std::to_string(
-                  storage_context_.getOrAddStorage(tensor.storage())) +
+                  storage_context_->getOrAddStorage(tensor.storage())) +
               ".storage";
           if (already_serialized) {
             // this case is hit when storage has been serialized already
@@ -590,7 +590,15 @@ void ScriptModuleSerializer::writeFiles(const std::string& code_dir) {
     // The cpu cost of generating zip datastructs and compressing isn't
     // well-spent for very small records.
     static constexpr size_t kMinToCompress = 200;
-
+    if(writer_.getAllWrittenRecords().count(filename) > 0){
+      std::cout << filename << std::endl;
+      std::cout << src.c_str() << std::endl;
+      std::cout << src.size() << std::endl << std::endl;
+      continue;
+    }
+    std::cout << filename << std::endl;
+    std::cout << src.c_str() << std::endl;
+    std::cout << src.size() << std::endl << std::endl;
     writer_.writeRecord(
         filename,
         src.c_str(),
@@ -780,7 +788,7 @@ void ScriptModuleSerializer::serialize_unified_format(
   // function to have the code actually saved (tensors are saved)
 }
 
-SerializationStorageContext& ScriptModuleSerializer::storage_context() {
+std::shared_ptr<SerializationStorageContext> ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
