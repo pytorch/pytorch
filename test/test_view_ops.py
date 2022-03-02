@@ -1489,9 +1489,6 @@ class TestOldViewOps(TestCase):
 
         float_inputs_error_case = [(1.1, 2.0), (1.1, 1.0)]
         for error_case in float_inputs_error_case:
-            with self.assertRaisesRegex(RuntimeError, "Input shapes "
-                                        "should be of type ints, a tuple of ints, or a list of ints"):
-                torch.broadcast_shapes(error_case)
             for float_input in error_case:
                 with self.assertRaisesRegex(RuntimeError, "Input shapes "
                                             "should be of type ints, a tuple of ints, or a list of ints"):
