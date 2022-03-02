@@ -5,6 +5,9 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <memory>
+#include "c10/util/ArrayRef.h"
+#include "lazy/core/dynamic_ir.h"
 
 namespace torch {
 namespace lazy {
@@ -64,6 +67,24 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
 C10_REGISTER_GUARD_IMPL(Lazy, LTCGuardImpl);
 
 }  // namespace
+
+
+c10::ArrayRef<c10::SymbolicOrConcreteInt> LTCTensorImpl::boxed_sizes() const {
+
+  if (boxed_sizes_) {
+    return c10::ArrayRef<c10::SymbolicOrConcreteInt>(*boxed_sizes_);
+  }
+
+  std::vector<c10::SymbolicOrConcreteInt> boxed_sizes;
+  boxed_sizes.reserve(dim());
+
+  for (auto i: c10::irange(dim())) {
+    boxed_sizes.push_back(GetLazySymbolicIntImpl()->getSizeNode(tensor_.GetIrValue(), i));    
+  }
+
+  this->boxed_sizes_ = boxed_sizes;
+  return c10::ArrayRef<c10::SymbolicOrConcreteInt>(*this->boxed_sizes_);
+}
 
 LTCTensorImpl::LTCTensorImpl(const LazyTensor& tensor)
     : LTCTensorImpl(LazyTensor(tensor)) {}

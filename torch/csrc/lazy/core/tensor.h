@@ -9,17 +9,25 @@
 
 namespace torch {
 namespace lazy {
+  
+
+
 
 struct TORCH_API LazySymbolicIntImpl: public c10::SymbolicIntImpl {
+
+  std::shared_ptr<torch::lazy::Node> getNode(int64_t index);
+   
   bool virtual isSymbolicInt(int64_t data_) override {
-    return false;
+    return data_ < -1;
   };
 
-  // I can't overload + for primitive types
-  int64_t virtual add(int64_t s1, int64_t s2) override {
-    return 0;
-  }
-};  
+  int64_t getSizeNode(torch::lazy::Value v, size_t dim);
+
+  // We can't overload + for primitive types, so we have to use"add"
+  int64_t virtual add(int64_t s1, int64_t s2) override;
+}; 
+
+TORCH_API LazySymbolicIntImpl* GetLazySymbolicIntImpl();
 
 class TORCH_API LazyTensor {
  public:

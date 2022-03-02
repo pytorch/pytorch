@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include "c10/util/ArrayRef.h"
 
 namespace at {
 namespace native {
@@ -798,8 +799,18 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
-  TORCH_CHECK(size.size() >= (size_t)self.dim(),
+IntArrayRef AssertConcreteSizes(c10::ArrayRef<c10::SymbolicOrConcreteInt> ar) {
+  for (SymbolicOrConcreteInt sci: ar) {
+    TORCH_CHECK(!sci.isSymbolicInt());
+  }
+
+  return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
+}
+
+
+Tensor expand(const Tensor& self, c10::ArrayRef<c10::SymbolicOrConcreteInt> boxed_size, bool /*unused*/) {
+    IntArrayRef size = c10::AssertConcreteSizes(boxed_size); 
+    TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",
            "must be greater or equal to the number of dimensions in the tensor (",

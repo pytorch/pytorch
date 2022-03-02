@@ -2,6 +2,7 @@
 #define CAFFE2_CORE_TENSOR_H_
 
 #include <c10/macros/Macros.h>
+#include "c10/util/ArrayRef.h"
 #include "caffe2/core/storage.h"
 
 #include <ATen/core/UndefinedTensorImpl.h>
@@ -427,6 +428,10 @@ class TORCH_API Tensor final {
   inline at::IntArrayRef sizes() const {
     return impl_.get()->sizes();
   }
+
+   inline c10::ArrayRef<c10::SymbolicOrConcreteInt> boxed_sizes() const {
+     return impl_.get()->boxed_sizes();
+   }
 
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());

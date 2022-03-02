@@ -1,5 +1,3 @@
-#pragma once
-
 #include <torch/csrc/lazy/core/dynamic_ir.h>
 
 namespace torch {

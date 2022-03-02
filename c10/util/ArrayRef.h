@@ -52,11 +52,13 @@ public:
   int64_t data_;
 
   // Note this is static as it should apply to all SymbolicInts
-  static std::unique_ptr<SymbolicIntImpl> impl_;
+  // we also want this to be fast enough, hence the raw ptr
+  static SymbolicIntImpl* impl_;
+
 
   // TODO: this can be done per device
   static void RegisterSymbolicIntImpl(SymbolicIntImpl* impl) {
-    impl_.reset(impl);
+    impl_ = impl;
   }
 
   bool isSymbolicInt() {
@@ -170,10 +172,29 @@ class ArrayRef final {
     debugCheckNullptrInvariant();
   }
 
+
+  template <size_t N>
+  ArrayRef(const SmallVector<int64_t, N>& Vec):
+    Data(reinterpret_cast<const c10::SymbolicOrConcreteInt*>(Vec.data())), Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
+
   template <typename U,
   typename = std::enable_if_t<std::is_constructible<T, U>::value>>
   ArrayRef(const ArrayRef<U> ar):
     Data(reinterpret_cast<const T*>(ar.data())), Length(ar.size()) {}
+
+  //template <typename U, typename T1 = T, size_t N,
+  template <typename T1 = T, size_t N,
+  typename = std::enable_if_t<std::is_same<SymbolicOrConcreteInt, T1>::value>>
+  //typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
+  ArrayRef(const SmallVector<int64_t, N>& Vec):
+    Data(reinterpret_cast<const c10::SymbolicOrConcreteInt*>(Vec.data())), Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
+
+
+
 
   /// Construct an ArrayRef from a std::vector.
   // The enable_if stuff here makes sure that this isn't used for

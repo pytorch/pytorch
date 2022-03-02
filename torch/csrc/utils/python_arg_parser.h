@@ -183,6 +183,7 @@ struct PythonArgs {
   inline c10::OptionalArray<double> doublelistOptional(int i);
   inline std::vector<double> doublelist(int i);
   inline std::vector<double> getDoublelist(int i);
+  inline std::vector<double> boxedintlist(int i);
   inline at::Layout layout(int i);
   inline at::Layout layoutWithDefault(int i, at::Layout default_layout);
   inline c10::optional<at::Layout> layoutOptional(int i);
@@ -460,6 +461,16 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
   }
   return this->getDoublelist(i);
 }
+
+inline std::vector<double> PythonArgs::boxedintlist(int i) {
+  if (!args[i]) {
+    return {};
+  }
+
+  TORCH_INTERNAL_ASSERT(false, "NYI");
+  return {};
+}
+
 
 inline at::ScalarType PythonArgs::scalartypeWithDefault(int i, at::ScalarType default_scalartype) {
   if (!args[i]) return default_scalartype;

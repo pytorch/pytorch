@@ -1,6 +1,6 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/tensor.h>
-
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
@@ -11,9 +11,66 @@
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
 #include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 #include <torch/csrc/lazy/ts_backend/ops/scalar.h>
+#include <memory>
+#include <mutex>
+#include "c10/util/Exception.h"
+#include "lazy/core/ir.h"
 
 namespace torch {
 namespace lazy {
+
+
+struct DimensionNodeMap {
+
+  public:
+
+    std::shared_ptr<torch::lazy::DimensionNode> getNode(int64_t index) {
+      std::lock_guard<std::mutex> lock(mut_);
+      return std::dynamic_pointer_cast<DimensionNode>(nodes_[index]);
+    }
+
+    // yay!!! a memory leak!!!
+    int64_t putNode(std::shared_ptr<torch::lazy::Node> node) {
+      std::lock_guard<std::mutex> lock(mut_);
+      int64_t size = nodes_.size();
+      nodes_.push_back(node);
+      return size;
+    }
+
+  private:
+    std::vector<std::shared_ptr<torch::lazy::Node>> nodes_;
+    std::mutex mut_;
+};
+
+static DimensionNodeMap dim_map;
+
+std::shared_ptr<torch::lazy::Node> LazySymbolicIntImpl::getNode(int64_t index) {
+  static std::vector<std::shared_ptr<torch::lazy::DimensionNode>> nodes;
+  static std::mutex mut_;
+  TORCH_INTERNAL_ASSERT(index < -1);
+  auto norm_index = -index - 1;
+  TORCH_INTERNAL_ASSERT(norm_index < nodes.size());
+  return dim_map.getNode(norm_index);
+}
+
+int64_t LazySymbolicIntImpl::getSizeNode(torch::lazy::Value v, size_t dim) {
+  auto size_node = MakeNode<torch::lazy::SizeNode>(v, dim);
+  return -dim_map.putNode(size_node) + 1;
+}
+
+int64_t LazySymbolicIntImpl::add(int64_t s1, int64_t s2) {
+  auto lhs = dim_map.getNode(s1);
+  auto rhs = dim_map.getNode(s2);
+  auto add = MakeNode<torch::lazy::SizeAdd>(torch::lazy::Value(lhs), torch::lazy::Value(rhs));
+  return -(dim_map.putNode(add) + 1);
+}
+
+LazySymbolicIntImpl* GetLazySymbolicIntImpl() {
+  static LazySymbolicIntImpl impl_;
+  return &impl_;
+}
+
+
 namespace {
 LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const BackendDevice& device) {

@@ -21,6 +21,7 @@
 #include <atomic>
 #include <memory>
 #include <numeric>
+#include "c10/util/ArrayRef.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrunk to a smaller size. As a result, a Tensor is always going to
@@ -708,6 +709,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #else
       ;
 #endif
+
+TENSORIMPL_MAYBE_VIRTUAL inline c10::ArrayRef<c10::SymbolicOrConcreteInt> boxed_sizes() const {
+     return c10::ArrayRef<c10::SymbolicOrConcreteInt>(sizes());
+}
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains

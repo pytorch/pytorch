@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include "c10/util/ArrayRef.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
@@ -426,6 +427,10 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
 // }
 
 void InitLtcModuleBindings(py::module m) {
+
+  // register LazySymbolicIntImpl
+  c10::SymbolicOrConcreteInt::RegisterSymbolicIntImpl(GetLazySymbolicIntImpl());
+
   py::class_<torch::lazy::Node, std::shared_ptr<torch::lazy::Node>>(m, "IrNode");
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });

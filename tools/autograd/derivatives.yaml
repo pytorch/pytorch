@@ -594,7 +594,7 @@
   self: grad * (result + 1)
   result: auto_element_wise
 
-- name: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
+- name: expand(Tensor(a) self, BoxedInt[] size, *, bool implicit=False) -> Tensor(a)
   self: at::sum_to(grad, self.sizes())
   result: auto_linear
 

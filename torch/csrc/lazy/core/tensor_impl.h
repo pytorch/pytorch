@@ -5,6 +5,7 @@
 #include <c10/core/TensorImpl.h>
 
 #include <torch/csrc/lazy/core/tensor.h>
+#include "c10/util/ArrayRef.h"
 
 namespace torch {
 namespace lazy {
@@ -21,6 +22,8 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   void set_tensor(const LazyTensor& lazy_tensor);
 
   void force_refresh_sizes() { generation_ = 0; }
+
+  virtual c10::ArrayRef<c10::SymbolicOrConcreteInt> boxed_sizes() const override;
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
@@ -51,6 +54,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   void setup_size_properties();
 
   LazyTensor tensor_;
+  mutable c10::optional<std::vector<c10::SymbolicOrConcreteInt>> boxed_sizes_;
   size_t generation_ {0};
 };
 

@@ -2033,6 +2033,25 @@ private:
   : Type(TypeKind::AnyClassType) {}
 };
 
+
+struct SymbolicOrConcreteIntType;
+using SymbolicOrConcreteIntTypePtr = SingletonTypePtr<SymbolicOrConcreteIntType>;
+
+struct TORCH_API SymbolicOrConcreteIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "Any";
+  }
+  static const TypeKind Kind = TypeKind::SymbolicOrConcreteIntType;
+  // global singleton
+  static SymbolicOrConcreteIntTypePtr get();
+
+ private:
+  SymbolicOrConcreteIntType() : Type(TypeKind::SymbolicOrConcreteIntType) {}
+};
+
 template<>
 inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||

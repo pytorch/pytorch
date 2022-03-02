@@ -48,6 +48,7 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
+  _(SymbolicOrConcreteIntType) \
   _(UnionType)              \
   _(DynamicType)
 
@@ -99,6 +100,7 @@ TORCH_DECLARE_SINGLETON(ScalarTypeType);
 TORCH_DECLARE_SINGLETON(AnyListType);
 TORCH_DECLARE_SINGLETON(AnyTupleType);
 TORCH_DECLARE_SINGLETON(AnyClassType);
+TORCH_DECLARE_SINGLETON(SymbolicOrConcreteIntType);
 
 namespace detail {
 template <typename T, typename Enable = void>

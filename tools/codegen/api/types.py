@@ -67,6 +67,8 @@ intArrayRefT = BaseCppType('at', 'IntArrayRef')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
+BoxedIntT = BaseCppType('c10', 'SymbolicOrConcreteInt')
+BoxedIntArrayRefT = BaseCppType('at', 'BoxedIntArrayRef')
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.int: longT,
@@ -84,6 +86,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.QScheme: qschemeT,
     BaseTy.Storage: storageT,
     BaseTy.Stream: streamT,
+    BaseTy.BoxedInt: BoxedIntT,
 }
 
 # CTypes encode C++ type structure as needed for translation.
