@@ -35,7 +35,8 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
         : tensor_data(std::move(tensor_data)),
           device(std::move(device)),
           unique_id(GetNextTensorId()) {
-            TORCH_CHECK(tensor_data.device().type() != at::kLazy);
+            TORCH_CHECK(this->tensor_data);
+            TORCH_CHECK(this->tensor_data->device().type() != at::kLazy);
           }
 
     ~Data();
