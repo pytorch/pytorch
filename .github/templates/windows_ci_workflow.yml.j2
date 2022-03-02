@@ -31,13 +31,13 @@ on:
       - '!{{ label }}/*'
   {%- endif %}
 {%- endfor %}
-{%- if not is_scheduled and not only_on_pr %}
+{%- if not is_scheduled %}
     branches:
       - master
       - main
       - release/*
 {%- endif %}
-{%- if is_scheduled and not only_on_pr %}
+{%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
 {%- endif %}
