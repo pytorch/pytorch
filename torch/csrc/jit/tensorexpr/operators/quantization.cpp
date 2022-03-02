@@ -39,7 +39,34 @@ bool isQuantized(const BufHandle& qx) {
   return qx.node()->qscale() && qx.node()->qzero();
 }
 
-BufHandle makeQBufHandleNCHW(
+BufHandle makeQBufHandleChannelsLast(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const ExprPtr qscale,
+    const ExprPtr qzero) {
+  BufHandle ResultBuf(name, dims, dtype);
+  ResultBuf.node()->set_qscale(qscale);
+  ResultBuf.node()->set_qzero(qzero);
+  ResultBuf.node()->set_strides(make_channels_last_strides(dims));
+  return ResultBuf;
+}
+
+BufHandle makeQBufHandleChannelsLast(
+    const std::string& name,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype,
+    const double qscale,
+    const int64_t qzero) {
+  return makeQBufHandleChannelsLast(
+      name,
+      dims,
+      dtype,
+      DoubleImm::make(qscale).node(),
+      LongImm::make(qzero).node());
+}
+
+BufHandle makeQBufHandleContiguous(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
@@ -52,26 +79,13 @@ BufHandle makeQBufHandleNCHW(
   return ResultBuf;
 }
 
-BufHandle makeQBufHandleNHWC(
-    const std::string& name,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype,
-    const ExprPtr qscale,
-    const ExprPtr qzero) {
-  BufHandle ResultBuf(name, dims, dtype);
-  ResultBuf.node()->set_qscale(qscale);
-  ResultBuf.node()->set_qzero(qzero);
-  ResultBuf.node()->set_strides(make_channels_last_strides(dims));
-  return ResultBuf;
-}
-
-BufHandle makeQBufHandleNHWC(
+BufHandle makeQBufHandleContiguous(
     const std::string& name,
     const std::vector<ExprHandle>& dims,
     Dtype dtype,
     const double qscale,
     const int64_t qzero) {
-  return makeQBufHandleNHWC(
+  return makeQBufHandleContiguous(
       name,
       dims,
       dtype,
@@ -79,71 +93,19 @@ BufHandle makeQBufHandleNHWC(
       LongImm::make(qzero).node());
 }
 
-BufHandle makeQBufHandleNLC(
-    const std::string& name,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype,
-    const ExprPtr qscale,
-    const ExprPtr qzero) {
-  BufHandle ResultBuf(name, dims, dtype);
-  ResultBuf.node()->set_qscale(qscale);
-  ResultBuf.node()->set_qzero(qzero);
-  ResultBuf.node()->set_strides(make_channels_last_strides(dims));
-  return ResultBuf;
-}
-
-BufHandle makeQBufHandleNLC(
-    const std::string& name,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype,
-    const double qscale,
-    const int64_t qzero) {
-  return makeQBufHandleNLC(
-      name,
-      dims,
-      dtype,
-      DoubleImm::make(qscale).node(),
-      LongImm::make(qzero).node());
-}
-
-BufHandle makeQBufHandleNCHW(
-    const std::string& name,
-    const std::vector<ExprHandle>& dims,
-    Dtype dtype,
-    const double qscale,
-    const int64_t qzero) {
-  return makeQBufHandleNCHW(
-      name,
-      dims,
-      dtype,
-      DoubleImm::make(qscale).node(),
-      LongImm::make(qzero).node());
-}
-
-bool isNHWC(const BufHandle& buf) {
+bool isChannelsLast(const BufHandle& buf) {
   const auto& strides = buf.node()->strides();
   const auto& dims = buf.node()->dims();
-  if (strides.size() != 4) {
+  const auto rank = dims.size();
+  if (rank < 3) {
     return false;
   }
-  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
-  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
-  auto strides3 = to<LongImm>(IRSimplifier::simplify(strides[3]))->value();
+  auto dimsC = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
+  auto stridesC = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
+  auto stridesLast =
+      to<LongImm>(IRSimplifier::simplify(strides[rank - 1]))->value();
 
-  return ((strides3 == dims1) && (strides1 == 1));
-}
-
-bool isNLC(const BufHandle& buf) {
-  const auto& strides = buf.node()->strides();
-  const auto& dims = buf.node()->dims();
-  if (strides.size() != 3) {
-    return false;
-  }
-  auto dims1 = to<LongImm>(IRSimplifier::simplify(dims[1]))->value();
-  auto strides1 = to<LongImm>(IRSimplifier::simplify(strides[1]))->value();
-  auto strides2 = to<LongImm>(IRSimplifier::simplify(strides[2]))->value();
-
-  return ((strides2 == dims1) && (strides1 == 1));
+  return ((stridesLast == dimsC) && (stridesC == 1));
 }
 
 ExprHandle quant(
@@ -247,8 +209,8 @@ Tensor computeQuantizedAdd(
       ExprHandleVectorToExprVector(outputShape),
       out_dtype,
       nullptr,
-      isNHWC(QA) || isNLC(QA) ? make_channels_last_strides(outputShape)
-                              : make_contiguous_strides(outputShape),
+      isChannelsLast(QA) ? make_channels_last_strides(outputShape)
+                         : make_contiguous_strides(outputShape),
       out_qscale.node(),
       out_qzero.node());
   return Tensor(buf, vars, exprHandle.node());
@@ -274,15 +236,11 @@ Tensor computeQuantizePerTensorExternalCall(
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
   auto ResultBuf = [&]() {
-    if (isNHWC(x)) {
-      return makeQBufHandleNHWC(
+    if (isChannelsLast(x)) {
+      return makeQBufHandleChannelsLast(
           "quantize_per_tensor", outputShape, dtype, qscale, qzero);
     }
-    if (isNLC(x)) {
-      return makeQBufHandleNLC(
-          "quantize_per_tensor", outputShape, dtype, qscale, qzero);
-    }
-    return makeQBufHandleNCHW(
+    return makeQBufHandleContiguous(
         "quantize_per_tensor", outputShape, dtype, qscale, qzero);
   }();
   StmtPtr s = ExternalCall::make(
@@ -377,7 +335,7 @@ Tensor computeQuantizedConv1d(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandleNLC(
+  auto ResultBuf = makeQBufHandleChannelsLast(
       "quantized_conv1d",
       outputShape,
       Dtype(out_qdtype),
@@ -408,7 +366,7 @@ Tensor computeQuantizedConv2d(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandleNHWC(
+  auto ResultBuf = makeQBufHandleChannelsLast(
       "quantized_conv2d",
       outputShape,
       Dtype(out_qdtype),
@@ -439,7 +397,7 @@ Tensor computeQuantizedConv2dRelu(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandleNHWC(
+  auto ResultBuf = makeQBufHandleChannelsLast(
       "quantized_conv2d_relu",
       outputShape,
       Dtype(out_qdtype),
@@ -470,7 +428,7 @@ Tensor computeQuantizedLinear(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandleNCHW(
+  auto ResultBuf = makeQBufHandleContiguous(
       "quantized_linear",
       outputShape,
       Dtype(out_qdtype),
@@ -501,7 +459,7 @@ Tensor computeQuantizedLinearRelu(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qx);
-  auto ResultBuf = makeQBufHandleNCHW(
+  auto ResultBuf = makeQBufHandleContiguous(
       "quantized_linear_relu",
       outputShape,
       Dtype(out_qdtype),
@@ -532,16 +490,16 @@ Tensor computeQuantizedAddExternalCall(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  const bool isQAChannelsLast = isNHWC(qa);
-  const bool isQBChannelsLast = isNHWC(qb);
+  const bool isQAChannelsLast = isChannelsLast(qa);
+  const bool isQBChannelsLast = isChannelsLast(qb);
   auto ResultBuf = (isQAChannelsLast || isQBChannelsLast)
-      ? makeQBufHandleNHWC(
+      ? makeQBufHandleChannelsLast(
             "quantized_add",
             outputShape,
             Dtype(out_qdtype),
             out_qscale,
             out_qzero)
-      : makeQBufHandleNCHW(
+      : makeQBufHandleContiguous(
             "quantized_add",
             outputShape,
             Dtype(out_qdtype),
@@ -575,7 +533,7 @@ Tensor computeQuantizedMul(
   const auto out_qzero = c10::get<int64_t>(inputs[3]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  auto ResultBuf = makeQBufHandleNCHW(
+  auto ResultBuf = makeQBufHandleContiguous(
       "quantized_mul", outputShape, Dtype(out_qdtype), out_qscale, out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
@@ -604,7 +562,7 @@ Tensor computeQuantizedMulScalar(
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
   double scale1 = immQScale(qa);
-  auto ResultBuf = makeQBufHandleNCHW(
+  auto ResultBuf = makeQBufHandleContiguous(
       "quantized_mul_scalar",
       outputShape,
       Dtype(out_qdtype),
@@ -627,14 +585,14 @@ Tensor computeQuantizedRelu(
     at::Device device) {
   const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
   const auto out_qdtype = immQDType(qa);
-  const bool isQAChannelsLast = isNHWC(qa);
-  auto ResultBuf = isQAChannelsLast ? makeQBufHandleNHWC(
+  const bool isQAChannelsLast = isChannelsLast(qa);
+  auto ResultBuf = isQAChannelsLast ? makeQBufHandleChannelsLast(
                                           "quantized_relu",
                                           outputShape,
                                           Dtype(out_qdtype),
                                           immQScale(qa),
                                           immQZero(qa))
-                                    : makeQBufHandleNCHW(
+                                    : makeQBufHandleContiguous(
                                           "quantized_relu",
                                           outputShape,
                                           Dtype(out_qdtype),
@@ -675,7 +633,7 @@ Tensor computeQuantizedCat(
   extra_args.emplace_back(argDim);
   extra_args.emplace_back(out_qscale);
   extra_args.emplace_back(out_qzero);
-  auto ResultBuf = makeQBufHandleNCHW(
+  auto ResultBuf = makeQBufHandleContiguous(
       "quantized_cat",
       outputShape,
       Dtype(immQDType(inputList[0])),
@@ -749,8 +707,8 @@ Tensor computeUpsampleNearest2d(
     return A.load(newAxes);
   };
   auto e = body_func(args);
-  auto strides = isNHWC(A) || isNLC(A) ? make_channels_last_strides(outputShape)
-                                       : make_contiguous_strides(outputShape);
+  auto strides = isChannelsLast(A) ? make_channels_last_strides(outputShape)
+                                   : make_contiguous_strides(outputShape);
   BufHandle buf = Buf::make(
       "upsample_nearest2d",
       outputShape,
@@ -796,7 +754,7 @@ Tensor computeUpsampleNearest2dExternalCall(
 
   BufHandle ResultBuf = [&]() {
     if (isQuantized(x)) {
-      return makeQBufHandleNHWC(
+      return makeQBufHandleChannelsLast(
           "upsample_nearest2d",
           outputShape,
           Dtype(immQDType(x)),
@@ -832,18 +790,18 @@ Tensor computeQuantizedSigmoidExternalCall(
   const double out_qscale = 1.0f / 256.0f;
   const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
 
-  auto ResultBuf = isNHWC(qx) || isNLC(qx) ? makeQBufHandleNHWC(
-                                                 "quantized_sigmoid",
-                                                 outputShape,
-                                                 Dtype(out_qdtype),
-                                                 out_qscale,
-                                                 out_qzero)
-                                           : makeQBufHandleNCHW(
-                                                 "quantized_sigmoid",
-                                                 outputShape,
-                                                 Dtype(out_qdtype),
-                                                 out_qscale,
-                                                 out_qzero);
+  auto ResultBuf = isChannelsLast(qx) ? makeQBufHandleChannelsLast(
+                                            "quantized_sigmoid",
+                                            outputShape,
+                                            Dtype(out_qdtype),
+                                            out_qscale,
+                                            out_qzero)
+                                      : makeQBufHandleContiguous(
+                                            "quantized_sigmoid",
+                                            outputShape,
+                                            Dtype(out_qdtype),
+                                            out_qscale,
+                                            out_qzero);
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_sigmoid",

@@ -4,23 +4,25 @@ Most commonly used methods are already supported, and the interface is general
 enough, so that more sophisticated ones can be also easily integrated in the
 future.
 """
-from functools import partial
+from functools import partialmethod
 from torch import optim
 
-from .adam import Adam
-from .adamw import AdamW
-NAdam = partial(optim.NAdam, foreach=True)
-from .sgd import SGD
-RAdam = partial(optim.RAdam, foreach=True)
-from .rmsprop import RMSprop
-from .rprop import Rprop
-ASGD = partial(optim.ASGD, foreach=True)
-Adamax = partial(optim.Adamax, foreach=True)
-Adadelta = partial(optim.Adadelta, foreach=True)
-Adagrad = partial(optim.Adagrad, foreach=True)
+def partialclass(cls, *args, **kwargs):
 
-del adam
-del adamw
-del sgd
-del rmsprop
-del rprop
+    class NewCls(cls):
+        __init__ = partialmethod(cls.__init__, *args, **kwargs)
+
+    return NewCls
+
+
+Adam = partialclass(optim.Adam, foreach=True)
+AdamW = partialclass(optim.AdamW, foreach=True)
+NAdam = partialclass(optim.NAdam, foreach=True)
+SGD = partialclass(optim.SGD, foreach=True)
+RAdam = partialclass(optim.RAdam, foreach=True)
+RMSprop = partialclass(optim.RMSprop, foreach=True)
+Rprop = partialclass(optim.Rprop, foreach=True)
+ASGD = partialclass(optim.ASGD, foreach=True)
+Adamax = partialclass(optim.Adamax, foreach=True)
+Adadelta = partialclass(optim.Adadelta, foreach=True)
+Adagrad = partialclass(optim.Adagrad, foreach=True)

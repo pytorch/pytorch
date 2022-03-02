@@ -297,6 +297,16 @@ class TestFFT(TestCase):
             op(t)
 
     @onlyNativeDeviceTypes
+    def test_empty_ifft(self, device):
+        t = torch.empty(2, 1, device=device, dtype=torch.complex64)
+        match = r"Invalid number of data points \([-\d]*\) specified"
+
+        for f in [torch.fft.irfft, torch.fft.irfft2, torch.fft.irfftn,
+                  torch.fft.hfft, torch.fft.hfft2, torch.fft.hfftn]:
+            with self.assertRaisesRegex(RuntimeError, match):
+                f(t)
+
+    @onlyNativeDeviceTypes
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
@@ -879,9 +889,16 @@ class TestFFT(TestCase):
             input_1d = x.dim() == 1
             if input_1d:
                 x = x.view(1, -1)
+
+            # NOTE: librosa 0.9 changed default pad_mode to 'constant' (zero padding)
+            # however, we use the pre-0.9 default ('reflect')
+            pad_mode = 'reflect'
+
             result = []
             for xi in x:
-                ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center)
+                ri = librosa.stft(xi.cpu().numpy(), n_fft=n_fft, hop_length=hop_length,
+                                  win_length=win_length, window=window, center=center,
+                                  pad_mode=pad_mode)
                 result.append(torch.from_numpy(np.stack([ri.real, ri.imag], -1)))
             result = torch.stack(result, 0)
             if input_1d:

@@ -467,6 +467,41 @@ void nnc_aten_quantized_conv1d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_quantized_conv1d_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
+      bufs_out_num);
+  auto convPackedParams =
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
+  const double out_qscale = ((double*)extra_args)[3];
+  const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
+  auto qx = tensors[1].unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
+  auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_quantized_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -626,6 +661,39 @@ void nnc_aten_quantized_linear(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_quantized_linear_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
+      bufs_out_num);
+  auto linearPackedParams =
+      reinterpret_cast<LinearPackedParamsBase*>(buf_data[2]);
+  const double out_qscale = ((double*)extra_args)[3];
+  const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
+  auto r = linearPackedParams->apply(tensors[1], out_qscale, out_qzero);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_quantized_linear_relu(
     int64_t bufs_num,
     void** buf_data,
@@ -780,6 +848,36 @@ void nnc_aten_quantized_mul_scalar(
   // NOLINTNEXTLINE
   auto r = quantized_mul_scalar(tensors[1], scalar);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_mul_scalar_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  const double x_qscale = ((double*)extra_args)[0];
+  const int64_t x_qzero = extra_args[1];
+  const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}},
+      bufs_out_num);
+  const double scalar = ((double*)extra_args)[3];
+  // NOLINTNEXTLINE
+  auto r = quantized_mul_scalar(tensors[1], scalar);
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_quantized_relu(
@@ -1136,6 +1234,56 @@ void nnc_aten_conv1d(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_conv1d_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  const size_t bufs_out_num = 1u;
+  auto tensors = constructTensors2(
+      bufs_in_num,
+      buf_data,
+      buf_ranks,
+      buf_dims,
+      buf_strides,
+      buf_dtypes,
+      c10::nullopt,
+      bufs_out_num);
+
+  at::Tensor r;
+  const at::Tensor& x = tensors[1];
+  const at::Tensor& w = tensors[2];
+  if (args_num > 0) {
+    // Check that if the extra arguments are provided, then the bias tensor is
+    // also present
+    TORCH_INTERNAL_ASSERT(args_num == 4 && bufs_in_num == 3);
+    const at::Tensor& b = tensors[3];
+
+    int64_t stride = extra_args[0];
+    int64_t padding = extra_args[1];
+    int64_t dilation = extra_args[2];
+    int64_t groups = extra_args[3];
+
+    try {
+      r = at::conv1d(x, w, b, {stride}, {padding}, {dilation}, groups);
+    } catch (...) {
+    }
+  } else {
+    try {
+      r = at::conv1d(x, w);
+    } catch (...) {
+    }
+  }
+
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
+}
+
 void nnc_aten_adaptive_avg_pool2d(
     int64_t bufs_num,
     void** buf_data,
@@ -1208,6 +1356,32 @@ void nnc_aten_max_red(
   } catch (...) {
   }
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_max_red_out(
+    int64_t bufs_in_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  size_t bufs_out_num = 1u;
+  auto tensors = constructTensors2(
+      bufs_in_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+
+  at::Tensor r;
+  const at::Tensor& x = tensors[1];
+  int64_t max_dim = extra_args[0];
+  bool keep_dim = extra_args[1];
+  try {
+    r = std::get<0>(at::max(x, max_dim, keep_dim));
+  } catch (...) {
+  }
+  buf_data[0] = r.data_ptr();
+  c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
+  buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
 }
 
 void nnc_aten_addmm(
@@ -1338,6 +1512,9 @@ const static RegisterNNCExternalFunction nnc_conv2d(
 const static RegisterNNCExternalFunction nnc_quantized_conv1d(
     "nnc_aten_quantized_conv1d",
     nnc_aten_quantized_conv1d);
+const static RegisterNNCExternalFunction nnc_quantized_conv1d_out(
+    "nnc_aten_quantized_conv1d_out",
+    nnc_aten_quantized_conv1d_out);
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
@@ -1353,6 +1530,9 @@ const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu_out(
 const static RegisterNNCExternalFunction nnc_quantized_linear(
     "nnc_aten_quantized_linear",
     nnc_aten_quantized_linear);
+const static RegisterNNCExternalFunction nnc_quantized_linear_out(
+    "nnc_aten_quantized_linear_out",
+    nnc_aten_quantized_linear_out);
 #ifndef _WIN32
 const static RegisterNNCExternalFunction nnc_quantized_add(
     "nnc_aten_quantized_add",
@@ -1366,6 +1546,9 @@ const static RegisterNNCExternalFunction nnc_quantized_mul_out(
 const static RegisterNNCExternalFunction nnc_quantized_mul_scalar(
     "nnc_aten_quantized_mul_scalar",
     nnc_aten_quantized_mul_scalar);
+const static RegisterNNCExternalFunction nnc_quantized_mul_scalar_out(
+    "nnc_aten_quantized_mul_scalar_out",
+    nnc_aten_quantized_mul_scalar_out);
 const static RegisterNNCExternalFunction nnc_quantized_sigmoid(
     "nnc_aten_quantized_sigmoid",
     nnc_aten_quantized_sigmoid);
@@ -1401,6 +1584,9 @@ const static RegisterNNCExternalFunction nnc_upsample_nearest2d_out(
 const static RegisterNNCExternalFunction nnc_conv1d(
     "nnc_aten_conv1d",
     nnc_aten_conv1d);
+const static RegisterNNCExternalFunction nnc_conv1d_out(
+    "nnc_aten_conv1d_out",
+    nnc_aten_conv1d_out);
 const static RegisterNNCExternalFunction nnc_adaptive_avg_pool2d(
     "nnc_aten_adaptive_avg_pool2d",
     nnc_aten_adaptive_avg_pool2d);
@@ -1410,6 +1596,9 @@ const static RegisterNNCExternalFunction nnc_mean(
 const static RegisterNNCExternalFunction nnc_max_red(
     "nnc_aten_max_red",
     nnc_aten_max_red);
+const static RegisterNNCExternalFunction nnc_max_red_out(
+    "nnc_aten_max_red_out",
+    nnc_aten_max_red_out);
 const static RegisterNNCExternalFunction nnc_addmm(
     "nnc_aten_addmm",
     nnc_aten_addmm);

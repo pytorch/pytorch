@@ -75,7 +75,7 @@ graph {
     name: "Mul_7"
     op_type: "Mul"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Div_0"
     type {

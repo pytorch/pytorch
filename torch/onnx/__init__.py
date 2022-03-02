@@ -1,4 +1,5 @@
 import torch._C as _C
+from typing import Dict, Optional
 
 TensorProtoDataType = _C._onnx.TensorProtoDataType
 OperatorExportTypes = _C._onnx.OperatorExportTypes
@@ -24,6 +25,23 @@ class CheckerError(Exception):
 
     pass
 
+
+class SymbolicContext:
+    r"""Provides extra context for symbolic functions.
+
+    Args:
+        params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
+        env (Dict[_C.Value, _C.Value]): Mapping from Torch domain graph Value to ONNX domain graph Value.
+        cur_node (_C.Node): Current node being converted to ONNX domain.
+        onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
+    """
+    def __init__(self, params_dict, env, cur_node, onnx_block):
+        self.params_dict: Dict[str, _C.IValue] = params_dict
+        self.env: Dict[_C.Value, _C.Value] = env
+        # Current node that is being converted.
+        self.cur_node: _C.Node = cur_node
+        # Current onnx block that converted nodes are being appended to.
+        self.onnx_block: _C.Block = onnx_block
 
 def _export(*args, **kwargs):
     from torch.onnx import utils
@@ -286,6 +304,19 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             particular types of modules to export as local functions in ONNX.
             This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
             ``opset_version`` < 15 implies IR version < 8, which means no local function support.
+            Module variables will be exported as function attributes. There are two categories of function
+            attributes.
+
+            1. Annotated attributes: class variables that have type annotations via
+            `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_
+            will be exported as attributes.
+            Annotated attributes are not used inside the subgraph of ONNX local function because
+            they are not created by PyTorch JIT tracing, but they may be used by consumers
+            to determine whether or not to replace the function with a particular fused kernel.
+
+            2. Inferred attributes: variables that are used by operators inside the module. Attribute names
+            will have prefix "inferred::". This is to differentiate from predefined attributes retrieved from
+            python module annotations. Inferred attributes are used inside the subgraph of ONNX local function.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
