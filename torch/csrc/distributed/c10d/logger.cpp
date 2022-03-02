@@ -1,6 +1,6 @@
 #include <c10/util/StringUtil.h>
 #include <c10d/Utils.hpp>
-#include <c10d/debug.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
 #include <string>
