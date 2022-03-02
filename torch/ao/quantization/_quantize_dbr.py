@@ -30,6 +30,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
 
     Supported `prepare_custom_config_dict` keys:
       * `non_traceable_module_class` - same meaning as in prepare_fx
+      * `output_dtypes` - expected dtypes of model outputs, must match actual
+        output structure.
 
     TODO(future PR): better docblock
     """
@@ -79,6 +81,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
                 parents_to_delete_auto_quant_state.append(v)
         for v in parents_to_delete_auto_quant_state:
             del v._auto_quant_state
+
+        del model._fqn_to_auto_quant_state_map
 
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types
