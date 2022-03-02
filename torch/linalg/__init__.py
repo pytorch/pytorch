@@ -824,7 +824,7 @@ Examples::
 ldl_factor = _add_docstr(_linalg.linalg_ldl_factor, r"""
 linalg.ldl_factor(A, *, hermitian=False, out=None) -> (Tensor, Tensor)
 
-Computes a compact representation of the LDL factorization of a Hermitian or symmetric indefinite matrix.
+Computes a compact representation of the LDL factorization of a Hermitian or symmetric (possibly indefinite) matrix.
 
 When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian`\ `= True`)
 or symmetric (:attr:`hermitian`\ `= False`).
