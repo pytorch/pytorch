@@ -9,7 +9,7 @@ void createCuDNNHandle(cudnnHandle_t *handle) {
   AT_CUDNN_CHECK(cudnnCreate(handle));
 }
 
-void destroyCuDNNHandle(cudnnHandle_t handle) {
+void destroyCuDNNHandle(cudnnHandle_t /*handle*/) {
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
 // would already be destroyed by the time this gets destroyed. It
