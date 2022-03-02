@@ -193,6 +193,7 @@ fi
 
 echo $PATH
 ls /opt/cache/bin
+vi /opt/cache/bin/gcc
 echo "env ---------------------------"
 env
 which g++
