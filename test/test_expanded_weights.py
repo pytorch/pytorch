@@ -6,8 +6,9 @@ import unittest
 
 import torch
 import torch.nn as nn
-from torch.nn.modules.loss import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss
 from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
@@ -15,7 +16,6 @@ from torch.testing._internal.common_methods_invocations import SampleInput, op_d
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
     unpack_expanded_weight_or_tensor, sum_over_all_but_batch_and_last_n, standard_kwargs
-from torch.testing._internal.common_cuda import TEST_CUDA
 
 class TestContext:
     pass
@@ -195,8 +195,8 @@ class TestExpandedWeightFunctional(TestCase):
 
     def test_expanded_weight_error(self, device):
         batch_size = 3
-        sample_input = make_tensor((batch_size, 4), device, torch.float32, requires_grad=True)
-        sample_weight = make_tensor((4), device, torch.float32, requires_grad=True)
+        sample_input = make_tensor((batch_size, 4), dtype=torch.float32, device=device, requires_grad=True)
+        sample_weight = make_tensor((4), dtype=torch.float32, device=device, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, r"Expanded Weights encountered but cannot handle function"):
             torch.add(sample_input, ExpandedWeight(sample_weight, batch_size))
 
@@ -243,7 +243,7 @@ class TestExpandedWeightFunctional(TestCase):
 
 
 class TestExpandedWeightModule(TestCase):
-    def _do_test(self, module, input, kwargs):
+    def _do_test(self, module, input):
         if len(list(module.parameters())) == 0:  # for norms with affine=False
             raise unittest.SkipTest("affine=False, no params")
         batch_size = input.shape[0]
@@ -257,7 +257,7 @@ class TestExpandedWeightModule(TestCase):
                 del param.grad_sample
 
             # get per sample grads with a for loop
-            expected_res = torch.tensor(0., device=input.device, **kwargs)
+            expected_res = torch.tensor(0., device=input.device, dtype=torch.double)
             expected_grads = []
             for i in range(batch_size):
                 res = module(input[i].unsqueeze(0)).sum()
@@ -322,19 +322,19 @@ class ContextManagerTests(TestBase):
         return self._get_arg('constructor_args', False)
 
     def test_context_manager(self, test_case, device):
-        kwargs = {}
-        if device == 'cuda' and 'Embedding' not in self.get_name():  # embedding input is longtensor
-            kwargs['dtype'] = torch.double
-        module = self.constructor(*self.constructor_args, **kwargs).to(device)
-        input = self._get_input().to(device, **kwargs)
+        kwargs = {'device': device, 'dtype': torch.double}
+        module = self.constructor(*self.constructor_args).to(**kwargs)
+        if 'Embedding' in self.get_name():
+            kwargs['dtype'] = torch.long
+        input = self._get_input().to(**kwargs)
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest("Can't get per sample gradients when no batch dim or batch dim is 0")
         if self.constructor == torch.nn.Linear and len(input.shape) == 1:
             raise unittest.SkipTest("Can't get per sample gradients for input of rank 1")
-        test_case._do_test(module, input, kwargs)
+        test_case._do_test(module, input)
 
-    def test_context_manager_multiple_inputs(self, test_case):
-        module = self.constructor(*self.constructor_args)
+    def test_context_manager_multiple_inputs(self, test_case, device):
+        module = self.constructor(*self.constructor_args).to(device)
         input = self._get_input()
         if len(input.shape) == 0 or input.shape[0] == 0:
             raise unittest.SkipTest("Can't get per sample gradients when no batch dim or batch dim is 0")
@@ -344,7 +344,7 @@ class ContextManagerTests(TestBase):
 
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
-supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'GroupNorm', 'LayerNorm', 'InstanceNorm', 'Embedding']
+supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding', 'LayerNorm', 'GroupNorm', 'InstanceNorm']
 supported_tests = [t for t in module_tests + new_module_tests if 'module_name' in t and t['module_name'] in supported_modules]
 for test_param in supported_tests:
     if 'constructor' not in test_param:
@@ -360,12 +360,10 @@ for test_param in supported_tests:
         raise RuntimeError('Found two tests with the same name: ' + test_name)
     if decorator is not None:
         fn = decorator(fn)
-
     if test.test_cpu:
         setattr(TestExpandedWeightModule, test_name, lambda self, test=test: test.test_context_manager(self, 'cpu'))
         setattr(TestExpandedWeightModule, test_name_multi_input,
-                lambda self, test=test: test.test_context_manager_multiple_inputs(self))
-
+                lambda self, test=test: test.test_context_manager_multiple_inputs(self, 'cpu'))
     if TEST_CUDA and test.test_cuda:
         # since this checks derivatives, only use double for precision
         setattr(TestExpandedWeightModule, test_name + '_cuda_double',

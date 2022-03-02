@@ -45,6 +45,7 @@ def _remove_swap(module, name: str) -> None:
         delattr(module, "_orig_class")
         delattr(module, "_functional_parameters")
 
+
 @contextlib.contextmanager
 def reparametrize_module(
     module: torch.nn.Module,
