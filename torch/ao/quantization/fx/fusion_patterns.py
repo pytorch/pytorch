@@ -128,5 +128,5 @@ class DefaultFuseHandler(FuseHandler):
         node = fused_graph.node_copy(root_node, load_arg)
         args = list(node.args)
         args.extend(extra_args)
-        node.args = args
+        node.args = tuple(args)
         return node
