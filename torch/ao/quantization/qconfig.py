@@ -211,7 +211,7 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
-def get_default_qat_qconfig(backend='fbgemm', version=0):
+def get_default_qat_qconfig(backend='fbgemm', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
 
@@ -226,22 +226,6 @@ def get_default_qat_qconfig(backend='fbgemm', version=0):
     # Use the fused observer + fake_quant modules for doing QAT.
     if version == 0:
         if backend == 'fbgemm':
-            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                                                 quant_min=0,
-                                                                                 quant_max=255,
-                                                                                 reduce_range=True),
-                              weight=default_fused_per_channel_wt_fake_quant)
-        elif backend == 'qnnpack':
-            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                                                 quant_min=0,
-                                                                                 quant_max=255,
-                                                                                 reduce_range=False),
-                              weight=default_fused_wt_fake_quant)
-        else:
-            qconfig = default_qat_qconfig_v2
-    # Histogram observer is too slow for quantization aware training
-    elif version == 1:
-        if backend == 'fbgemm':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
                                                                 quant_max=255,
@@ -255,6 +239,22 @@ def get_default_qat_qconfig(backend='fbgemm', version=0):
                               weight=default_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
+    # Use the fused observer + fake_quant modules for doing QAT.
+    elif version == 1:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=False),
+                              weight=default_fused_wt_fake_quant)
+        else:
+            qconfig = default_qat_qconfig_v2
     else:
         raise AssertionError("Version number: " + str(version) +
                              "in get_default_qat_qconfig is not supported. Version number must be 0 or 1")
@@ -290,7 +290,7 @@ def get_default_qconfig_dict(backend='fbgemm', version=0):
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=MovingAverageMinMaxObserver)
     return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
 
-def get_default_qat_qconfig_dict(backend='fbgemm', version=0):
+def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
     qconfig = get_default_qat_qconfig(backend, version)
     qconfig_transpose = qconfig
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
