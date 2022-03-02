@@ -408,7 +408,7 @@ struct DifferentiableGraphOp {
     detachVariables(stack);
     if (IsNewExecutorEnabled()) {
       const ExecutionPlan& plan =
-          f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+          f_ptr->getPlanFor(stack);
       InterpreterState(plan.code).run(stack);
     } else {
       InterpreterState(legacy_f).run(stack);
@@ -550,7 +550,7 @@ void GraphExecutorImplBase::run(Stack& stack) {
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
   const ExecutionPlan& plan =
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+      getPlanFor(stack);
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
@@ -576,7 +576,7 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
     InterpreterState state;
   };
   auto frame = std::make_shared<Frame>(
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()),
+      getPlanFor(stack),
       std::move(taskLauncher));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
@@ -602,7 +602,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
+  const ExecutionPlan& getPlanFor(Stack& stack, c10::optional<size_t> remaining_bailout_depth)
       override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
@@ -782,13 +782,9 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
   return pImpl->runAsync(stack, std::move(taskLauncher));
 }
 
-size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth() : 0;
-}
-
 const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 

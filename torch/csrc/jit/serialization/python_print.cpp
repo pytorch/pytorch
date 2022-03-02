@@ -921,6 +921,11 @@ struct PythonPrintImpl {
 
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
+      if (v.isNone()) {
+        ss << "None";
+        return true;
+      }
+
       if (v.isTensor() || containsNonASCIIString(v) || v.isObject()) {
         TORCH_INTERNAL_ASSERT(!v.type<c10::Type>()->is_module());
         ss << "CONSTANTS.c" << getOrAddConstant(v);
