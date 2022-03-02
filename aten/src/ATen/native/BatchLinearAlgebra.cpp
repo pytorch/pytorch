@@ -4310,6 +4310,30 @@ TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
   }
 }
 
+std::tuple<Tensor&, Tensor&> linalg_ldl_factor_out(
+    const Tensor& self,
+    bool hermitian,
+    Tensor& LD,
+    Tensor& pivots) {
+  auto info = at::empty({0}, self.options().dtype(kInt));
+  // We pass check_errors as we want to use lu_factor rather than lu_factor_ex
+  // in the errors
+  at::linalg_ldl_factor_ex_outf(
+      self, hermitian, /*check_errors=*/false, LD, pivots, info);
+  at::_linalg_check_errors(info, "torch.linalg.ldl_factor", self.dim() == 2);
+  return std::tie(LD, pivots);
+}
+
+std::tuple<Tensor, Tensor> linalg_ldl_factor(
+    const Tensor& self,
+    bool hermitian) {
+  Tensor LD, pivots, info;
+  std::tie(LD, pivots, info) =
+      at::linalg_ldl_factor_ex(self, hermitian, /*check_errors=*/false);
+  at::_linalg_check_errors(info, "torch.linalg.ldl_factor", self.dim() == 2);
+  return std::make_tuple(std::move(LD), std::move(pivots));
+}
+
 DEFINE_DISPATCH(ldl_solve_stub);
 
 TORCH_IMPL_FUNC(linalg_ldl_solve_out)

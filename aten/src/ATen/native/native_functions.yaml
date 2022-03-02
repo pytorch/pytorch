@@ -10860,6 +10860,14 @@
   dispatch:
     CPU, CUDA: linalg_ldl_factor_ex_out
 
+- func: linalg_ldl_factor(Tensor self, *, bool hermitian=False) -> (Tensor LD, Tensor pivots)
+  python_module: linalg
+  variants: function
+
+- func: linalg_ldl_factor.out(Tensor self, *, bool hermitian=False, Tensor(a!) LD, Tensor(b!) pivots) -> (Tensor(a!) LD, Tensor(b!) pivots)
+  python_module: linalg
+  variants: function
+
 - func: linalg_ldl_solve(Tensor LD, Tensor pivots, Tensor B, *, bool hermitian=False) -> Tensor
   structured_delegate: linalg_ldl_solve.out
   python_module: linalg
