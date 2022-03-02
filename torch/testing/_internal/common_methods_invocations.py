@@ -5113,7 +5113,7 @@ def sample_inputs_linalg_cholesky_inverse(op_info, device, dtype, requires_grad=
         out.append(SampleInput(a.clone().requires_grad_(requires_grad), kwargs=dict(upper=True)))
     return out
 
-def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False, **kwargs):
     from torch.testing._internal.common_utils import (
         random_hermitian_pd_matrix,
         random_symmetric_pd_matrix,
@@ -5150,7 +5150,7 @@ def sample_inputs_linalg_ldl_factor(op_info, device, dtype, requires_grad=False)
             kwargs=dict(hermitian=True),
         )  # batch of matrices
 
-def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_ldl_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     # Generate LDL factors of symmetric (and Hermitian on CPU) matrices
     from torch.testing._internal.common_utils import random_hermitian_pd_matrix, random_symmetric_pd_matrix
     device = torch.device(device)
@@ -10011,6 +10011,13 @@ op_db: List[OpInfo] = [
                skipCUDAIfNoCusolver, skipCPUIfNoLapack,
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})),
            ]),
+    OpInfo('linalg.ldl_factor',
+           aten_name='linalg_ldl_factor',
+           dtypes=floating_and_complex_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_linalg_ldl_factor,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           ),
     OpInfo('linalg.ldl_factor_ex',
            aten_name='linalg_ldl_factor_ex',
            dtypes=floating_and_complex_types(),
