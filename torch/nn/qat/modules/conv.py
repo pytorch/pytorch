@@ -79,7 +79,7 @@ class Conv2d(nn.Conv2d):
             assert hasattr(cls, "_FLOAT_RELU_MODULE")
             relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
             modules.append(relu)
-            fused = cls._FLOAT_MODULE(*modules)
+            fused = cls._FLOAT_MODULE(*modules)  # type: ignore[arg-type]
             fused.train(self.training)
             return fused
         else:
@@ -193,7 +193,7 @@ class Conv3d(nn.Conv3d):
             assert hasattr(cls, "_FLOAT_RELU_MODULE")
             relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
             modules.append(relu)
-            fused = cls._FLOAT_MODULE(*modules)
+            fused = cls._FLOAT_MODULE(*modules)  # type: ignore[arg-type]
             fused.train(self.training)
             return fused
         else:
