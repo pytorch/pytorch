@@ -3,7 +3,8 @@
 import contextlib
 import itertools
 import sys
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, Optional, Tuple
+from dataclasses import dataclass
 
 import torch
 from torch import distributed as dist
@@ -31,7 +32,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class _GradAccConfig(NamedTuple):
+@dataclass
+class _GradAccConfig:
     """
     This configures how gradients are accumulated in :meth:`_test_grad_acc`.
     Each instance of this class represents ``num_iters``-many consecutive
@@ -45,6 +47,30 @@ class _GradAccConfig(NamedTuple):
     """
     use_no_sync: bool
     num_iters: int
+
+    def __repr__(self) -> str:
+        # Override to remove any spaces in the string to appease the internal
+        # build's test name parser
+        return (
+            f"(use_no_sync={self.use_no_sync},"
+            f"num_iters={self.num_iters})"
+        )
+
+
+@dataclass
+class _GradAccConfigs:
+    """
+    This wraps a :class:`list` of :class:`_GradAccConfig` instances with the
+    sole purpose of overriding :meth:`__repr__` to remove spaces.
+    """
+    configs: List[_GradAccConfig]
+
+    def __repr__(self) -> str:
+        # Override to remove any spaces in the string to appease the internal
+        # build's test name parser
+        return (
+            "[" + ",".join(config.__repr__() for config in self.configs) + "]"
+        )
 
 
 class TestGradAcc(FSDPTest):
@@ -97,7 +123,7 @@ class TestGradAcc(FSDPTest):
                 group, cuda_first=False, add_bn=False,
                 config={
                     "cpu_offload": cpu_offload,
-                    "backward_prefetch": backward_prefetch
+                    "backward_prefetch": backward_prefetch,
                 },
             )  # disable BN since the test uses varying batch sizes
             fsdp_model.eval()  # disable dropout
@@ -180,12 +206,20 @@ class TestGradAcc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
-        "configs_args",  # (use_no_sync, num_iters)
+        "configs",
         [
-            [(True, 4)],
-            [(False, 4)],
-            [(True, 2), (False, 2), (True, 2)],
-            [(False, 2), (True, 2), (False, 2)],
+            _GradAccConfigs([_GradAccConfig(use_no_sync=True, num_iters=4)]),
+            _GradAccConfigs([_GradAccConfig(use_no_sync=False, num_iters=4)]),
+            _GradAccConfigs([
+                _GradAccConfig(use_no_sync=True, num_iters=2),
+                _GradAccConfig(use_no_sync=False, num_iters=2),
+                _GradAccConfig(use_no_sync=True, num_iters=2),
+            ]),
+            _GradAccConfigs([
+                _GradAccConfig(use_no_sync=False, num_iters=2),
+                _GradAccConfig(use_no_sync=True, num_iters=2),
+                _GradAccConfig(use_no_sync=False, num_iters=2),
+            ]),
         ]
     )
     @parametrize(
@@ -198,7 +232,7 @@ class TestGradAcc(FSDPTest):
     )
     def test_grad_acc(
         self,
-        configs_args: List[Tuple[bool, int]],
+        configs: _GradAccConfigs,
         cpu_offload: CPUOffload,
         backward_prefetch: Optional[BackwardPrefetch],
     ):
@@ -218,15 +252,9 @@ class TestGradAcc(FSDPTest):
         manager is not currently compatible with CPU offloading, so those tests
         are skipped.
         """
-        # Construct the `_GradAccConfig` instances here instead of directly in
-        # the `parametrize` to be parseable by internal test builds
-        configs = [
-            _GradAccConfig(use_no_sync=use_no_sync, num_iters=num_iters)
-            for (use_no_sync, num_iters) in configs_args
-        ]
         self._test_grad_acc(
             batch_dim=1,
-            configs=configs,
+            configs=configs.configs,
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
         )
