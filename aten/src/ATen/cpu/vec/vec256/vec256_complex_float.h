@@ -248,7 +248,7 @@ public:
     return map(std::acos);
   }
   Vectorized<c10::complex<float>> atan() const;
-  Vectorized<c10::complex<float>> atan2(const Vectorized<c10::complex<float>> &b) const {
+  Vectorized<c10::complex<float>> atan2(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> erf() const {
@@ -289,20 +289,20 @@ public:
   Vectorized<c10::complex<float>> floor() const {
     return _mm256_floor_ps(values);
   }
-  Vectorized<c10::complex<float>> hypot(const Vectorized<c10::complex<float>> &b) const {
+  Vectorized<c10::complex<float>> hypot(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> igamma(const Vectorized<c10::complex<float>> &x) const {
+  Vectorized<c10::complex<float>> igamma(const Vectorized<c10::complex<float>>& /*x*/) const {
     AT_ERROR("not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> igammac(const Vectorized<c10::complex<float>> &x) const {
+  Vectorized<c10::complex<float>> igammac(const Vectorized<c10::complex<float>>& /*x*/) const {
     AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> neg() const {
     auto zero = _mm256_setzero_ps();
     return _mm256_sub_ps(zero, values);
   }
-  Vectorized<c10::complex<float>> nextafter(const Vectorized<c10::complex<float>> &b) const {
+  Vectorized<c10::complex<float>> nextafter(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> round() const {
@@ -343,31 +343,31 @@ public:
   Vectorized<c10::complex<float>> operator!=(const Vectorized<c10::complex<float>>& other) const {
     return _mm256_cmp_ps(values, other.values, _CMP_NEQ_UQ);
   }
-  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator<=(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> operator>=(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<c10::complex<float>> eq(const Vectorized<c10::complex<float>>& other) const;
   Vectorized<c10::complex<float>> ne(const Vectorized<c10::complex<float>>& other) const;
-  Vectorized<c10::complex<float>> lt(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> lt(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> le(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> le(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> gt(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> gt(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
-  Vectorized<c10::complex<float>> ge(const Vectorized<c10::complex<float>>& other) const {
+  Vectorized<c10::complex<float>> ge(const Vectorized<c10::complex<float>>& /*other*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 };

@@ -185,7 +185,7 @@ constexpr bool op_allowlist_contains_name_in_schema(string_view allowlist, strin
 // and should be registered.  When we turn this on, the list of valid
 // mobile dispatch keys is hard coded (but you need to make sure
 // that you have the correct set of dispatch keys for this).
-constexpr bool dispatch_key_allowlist_check(DispatchKey k) {
+constexpr bool dispatch_key_allowlist_check(DispatchKey /*k*/) {
 #ifdef C10_MOBILE
   return true;
   // Disabled for now: to be enabled later!
