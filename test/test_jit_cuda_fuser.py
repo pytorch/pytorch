@@ -2903,7 +2903,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
+    # @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_batch_norm_half(self):
         with torch.backends.cudnn.flags(enabled=True):
             setups = [
