@@ -244,6 +244,8 @@ class TestExpandedWeightFunctional(TestCase):
 
 class TestExpandedWeightModule(TestCase):
     def _do_test(self, module, input):
+        if len(list(module.parameters())) == 0:  # for norms with affine=False
+            raise unittest.SkipTest("affine=False, no params")
         batch_size = input.shape[0]
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager
@@ -274,6 +276,8 @@ class TestExpandedWeightModule(TestCase):
             def forward(self, input):
                 return self.module(input) + self.module(input)
 
+        if len(list(module.parameters())) == 0:  # for norms with affine=False
+            raise unittest.SkipTest("affine=False, no params")
         batch_size = input.shape[0]
         with freeze_rng_state():
             # get per sample grads with ExpandedWeights context manager, calling .backward() twice
@@ -340,7 +344,7 @@ class ContextManagerTests(TestBase):
 
 # TODO: Once all of these use ModuleInfo, replace with ModuleInfo tests
 # These currently use the legacy nn tests
-supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding']
+supported_modules = ['Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Embedding', 'LayerNorm']
 supported_tests = [t for t in module_tests + new_module_tests if 'module_name' in t and t['module_name'] in supported_modules]
 for test_param in supported_tests:
     if 'constructor' not in test_param:
