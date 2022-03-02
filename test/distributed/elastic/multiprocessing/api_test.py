@@ -17,7 +17,6 @@ import time
 from itertools import product
 from typing import Callable, Dict, List, Union
 from unittest import mock
-from unittest.mock import patch
 
 import torch
 import torch.multiprocessing as mp
@@ -31,7 +30,7 @@ from torch.distributed.elastic.multiprocessing.api import (
     _wrap,
     to_map,
 )
-from torch.distributed.elastic.multiprocessing.errors.error_handler import _write_error
+from torch.distributed.elastic.multiprocessing.errors import ErrorHandler
 from torch.testing._internal.common_utils import (
     IS_IN_CI,
     IS_MACOS,
@@ -40,9 +39,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
+    TestCase,
     run_tests,
     sandcastle_skip_if,
-    TestCase
 )
 
 
@@ -65,27 +64,29 @@ class RunProcResultsTest(TestCase):
         pr_fail = RunProcsResult(failures={0: fail0})
         self.assertTrue(pr_fail.is_failed())
 
-    @patch("torch.distributed.elastic.multiprocessing.errors.log")
-    def test_get_failures(self, log_mock):
-        with mock.patch("time.time", side_effect=[3, 2, 1]):
-            error_file0 = os.path.join(self.test_dir, "error0.json")
-            error_file1 = os.path.join(self.test_dir, "error1.json")
-            _write_error(RuntimeError("error 0"), error_file0)
-            _write_error(RuntimeError("error 1"), error_file1)
+    def test_get_failures(self):
 
-            fail0 = ProcessFailure(
-                local_rank=0, pid=997, exitcode=1, error_file=error_file0
-            )
-            fail1 = ProcessFailure(
-                local_rank=1, pid=998, exitcode=3, error_file=error_file1
-            )
-            fail2 = ProcessFailure(
-                local_rank=2, pid=999, exitcode=15, error_file="no_exist.json"
-            )
+        error_file0 = os.path.join(self.test_dir, "error0.json")
+        error_file1 = os.path.join(self.test_dir, "error1.json")
+        eh = ErrorHandler()
+        with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": error_file0}):
+            eh.record_exception(RuntimeError("error 0"))
 
-            self.assertEqual(3, fail0.timestamp)
-            self.assertEqual(2, fail1.timestamp)
-            self.assertEqual(1, fail2.timestamp)
+        with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": error_file0}):
+            eh.record_exception(RuntimeError("error 1"))
+
+        fail0 = ProcessFailure(
+            local_rank=0, pid=997, exitcode=1, error_file=error_file0
+        )
+        fail1 = ProcessFailure(
+            local_rank=1, pid=998, exitcode=3, error_file=error_file1
+        )
+        fail2 = ProcessFailure(
+            local_rank=2, pid=999, exitcode=15, error_file="no_exist.json"
+        )
+
+        self.assertLessEqual(fail0.timestamp, fail1.timestamp)
+        self.assertLessEqual(fail1.timestamp, fail2.timestamp)
 
 
 class StdTest(TestCase):

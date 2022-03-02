@@ -740,7 +740,8 @@ class TestONNXRuntime(unittest.TestCase):
         dummy_input = torch.randn(1, 3, 224, 224)
         self.run_test(model, (dummy_input,))
 
-    @unittest.skip("Fixed in PyTorch master. RuntimeError: Error(s) in loading state_dict for QuantizableMobileNetV3")
+    @unittest.skip("Unstable loading pretrained quantized mobilenet v3: https://github.com/pytorch/vision/issues/5303")
+    @skipIfUnsupportedMinOpsetVersion(10)
     @disableScriptTest()
     def test_mobilenet_v3_quant(self):
         model = torchvision.models.quantization.mobilenet_v3_large(pretrained=True, quantize=True)
@@ -10515,6 +10516,9 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_linear(self):
         model = torch.nn.quantized.Linear(4, 8)
+        # Set non-zero bias.
+        bias = torch.arange(8).to(torch.float)
+        model.set_weight_bias(model.weight(), bias)
         input = torch.randn(4, 4)
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         # Currently, we need convert the model to ScriptModule before export.
@@ -10529,11 +10533,11 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.quantized.Conv2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
-        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.2, 0, torch.qint8)
-        bias = torch.randn(33)
+        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.5, 0, torch.qint8)
+        bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
-        q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(torch.jit.trace(model, q_input), (q_input,))
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -10548,11 +10552,11 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.intrinsic.quantized.ConvReLU2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
-        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.2, 0, torch.qint8)
-        bias = torch.randn(33)
+        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.5, 0, torch.qint8)
+        bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
-        q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(torch.jit.trace(model, q_input), (q_input,))
 
     @skipIfUnsupportedMinOpsetVersion(10)
