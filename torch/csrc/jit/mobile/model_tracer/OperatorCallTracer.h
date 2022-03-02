@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/record_function.h>
+#include <c10/util/Synchronized.h>
 
 namespace torch {
 namespace jit {
@@ -17,17 +18,14 @@ namespace mobile {
  *
  */
 struct OperatorCallTracer final {
-  static std::set<std::string> called_operators_;
   at::CallbackHandle handle_;
 
   OperatorCallTracer();
 
-  std::set<std::string> const& getCalledOperators() const {
+  static c10::Synchronized<std::set<std::string>>& getCalledOperators() {
+    static c10::Synchronized<std::set<std::string>> called_operators_;
     return called_operators_;
   }
-
-  /* Protect concurrent writes into the set. */
-  static std::mutex& getMutex();
 
   ~OperatorCallTracer() {
     at::removeCallback(handle_);
