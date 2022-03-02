@@ -37,7 +37,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNSUPPORTED_RANDOM(bernoulli);
   UNSUPPORTED_RANDOM2(bernoulli, out);
   UNSUPPORTED_RANDOM2(bernoulli, p);
-  UNSUPPORTED_RANDOM2(bernoulli_, Tensor);
   UNSUPPORTED_RANDOM(bernoulli_.float);
 
   UNSUPPORTED_RANDOM(cauchy_);
