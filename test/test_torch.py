@@ -55,7 +55,7 @@ import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
-    all_types_and, floating_types, floating_and_complex_types,
+    all_types_and, floating_types, floating_and_complex_types, integral_types,
 )
 
 # Protects against includes accidentally setting the default dtype

@@ -3217,11 +3217,10 @@ class TestSparse(TestCase):
     @skipIfRocm
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(*floating_types_and(
-                      *[torch.half] if CUDA11OrLater and SM53OrLater else [],
-                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
-                      *[torch.complex64] if CUDA11OrLater else [],
-                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if CUDA11OrLater and SM53OrLater else [],
+                                      *[torch.bfloat16] if CUDA11OrLater and SM80OrLater else [],
+                                      *[torch.complex64] if CUDA11OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
