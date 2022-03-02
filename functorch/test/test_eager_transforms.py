@@ -1988,6 +1988,34 @@ class TestComposability(TestCase):
         # Honestly IDK what the result here is... but at least it runs
 
 
+class TestMakeFunctional(TestCase):
+    def test_parameter_tying(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(3))
+                self.linear = nn.Linear(3, 3)
+                self.linear.bias = self.bias
+                self.linear_tied = self.linear
+
+        mod = Foo()
+        with self.assertRaisesRegex(RuntimeError, "parameter tying"):
+            func, params = make_functional(mod)
+
+    def test_buffer_tying(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(3))
+                self.linear = nn.Linear(3, 3)
+                self.register_buffer('buffer', torch.randn(3))
+                self.register_buffer('buffer_tied', self.buffer)
+
+        mod = Foo()
+        with self.assertRaisesRegex(RuntimeError, "parameter tying"):
+            func, params, buffers = make_functional_with_buffers(mod)
+
+
 class TestExamplesCorrectness(TestCase):
     def test_maml_regression(self, device):
         class ThreeLayerNet(nn.Module):
