@@ -6026,17 +6026,6 @@ class TestTorch(TestCase):
             "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
             lambda: [1, 2] in x)
 
-    def test_deepcopy_parameter(self):
-        from copy import deepcopy
-        l = torch.nn.Linear(10, 1)
-        s = l.state_dict(keep_vars=True)
-        self.assertEqual(torch.nn.Parameter, type(s['weight']))
-        self.assertEqual(torch.nn.Parameter, type(s['bias']))
-
-        s2 = deepcopy(s)
-        self.assertEqual(torch.nn.Parameter, type(s2['weight']))
-        self.assertEqual(torch.nn.Parameter, type(s2['bias']))
-
     def test_pickle(self):
         import pickle
         a = torch.randn(5, 5)
