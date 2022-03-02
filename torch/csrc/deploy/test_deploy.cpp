@@ -292,6 +292,7 @@ TEST(TorchpyTest, RegisterModule) {
   }
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(TorchpyTest, FxModule) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);
@@ -318,6 +319,7 @@ TEST(TorchpyTest, FxModule) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+#endif
 
 // Moving a tensor between interpreters should share the underlying storage.
 TEST(TorchpyTest, TensorSerializationSharing) {
