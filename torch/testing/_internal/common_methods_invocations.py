@@ -2588,6 +2588,7 @@ def sample_inputs_normal_tensor_first(self, device, dtype, requires_grad, **kwar
         ([3], [3], {}),
         ([3, 4, 2], [3, 4, 2], {}),
         ([2, 3], 1.1, {}),
+        ([1, 2, 3], [5, 2, 3], {}),  # broadcasting
     ]
 
     return sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs)
@@ -15623,7 +15624,6 @@ unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
-sparse_csr_funcs = [op for op in op_db if op.supports_sparse_csr]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]

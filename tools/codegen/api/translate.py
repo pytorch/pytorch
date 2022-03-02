@@ -209,7 +209,6 @@ Check this module for more information.
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
             except UnsatError:
                 return memory_format
-
         elif goal == NamedCType("options", BaseCType(tensorOptionsT)):
             dtype = direct_solve(NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))))
             pin_memory = direct_solve(NamedCType("pin_memory", OptionalCType(BaseCType(boolT))))
