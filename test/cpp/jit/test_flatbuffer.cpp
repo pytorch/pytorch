@@ -166,6 +166,9 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+  std::stringstream ss;
+  module->_save_for_mobile(ss, {}, true, /*use_flatbuffer*/ true);
+  auto flatbuffer_module2 = load_mobile_module_from_stream(ss);
 }
 
 TEST(FlatbufferTest, Conv) {

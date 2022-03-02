@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -784,20 +785,37 @@ SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
+void save_mobile_module_to(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  CompilationOptions options = getOptionsFromGlobal();
+  mobile::Module mod = jitModuleToMobile(module, options);
+  auto buffer = save_mobile_module_to_bytes(mod, extra_files);
+  writer_func(reinterpret_cast<char*>(buffer.data()), buffer.size());
+}
+
 void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(
-      [&](const void* buf, size_t nbytes) -> size_t {
-        out.write(static_cast<const char*>(buf), nbytes);
-        return !out ? 0 : nbytes;
-      });
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  if (use_flatbuffer) {
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -805,11 +823,23 @@ void ExportModule(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(filename);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+    auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+      std::fstream ofile(filename, std::ios::binary | std::ios::out);
+      ofile.write(static_cast<const char*>(buf), nbytes);
+      ofile.close();
+      return !ofile ? 0 : nbytes;
+    };
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(filename);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -817,11 +847,17 @@ void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(writer_func);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 namespace {

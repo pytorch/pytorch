@@ -52,6 +52,10 @@ TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
 
+TORCH_API mobile::Module load_mobile_module_from_stream(
+    std::istream& in,
+    c10::optional<c10::Device> device = c10::nullopt);
+
 TORCH_API void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files);

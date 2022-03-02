@@ -697,8 +697,7 @@ void save_mobile_module(
     const mobile::Module& module,
     const std::string& filename,
     const ExtraFilesMap& extra_files) {
-  FlatbufferSerializer fb_serializer;
-  auto buffer = fb_serializer.serializeModule(module, true, extra_files);
+  auto buffer = save_mobile_module_to_bytes(module, extra_files);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
   ofile.close();
