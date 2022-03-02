@@ -527,6 +527,7 @@ LINUX_WORKFLOWS = [
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_DEFAULT},
         ),
+        enable_default_test = False,
         enable_distributed_test=False,
     ),
     CIWorkflow(
