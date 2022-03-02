@@ -123,19 +123,21 @@ void i1e_kernel_cuda(TensorIteratorBase& iter) {
 const char sigmoid_name[] = "sigmoid";
 void sigmoid_kernel_cuda(TensorIteratorBase& iter) {
   if (at::isComplexType(iter.common_dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cuda", [&]() {
-      #if AT_USE_JITERATOR()
+    #if AT_USE_JITERATOR()
+      AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cuda", [&]() {
         jitted_gpu_kernel<
             /*name=*/sigmoid_name,
             /*return_dtype=*/scalar_t,
             /*common_dtype=*/scalar_t,
             /*arity=*/1>(iter, sigmoid_string);
-      #else
+      });
+    #else
+      AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "sigmoid_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return scalar_t{1} / (scalar_t{1} + std::exp(-a));
         });
-      #endif
-    });
+      });
+    #endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "sigmoid_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
