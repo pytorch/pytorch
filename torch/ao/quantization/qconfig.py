@@ -239,7 +239,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                               weight=default_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
-    # Use the fused observer + fake_quant modules for doing QAT.
+
+    # Use the fused observe + fake_quant modules for doing QAT.
     elif version == 1:
         if backend == 'fbgemm':
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
