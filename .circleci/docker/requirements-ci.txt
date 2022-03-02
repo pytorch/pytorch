@@ -57,30 +57,30 @@ librosa>=0.6.2
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
 
-#mkl
+mkl
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions:
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
 
-#mkl-devel
+mkl-devel
 # see mkl
 
-#mock
+mock
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
 #test that import: test_module_init.py, test_modules.py, test_nn.py,
 #test_testing.py
 
-#MonkeyType
+MonkeyType
 #Description: collects runtime types of function arguments and return
 #values, and can automatically generate stub files
 #Pinned versions:
 #test that import:
 
-mypy==0.812
+#mypy==0.812
 #Description: linter
 #Pinned versions: 0.812
 # Pin MyPy version because new errors are likely to appear with each release
