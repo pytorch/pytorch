@@ -29,7 +29,7 @@ Typically a PyTorch op returns a new tensor as output, e.g. :meth:`~torch.Tensor
 But in case of view ops, outputs are views of input tensors to avoid unnecessary data copy.
 No data movement occurs when creating a view, view tensor just changes the way
 it interprets the same data. Taking a view of contiguous tensor could potentially produce a non-contiguous tensor.
-Users should be pay additional attention as contiguity might have implicit performance impact.
+Users should pay additional attention as contiguity might have implicit performance impact.
 :meth:`~torch.Tensor.transpose` is a common example.
 
 ::

@@ -851,7 +851,7 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
         // input_index = round(index_f32)
         // Same as Pillow and Scikit-Image/Scipy ndi.zoom
 
-        for (int64_t i=0; i<output_size; i++) {
+        for (const auto i : c10::irange(output_size)) {
           const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
               scale, i, /*align_corners=*/align_corners, /*cubic=*/false);
           input_index = static_cast<int64_t>(floorf(real_input_index + 0.5));

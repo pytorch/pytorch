@@ -69,8 +69,6 @@ class DistTestCases:
     # Backends that do not support a specific collective
     skip_collective = {}
     skip_collective["allgather_coalesced"] = {"nccl", "mpi"}
-    skip_collective["gather"] = {"nccl"}
-    skip_collective["scatter"] = {"nccl"}
     skip_collective["reduce"] = set()
     skip_collective["sendrecv anysource"] = {"nccl"}
     skip_collective["cpu barrier"] = {"nccl"}
@@ -226,6 +224,7 @@ def with_dist_debug_levels(levels):
             old_level = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
             for level in levels:
                 os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
+                c10d.set_debug_level_from_env()
                 ret = func(*args, **kwargs)
                 c10d.barrier()
                 if old_level is not None:

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -16,6 +17,7 @@ namespace jit {
 namespace {
 void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 #if AT_CUDNN_ENABLED()
+  GRAPH_DEBUG("Before fuseFrozenConvAddReluImpl: ", *graph);
   SubgraphRewriter rewriter;
 
   // CUDNN does not support conv1d
@@ -104,6 +106,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
   rewriter.runOnGraph(graph, filter);
+  GRAPH_DEBUG("After fuseFrozenConvAddReluImpl: ", *graph);
 #endif
 }
 

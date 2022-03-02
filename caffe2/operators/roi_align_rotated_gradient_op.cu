@@ -28,8 +28,7 @@ __device__ void bilinear_interpolate_gradient(
     int& x_low,
     int& x_high,
     int& y_low,
-    int& y_high,
-    const int index /* index for debug only*/) {
+    int& y_high) {
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
     // empty
@@ -75,7 +74,6 @@ template <typename T>
 __global__ void RoIAlignRotatedBackward(
     const int nthreads,
     const T* top_diff,
-    const int num_rois,
     const T spatial_scale,
     const int channels,
     const int height,
@@ -165,8 +163,7 @@ __global__ void RoIAlignRotatedBackward(
             x_low,
             x_high,
             y_low,
-            y_high,
-            index);
+            y_high);
 
         T g1 = top_diff_this_bin * w1 / count;
         T g2 = top_diff_this_bin * w2 / count;
@@ -213,7 +210,6 @@ C10_EXPORT bool RoIAlignRotatedGradientOp<float, CUDAContext>::RunOnDevice() {
            context_.cuda_stream()>>>(
             dY.numel(),
             dY.data<float>(),
-            R.dim32(0),
             spatial_scale_,
             X.dim32(1),
             X.dim32(2),

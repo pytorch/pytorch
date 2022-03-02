@@ -80,7 +80,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
 
     const int64_t D = input.size(1);
     TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (const auto dim : c10::irange(D)) {
         TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
         TORCH_INTERNAL_ASSERT(hist.size(dim) + 1 == bin_edges[dim].numel());
     }
@@ -103,7 +103,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     std::vector<int64_t> num_bin_edges(D);
     std::vector<input_t> leftmost_edge(D), rightmost_edge(D);
 
-    for (int64_t dim = 0; dim < D; dim++) {
+    for (const auto dim : c10::irange(D)) {
         bin_seq[dim] = bin_edges[dim].data_ptr<input_t>();
         num_bin_edges[dim] = bin_edges[dim].numel();
         leftmost_edge[dim] = bin_seq[dim][0];
@@ -138,7 +138,7 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             bool skip_elt = false;
             int64_t hist_index = 0;
 
-            for (int64_t dim = 0; dim < D; dim++) {
+            for (const auto dim : c10::irange(D)) {
                 const input_t elt = accessor_in[i][dim];
 
                 // Skips elements which fall outside the specified bins
@@ -215,7 +215,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
             : c10::optional<Tensor>();
 
     std::vector<Tensor> bin_edges_contig(bin_edges.size());
-    for (size_t dim = 0; dim < bin_edges_contig.size(); dim++) {
+    for (const auto dim : c10::irange(bin_edges_contig.size())) {
         bin_edges_contig[dim] = bin_edges[dim].contiguous();
     }
 
@@ -234,7 +234,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
          /* For each dimension, divides each bin's value
           * by the bin's length in that dimension.
           */
-        for (int64_t dim = 0; dim < N; dim++) {
+        for (const auto dim : c10::irange(N)) {
             const auto bin_lengths = bin_edges[dim].diff();
 
             // Used to reshape bin_lengths to align with the corresponding dimension of hist.
