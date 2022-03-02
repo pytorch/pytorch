@@ -5,15 +5,13 @@
 namespace torch {
 namespace lazy {
 
-std::vector<torch::lazy::Node*> Util::ComputePostOrder(
-    const torch::lazy::Node* node,
-    EmissionMap* emap) {
-  std::vector<torch::lazy::Node*> post_order;
-  std::vector<torch::lazy::Node*> queue;
+std::vector<Node*> Util::ComputePostOrder(const Node* node, EmissionMap* emap) {
+  std::vector<Node*> post_order;
+  std::vector<Node*> queue;
   // std::vector<const T> to c10::ArrayRef<T> conversion is not supported,
   // so we need to drop const in the return vector and use const_cast here.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  queue.push_back(const_cast<torch::lazy::Node*>(node));
+  queue.push_back(const_cast<Node*>(node));
   while (!queue.empty()) {
     node = queue.back();
     auto it = emap->find(node);
@@ -23,7 +21,7 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
         auto oit = emap->find(output.node);
         if (oit == emap->end()) {
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          queue.push_back(const_cast<torch::lazy::Node*>(output.node));
+          queue.push_back(const_cast<Node*>(output.node));
         } else {
           TORCH_CHECK(
               oit->second != kEmitting,
@@ -41,7 +39,7 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
       }
       (*emap)[node] = kEmitted;
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      post_order.push_back(const_cast<torch::lazy::Node*>(node));
+      post_order.push_back(const_cast<Node*>(node));
       queue.pop_back();
     } else {
       TORCH_CHECK(it->second == kEmitted);
@@ -51,10 +49,10 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
   return post_order;
 }
 
-std::vector<torch::lazy::Node*> Util::ComputePostOrder(
-    c10::ArrayRef<torch::lazy::Node*> nodes,
+std::vector<Node*> Util::ComputePostOrder(
+    c10::ArrayRef<Node*> nodes,
     EmissionMap* emap) {
-  std::vector<torch::lazy::Node*> post_order;
+  std::vector<Node*> post_order;
   for (auto node : nodes) {
     auto node_post_order = ComputePostOrder(node, emap);
     post_order.insert(
@@ -63,13 +61,12 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
   return post_order;
 }
 
-std::vector<torch::lazy::Node*> Util::ComputePostOrder(
-    c10::ArrayRef<torch::lazy::Node*> nodes) {
+std::vector<Node*> Util::ComputePostOrder(c10::ArrayRef<Node*> nodes) {
   EmissionMap emap;
   return ComputePostOrder(nodes, &emap);
 }
 
-size_t Util::GetGraphSize(c10::ArrayRef<torch::lazy::Node*> nodes) {
+size_t Util::GetGraphSize(c10::ArrayRef<Node*> nodes) {
   return ComputePostOrder(nodes).size();
 }
 

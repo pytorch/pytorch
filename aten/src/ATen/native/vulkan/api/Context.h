@@ -9,10 +9,7 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-
-#ifdef MAKE_VULKAN_THREADSAFE
 #include <ATen/native/vulkan/api/ThreadContext.h>
-#endif /* MAKE_VULKAN_THREADSAFE */
 
 namespace at {
 namespace native {
@@ -75,13 +72,7 @@ class Context final {
   VkQueue queue_;
   Shader shader_;
   Pipeline pipeline_;
-#ifdef MAKE_VULKAN_THREADSAFE
   ThreadContext threadcontext_;
-#else
-  Command command_;
-  Descriptor descriptor_;
-  Resource resource_;
-#endif /* MAKE_VULKAN_THREADSAFE */
 };
 
 bool available();
@@ -108,7 +99,6 @@ inline Pipeline& Context::pipeline() {
   return pipeline_;
 }
 
-#ifdef MAKE_VULKAN_THREADSAFE
 inline Command& Context::command() {
   return threadcontext_.command();
 }
@@ -120,19 +110,6 @@ inline Descriptor& Context::descriptor() {
 inline Resource& Context::resource() {
   return threadcontext_.resource();
 }
-#else
-inline Command& Context::command() {
-  return command_;
-}
-
-inline Descriptor& Context::descriptor() {
-  return descriptor_;
-}
-
-inline Resource& Context::resource() {
-  return resource_;
-}
-#endif /* MAKE_VULKAN_THREADSAFE */
 
 inline VkDevice Context::device() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);

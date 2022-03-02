@@ -1,13 +1,14 @@
 #ifndef CAFFE2_OPERATORS_ARG_OPS_H_
 #define CAFFE2_OPERATORS_ARG_OPS_H_
 
-#include <algorithm>
-#include <iterator>
-#include <vector>
-
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
+#include <c10/util/irange.h>
+
+#include <algorithm>
+#include <iterator>
+#include <vector>
 
 namespace caffe2 {
 
@@ -43,7 +44,7 @@ class ArgOp final : public Operator<Context> {
     Y_dims.reserve(ndim);
     int prev_size = 1;
     int next_size = 1;
-    for (int i = 0; i < axis_; ++i) {
+    for (const auto i : c10::irange(axis_)) {
       Y_dims.push_back(X_dims[i]);
       prev_size *= X_dims[i];
     }

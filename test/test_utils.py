@@ -864,5 +864,13 @@ class TestExtensionUtils(TestCase):
             torch._register_device_module('xpu', DummyXPUModule)
 
 
+class TestCppExtensionUtils(TestCase):
+    def test_cpp_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
+
+    def test_cc_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
+
+
 if __name__ == '__main__':
     run_tests()

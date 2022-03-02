@@ -114,11 +114,16 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
-    run_frozen_optimizations(out, optimize_numerics)
+
+    preserved_methods = [x for x in preserved_attrs if mod._c._has_method(x)]
+    run_frozen_optimizations(out, optimize_numerics, preserved_methods)
 
     return out
 
-def run_frozen_optimizations(mod, optimize_numerics: bool = True):
+
+def run_frozen_optimizations(
+    mod, optimize_numerics: bool = True, preserved_methods: Optional[List[str]] = None
+):
     r"""
     Runs a series of optimizations looking for patterns that occur in frozen graphs.
     The current set of optimizations includes:
@@ -161,7 +166,16 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
     """
     torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
-def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
+    if preserved_methods is None:
+        preserved_methods = []
+
+    for method in preserved_methods:
+        torch._C._jit_pass_optimize_frozen_graph(
+            mod.__getattr__(method).graph, optimize_numerics
+        )
+
+
+def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]] = None) -> ScriptModule:
     """
     Performs a set of optimization passes to optimize a model for the
     purposes of inference. If the model is not already frozen, optimize_for_inference
@@ -195,8 +209,12 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
             "optimize_for_inference expects a ScriptModule as input. "
             "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
 
-    if hasattr(mod, "training"):
-        mod = freeze(mod.eval())
+    if other_methods is None:
+        other_methods = []
 
-    torch._C._jit_pass_optimize_for_inference(mod._c)
+    if hasattr(mod, "training"):
+        mod = freeze(mod.eval(), preserved_attrs=other_methods)
+
+    torch._C._jit_pass_optimize_for_inference(mod._c, other_methods)
+
     return mod

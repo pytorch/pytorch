@@ -69,30 +69,30 @@ class IndexCompute : public BackwardVisitor {
   void handle(Expr*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
-  kir::Val* getExtent(kir::IterDomain* id);
+  Val* getExtent(IterDomain* id);
 
   //! True if a domain is not used to index
-  bool isZero(kir::IterDomain* id) const;
+  bool isZero(IterDomain* id) const;
   //! True if any dependent of a domain is not used to index
-  bool hasZeroMerged(kir::IterDomain* id) const;
+  bool hasZeroMerged(IterDomain* id) const;
 
   // Tensor domain we're mapping back to root
   const TensorDomain* td_; // NOLINT
 
   // Map we update as we propagate backward, containing all IDs in the
   // propagation. Initial indices are mapped with this map at tv->domain()
-  // and are back propagated to tv->rootDomain(). This index_map_ keeps the
+  // and are back propagated to tv->getRootDomain(). This index_map_ keeps the
   // indices at intermediate IterDomain's in that back propagation.
-  std::unordered_map<kir::IterDomain*, kir::Val*> index_map_; // NOLINT
+  std::unordered_map<IterDomain*, Val*> index_map_; // NOLINT
 
   // Map from IterDomain to their broadcasted extent. If a TV has I0*I1 but its
   // producer has B0*I1 this map will contain a mapping from the ID{B0*I1} to
   // the extent I0*I1. Also contains updated extents if we merge in a 0 index.
   // See zero_merged_in_.
-  std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_; // NOLINT
+  std::unordered_map<IterDomain*, Val*> extent_map_; // NOLINT
 
   // Keeps track of domains that do not contribute to indexing
-  std::unordered_set<kir::IterDomain*> zero_domains_; // NOLINT
+  std::unordered_set<IterDomain*> zero_domains_; // NOLINT
 
   // This set keeps track of IterDomain's that have had a zero index merged into
   // them. This happens if we do something like tv->axis(0)->split(4) then
@@ -100,47 +100,46 @@ class IndexCompute : public BackwardVisitor {
   // indexing would be (0, i) then when we do the backward computation that zero
   // and i would attempt to be merged together. We handle indices like these
   // specially.
-  std::unordered_set<kir::IterDomain*> zero_merged_in_;
+  std::unordered_set<IterDomain*> zero_merged_in_;
 
   // IDs that are a result of contiguous merges
-  std::unordered_set<kir::IterDomain*> contig_ids;
+  std::unordered_set<IterDomain*> contig_ids;
 
   // Mentions if we should propagate an index down a particular IterDomain path
   // if there's an option
-  std::unordered_set<kir::IterDomain*> preferred_paths_;
+  std::unordered_set<IterDomain*> preferred_paths_;
 
   // Map from IterDomains to halo-extended extents in corresponding
   // reference tensor
-  std::unordered_map<kir::IterDomain*, kir::Val*> reference_halo_extent_map_;
+  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map_;
 
  public:
-  const std::unordered_map<kir::IterDomain*, kir::Val*>& indexMap() const {
+  const std::unordered_map<IterDomain*, Val*>& indexMap() const {
     return index_map_;
   }
 
-  const std::unordered_map<kir::IterDomain*, kir::Val*>& extentMap() const {
+  const std::unordered_map<IterDomain*, Val*>& extentMap() const {
     return extent_map_;
   }
 
-  const std::unordered_set<kir::IterDomain*>& zeroDomains() const {
+  const std::unordered_set<IterDomain*>& zeroDomains() const {
     return zero_domains_;
   }
 
-  const std::unordered_set<kir::IterDomain*>& zeroMergedIn() const {
+  const std::unordered_set<IterDomain*>& zeroMergedIn() const {
     return zero_merged_in_;
   }
 
   // Propagate back from _td using initial_index_map
   IndexCompute(
       const TensorDomain* _td,
-      std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
-      std::unordered_map<kir::IterDomain*, kir::Val*> _extent_map,
-      std::unordered_set<kir::IterDomain*> zero_domains,
-      std::unordered_set<kir::IterDomain*> _zero_merged_in,
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_map<IterDomain*, Val*> _extent_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> _zero_merged_in,
       const std::vector<bool>& _root_contiguity,
-      std::unordered_set<kir::IterDomain*> preferred_paths = {},
-      std::unordered_map<kir::IterDomain*, kir::Val*>
-          reference_halo_extent_map = {});
+      std::unordered_set<IterDomain*> preferred_paths = {},
+      std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
 
   // Updates index_map, extent_map, and zero_merged_in based on id_map and
   // returns a new IndexCompute ready to be used.
@@ -148,8 +147,8 @@ class IndexCompute : public BackwardVisitor {
       const TensorDomain* new_td,
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
       const std::vector<bool>& _root_contiguity,
-      const std::unordered_map<kir::IterDomain*, kir::Val*>&
-          reference_halo_extent_map = {});
+      const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
+          {});
 
   virtual void run();
 };
@@ -159,10 +158,10 @@ class IndexSwizzle : public IndexCompute {
  public:
   IndexSwizzle(
       const TensorView* tv,
-      std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
-      std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
-      std::unordered_set<kir::IterDomain*> zero_domains,
-      std::unordered_set<kir::IterDomain*> zero_merged_in);
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_map<IterDomain*, Val*> extent_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> zero_merged_in);
 
   void run() override;
 
@@ -183,24 +182,24 @@ class RootPredicateInfo {
   friend class Index;
 
  public:
-  const auto& startPredicates() const {
-    return start_predicates_;
+  const auto& startPredicate() const {
+    return start_predicate_;
   }
 
-  auto& startPredicates() {
-    return start_predicates_;
+  auto& startPredicate() {
+    return start_predicate_;
   }
 
-  const auto& startOffsets() const {
-    return start_offsets_;
+  const auto& startOffset() const {
+    return start_offset_;
   }
 
-  const auto& stopPredicates() const {
-    return stop_predicates_;
+  const auto& stopPredicate() const {
+    return stop_predicate_;
   }
 
-  const auto& stopOffsets() const {
-    return stop_offsets_;
+  const auto& stopOffset() const {
+    return stop_offset_;
   }
 
   const auto& rootIds() const {
@@ -212,14 +211,14 @@ class RootPredicateInfo {
   static RootPredicateInfo getFalseInfo();
 
  private:
-  // prdicates for lower end
-  std::vector<kir::Bool*> start_predicates_;
-  // prdicates for upper end
-  std::vector<kir::Bool*> stop_predicates_;
-  // Offsets of the start predicate
-  std::vector<kir::Val*> start_offsets_;
-  // Offsets of the stop predicate
-  std::vector<kir::Val*> stop_offsets_;
+  // prdicate for lower end
+  Bool* start_predicate_ = nullptr;
+  // prdicate for upper end
+  Bool* stop_predicate_ = nullptr;
+  // Offset of the start predicate
+  Val* start_offset_ = nullptr;
+  // Offset of the stop predicate
+  Val* stop_offset_ = nullptr;
   // Track which roots have been handled by the generated predicates
   std::unordered_set<IterDomain*> root_ids_;
 };
@@ -230,24 +229,24 @@ class RootPredicateInfo {
 class Index {
  private:
   // Producer indexing if it's in shared or local memory
-  static std::vector<kir::Val*> getNonGlobalProducerStridedIndices(
+  static std::vector<Val*> getNonGlobalProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
-  static std::vector<kir::Val*> getNonGlobalConsumerStridedIndices(
+  static std::vector<Val*> getNonGlobalConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
   // Producer if it's in global memory
-  static std::vector<kir::Val*> getGlobalProducerStridedIndices(
+  static std::vector<Val*> getGlobalProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
-  static std::vector<kir::Val*> getGlobalConsumerStridedIndices(
+  static std::vector<Val*> getGlobalConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
@@ -270,7 +269,7 @@ class Index {
   //! root domain of a producer tensor. The size of the returned
   //! vector is guaranteed to be equal to the number of axes of the
   //! indexing root domain.
-  static std::vector<kir::Val*> getProducerStridedIndices(
+  static std::vector<Val*> getProducerStridedIndices(
       TensorView* producer,
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
@@ -279,7 +278,7 @@ class Index {
   //! root domain of a consumer tensor. The size of the returned
   //! vector is guaranteed to be equal to the number of axes of the
   //! indexing root domain.
-  static std::vector<kir::Val*> getConsumerStridedIndices(
+  static std::vector<Val*> getConsumerStridedIndices(
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
@@ -307,7 +306,7 @@ class Index {
   //! vectorized loop.
   static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
   getReferenceRootPredicates(
-      const kir::TensorView* kir_consumer_tv,
+      TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);
@@ -322,7 +321,7 @@ class Index {
   static bool protectWithMagicZero(
       kir::ForLoop* loop,
       IterDomain* reference_domain = nullptr,
-      kir::Val* ind = nullptr);
+      Val* ind = nullptr);
 };
 
 } // namespace cuda

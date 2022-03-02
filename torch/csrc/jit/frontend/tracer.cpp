@@ -323,6 +323,14 @@ Value* TracingState::getOutput(const IValue& iv, size_t i) {
   }
 }
 
+Node* TracingState::createNode(c10::Symbol op_name, size_t num_outputs) {
+  return graph->create(op_name, num_outputs);
+}
+
+void TracingState::insertNode(Node* node) {
+  graph->insertNode(node);
+}
+
 // XXX: this function mutates input
 static IValue addInput(
     const std::shared_ptr<TracingState>& state,

@@ -37,14 +37,6 @@ BIAS_INDEX_DICT = {
     torch.nn.functional.instance_norm : [4],
 }
 
-# turn foo.bar -> ['foo', 'bar']
-def _parent_name(target):
-    r = target.rsplit('.', 1)
-    if len(r) == 1:
-        return '', r[0]
-    else:
-        return r[0], r[1]
-
 def graph_pretty_str(g, shorten=True) -> str:
     """Returns a printable representation of the ops in the graph of g.
     If shorten is True, tries to abbreviate fields.
@@ -125,6 +117,9 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    compute_dtype = None
+    if hasattr(activation_post_process, "compute_dtype"):
+        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
@@ -142,6 +137,11 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
+    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8]:
+        node_type = "call_function"
+        quantize_op = torch.quantize_per_tensor_dynamic
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
         raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
     assert quantize_op is not None
@@ -511,3 +511,15 @@ def maybe_get_next_module(
             return user
 
     return None
+
+def create_node_from_old_node_preserve_meta(
+    quantized_graph: Graph,
+    create_node_args: Tuple[Any, ...],
+    old_node: Node,
+) -> Node:
+    """
+    Creates `new_node` and copies the necessary metadata to it from `old_node`.
+    """
+    new_node = quantized_graph.create_node(*create_node_args)
+    new_node.stack_trace = old_node.stack_trace
+    return new_node

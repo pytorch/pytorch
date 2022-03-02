@@ -1,4 +1,5 @@
 #include <ATen/native/TensorTransformations.h>
+#include <ATen/native/IndexKernel.h>  // for flip_stub
 
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>

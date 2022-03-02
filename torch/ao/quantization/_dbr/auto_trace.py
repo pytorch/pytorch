@@ -13,13 +13,18 @@ from .utils import (
     HookType,
     get_torch_function_hook_type,
     get_module_hook_type,
+    OpQuantizeabilityType,
+    AutoQuantizationStateModuleDict,
+    get_fqn_valid_for_module_dict_key,
 )
 from .model_utils import (
     pack_weights_for_functionals,
     attach_scale_zp_values_to_model,
     attach_op_convert_info_to_model,
+    attach_output_convert_info_to_model,
 )
 from . import auto_trace_rewriter
+from torch.ao.quantization import is_activation_post_process
 
 logger = logging.getLogger('auto_trace')
 logging.basicConfig(level=logging.DEBUG)
@@ -33,10 +38,15 @@ enable_logging = False
 
 def add_auto_observation(
     model : torch.nn.Module,
+    qconfig_dict: Dict[str, Any],
     example_inputs: Tuple[Any],
     input_dtypes: Any = (torch.float,),  # must be same structure as model inputs
-    output_dtypes: Any = (torch.float,),  # must be same structure as model outputs
+    prepare_custom_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
+    if prepare_custom_config_dict is None:
+        prepare_custom_config_dict = {}
+    output_dtypes = prepare_custom_config_dict.get('output_dtypes', (torch.float,))
+
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
             return x.as_subclass(QuantizationPrepareTensorProxy)  # type: ignore[arg-type]
@@ -57,6 +67,8 @@ def add_auto_observation(
     # Counter for global quantizeable ops, useful for intermediate activation
     # logging.
     global_op_idx = [0]
+
+    global_disable_torch_function_override = False
 
     class QuantizationPrepareTensorProxy(torch.Tensor):
         """
@@ -79,36 +91,80 @@ def add_auto_observation(
 
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
-            # to prevent printing things from going into an infinite loop
-            if func == torch.Tensor.__repr__:
+            nonlocal global_disable_torch_function_override
+            if (
+                # global override means disable the override here
+                global_disable_torch_function_override or
+                # to prevent printing things from going into an infinite loop
+                func == torch.Tensor.__repr__ or
+                # we don't need to override getters in this framework
+                func.__name__ == '__get__'
+            ):
                 return super().__torch_function__(func, types, args, kwargs)
+
+            # if we are in a function, the current module is always a parent
+            nonlocal cur_module
+            parent_module = cur_module
             if enable_logging:
-                logger.debug(f'__torch_function__ {str(func)} len_args {len(args)}')
+                if not is_activation_post_process(parent_module):
+                    # logging for insides of obs/fq is not useful for this framework
+
+                    # fqn map does not contain observers, which is why we
+                    # cannot always assume that FQN exists
+                    fqn_for_logging = module_id_to_fqn.get(
+                        id(parent_module), 'unknown') if parent_module else None
+                    logger.debug(
+                        f' fqn:{fqn_for_logging} _tf_ {str(func)} len_args {len(args)}')
 
             nonlocal qtensor_id
-            nonlocal cur_module
             kwargs = kwargs if kwargs else {}
-            # if we are in a function, the current module is always a parent
-            parent_module = cur_module
             hook_type = get_torch_function_hook_type(parent_module, func)
 
             if hook_type is HookType.OP_HOOKS:
-                qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
+                qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 if not first_call:
                     qstate.validate_cur_op(func)
                 # run "before" hook
-                args, kwargs = qstate.op_prepare_before_hook(
-                    func, args, kwargs, first_call, qtensor_id, fqn, parent_module)
+                if first_call:
+                    args, kwargs = qstate.first_call_op_prepare_before_hook(
+                        func, args, kwargs, qtensor_id, fqn, parent_module,
+                        OpQuantizeabilityType.QUANTIZEABLE)
+                else:
+                    args, kwargs = qstate.op_prepare_before_hook(
+                        func, args, kwargs)
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
-                output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, parent_module,
-                    global_op_idx)
+                if first_call:
+                    output = qstate.first_call_op_prepare_after_hook(
+                        func, output, args, qtensor_id,
+                        OpQuantizeabilityType.QUANTIZEABLE)
+                else:
+                    output = qstate.op_prepare_after_hook(
+                        func, output, args, global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
+                # Hook type is not HookType.OP_HOOKS, if first_call is True we
+                # record the DAG of non-quantizeable ops.
+
+                if first_call:
+                    qstate = getattr(parent_module, '_auto_quant_state', None)
+                    if qstate:
+                        fqn = module_id_to_fqn.get(id(parent_module), None) \
+                            if parent_module else None
+                        args, kwargs = qstate.first_call_op_prepare_before_hook(
+                            func, args, kwargs, qtensor_id, fqn, parent_module,
+                            OpQuantizeabilityType.NOT_QUANTIZEABLE)
+
                 output = super().__torch_function__(func, types, args, kwargs)
+
+                if first_call:
+                    qstate = getattr(parent_module, '_auto_quant_state', None)
+                    if qstate:
+                        output = qstate.first_call_op_prepare_after_hook(
+                            func, output, args, qtensor_id,
+                            OpQuantizeabilityType.NOT_QUANTIZEABLE)
 
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
@@ -166,7 +222,8 @@ def add_auto_observation(
             def _patched_module_call(self, *args, **kwargs):
 
                 if enable_logging:
-                    logger.debug(f"_patched_module_call: {type(self)}")
+                    fqn = module_id_to_fqn.get(id(self), None)
+                    logger.debug(f" fqn:{fqn} _cl_: {type(self)} start")
 
                 nonlocal cur_module
                 old_module = cur_module
@@ -176,10 +233,6 @@ def add_auto_observation(
                     module_stack.append(self)
                     fqn = module_id_to_fqn.get(id(self), None)
 
-                    if enable_logging:
-                        fqn = module_id_to_fqn.get(id(self), None)
-                        logger.debug(f"\nstarting fqn {fqn}")
-
                     hook_type = get_module_hook_type(parent_module, cur_module)
 
                     if hook_type is HookType.OP_HOOKS:
@@ -188,18 +241,43 @@ def add_auto_observation(
                         # before hooks
                         if not first_call:
                             parent_qstate.validate_cur_op(cur_module)
-                        args, kwargs = parent_qstate.op_prepare_before_hook(
-                            cur_module, args, kwargs, first_call, qtensor_id,
-                            fqn, cur_module)
+
+                        # If we are in this hook, `cur_module` is a leaf module.
+                        # Therefore, we do not need to override any of its
+                        # children. Disabling the overrides for performance.
+                        nonlocal global_disable_torch_function_override
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
+                        if first_call:
+                            # mypy ignore is used instead of assert because this
+                            # runs on every forward and assert has a performance cost
+                            args, kwargs = parent_qstate.first_call_op_prepare_before_hook(
+                                cur_module, args, kwargs, qtensor_id,
+                                fqn, cur_module,  # type: ignore[arg-type]
+                                OpQuantizeabilityType.QUANTIZEABLE)
+                        else:
+                            # mypy ignore is used instead of assert because this
+                            # runs on every forward and assert has a performance cost
+                            args, kwargs = parent_qstate.op_prepare_before_hook(
+                                cur_module, args, kwargs)  # type: ignore[arg-type]
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
 
+                        # Re-enable the overrides.
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
+
                         # after hooks
-                        # TODO is it correct to call_cur_module twice here?
-                        output = parent_qstate.op_prepare_after_hook(
-                            cur_module, output, args, first_call, qtensor_id,
-                            cur_module, global_op_idx)
+                        if first_call:
+                            output = parent_qstate.first_call_op_prepare_after_hook(
+                                cur_module, output, args, qtensor_id,
+                                OpQuantizeabilityType.QUANTIZEABLE)
+                        else:
+                            output = parent_qstate.op_prepare_after_hook(
+                                cur_module, output, args, global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -212,23 +290,46 @@ def add_auto_observation(
                         output = orig_module_call(self, *args, **kwargs)
 
                         # after hooks
-                        output = cur_qstate.outputs_prepare_hook(
-                            output, first_call, qtensor_id)
+                        if first_call:
+                            output = cur_qstate.first_call_outputs_prepare_hook(
+                                output, qtensor_id)
+                        else:
+                            output = cur_qstate.outputs_prepare_hook(output)
+
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
+                        if first_call and parent_module is not None:
+                            parent_qstate_fc = getattr(
+                                parent_module, '_auto_quant_state', None)
+                            if parent_qstate_fc:
+                                args, kwargs = \
+                                    parent_qstate_fc.first_call_op_prepare_before_hook(
+                                        cur_module, args, kwargs, qtensor_id, fqn,
+                                        cur_module,
+                                        OpQuantizeabilityType.NOT_QUANTIZEABLE)
+
                         output = orig_module_call(self, *args, **kwargs)
                         # if this fp32 was inplace, make sure to set the output dtype
                         # back to torch.float
                         if hasattr(output, '_qtensor_info'):
                             del output._qtensor_info
 
+                        if first_call and parent_module is not None:
+                            parent_qstate_fc = getattr(
+                                parent_module, '_auto_quant_state', None)
+                            if parent_qstate_fc:
+                                output = \
+                                    parent_qstate_fc.first_call_op_prepare_after_hook(
+                                        cur_module, output, args, qtensor_id,
+                                        OpQuantizeabilityType.NOT_QUANTIZEABLE)
+
                     else:
                         output = orig_module_call(self, *args, **kwargs)
 
                     if enable_logging:
                         fqn = module_id_to_fqn.get(id(self), None)
-                        logger.debug(f"\nending fqn {fqn}")
+                        logger.debug(f" fqn:{fqn} _cl_: {type(self)} end")
 
                     return output
                 finally:
@@ -243,31 +344,75 @@ def add_auto_observation(
                     # Create a list before iterating because we are adding new
                     # named modules inside the loop.
                     named_modules = list(self.named_modules())
-                    for k, v in named_modules:
 
-                        # k is the global FQN, i.e. 'foo.bar.baz'
+                    # Record module instances which are leaves or children of leaves
+                    leaves = set()
+                    for fqn, child in named_modules:
+                        if is_leaf(child, prepare_custom_config_dict):
+                            for _, child_child in child.named_modules():
+                                leaves.add(child_child)
+
+                    self._fqn_to_auto_quant_state_map = AutoQuantizationStateModuleDict()
+
+                    for fqn, v in named_modules:
+
+                        # fqn is the global FQN, i.e. 'foo.bar.baz'
                         # v is the module instance
                         #
                         # we need to associate the global FQN with SeenOp
                         # for modules, this is the module FQN
                         # for functions, this is the parent module FQN
-                        module_id_to_fqn[id(v)] = k
+                        module_id_to_fqn[id(v)] = fqn
 
-                        has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
-                        if has_qconfig and not is_leaf(v):
-                            if v is self:
-                                # for the top level module only, specify input
-                                # and output dtypes
-                                v._auto_quant_state = AutoQuantizationState(
-                                    v.qconfig, input_dtypes, output_dtypes)
-                                pass
-                            else:
-                                v._auto_quant_state = AutoQuantizationState(
-                                    v.qconfig)
+                        if v in leaves:
+                            continue
+
+                        if v is self:
+                            # for the top level module only, specify input
+                            # and output dtypes
+                            auto_quant_state = AutoQuantizationState(
+                                qconfig_dict, fqn,
+                                input_dtypes, output_dtypes)
+                        else:
+                            auto_quant_state = AutoQuantizationState(
+                                qconfig_dict, fqn)
+
+                        # The code below registers the auto_quant_state object
+                        # of the child in the module hierarchy of the parent,
+                        # and adds the auto_quant_state object to the child
+                        # with a raw __setattr__, without registering it in
+                        # the module hierarchy of the child.
+                        # This is solving the problem of both storing extra state
+                        # (observers) as well as not modifying the meaning of user
+                        # code in child modules which iterates over all module
+                        # children.
+                        #
+                        # This narrows down the issue of dynamically adding
+                        # children to only affect the top level module and not
+                        # the children.
+
+                        # On the parent, register this module in the FQN map
+                        fqn_to_use_for_key = \
+                            get_fqn_valid_for_module_dict_key(fqn)
+                        self._fqn_to_auto_quant_state_map[fqn_to_use_for_key] = \
+                            auto_quant_state
+                        # On the child, manually set the attribute without
+                        # going through the `torch.nn.Module.__setattr__`
+                        # function, to prevent this object from appearing in
+                        # the child's module hierarchy.
+                        object.__setattr__(
+                            v, '_auto_quant_state', auto_quant_state)
 
                 global_op_idx[0] = 0
 
                 output = super().__call__(*new_args, **new_kwargs)
+
+                if first_call:
+                    for _, v in self.named_modules():
+                        if hasattr(v, '_auto_quant_state'):
+                            v._auto_quant_state.match_fusion_patterns()
+                            v._auto_quant_state.insert_observers(v)
+
                 return output
             finally:
                 torch.nn.Module.__call__ = orig_module_call
@@ -281,7 +426,6 @@ def add_auto_observation(
     return model
 
 
-# TODO(future PR): add serialization support
 def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     def convert_to_dispatch_proxy(x):
         if isinstance(x, torch.Tensor):
@@ -293,6 +437,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     # Counter for global quantizeable ops, useful for intermediate activation
     # logging.
     global_op_idx = [0]
+
+    global_disable_torch_function_override = False
 
     class QuantizationConvertTensorProxy(torch.Tensor):
         """
@@ -316,8 +462,15 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
-            # to prevent printing things from going into an infinite loop
-            if func == torch.Tensor.__repr__:
+            nonlocal global_disable_torch_function_override
+            if (
+                # global override means disable the override here
+                global_disable_torch_function_override or
+                # to prevent printing things from going into an infinite loop
+                func == torch.Tensor.__repr__ or
+                # we don't need to override getters in this framework
+                func.__name__ == '__get__'
+            ):
                 return super().__torch_function__(func, types, args, kwargs)
 
             kwargs = kwargs if kwargs else {}
@@ -326,12 +479,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             hook_type = get_torch_function_hook_type(parent_module, func)
 
             if enable_logging:
-                with torch._C.DisableTorchFunction():
-                    logger.debug(
-                        f"__torch_function__ {func} " +
-                        f"hook_type {hook_type} " +
-                        # f"arg_types {[type(arg) for arg in args]}) " +
-                        f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
+                fqn_for_logging = module_id_to_fqn.get(
+                    id(parent_module), 'unknown') if parent_module else None
+                logger.debug(
+                    f" fqn:{fqn_for_logging} _tf_ {func} " +
+                    f"hook_type {hook_type} " +
+                    # f"arg_types {[type(arg) for arg in args]}) " +
+                    f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
             if hook_type is HookType.OP_HOOKS:
                 qstate: AutoQuantizationState = parent_module._auto_quant_state  # type: ignore[union-attr]
@@ -348,17 +502,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 qstate.mark_cur_op_complete(func)
 
             elif hook_type is HookType.ARG_DEQUANTS:
-                # disabling torch function to prevent infinite recursion on
-                # getset
                 # TODO(future PR): handle more dtypes
-                with torch._C.DisableTorchFunction():
-                    new_args = []
-                    for arg in args:
-                        if isinstance(arg, torch.Tensor) and arg.is_quantized:
-                            new_args.append(arg.dequantize())
-                        else:
-                            new_args.append(arg)
-                    args = tuple(new_args)
+                new_args = []
+                for arg in args:
+                    if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                        new_args.append(arg.dequantize())
+                    else:
+                        new_args.append(arg)
+                args = tuple(new_args)
                 output = super().__torch_function__(func, types, args, kwargs)
 
             else:  # HookType.NONE
@@ -372,10 +523,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 assert output is not NotImplemented
 
             if enable_logging:
+                fqn_for_logging = module_id_to_fqn.get(
+                    id(parent_module), 'unknown') if parent_module else None
                 out_dtype = None
                 if isinstance(output, torch.Tensor):
                     out_dtype = output.dtype
-                logger.debug(f"__torch_function__ {func} out {out_dtype} end")
+                logger.debug(f" fqn:{fqn_for_logging} _tf_ {func} out {out_dtype} end")
 
             return output
 
@@ -426,21 +579,19 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             orig_nn_sequential_forward = torch.nn.Sequential.forward
 
             def _patched_module_call(self, *args, **kwargs):
-                if enable_logging:
-                    fqn = module_id_to_fqn.get(id(self), None)
-                    logger.debug(f"\nstarting fqn {fqn}")
-
                 nonlocal cur_module
                 old_module = cur_module
                 cur_module = self
+                nonlocal global_disable_torch_function_override
                 try:
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
                     hook_type = get_module_hook_type(parent_module, cur_module)
                     if enable_logging:
+                        fqn_for_logging = module_id_to_fqn.get(id(self), None)
                         logger.debug(
-                            f"_patched_module_call {type(self)} " +
-                            # f"arg_types {[type(arg) for arg in args]} " +
+                            f" fqn: {fqn_for_logging} " +
+                            f"_cl_ {type(self)} " +
                             f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
                             f"hook_type {hook_type}")
 
@@ -448,9 +599,15 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # before hooks
                         qstate: AutoQuantizationState = \
                             parent_module._auto_quant_state  # type: ignore[union-attr, assignment]
-                        if enable_logging:
-                            logger.debug(qstate)
                         qstate.validate_cur_op(cur_module)
+
+                        # If we are in this hook, `cur_module` is a leaf module.
+                        # Therefore, we do not need to override any of its
+                        # children. Disabling the overrides for performance.
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
                         _, args, kwargs = qstate.op_convert_before_hook(
                             cur_module, args, kwargs, cur_module)
                         # forward
@@ -458,12 +615,15 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # after hooks
                         output = qstate.op_convert_after_hook(
                             cur_module, output, global_op_idx)
+
+                        # Re-enable the override.
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
+
                         qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
                         cur_qstate: AutoQuantizationState = cur_module._auto_quant_state
-                        if enable_logging:
-                            logger.debug(cur_qstate)
 
                         cur_qstate.reset_to_new_call()
 
@@ -471,35 +631,43 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
+
+                        # For the sake of performance, we assume no overrides
+                        # are needed for quantizing/dequantizing things
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
                         output = cur_qstate.outputs_convert_hook(output)
+
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
+
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
-                        # disabling torch function to prevent infinite recursion on
-                        # getset
                         # TODO(future PR): handle more dtypes
-                        with torch._C.DisableTorchFunction():
-                            new_args = []
-                            for arg in args:
-                                if isinstance(arg, torch.Tensor) and arg.is_quantized:
-                                    dequant = arg.dequantize().as_subclass(
-                                        QuantizationConvertTensorProxy)  # type: ignore[arg-type]
-                                    new_args.append(dequant)
-                                else:
-                                    new_args.append(arg)
-                            args = tuple(new_args)
+                        new_args = []
+                        for arg in args:
+                            if isinstance(arg, torch.Tensor) and arg.is_quantized:
+                                dequant = arg.dequantize().as_subclass(
+                                    QuantizationConvertTensorProxy)  # type: ignore[arg-type]
+                                new_args.append(dequant)
+                            else:
+                                new_args.append(arg)
+                        args = tuple(new_args)
                         output = orig_module_call(self, *args, **kwargs)
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)
 
                     if enable_logging:
+                        fqn_for_logging = module_id_to_fqn.get(id(self), None)
                         logger.debug(
-                            f"_patched_module_call {type(self)} " +
-                            # f"out {type(output)} " +
+                            f" fqn: {fqn_for_logging} " +
+                            f"_cl_ {type(self)} " +
                             f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
                             "end")
-                        logger.debug(f"ending fqn {fqn}\n")
                     return output
                 finally:
                     module_stack.pop()
@@ -510,24 +678,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
             try:
                 global_op_idx[0] = 0
-
-                needs_io_hooks = hasattr(self, '_auto_quant_state')
-
-                # handle module input dtype conversions
-                # TODO(implement)
-
                 output = super().__call__(*new_args, **new_kwargs)
-
-                # handle module output dtype conversions
-                if needs_io_hooks:
-                    qstate = self._auto_quant_state
-                    assert isinstance(qstate, AutoQuantizationState)
-                    output = qstate.outputs_convert_hook(output)
 
                 def unwrap_proxy(a):
                     if isinstance(a, QuantizationConvertTensorProxy):
                         a.__class__ = torch.Tensor  # type: ignore[assignment]
                     return a
+
                 output = map_aggregate(output, unwrap_proxy)
                 return output
             finally:
@@ -540,6 +697,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     pack_weights_for_functionals(module)
     attach_scale_zp_values_to_model(module)
     attach_op_convert_info_to_model(module)
+    attach_output_convert_info_to_model(module)
+
+    # Since eager mode convert could have changed the IDs of some modules,
+    # populate the FQN map again
+    for k, v in module.named_modules():
+        module_id_to_fqn[id(v)] = k
+
     module.__class__ = QuantizationDispatchModule
 
     return module
@@ -553,6 +717,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 # checking the fix into `torch.nn.Sequential` to avoid the patch.
 def _nn_sequential_patched_forward(cls, input):
     for module in cls:
-        if not isinstance(module, AutoQuantizationState):
+        if not isinstance(module, AutoQuantizationStateModuleDict):
             input = module(input)
     return input

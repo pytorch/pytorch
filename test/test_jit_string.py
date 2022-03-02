@@ -317,5 +317,17 @@ class TestScript(JitTestCase):
         self.checkScript(test_bool_conversion, ("nonempty",))
         self.checkScript(test_bool_conversion, ("",))
 
+    def test_string_slice(self):
+        def test_slice(a: str) -> Tuple[str, str, str, str, str]:
+            return (
+                a[0:1:2],
+                a[0:6:1],
+                a[4:1:2],
+                a[0:3:2],
+                a[-1:1:3],
+            )
+
+        self.checkScript(test_slice, ("hellotest",))
+
 if __name__ == '__main__':
     run_tests()

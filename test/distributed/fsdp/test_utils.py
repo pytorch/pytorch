@@ -6,7 +6,7 @@ import unittest
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp.utils import (
+from torch.distributed.fsdp.utils import (
     _apply_to_tensors,
 )
 from torch.testing._internal.common_utils import (

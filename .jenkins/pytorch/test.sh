@@ -80,7 +80,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 
   # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  export NUM_TEST_SHARDS=2
+  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
+  if [[ -z "${GITHUB_ACTIONS}" ]]; then
+    export NUM_TEST_SHARDS=2
+  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -303,7 +306,7 @@ test_vulkan() {
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_TEST_DIR"/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
@@ -411,19 +414,34 @@ test_torch_function_benchmark() {
   assert_git_not_dirty
 }
 
+build_xla() {
+  XLA_DIR=xla
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" build_torch_xla $XLA_DIR
+  assert_git_not_dirty
+}
+
 test_xla() {
+  clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
-  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
 
 # Do NOT run this test before any other tests, like test_python_shard, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
-test_backward_compatibility() {
+test_forward_backward_compatibility() {
   set -x
-  pushd test/backward_compatibility
+  pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
@@ -433,7 +451,7 @@ test_backward_compatibility() {
   deactivate
   rm -r venv
   pip show torch
-  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
+  python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   popd
   set +x
   assert_git_not_dirty
@@ -443,6 +461,12 @@ test_bazel() {
   set -e
 
   get_bazel
+
+   # Test //c10/... without Google flags and logging libraries. The
+   # :all_tests target in the subsequent Bazel invocation tests
+   # //c10/... with the Google libraries.
+  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+              --no//c10:use_gflags --no//c10:use_glog //c10/...
 
   tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
@@ -508,10 +532,11 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
-  test_backward_compatibility
+  test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
-elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
+elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
+  build_xla
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
@@ -534,13 +559,19 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
+  # Handle arbitrary number of shards
+  test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  test_vulkan
+  # TODO: re-enable vulkan test
+  echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
   test_distributed
   test_rpc
+elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
+  test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 else

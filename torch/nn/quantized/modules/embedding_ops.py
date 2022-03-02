@@ -93,6 +93,7 @@ class Embedding(torch.nn.Module):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        self.dtype = dtype
 
         if _weight is None:
             scales = torch.ones(num_embeddings, dtype=torch.float)
@@ -109,7 +110,10 @@ class Embedding(torch.nn.Module):
         self._packed_params.set_weight(qweight)
 
     def forward(self, indices: Tensor) -> Tensor:
-        return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
+        if self.dtype == torch.quint4x2:
+            return torch.ops.quantized.embedding_4bit(self._packed_params._packed_weight, indices)
+        else:
+            return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
 
     def _get_name(self):
         return 'QuantizedEmbedding'
@@ -154,13 +158,12 @@ class Embedding(torch.nn.Module):
                 weight_observer = float_qparams_weight_only_qconfig.weight()
 
         dtype = weight_observer.dtype
-
         is_float_qparams_qconfig = weight_observer.qscheme == torch.per_channel_affine_float_qparams
         assert is_float_qparams_qconfig, \
             'Embedding quantization is only supported with float_qparams_weight_only_qconfig.'
 
-        assert dtype == torch.quint8, \
-            f'The only supported weight dtype for nnq.Embedding is torch.quint8, got {dtype}'
+        assert dtype == torch.quint8 or dtype == torch.quint4x2, \
+            f'The only supported dtype for nnq.Embedding is torch.quint8 and torch.quint4x2, got {dtype}'
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
@@ -231,7 +234,6 @@ class EmbeddingBag(Embedding):
         """
         if hasattr(mod, 'weight_fake_quant'):
             weight_observer = mod.weight_fake_quant
-            activation_post_process = mod.activation_post_process
         else:
             assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
                 nn.EmbeddingBag.__name__

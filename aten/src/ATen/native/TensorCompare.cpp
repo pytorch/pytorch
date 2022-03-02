@@ -30,7 +30,7 @@ const OptionalScalarRef max) {
     TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
   }
 
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
@@ -61,14 +61,14 @@ TORCH_META_FUNC(isposinf) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isposinf does not support non-boolean outputs.");
-  build_unary_force_boolean_op(maybe_get_output(), self);
+  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(isneginf) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isneginf does not support non-boolean outputs.");
-  build_unary_force_boolean_op(maybe_get_output(), self);
+  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 static void check_unsupported_complex(const char* name, const Tensor& self) {
@@ -362,14 +362,16 @@ std::vector<Tensor> where(const Tensor& condition) {
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
   Tensor ret = at::empty(self.sizes(), self.options());
+  //
+  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(ret)
-    .add_input(condition)
+    .add_input(cond_bool)
     .add_input(self)
     .add_input(other)
     .build();
-  where_kernel(iter.device_type(), iter, condition.scalar_type());
+  where_kernel(iter.device_type(), iter);
   return ret;
 }
 
@@ -476,6 +478,8 @@ std::tuple<Tensor, Tensor> qmin(const Tensor& self, int64_t dim, bool keepdim) {
 
 // DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_WARN_ONCE("_aminmax is deprecated as of PyTorch 1.11 and will be removed in a future release. Use aminmax instead."
+                  " This warning will only appear once per process.");
   return at::aminmax(self, dim, keepdim);
 }
 
@@ -485,12 +489,13 @@ TORCH_IMPL_FUNC(clamp_out)
  const OptionalScalarRef min,
  const OptionalScalarRef max,
  const Tensor& result) {
+  using at::native::detail::ClampLimits;
   if (min && max) {
     clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
+    clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
-    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
+    clamp_min_scalar_stub(device_type(), *this, min.get());
   }
 }
 

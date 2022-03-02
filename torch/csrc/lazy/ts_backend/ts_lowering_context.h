@@ -27,7 +27,7 @@ class TORCH_API TSNodeLoweringInterface {
 
 class TORCH_API TSComputation : public Computation {
  public:
-  explicit TSComputation(const std::shared_ptr<torch::jit::Graph>& graph)
+  TSComputation(const std::shared_ptr<torch::jit::Graph>& graph)
       : graph_(graph), graph_executor_(graph, "") {
     for (torch::jit::Value* input : graph_->inputs()) {
       parameter_names_.push_back(input->debugName());
@@ -74,16 +74,50 @@ class TORCH_API TSLoweringContext : public LoweringContext {
 
   // TODO(whc) replace these when real impl lands;
   // I am just landing the interface in this diff, but MSVC won't allow undefined virtual funcs
-  Shape GetResultShape(size_t index) const override { TORCH_INTERNAL_ASSERT(false, "not implemented"); }
+  Shape GetResultShape(size_t index) const override {
+    TORCH_INTERNAL_ASSERT(false, "not implemented");
+  }
 
-  size_t AddResult(const Output& output) override { TORCH_INTERNAL_ASSERT(false, "not implemented"); }
+  size_t AddResult(const Output& output) override {
+    return AddResult(GetOutputOp(output));
+  }
 
-  ComputationPtr Build() override { TORCH_INTERNAL_ASSERT(false, "not implemented"); }
+  void AddParameter(
+      const torch::lazy::Output& output,
+      size_t index,
+      const Shape& shape,
+      const std::string& name) override {
+    TORCH_INTERNAL_ASSERT(false, "not implemented");
+  }
 
-  // Retrieves the lowered operation for a output. If the requested output is
+  ComputationPtr Build() override {
+    for (torch::jit::Value* output : root_tuple_) {
+      graph_->block()->registerOutput(output);
+    }
+    return std::shared_ptr<Computation>(new TSComputation(graph_));
+  }
+
+  // Retrieves the lowered operation for an output. If the requested output is
   // not available yet, the graph behind the output's Node is lowered, and the
   // corresponding TS operation returned.
-  torch::jit::Value* GetOutputOp(const Output& output);
+  torch::jit::Value* GetOutputOp(const Output& output) {
+    auto it = emitted_outputs_.find(output);
+    if (it == emitted_outputs_.end()) {
+      auto post_order = Util::ComputePostOrder(output.node, &emit_status_);
+      for (auto node : post_order) {
+        bool ok = lowering_->Lower(node);
+        TORCH_CHECK(ok, "Failed to lower: ", node->ToString());
+      }
+      // At this point the output better be present, otherwise there is an issue
+      // with the lowering code.
+      it = emitted_outputs_.find(output);
+      TORCH_CHECK(
+          it != emitted_outputs_.end(),
+          "No TS operation emitted for output: ",
+          output.ToString());
+    }
+    return it->second;
+  }
 
   // Assigns the given TS operation to the specified output. As outputs are
   // lowered in a post-order fashion, later nodes should always find their
@@ -103,7 +137,10 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     size_t index = 0;
   };
 
-  size_t AddResult(torch::jit::Value* op);
+  size_t AddResult(torch::jit::Value* op) {
+    root_tuple_.push_back(std::move(op));
+    return root_tuple_.size() - 1;
+  }
 
   std::shared_ptr<torch::jit::Graph> graph_;
   std::unordered_map<BackendData::Handle, Parameter> parameters_map_;

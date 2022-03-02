@@ -1,7 +1,7 @@
 #pragma once
 
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <algorithm>
 #include <unordered_map>

@@ -35,5 +35,11 @@ inline void check(
   EXPECT_EQ(actual, expected);
 }
 
+inline void deleteKey(
+    Store& store,
+    const std::string& key) {
+  store.deleteKey(key);
+}
+
 } // namespace test
 } // namespace c10d

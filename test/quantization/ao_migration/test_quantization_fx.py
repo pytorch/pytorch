@@ -32,7 +32,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'prepare',
             'convert',
-            'Fuser',
+            'fuse',
         ]
         self._test_function_import('fx', function_list)
 
@@ -155,9 +155,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_package_import('fx.fuse')
 
     def test_function_import_fx_fuse(self):
-        function_list = [
-            'Fuser'
-        ]
+        function_list = ['fuse']
         self._test_function_import('fx.fuse', function_list)
 
     def test_package_import_fx_fusion_patterns(self):
@@ -166,8 +164,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
     def test_function_import_fx_fusion_patterns(self):
         function_list = [
             'FuseHandler',
-            'ConvOrLinearBNReLUFusion',
-            'ModuleReLUFusion'
+            'DefaultFuseHandler'
         ]
         self._test_function_import('fx.fusion_patterns', function_list)
 
@@ -186,7 +183,6 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     def test_function_import_fx_utils(self):
         function_list = [
-            '_parent_name',
             'graph_pretty_str',
             'get_per_tensor_qparams',
             'quantize_node',

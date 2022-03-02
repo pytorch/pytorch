@@ -247,7 +247,7 @@ def add_dim3(kernel_string, cuda_kernel):
             closure += 1
         elif c == ")":
             closure -= 1
-        elif (c == "," or ind == len(kernel_string) - 1) and closure == 0:
+        if (c == "," or ind == len(kernel_string) - 1) and closure == 0:
             arg_locs[count]['end'] = ind + (c != ",")
             count += 1
             if count < 2:
@@ -356,8 +356,43 @@ def processKernelLaunches(string, stats):
 
         return kernel_positions
 
+    # Replace comments and string literals from the code so that find_kernel_bounds does not
+    # wrongly capture kernels in comments and string literals.
+    # This function replaces them with "x" to keep positions.
+    def mask_comments(string):
+        in_comment = ''
+        prev_c = ''
+        new_string = ''
+        for c in string:
+            if in_comment == '':
+                # Outside comments
+                if c == '/' and prev_c == '/':
+                    in_comment = '//'
+                elif c == '*' and prev_c == '/':
+                    in_comment = '/*'
+                elif c == '"' and prev_c != '\\' and prev_c != "'":
+                    in_comment = '"'
+            elif in_comment == '//':
+                # In // xxx
+                if c == '\r' or c == '\n':
+                    in_comment = ''
+            elif in_comment == '/*':
+                # In /* xxx */
+                if c == '/' and prev_c == '*':
+                    in_comment = ''
+            elif in_comment == '"':
+                # In ""
+                if c == '"' and prev_c != '\\':
+                    in_comment = ''
+            prev_c = c
+            if in_comment == '':
+                new_string += c
+            else:
+                new_string += 'x'
+        return new_string
+
     # Grab positional ranges of all kernel launches
-    get_kernel_positions = list(find_kernel_bounds(string))
+    get_kernel_positions = list(find_kernel_bounds(mask_comments(string)))
     output_string = string
 
     # Replace each CUDA kernel with a HIP kernel.

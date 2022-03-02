@@ -556,6 +556,65 @@ TEST(Expr, DynamicShapeAdd) {
   testWithSize(37);
 }
 
+TEST(Expr, OutOfBounds) {
+  ExprHandle N(10);
+  ExprHandle start(0);
+  ExprHandle stop(15);
+  VarHandle i("i", kInt);
+
+  BufHandle X("X", {N}, kInt);
+
+  auto body = Store::make(X, {i}, i);
+  auto stmt = For::make(i, start, stop, body);
+
+  PaddedBuffer<int> data(20);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
+TEST(Expr, OutOfBounds2d) {
+  std::vector<std::pair<int, int>> size_options = {{10, 15}, {15, 10}};
+  for (auto sizes : size_options) {
+    ExprHandle N(sizes.first);
+    ExprHandle M(sizes.second);
+    ExprHandle start(0);
+    ExprHandle stopInner(15);
+    ExprHandle stopOuter(15);
+    VarHandle i("i", kInt);
+    VarHandle j("j", kInt);
+
+    BufHandle X("X", {N, M}, kInt);
+
+    auto body = Store::make(X, {i, j}, i);
+    auto inner = For::make(j, start, stopInner, body);
+    auto stmt = For::make(i, start, stopOuter, inner);
+
+    PaddedBuffer<int> data(400);
+
+    EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+  }
+}
+
+TEST(Expr, OutOfBounds2dFlattenedIndex) {
+  ExprHandle buf_size(149);
+  ExprHandle start(0);
+  ExprHandle stopInner(15);
+  ExprHandle stopOuter(10);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  BufHandle X("X", {buf_size}, kInt);
+
+  auto idx = Add::make(Mul::make(i, stopInner), j);
+  auto body = Store::make(X, {idx}, i);
+  auto inner = For::make(j, start, stopInner, body);
+  auto stmt = For::make(i, start, stopOuter, inner);
+
+  PaddedBuffer<int> data(400);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
 void testCond01() {
   const int N = 16;
   PaddedBuffer<float> a_v(N);

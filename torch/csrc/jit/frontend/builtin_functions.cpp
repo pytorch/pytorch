@@ -1,13 +1,14 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 
+#include <ATen/code_template.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/api/include/torch/jit.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 
 namespace torch {
 namespace jit {
 
-auto scalar_operators_source = CodeTemplate(
+auto scalar_operators_source = at::jit::CodeTemplate(
     R"SCRIPT(
 def mul(a : ${Scalar}, b : Tensor) -> Tensor:
   return b * a
@@ -17,6 +18,14 @@ def ne(a : ${Scalar}, b : Tensor) -> Tensor:
   return b != a
 def eq(a : ${Scalar}, b : Tensor) -> Tensor:
   return b == a
+def sub(a : ${Scalar}, b : Tensor) -> Tensor:
+  return torch.neg(b) + a
+def div(a : ${Scalar}, b : Tensor) -> Tensor:
+  return torch.reciprocal(b) * a
+)SCRIPT");
+
+auto scalar_operators_no_complex_source = at::jit::CodeTemplate(
+    R"SCRIPT(
 def lt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b > a
 def le(a : ${Scalar}, b : Tensor) -> Tensor:
@@ -25,19 +34,15 @@ def gt(a : ${Scalar}, b : Tensor) -> Tensor:
   return b < a
 def ge(a : ${Scalar}, b : Tensor) -> Tensor:
   return b <= a
-def sub(a : ${Scalar}, b : Tensor) -> Tensor:
-  return torch.neg(b) + a
-def div(a : ${Scalar}, b : Tensor) -> Tensor:
-  return torch.reciprocal(b) * a
 )SCRIPT");
 
-auto _ntuple_ops = CodeTemplate(
+auto _ntuple_ops = at::jit::CodeTemplate(
     R"SCRIPT(
 def _${name}(x: BroadcastingList${Length}[${Scalar}]) -> List[${Scalar}]:
   return x
 )SCRIPT");
 
-auto floordiv = CodeTemplate(
+auto floordiv = at::jit::CodeTemplate(
     R"SCRIPT(
 def floordiv(self : Tensor, other : ${Rhs_Type}) -> Tensor:
   return torch.floor_divide(self, other)
@@ -72,6 +77,10 @@ def list_with_default(out_size: List[int], defaults: List[int]):
   return out_size
 def _assert(condition : bool, message : str):
   assert condition, message
+# existing device operator is registered with input name `a`, which prevents
+# torch.device(type="cuda") from working. add shim-layer here
+def device(type: str):
+  return torch.device(type)
 def type(self: Tensor, dtype: int, non_blocking: bool=False, copy: bool=False) -> Tensor:
   return self.to(dtype, non_blocking, copy)
 )SCRIPT";
@@ -85,6 +94,7 @@ def __contains__(self: str, key: str):
     return self.find(key, 0, len(self)) != -1
 )SCRIPT";
 
+#if !ENABLE_UPGRADERS
 // Implementations of historic symbol behaviors are defined here
 // See note [Versioned Symbols]
 
@@ -158,7 +168,6 @@ def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
              pin_memory:Optional[bool]=None) -> Tensor:
   if dtype is None:
     fill_value = float(fill_value)
-
   return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 )SCRIPT";
 
@@ -168,6 +177,7 @@ auto full_out = R"SCRIPT(
 def full_0_4(size:List[int], fill_value:number, *, out:Tensor) -> Tensor:
   return torch.full(size, fill_value, out=out)
 )SCRIPT";
+#endif
 
 struct BuiltinFunctionRegistry {
   const std::vector<Function*>& getAllBuiltinFunctionsFor(Symbol name) {
@@ -206,10 +216,16 @@ struct BuiltinFunctionRegistry {
   }
 
   void loadBuiltinFunctions() {
-    for (auto scalar : {"float", "int"}) {
-      TemplateEnv env;
+    for (auto scalar : {"float", "int", "complex"}) {
+      at::jit::TemplateEnv env;
       env.s("Scalar", scalar);
       loadSource(scalar_operators_source.format(env), "aten");
+    }
+
+    for (auto scalar : {"float", "int"}) {
+      at::jit::TemplateEnv env;
+      env.s("Scalar", scalar);
+      loadSource(scalar_operators_no_complex_source.format(env), "aten");
     }
 
     using str_pair = std::pair<std::string, std::string>;
@@ -221,7 +237,7 @@ struct BuiltinFunctionRegistry {
     };
     for (const auto scalar : {"float", "int"}) {
       for (const auto& pair : name_len) {
-        TemplateEnv env;
+        at::jit::TemplateEnv env;
         env.s("Scalar", scalar);
         env.s("name", pair.first);
         env.s("Length", pair.second);
@@ -229,7 +245,7 @@ struct BuiltinFunctionRegistry {
       }
     }
     for (auto rhs : {"number", "Tensor"}) {
-      TemplateEnv env;
+      at::jit::TemplateEnv env;
       env.s("Rhs_Type", rhs);
       loadSource(floordiv.format(env), "aten");
     }
@@ -237,6 +253,7 @@ struct BuiltinFunctionRegistry {
     loadSource(aten_ops, "aten");
     loadSource(aten_ops_additional, "aten");
 
+#if !ENABLE_UPGRADERS
     // Loads functions implementing historic behavior, see note [Versioned
     // Symbols]
     // Note: these functions go into the "upgraders" namespace
@@ -249,6 +266,7 @@ struct BuiltinFunctionRegistry {
     loadSource(div__scalar, "upgraders");
     loadSource(full, "upgraders");
     loadSource(full_out, "upgraders");
+#endif
 
     // These are under `prim` instead of `aten` since they exist to bind certain
     // tensor property getters to correpsonding methods

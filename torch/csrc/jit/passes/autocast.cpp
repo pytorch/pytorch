@@ -316,7 +316,6 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 
       // CastPolicy::fp16 (cast all inputs to float16)
       case aten::_convolution:
-      case aten::_convolution_nogroup:
       case aten::conv1d:
       case aten::conv2d:
       case aten::conv3d:

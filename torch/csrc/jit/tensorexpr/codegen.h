@@ -30,7 +30,9 @@ class TORCH_API CodeGen {
       : stmt_(stmt),
         buffer_args_(std::move(buffer_args)),
         device_(device),
-        kernel_func_name_(std::move(kernel_func_name)) {}
+        kernel_func_name_(std::move(kernel_func_name)) {
+    allocIntermediateBufs();
+  }
 
   virtual ~CodeGen() = default;
 
@@ -99,6 +101,8 @@ class TORCH_API CodeGen {
     return kernel_func_name_;
   }
 
+  void allocIntermediateBufs();
+
  protected:
   static void* argToPtr(const BufferArg& bufferArg, const CallArg& callArg);
 
@@ -114,6 +118,7 @@ class CodeGen::BufferArg {
   BufferArg(Tensor tensor) : buf_(tensor.buf()) {}
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
+  BufferArg(const BufPtr& buf) : buf_(buf) {}
 
   VarPtr var() const {
     return isVar_ ? var_ : buf_->base_handle();

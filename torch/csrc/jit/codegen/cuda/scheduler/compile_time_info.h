@@ -111,6 +111,8 @@ class CompileTimeInfoBase : public PolymorphicBase {
 
 } // namespace HeuristicCompileTime
 
+// Note: Do NOT export this class. MSVC issue with exported class that contains
+// std::vector<unique_ptr<xxx>>: https://godbolt.org/z/3E4e8T1P1
 //! Compile-time information cache for `canSchedule` and
 //!  `getHeuristics` interfaces. Each cache instance
 //!  stores information that could be inferred at compile

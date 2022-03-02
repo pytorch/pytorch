@@ -595,12 +595,12 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, TypedStorage, LegacyStorage
+from .storage import _StorageBase, _TypedStorage, LegacyStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
-# dtype, use torch.storage.TypedStorage directly.
+# dtype, use torch.storage._TypedStorage directly.
 
-class UntypedStorage(_C.ByteStorageBase, _StorageBase):
+class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 class ByteStorage(LegacyStorage):
@@ -689,7 +689,7 @@ class QUInt2x4Storage(LegacyStorage):
         return torch.quint2x4
 
 _storage_classes = {
-    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    _UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
@@ -811,6 +811,7 @@ from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
 import torch.backends.cuda
+import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
@@ -819,6 +820,9 @@ import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
+
+from torch.nested._nestedtensor import NestedTensor
+from torch.nested._nestedtensor import nested_tensor
 
 _C._init_names(list(torch._storage_classes))
 
@@ -887,3 +891,6 @@ def _register_device_module(device_type, module):
         raise RuntimeError("The runtime module of '{}' has already "
                            "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
+
+# expose return_types
+from . import return_types

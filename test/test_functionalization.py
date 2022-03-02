@@ -1,3 +1,5 @@
+# Owner(s): ["module: codegen"]
+
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
@@ -305,6 +307,22 @@ $0 = input('input')
 $1 = torch._ops.aten._to_copy($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand($1, [2])
 $3 = torch._ops.aten.add($2, $0)""")
+
+    def test_nested_functions_propagate_updates(self):
+        def g(x):
+            # Create a view of x
+            y = x[0]
+            y.add_(1)
+            # The view, y, gets deallocated at the end of this function
+
+        def f(x):
+            # Calling g(x) should mutate x
+            g(x)
+            # We expect x to be synced here, even though the alias created in g() has been deallocated!
+            y = x + x
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
 
 if __name__ == '__main__':
     run_tests()

@@ -20,12 +20,27 @@ struct TORCH_API CompilationOptions {
   bool incl_interface_call = false;
   bool enable_default_value_for_unspecified_arg = false;
   bool enable_default_args_before_out_args = true;
+  bool enable_emit_promoted_ops = true;
   int model_version = caffe2::serialize::kProducedBytecodeVersion;
 };
 
 TORCH_API mobile::Module jitModuleToMobile(
     const Module& module,
     const CompilationOptions& options);
+
+mobile::Code compileGraphToMobileCode(
+    const std::string& name,
+    const std::shared_ptr<Graph>& graph,
+    const CompilationOptions& compilation_options,
+    BackendDebugInfoRecorder& debug_info_recorder);
+
+TORCH_API std::unique_ptr<mobile::Function> convertJitFunctionToMobileFunction(
+    const GraphFunction& function,
+    const CompilationOptions& options);
+
+TORCH_API IValue convertMobileFunctionToCodeTable(
+    const mobile::Function& func,
+    const CompilationOptions& compilation_options);
 
 } // namespace jit
 } // namespace torch

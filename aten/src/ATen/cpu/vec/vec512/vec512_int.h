@@ -10,7 +10,7 @@
 
 namespace at {
 namespace vec {
-namespace {
+inline namespace CPU_CAPABILITY {
 
 #ifdef CPU_CAPABILITY_AVX512
 
@@ -869,19 +869,19 @@ Vectorized<int8_t> inline operator-(const Vectorized<int8_t>& a, const Vectorize
 }
 
 // Negation. Defined here so we can utilize operator-
-Vectorized<int64_t> Vectorized<int64_t>::neg() const {
+inline Vectorized<int64_t> Vectorized<int64_t>::neg() const {
   return Vectorized<int64_t>(0) - *this;
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::neg() const {
+inline Vectorized<int32_t> Vectorized<int32_t>::neg() const {
   return Vectorized<int32_t>(0) - *this;
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::neg() const {
+inline Vectorized<int16_t> Vectorized<int16_t>::neg() const {
   return Vectorized<int16_t>(0) - *this;
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::neg() const {
+inline Vectorized<int8_t> Vectorized<int8_t>::neg() const {
   return Vectorized<int8_t>(0) - *this;
 }
 
@@ -1067,99 +1067,99 @@ inline Vectorized<T> operator~(const Vectorized<T>& a) {
   return _mm512_xor_si512(a, _mm512_set1_epi32(-1));
 }
 
-Vectorized<int64_t> Vectorized<int64_t>::eq(const Vectorized<int64_t>& other) const {
+inline Vectorized<int64_t> Vectorized<int64_t>::eq(const Vectorized<int64_t>& other) const {
   return (*this == other) & Vectorized<int64_t>(1);
 }
 
-Vectorized<int64_t> Vectorized<int64_t>::ne(const Vectorized<int64_t>& other) const {
+inline Vectorized<int64_t> Vectorized<int64_t>::ne(const Vectorized<int64_t>& other) const {
   return (*this != other) & Vectorized<int64_t>(1);
 }
 
-Vectorized<int64_t> Vectorized<int64_t>::gt(const Vectorized<int64_t>& other) const {
+inline Vectorized<int64_t> Vectorized<int64_t>::gt(const Vectorized<int64_t>& other) const {
   return (*this > other) & Vectorized<int64_t>(1);
 }
 
-Vectorized<int64_t> Vectorized<int64_t>::ge(const Vectorized<int64_t>& other) const {
+inline Vectorized<int64_t> Vectorized<int64_t>::ge(const Vectorized<int64_t>& other) const {
   return (*this >= other) & Vectorized<int64_t>(1);
 }
 
-Vectorized<int64_t> Vectorized<int64_t>::lt(const Vectorized<int64_t>& other) const {
+inline Vectorized<int64_t> Vectorized<int64_t>::lt(const Vectorized<int64_t>& other) const {
   return (*this < other) & Vectorized<int64_t>(1);
 }
 
-Vectorized<int64_t> Vectorized<int64_t>::le(const Vectorized<int64_t>& other) const {
+inline Vectorized<int64_t> Vectorized<int64_t>::le(const Vectorized<int64_t>& other) const {
   return (*this <= other) & Vectorized<int64_t>(1);
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::eq(const Vectorized<int32_t>& other) const {
+inline Vectorized<int32_t> Vectorized<int32_t>::eq(const Vectorized<int32_t>& other) const {
   return (*this == other) & Vectorized<int32_t>(1);
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::ne(const Vectorized<int32_t>& other) const {
+inline Vectorized<int32_t> Vectorized<int32_t>::ne(const Vectorized<int32_t>& other) const {
   return (*this != other) & Vectorized<int32_t>(1);
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::gt(const Vectorized<int32_t>& other) const {
+inline Vectorized<int32_t> Vectorized<int32_t>::gt(const Vectorized<int32_t>& other) const {
   return (*this > other) & Vectorized<int32_t>(1);
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::ge(const Vectorized<int32_t>& other) const {
+inline Vectorized<int32_t> Vectorized<int32_t>::ge(const Vectorized<int32_t>& other) const {
   return (*this >= other) & Vectorized<int32_t>(1);
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::lt(const Vectorized<int32_t>& other) const {
+inline Vectorized<int32_t> Vectorized<int32_t>::lt(const Vectorized<int32_t>& other) const {
   return (*this < other) & Vectorized<int32_t>(1);
 }
 
-Vectorized<int32_t> Vectorized<int32_t>::le(const Vectorized<int32_t>& other) const {
+inline Vectorized<int32_t> Vectorized<int32_t>::le(const Vectorized<int32_t>& other) const {
   return (*this <= other) & Vectorized<int32_t>(1);
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::eq(const Vectorized<int16_t>& other) const {
+inline Vectorized<int16_t> Vectorized<int16_t>::eq(const Vectorized<int16_t>& other) const {
   return (*this == other) & Vectorized<int16_t>(1);
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::ne(const Vectorized<int16_t>& other) const {
+inline Vectorized<int16_t> Vectorized<int16_t>::ne(const Vectorized<int16_t>& other) const {
   return (*this != other) & Vectorized<int16_t>(1);
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::gt(const Vectorized<int16_t>& other) const {
+inline Vectorized<int16_t> Vectorized<int16_t>::gt(const Vectorized<int16_t>& other) const {
   return (*this > other) & Vectorized<int16_t>(1);
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::ge(const Vectorized<int16_t>& other) const {
+inline Vectorized<int16_t> Vectorized<int16_t>::ge(const Vectorized<int16_t>& other) const {
   return (*this >= other) & Vectorized<int16_t>(1);
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::lt(const Vectorized<int16_t>& other) const {
+inline Vectorized<int16_t> Vectorized<int16_t>::lt(const Vectorized<int16_t>& other) const {
   return (*this < other) & Vectorized<int16_t>(1);
 }
 
-Vectorized<int16_t> Vectorized<int16_t>::le(const Vectorized<int16_t>& other) const {
+inline Vectorized<int16_t> Vectorized<int16_t>::le(const Vectorized<int16_t>& other) const {
   return (*this <= other) & Vectorized<int16_t>(1);
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::eq(const Vectorized<int8_t>& other) const {
+inline Vectorized<int8_t> Vectorized<int8_t>::eq(const Vectorized<int8_t>& other) const {
   return (*this == other) & Vectorized<int8_t>(1);
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::ne(const Vectorized<int8_t>& other) const {
+inline Vectorized<int8_t> Vectorized<int8_t>::ne(const Vectorized<int8_t>& other) const {
   return (*this != other) & Vectorized<int8_t>(1);
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::gt(const Vectorized<int8_t>& other) const {
+inline Vectorized<int8_t> Vectorized<int8_t>::gt(const Vectorized<int8_t>& other) const {
   return (*this > other) & Vectorized<int8_t>(1);
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::ge(const Vectorized<int8_t>& other) const {
+inline Vectorized<int8_t> Vectorized<int8_t>::ge(const Vectorized<int8_t>& other) const {
   return (*this >= other) & Vectorized<int8_t>(1);
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::lt(const Vectorized<int8_t>& other) const {
+inline Vectorized<int8_t> Vectorized<int8_t>::lt(const Vectorized<int8_t>& other) const {
   return (*this < other) & Vectorized<int8_t>(1);
 }
 
-Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other) const {
+inline Vectorized<int8_t> Vectorized<int8_t>::le(const Vectorized<int8_t>& other) const {
   return (*this <= other) & Vectorized<int8_t>(1);
 }
 

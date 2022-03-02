@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <ATen/core/symbol.h>
+
 namespace torch {
 namespace jit {
 

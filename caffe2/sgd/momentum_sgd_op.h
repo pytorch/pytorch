@@ -17,7 +17,7 @@ void momentum_sgd_update(
     float* param,
     Context* /*context*/) {
   const float LR = lr[0];
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     if (!nesterov) {
       const float adjusted_gradient = LR * g[i] + momentum * m[i];
       nm[i] = adjusted_gradient;
@@ -154,7 +154,7 @@ class SparseMomentumSGDUpdateOp final : public Operator<Context> {
     auto* momentumOut = Output(OUTPUT_MOMENTUM)->template mutable_data<T>();
     auto* paramOut = Output(OUTPUT_PARAM)->template mutable_data<T>();
 
-    for (auto i = 0; i < n; ++i) {
+    for (const auto i : c10::irange(n)) {
       auto idx = indices[i];
       auto offsetI = i * block_size;
       auto offsetIdx = idx * block_size;

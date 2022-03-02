@@ -1,5 +1,5 @@
-#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
 
@@ -20,8 +19,11 @@
 #include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/grid_sync.h>
 #include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
 #include <nvfuser_resources/warp.h>
@@ -64,20 +66,30 @@ std::string kernelPreamble() {
   )";
 #endif
 
+  // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::index_utils_cu;
+
+  // Synchronization classes
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
     ss << nvfuser_resources::block_sync_default_cu;
   }
+  ss << nvfuser_resources::grid_sync_cu;
+
+  // Communication classes
   ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
-  ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
   ss << nvfuser_resources::warp_cu;
+
+  // Random utilities
+  ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
 
   return ss.str();
 }
@@ -97,6 +109,16 @@ bool validateKernelArgTensor(
     return false;
   }
 
+  if (is_cpu_scalar(arg) && !param->as<TensorView>()->isCpuScalar()) {
+    msg << "Argument is CPU Scalar Tensor, but parameter is not.\n";
+    return false;
+  }
+
+  if (!is_cpu_scalar(arg) && !arg.is_cuda()) {
+    msg << "Argumnet is a CPU tensor which is not supported in fusions.\n";
+    return false;
+  }
+
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
   // Note: This requires current Fusion to be active.
@@ -113,7 +135,7 @@ bool validateKernelArgTensor(
     return false;
   }
 
-  if (arg.device() != device) {
+  if (!is_cpu_scalar(arg) && arg.device() != device) {
     msg << "Argument is on device that is not compiled for."
         << "\n";
     return false;
@@ -326,6 +348,8 @@ void validateKernelOutputs(
       !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
+namespace {
+
 bool canVectorize(const IValue& aten_val, int word_size) {
   if (!aten_val.isTensor()) {
     return false;
@@ -358,16 +382,18 @@ bool canVectorize(const IValue& aten_val, int word_size) {
   return true;
 }
 
+// Returns true if a TV can be used with ParallelType::Vectorize. When
+// input or output tensors are involved, the other version of
+// canVectorize is used.
 bool canVectorize(
-    TensorView* fusion_tv,
+    TensorView* tv,
     int word_size,
-    GpuLower& lower,
     kir::ExpressionEvaluator& expr_eval) {
   IterDomain* last_root_dim = nullptr;
-  // TODO: Should this be rfactor instead of root??
-  for (size_t i = fusion_tv->getRootDomain().size(); i > 0; i--) {
-    auto r_id = fusion_tv->getRootDomain()[i - 1];
-    if (r_id->isReduction() || r_id->isBroadcast()) {
+  for (size_t i = tv->getRootDomain().size(); i > 0; i--) {
+    auto r_id = tv->getRootDomain()[i - 1];
+    if (r_id->isReduction() || r_id->isTrivialReduction() ||
+        r_id->isBroadcast()) {
       continue;
     }
     last_root_dim = r_id;
@@ -378,8 +404,7 @@ bool canVectorize(
     return false;
   }
 
-  auto last_dim_size =
-      expr_eval.evaluate(lower.lowerValue(last_root_dim->extent()));
+  auto last_dim_size = expr_eval.evaluate(last_root_dim->extent());
 
   if (!last_dim_size.has_value()) {
     return false;
@@ -392,23 +417,181 @@ bool canVectorize(
   return true;
 }
 
+// Check if there's any split that is non-divisible and vectorized. If
+// found, Vectorize is illegal.
+void validateVectorizedSplits(
+    kir::Kernel* kernel,
+    kir::ExpressionEvaluator& expr_eval) {
+  for (const auto& extent_factor : kernel->summary().splits_to_validate) {
+    auto input_extent = expr_eval.evaluate(extent_factor.first);
+    auto split_factor = expr_eval.evaluate(extent_factor.second);
+    TORCH_INTERNAL_ASSERT(
+        input_extent.has_value(),
+        "Could not check if a split with vectorization is divisible because the extent, ",
+        extent_factor.first->toString(),
+        ", is not possible to evaluate.");
+    TORCH_INTERNAL_ASSERT(
+        input_extent.has_value(),
+        "Could not check if a split with vectorization is divisible because the split factor, ",
+        extent_factor.second->toString(),
+        ", is not possible to evaluate.");
+    TORCH_INTERNAL_ASSERT(
+        input_extent.value() % split_factor.value() == 0,
+        "Non-divisible split with vectorization is detected. ",
+        "Extent: ",
+        input_extent.value(),
+        ". Factor: ",
+        split_factor.value());
+  }
+}
+
+//! Returns the position information of vectorized input/output tensors
+//!  in the given fusion.
+std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo(
+    Fusion* fusion) {
+  auto vectorized_tensor_info_ptr =
+      std::make_unique<caching::VectorizedTensorInfo>();
+  auto& tv_to_vector_word_size =
+      vectorized_tensor_info_ptr->tv_to_vector_word_size;
+  auto& global_inp_misaligned_tv =
+      vectorized_tensor_info_ptr->global_inp_misaligned_tv;
+  auto& global_out_misaligned_tv =
+      vectorized_tensor_info_ptr->global_out_misaligned_tv;
+
+  kir::ExpressionEvaluator expr_eval;
+
+  // Find all vectorized tensors and their word size
+  for (auto expr : fusion->exprs()) {
+    if (!expr->isA<UnaryOp>() ||
+        expr->as<UnaryOp>()->getUnaryOpType() != UnaryOpType::Set) {
+      continue;
+    }
+    auto uop = expr->as<UnaryOp>();
+    if (!uop->out()->isA<TensorView>() || !uop->in()->isA<TensorView>()) {
+      continue;
+    }
+    auto out_tv = uop->out()->as<TensorView>();
+    auto in_tv = uop->in()->as<TensorView>();
+    IterDomain* vector_dim = nullptr;
+    for (auto id : out_tv->domain()->domain()) {
+      if (id->getParallelType() == ParallelType::Vectorize ||
+          id->getParallelType() == ParallelType::MisalignedVectorize) {
+        TORCH_INTERNAL_ASSERT(
+            vector_dim == nullptr,
+            "Found multiple vectorized dimensions on tensor ",
+            out_tv);
+        vector_dim = id;
+      }
+    }
+    if (vector_dim == nullptr) {
+      continue;
+    }
+    auto vector_word_size = expr_eval.evaluate(vector_dim->extent());
+    TORCH_INTERNAL_ASSERT(
+        vector_word_size.has_value(),
+        "Non constant vector dimension found in ",
+        out_tv);
+
+    // The expression here must be a UnaryOp::Set, so checking either of the
+    // input or output tensor should be sufficient. When the output is a
+    // fusion output, check the tensor as its size information is available
+    // without using the expression evaluator.
+    auto tv_to_verify = out_tv->isFusionOutput() ? out_tv : in_tv;
+    tv_to_vector_word_size[tv_to_verify] = vector_word_size.value();
+
+    if (vector_dim->getParallelType() == ParallelType::MisalignedVectorize) {
+      TORCH_INTERNAL_ASSERT(
+          in_tv->isFusionInput() || out_tv->isFusionOutput(),
+          "MisalignedVectorize is assumed to be used with either input or output tensor");
+      if (out_tv->getMemoryType() == MemoryType::Global &&
+          in_tv->getMemoryType() == MemoryType::Local) {
+        global_out_misaligned_tv.insert(out_tv);
+      } else if (
+          in_tv->getMemoryType() == MemoryType::Global &&
+          out_tv->getMemoryType() == MemoryType::Local) {
+        global_inp_misaligned_tv.insert(in_tv);
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Unsupported memory configuration for misaligned vectorization.");
+      }
+    }
+  }
+
+  // Check striding information on input and outputs as well as size information
+  // of all
+  auto& inp_misaligned_tensors_pos =
+      vectorized_tensor_info_ptr->inp_misaligned_tensors_pos;
+  auto& out_misaligned_tensors_pos =
+      vectorized_tensor_info_ptr->out_misaligned_tensors_pos;
+  auto& inp_pos_to_word_size_map_to_verify =
+      vectorized_tensor_info_ptr->inp_pos_to_word_size_map_to_verify;
+  auto& out_pos_to_word_size_map_to_verify =
+      vectorized_tensor_info_ptr->out_pos_to_word_size_map_to_verify;
+  auto& intermediate_tv_to_word_size_map_to_verify =
+      vectorized_tensor_info_ptr->intermediate_tv_to_word_size_map_to_verify;
+
+  for (auto entry : tv_to_vector_word_size) {
+    auto tv = entry.first;
+    auto word_size = entry.second;
+    if (tv->isFusionInput()) {
+      auto inp_it =
+          std::find(fusion->inputs().begin(), fusion->inputs().end(), tv);
+      TORCH_INTERNAL_ASSERT(
+          inp_it != fusion->inputs().end(),
+          "Could not find ",
+          tv,
+          " in fusion inputs.");
+      auto inp_pos = std::distance(fusion->inputs().begin(), inp_it);
+
+      if (global_inp_misaligned_tv.find(tv) != global_inp_misaligned_tv.end()) {
+        inp_misaligned_tensors_pos.emplace_back(inp_pos);
+      } else {
+        // Shouldn't visit same pos twice here, assert ?
+        inp_pos_to_word_size_map_to_verify[inp_pos] = word_size;
+      }
+    } else if (tv->isFusionOutput()) {
+      auto out_it =
+          std::find(fusion->outputs().begin(), fusion->outputs().end(), tv);
+      TORCH_INTERNAL_ASSERT(
+          out_it != fusion->outputs().end(),
+          "Could not find ",
+          tv,
+          " in provided fusion outputs.");
+      auto out_pos = std::distance(fusion->outputs().begin(), out_it);
+
+      if (global_out_misaligned_tv.find(tv) != global_out_misaligned_tv.end()) {
+        out_misaligned_tensors_pos.emplace_back(out_pos);
+      } else {
+        out_pos_to_word_size_map_to_verify[out_pos] = word_size;
+      }
+    } else {
+      // Intermediate tensors. Note that this must be Vectorize as
+      // MisalignedVectorize is only supported for inputs and outputs.
+      intermediate_tv_to_word_size_map_to_verify[tv] = word_size;
+    }
+  }
+
+  return vectorized_tensor_info_ptr;
+}
+} // namespace
+
 // Misaligned vectorization check. Currently misaligned vectorization is limited
 // to global-register and register-global load/store patterns. However, this
 // could be improved to include shared memory.
 void validateVectorizedTensors(
-    Fusion* fusion,
+    kir::Kernel* kernel,
     const at::ArrayRef<IValue>& inputs,
     const std::vector<at::Tensor>& outputs,
-    GpuLower& lower,
-    caching::ExecutorCompileTimeInfoCache* data_cache) {
+    caching::ExecutorCompileTimeInfoCache* data_cache,
+    kir::ExpressionEvaluator& expr_eval) {
   FUSER_PERF_SCOPE("FusionExecutor::validateVectorizedTensors");
 
   auto tensor_vectorization_validation_entry =
       executor_utils::caching::ExecutorCompileTimeEntry<
           executor_utils::caching::VectorizedTensorValidation>(
-          data_cache, [fusion, &lower]() {
-            return executor_utils::getVectorizedTensorValidationInfo(
-                fusion, lower);
+          data_cache, [kernel]() {
+            return executor_utils::getVectorizedTensorValidationInfo(kernel);
           });
 
   // Validate all the canVectorizes:
@@ -417,7 +600,7 @@ void validateVectorizedTensors(
     TORCH_INTERNAL_ASSERT(
         canVectorize(inputs[it.first], it.second),
         "Error vectorizing, ",
-        fusion->inputs()[it.first],
+        kernel->inputs()[it.first],
         " as input provided does not allowed vectorization by word size, ",
         it.second);
   }
@@ -428,10 +611,22 @@ void validateVectorizedTensors(
       TORCH_INTERNAL_ASSERT(
           canVectorize(outputs[it.first], it.second),
           "Error vectorizing, ",
-          fusion->outputs()[it.first],
+          kernel->outputs()[it.first],
           " as output provided does not allowed vectorization by word size, ",
           it.second);
     }
+  }
+
+  for (auto it : tensor_vectorization_validation_entry.get()
+                     .intermediate_tv_to_word_size_map_to_verify) {
+    auto tv = it.first;
+    auto vec_width = it.second;
+    TORCH_INTERNAL_ASSERT(
+        canVectorize(tv, vec_width, expr_eval),
+        "Error vectorizing, ",
+        tv->toString(),
+        " as the extent of the vectorized axis does not allowed vectorization by word size, ",
+        vec_width);
   }
 
   std::vector<c10::IValue> inp_misaligned_tensors;
@@ -464,6 +659,8 @@ void validateVectorizedTensors(
           inp_misaligned_tensors,
           out_misaligned_tensors),
       "All global tensors must have the same stride for misaligned vectorization.");
+
+  validateVectorizedSplits(kernel, expr_eval);
 }
 
 kir::ExpressionEvaluator bindKernelInputs(
@@ -482,7 +679,7 @@ kir::ExpressionEvaluator bindKernelInputs(
   for (const auto i : c10::irange(inputs.size())) {
     const auto input = inputs[i];
 
-    if (auto tensor_input = dynamic_cast<kir::TensorView*>(input)) {
+    if (auto tensor_input = dynamic_cast<TensorView*>(input)) {
       TORCH_INTERNAL_ASSERT(
           aten_inputs[i].isTensor(),
           "Something went wrong configuring launch. Inputs no longer match at index:",
@@ -490,7 +687,7 @@ kir::ExpressionEvaluator bindKernelInputs(
 
       const auto aten_tensor = aten_inputs[i].toTensor();
       const auto root_domain =
-          kir::TensorDomain::noReductions(tensor_input->domain()->rootDomain());
+          TensorDomain::noReductions(tensor_input->domain()->getRootDomain());
       TORCH_INTERNAL_ASSERT(
           aten_tensor.ndimension() == static_cast<int>(root_domain.size()),
           "Something went wrong configuring launch. Inputs no longer match.");
@@ -505,7 +702,7 @@ kir::ExpressionEvaluator bindKernelInputs(
             TORCH_CHECK(
                 *prev_value == value,
                 "Attempting to bind ",
-                kir::toString(extent),
+                extent->toString(),
                 " to ",
                 value,
                 "but it's already set to ",
@@ -513,7 +710,7 @@ kir::ExpressionEvaluator bindKernelInputs(
             should_bind = false;
           }
         }
-        if (should_bind && !extent->isConst()) {
+        if (should_bind && !extent->isConstScalar()) {
           expr_eval.bind(extent, value);
         }
       }
@@ -649,24 +846,19 @@ NvrtcFunction nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fastmath = getenv("PYTORCH_NVFUSER_DISABLE_FASTMATH");
-  if (!disable_fastmath || (atoi(disable_fastmath) == 0)) {
-    args.push_back("--use_fast_math");
-  } else {
-    TORCH_WARN_ONCE(
-        "fast math disabled in nvfuser, try set `PYTORCH_NVFUSER_DISABLE_FASTMATH=0`");
-  }
-
   const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
-  // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
-  if (disable_fma && atoi(disable_fma)) {
 #ifdef __HIP_PLATFORM_HCC__
+  if (disable_fma && atoi(disable_fma)) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
-#else
-    args.push_back("--fmad=false");
-#endif
   }
+#else
+  if (disable_fma && atoi(disable_fma)) {
+    args.push_back("--fmad=false");
+  } else {
+    args.push_back("--fmad=true");
+  }
+#endif
 
 #ifndef NDEBUG
   // Add line info to generated kernels
@@ -989,7 +1181,7 @@ template class ExecutorCompileTimeEntry<OutputAliasIndices>;
 } // namespace caching
 
 std::vector<IterDomain*> getParallelBindingsIterDomains(
-    GpuLower& lower,
+    GpuLower* lower,
     const std::vector<TensorView*>& used_tvs) {
   std::vector<IterDomain*> parallel_ids;
   for (auto tv : used_tvs) {
@@ -999,7 +1191,7 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
           // Want to keep the broadcast dimensions if they are not resolved
           // TODO: piping down the parallel dimension map here would
           //  be helpful
-          auto& parallel_map = lower.caParallelMap();
+          auto& parallel_map = lower->caParallelMap();
           if (parallel_map.getConcreteMappedID(id) == id) {
             parallel_ids.push_back(id);
           }
@@ -1014,39 +1206,41 @@ std::vector<IterDomain*> getParallelBindingsIterDomains(
   return parallel_ids;
 }
 
+namespace {
+
 void insertParallelExtent(
-    GpuLower& lower,
     IterDomain* binding_id,
     const std::unique_ptr<ParallelExtentMap>& parallel_iter_extents_ptr) {
-  auto kir_extent = lower.lowerValue(binding_id->extent());
+  auto extent = binding_id->extent();
   const auto it =
       parallel_iter_extents_ptr->find(binding_id->getParallelType());
   if (it != parallel_iter_extents_ptr->end()) {
-    it->second.push_back(kir_extent);
+    it->second.push_back(extent);
   } else {
     parallel_iter_extents_ptr->operator[](binding_id->getParallelType()) = {
-        kir_extent};
+        extent};
   }
 }
 
+} // namespace
+
 std::unique_ptr<ParallelExtentMap> getParallelIterExtents(
-    GpuLower& lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
   for (auto id : parallel_binding_ids) {
-    insertParallelExtent(lower, id, parallel_iter_extents_ptr);
+    insertParallelExtent(id, parallel_iter_extents_ptr);
   }
 
   return parallel_iter_extents_ptr;
 }
 
 std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
-    GpuLower& lower,
+    GpuLower* lower,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto parallel_iter_extents_ptr = std::make_unique<ParallelExtentMap>();
-  auto& parallel_map = lower.caParallelMap();
+  auto& parallel_map = lower->caParallelMap();
   std::vector<IterDomain*> mapped;
-  bool is_tidx_warp_padded = lower.getWarpPaddedParallelInfo().is_tidx_padded;
+  bool is_tidx_warp_padded = lower->getWarpPaddedParallelInfo().is_tidx_padded;
 
   for (auto id : parallel_binding_ids) {
     if (std::any_of(
@@ -1061,7 +1255,7 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
     }
 
     insertParallelExtent(
-        lower, parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
+        parallel_map.getConcreteMappedID(id), parallel_iter_extents_ptr);
     mapped.push_back(id);
   }
 
@@ -1069,7 +1263,7 @@ std::unique_ptr<ParallelExtentMap> getSimplifiedParallelIterExtents(
 }
 
 std::unique_ptr<caching::WarpPaddedExtentsInfo> getWarpPaddedExtentsInfo(
-    GpuLower& lower,
+    kir::Kernel* kernel,
     std::vector<IterDomain*>& parallel_binding_ids) {
   auto warp_padded_extent_info_ptr =
       std::make_unique<caching::WarpPaddedExtentsInfo>();
@@ -1077,7 +1271,6 @@ std::unique_ptr<caching::WarpPaddedExtentsInfo> getWarpPaddedExtentsInfo(
       warp_padded_extent_info_ptr->warp_padded_extent_set;
   auto& warp_padded_constant =
       warp_padded_extent_info_ptr->warp_padded_constant;
-  auto kernel = lower.kernel();
   bool has_warp_reduction =
       kernel->getWarpPaddedParallelInfo().has_warp_reduction;
 
@@ -1087,132 +1280,16 @@ std::unique_ptr<caching::WarpPaddedExtentsInfo> getWarpPaddedExtentsInfo(
     if (has_warp_reduction) {
       if (id->hasPaddingToMultipleOfWarp() ||
           kernel->isParallelTypePadded(id->getParallelType())) {
-        auto kir_extent = lower.lowerValue(id->extent());
-        warp_padded_extent_set.insert(kir_extent);
+        auto extent = id->extent();
+        warp_padded_extent_set.insert(extent);
         auto padded_value = id->getMaybeSizeAfterPadding();
         if (padded_value.has_value()) {
-          warp_padded_constant[kir_extent] = padded_value.value();
+          warp_padded_constant[extent] = padded_value.value();
         }
       }
     }
   }
   return warp_padded_extent_info_ptr;
-}
-
-std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo(
-    Fusion* fusion,
-    GpuLower& lower) {
-  auto vectorized_tensor_info_ptr =
-      std::make_unique<caching::VectorizedTensorInfo>();
-  auto& tv_to_vector_word_size =
-      vectorized_tensor_info_ptr->tv_to_vector_word_size;
-  auto& global_inp_misaligned_tv =
-      vectorized_tensor_info_ptr->global_inp_misaligned_tv;
-  auto& global_out_misaligned_tv =
-      vectorized_tensor_info_ptr->global_out_misaligned_tv;
-
-  kir::ExpressionEvaluator expr_eval;
-
-  // Find all vectorized tensors and their word size
-  for (auto expr : fusion->exprs()) {
-    if (!expr->isA<UnaryOp>() ||
-        expr->as<UnaryOp>()->getUnaryOpType() != UnaryOpType::Set) {
-      continue;
-    }
-    auto uop = expr->as<UnaryOp>();
-    if (!uop->out()->isA<TensorView>() || !uop->in()->isA<TensorView>()) {
-      continue;
-    }
-    auto out_tv = uop->out()->as<TensorView>();
-    auto in_tv = uop->in()->as<TensorView>();
-    IterDomain* vector_dim = nullptr;
-    for (auto id : out_tv->domain()->domain()) {
-      if (id->getParallelType() == ParallelType::Vectorize ||
-          id->getParallelType() == ParallelType::MisalignedVectorize) {
-        TORCH_INTERNAL_ASSERT(
-            vector_dim == nullptr,
-            "Found multiple vectorized dimensions on tensor ",
-            out_tv);
-        vector_dim = id;
-      }
-    }
-    if (vector_dim == nullptr) {
-      continue;
-    }
-    auto vector_word_size =
-        expr_eval.evaluate(lower.lowerValue(vector_dim->extent()));
-    TORCH_INTERNAL_ASSERT(
-        vector_word_size.has_value(),
-        "Non constant vector dimension found in ",
-        out_tv);
-    tv_to_vector_word_size[out_tv] = vector_word_size.value();
-    tv_to_vector_word_size[in_tv] = vector_word_size.value();
-
-    if (vector_dim->getParallelType() == ParallelType::MisalignedVectorize) {
-      if (out_tv->getMemoryType() == MemoryType::Global &&
-          in_tv->getMemoryType() == MemoryType::Local) {
-        global_out_misaligned_tv.insert(out_tv);
-      } else if (
-          in_tv->getMemoryType() == MemoryType::Global &&
-          out_tv->getMemoryType() == MemoryType::Local) {
-        global_inp_misaligned_tv.insert(in_tv);
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Unsupported memory configuration for misaligned vectorization.");
-      }
-    }
-  }
-
-  // Check striding information on input and outputs as well as size information
-  // of all
-  auto& inp_misaligned_tensors_pos =
-      vectorized_tensor_info_ptr->inp_misaligned_tensors_pos;
-  auto& out_misaligned_tensors_pos =
-      vectorized_tensor_info_ptr->out_misaligned_tensors_pos;
-  auto& inp_pos_to_word_size_map_to_verify =
-      vectorized_tensor_info_ptr->inp_pos_to_word_size_map_to_verify;
-  auto& out_pos_to_word_size_map_to_verify =
-      vectorized_tensor_info_ptr->out_pos_to_word_size_map_to_verify;
-
-  for (auto entry : tv_to_vector_word_size) {
-    auto tv = entry.first;
-    auto word_size = entry.second;
-    if (tv->isFusionInput()) {
-      auto inp_it =
-          std::find(fusion->inputs().begin(), fusion->inputs().end(), tv);
-      TORCH_INTERNAL_ASSERT(
-          inp_it != fusion->inputs().end(),
-          "Could not find ",
-          tv,
-          " in fusion inputs.");
-      auto inp_pos = std::distance(fusion->inputs().begin(), inp_it);
-
-      if (global_inp_misaligned_tv.find(tv) != global_inp_misaligned_tv.end()) {
-        inp_misaligned_tensors_pos.emplace_back(inp_pos);
-      } else {
-        // Shouldn't visit same pos twice here, assert ?
-        inp_pos_to_word_size_map_to_verify[inp_pos] = word_size;
-      }
-    } else if (tv->isFusionOutput()) {
-      auto out_it =
-          std::find(fusion->outputs().begin(), fusion->outputs().end(), tv);
-      TORCH_INTERNAL_ASSERT(
-          out_it != fusion->outputs().end(),
-          "Could not find ",
-          tv,
-          " in provided fusion outputs.");
-      auto out_pos = std::distance(fusion->outputs().begin(), out_it);
-
-      if (global_out_misaligned_tv.find(tv) != global_out_misaligned_tv.end()) {
-        out_misaligned_tensors_pos.emplace_back(out_pos);
-      } else {
-        out_pos_to_word_size_map_to_verify[out_pos] = word_size;
-      }
-    }
-  }
-
-  return vectorized_tensor_info_ptr;
 }
 
 } // namespace executor_utils

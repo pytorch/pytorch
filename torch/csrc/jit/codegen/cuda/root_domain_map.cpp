@@ -196,7 +196,7 @@ UnmappableReductionDomains::UnmappableReductionDomains() {
 
 namespace {
 
-//! Find all domains that a given domain is depeendent on
+//! Find all domains that a given domain is dependent on
 class FindInputDomains : BackwardVisitor {
  private:
   FindInputDomains(TensorView* tv, const IterDomain* id)
@@ -351,11 +351,11 @@ bool ComputeAtRootDomainMap::canMap(
     const IterDomain* id_b) const {
   TORCH_INTERNAL_ASSERT(
       id_a->definition() == nullptr || id_a->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_a);
   TORCH_INTERNAL_ASSERT(
       id_b->definition() == nullptr || id_b->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_b);
 
   // Forward to overloaded functions
@@ -530,7 +530,8 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     const TensorDomain* consumer,
     const std::unordered_set<IterDomain*>& root_dims_to_map,
     bool producer_to_consumer) const {
-  const auto& producer_root = producer->getMaybeRFactorDomain();
+  const auto& producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
   const auto& consumer_root = consumer->getRootDomain();
   const TensorDomain* from_td = producer_to_consumer ? producer : consumer;
   const TensorDomain* to_td = producer_to_consumer ? consumer : producer;
@@ -547,15 +548,14 @@ std::unordered_map<IterDomain*, IterDomain*> ComputeAtRootDomainMap::map(
     if (id_map.find(from_id) != id_map.end()) {
       continue;
     }
-    // Matching ID not found. It's an error unless: from_id is
-    // reduction of a producer domain; from_id is a new broadcast of a
-    // consumer domain; or from_id is a window axis of a consumer
-    // domain.
-    if ((producer_to_consumer && from_id->isReduction()) ||
-        (!producer_to_consumer &&
-         (new_broadcast_domains_.find(DomainKey(from_td, from_id)) !=
-              new_broadcast_domains_.end() ||
-          (window_axes_.count(from_id) > 0)))) {
+    // Matching ID not found. It's an error unless from_id is a new
+    // broadcast of a consumer domain; or from_id is a window axis of
+    // a consumer domain. Note that reduction domains are removed from
+    // the producer root domain.
+    if (!producer_to_consumer &&
+        (new_broadcast_domains_.find(DomainKey(from_td, from_id)) !=
+             new_broadcast_domains_.end() ||
+         (window_axes_.count(from_id) > 0))) {
       continue;
     }
     TORCH_INTERNAL_ASSERT(
@@ -661,6 +661,58 @@ void ComputeAtRootDomainMapBuilder::setMapped(
   root_map_.eq_set_.join(producer, consumer);
 }
 
+void ComputeAtRootDomainMapBuilder::setInvalid(
+    const DomainKey& key1,
+    const DomainKey& key2) {
+  invalid_mappings_.emplace_back(key1, key2);
+}
+
+bool ComputeAtRootDomainMapBuilder::isInvalid(
+    const std::vector<DomainKey>& domains) const {
+  // First, collect all invalid mappings for each of the keys in domains
+  DomainKeyMap<DomainKeySet> invalid_key_map;
+  for (const auto& key : domains) {
+    DomainKeySet invalid_keys;
+    for (const auto& invalid_pair : invalid_mappings_) {
+      if (root_map_.canMap(key, invalid_pair.first)) {
+        invalid_keys.insert(invalid_pair.second);
+      } else if (root_map_.canMap(key, invalid_pair.second)) {
+        invalid_keys.insert(invalid_pair.first);
+      }
+    }
+    invalid_key_map.emplace(key, invalid_keys);
+  }
+
+  // Next, check if any pair is invalid to map.
+  const auto num_keys = domains.size();
+  for (const auto i : c10::irange(num_keys)) {
+    const auto& key_i = domains[i];
+    // If no invalid keys found for key_i, it can be skipped.
+    const auto invalid_key_map_it = invalid_key_map.find(key_i);
+    if (invalid_key_map_it == invalid_key_map.end()) {
+      continue;
+    }
+
+    // Set of keys that are invalid to be mapped with key_i.
+    const DomainKeySet& invalid_keys_for_i = invalid_key_map_it->second;
+
+    // If any other key in domains is identified mappable with any of
+    // the keys in this set, the mapping with key_i is invalid.
+    for (const auto j : c10::irange(i + 1, num_keys)) {
+      const auto& key_j = domains[j];
+      if (std::any_of(
+              invalid_keys_for_i.begin(),
+              invalid_keys_for_i.end(),
+              [&](const auto& invalid_key_for_i) {
+                return root_map_.canMap(key_j, invalid_key_for_i);
+              })) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void ComputeAtRootDomainMapBuilder::setMaybeMapped(
     const TensorDomain* producer_td,
     const IterDomain* producer_id,
@@ -762,7 +814,8 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
 void ComputeAtRootDomainMapBuilder::handle(BroadcastOp* op) {
   const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
   const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
-  const auto in_root = TensorDomain::noReductions(in_td->getRootDomain());
+  const auto in_root =
+      TensorDomain::noReductions(in_td->getMaybeRFactorDomain());
   const auto& out_root = out_td->getRootDomain();
   const auto& bcast_dim_flags = op->getBroadcastDimFlags();
   TORCH_INTERNAL_ASSERT(
@@ -809,7 +862,7 @@ void ComputeAtRootDomainMapBuilder::handle(BroadcastOp* op) {
 void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {
   const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
   std::vector<IterDomain*> in_root =
-      TensorDomain::noReductions(in_td->getRootDomain());
+      TensorDomain::noReductions(in_td->getMaybeRFactorDomain());
 
   const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
   const auto& out_root = out_td->getRootDomain();
@@ -826,7 +879,8 @@ void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {
 void ComputeAtRootDomainMapBuilder::handle(GatherOp* op) {
   const TensorDomain* in_td = op->in()->as<TensorView>()->domain();
   const TensorDomain* out_td = op->out()->as<TensorView>()->domain();
-  const auto in_root = TensorDomain::noReductions(in_td->getRootDomain());
+  const auto in_root =
+      TensorDomain::noReductions(in_td->getMaybeRFactorDomain());
   const auto& out_root = out_td->getRootDomain();
 
   // Only maps the input root axes. Do not map the new window axes.
@@ -851,9 +905,11 @@ bool ComputeAtRootDomainMapBuilder::mapAllConsumers(
   // All entries in key_set must be equivalent with each other.
   TORCH_INTERNAL_ASSERT(consumer_set.size() > 0);
   bool consistent = safeToMap(consumer_set);
-  if (consistent) {
-    for (const auto pending_consumer : consumer_set) {
+  for (const auto pending_consumer : consumer_set) {
+    if (consistent) {
       setMapped(producer_key, pending_consumer);
+    } else {
+      setInvalid(producer_key, pending_consumer);
     }
   }
   // This entry should never be used again, so remove it.
@@ -927,6 +983,10 @@ bool ComputeAtRootDomainMapBuilder::safeToMap(const DomainKeySet& domains) {
   if (incompatible_domains_.isReductionOutputMapped(
           unique_domains, root_map_) &&
       !map_through_reduction_) {
+    return false;
+  }
+  // Make sure mapping these domains won't cause any invalid mapping
+  if (isInvalid(unique_domains)) {
     return false;
   }
   return true;

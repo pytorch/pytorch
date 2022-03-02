@@ -17,7 +17,7 @@
 #include <omp.h>
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -200,7 +200,7 @@ void init_num_threads() {
   omp_set_num_threads(1);
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   mkl_set_num_threads(1);
 #endif
 
@@ -308,7 +308,7 @@ c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
 #else
   // TODO: caffe2::PThreadPool only provides a data-parallel API.
   // Task parallelism is not currently supported.
-  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::dynT<NoneType>());
   func();
   future->markCompleted();
   return future;

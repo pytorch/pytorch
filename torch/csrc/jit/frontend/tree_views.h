@@ -501,16 +501,7 @@ struct ClassDef : public TreeView {
       const Maybe<Expr>& superclass,
       const List<Stmt>& body,
       const List<Property>& properties,
-      const List<Assign>& assigns) {
-    return ClassDef(Compound::create(
-        TK_CLASS_DEF,
-        range,
-        {name,
-         superclass,
-         body,
-         Maybe<List<Property>>::create(range, properties),
-         Maybe<List<Assign>>::create(range, assigns)}));
-  }
+      const List<Assign>& assigns);
 };
 
 TORCH_API std::vector<std::string> getUnresolvedClassAttributes(
@@ -916,7 +907,7 @@ struct Const : public Expr {
     try {
       // NOLINTNEXTLINE(modernize-use-nullptr)
       return c10::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
-    } catch (const std::out_of_range& e) {
+    } catch (const std::out_of_range&) {
       throw ErrorReport(range()) << "Integral constant out of range "
                                     "(must fit in a signed 64 bit integer)";
     }
