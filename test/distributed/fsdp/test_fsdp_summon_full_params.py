@@ -15,6 +15,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
+    DeterministicModel,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -262,6 +263,23 @@ class TestSummonFullParams(FSDPTest):
             self.assertEqual(0, p[0])
         else:
             self.assertEqual(self.rank + 2, p[0])
+
+    @skip_if_lt_x_gpu(2)
+    def test_summon_full_params_equivalence(self):
+        offload = CPUOffload(offload_params=True)
+        model = FSDP(
+            DeterministicModel(wrap_fsdp=True, cpu_offload=offload),
+            cpu_offload=offload
+        )
+        local_model = DeterministicModel(wrap_fsdp=False)
+
+        with model._summon_full_params(recurse=True):
+            # Below sleep causes failures without stream synchronization in
+            # summon_full_params fix.
+            torch.cuda._sleep(1000000)
+            fsdp_params = deepcopy(list(model.parameters()))
+
+        self.assertEqual(fsdp_params, list(local_model.parameters()))
 
     @skip_if_lt_x_gpu(2)
     def test_reshard_outside_forward_backward_iteration(self):
