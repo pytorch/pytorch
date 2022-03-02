@@ -607,7 +607,8 @@ class PackageExporter:
                             f"Object '{field}' from module {module} was mocked out during packaging "
                             f"but is being used in resource - {resource} in package {package}. "
                             "If this error is happening during 'save_pickle', please ensure that your "
-                            "pickled object doesn't contain any mocked objects."
+                            "pickled object doesn't contain any mocked objects. Try interning or externing"
+                            f"{module} if {field} is supposed to be in the package."
                         )
                     else:
                         return
