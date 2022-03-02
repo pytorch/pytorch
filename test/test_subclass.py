@@ -4,7 +4,7 @@ import tempfile
 import torch
 from copy import deepcopy
 from torch import nn
-from torch.nn.utils.parametrize import register_parametrization
+from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
@@ -121,7 +121,8 @@ class TestSubclass(TestCase):
         optimizer.step()
 
     @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
-    def test_parametrization(self, tensor_cls):
+    @parametrize("leave_parametrized", [False, True])
+    def test_parametrization(self, tensor_cls, leave_parametrized):
         def create_fn():
             return self._create_tensor(tensor_cls)
 
@@ -143,6 +144,7 @@ class TestSubclass(TestCase):
         self.assertIs(type(m.weight), tensor_cls)
         output = m(self._create_tensor(torch.Tensor))
         self.assertIs(type(output), tensor_cls)
+        remove_parametrizations(m, 'weight', leave_parametrized=leave_parametrized)
 
     # Lazy modules with custom tensors are not supported yet.
     @expectedFailure
