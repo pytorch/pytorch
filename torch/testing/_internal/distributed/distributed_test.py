@@ -315,7 +315,11 @@ class TwoLinLayerNet(nn.Module):
         return (a, b)
 
 
-class EmbeddingNet(nn.Module):
+class EmbeddingNetDifferentDimension(nn.Module):
+    """
+    A module containing an embedding with different dimension depending on the
+    rank.
+    """
     def __init__(self, rank):
         super().__init__()
         embedding_dim = 500 if rank == 0 else 50
@@ -7007,7 +7011,7 @@ class DistributedTest:
 
             # Create a valid model. The constructor initializes the logger that we use later.
             # We never actually use the rest of the model - we only need its logger.
-            net = EmbeddingNet(0)
+            net = EmbeddingNetDifferentDimension(0)
             net = torch.nn.parallel.DistributedDataParallel(
                 net.to(self.rank),
                 device_ids=[self.rank],
@@ -7080,7 +7084,7 @@ class DistributedTest:
             ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
 
             # Create a valid model. The constructor initializes the logger that we use later.
-            net = EmbeddingNet(0)
+            net = EmbeddingNetDifferentDimension(0)
             net = torch.nn.parallel.DistributedDataParallel(
                 net.to(self.rank),
                 device_ids=[self.rank],
@@ -7145,7 +7149,7 @@ class DistributedTest:
             ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
-            net = EmbeddingNet(self.rank)
+            net = EmbeddingNetDifferentDimension(self.rank)
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank),
@@ -7345,36 +7349,17 @@ class DistributedTest:
         @require_backends_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         def test_different_graph_across_ranks(self):
-            # In default rebuilt bucket is enabled when
-            # find_unused_parameters=True.
             base_model = self._test_different_graph_across_ranks(
                 find_unused_parameters=True
             )
-            self.assertTrue(
+            self.assertFalse(
                 base_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
-
-            # rebuilt bucket could be disabled when find_unused_parameters=True
-            # by setting environment variable for debugging purpose.
-            os.environ["DISABLE_REBUILT_BUCKET"] = "1"
-            base_model_1 = self._test_different_graph_across_ranks(
-                find_unused_parameters=True
-            )
-            self.assertFalse(
-                base_model_1._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
-            )
-
-            # rebuilt bucket is always enabled for static_graph=True in default.
             static_model = self._test_different_graph_across_ranks(static_graph=True)
             self.assertTrue(
                 static_model._get_ddp_logging_data().get("has_rebuilt_buckets", 0)
             )
-
-            # compare the training results
             for i, j in zip(base_model.parameters(), static_model.parameters()):
-                self.assertEqual(i, j)
-
-            for i, j in zip(base_model_1.parameters(), static_model.parameters()):
                 self.assertEqual(i, j)
 
         @require_backend({"gloo"})
@@ -7668,7 +7653,7 @@ class DistributedTest:
             class SubModule(nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.embedding_net = EmbeddingNet(0)
+                    self.embedding_net = EmbeddingNetDifferentDimension(0)
                     self.lin = TwoLinLayerNet()
                     self.bn = BatchNormNet()
                     self.lin_layer = nn.Linear(4, 10, bias=False)
@@ -7677,7 +7662,7 @@ class DistributedTest:
                     x = self.bn(x)
                     x = self.lin_layer(x)
                     x = self.lin.a(x)  # self.lin.b param unused
-                    # EmbeddingNet entirely unused: self.embedding_net.embedding and
+                    # EmbeddingNetDifferentDimension entirely unused: self.embedding_net.embedding and
                     # self.embedding_net.lin unused.
                     return x
 
