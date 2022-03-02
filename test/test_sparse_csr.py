@@ -882,11 +882,10 @@ class TestSparseCSR(TestCase):
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(torch.complex64,
-                  *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else [],
-                  *floating_types_and(
-                      *[torch.bfloat16] if SM80OrLater else [],
-                      *[torch.half] if SM53OrLater else []))
+    @dtypesIfCUDA(*floating_types_and(torch.complex64,
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      *[torch.half] if SM53OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @skipCUDAIf(
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"
@@ -956,11 +955,10 @@ class TestSparseCSR(TestCase):
 
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
-    @dtypesIfCUDA(torch.complex64,
-                  *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else [],
-                  *floating_types_and(
-                      *[torch.bfloat16] if SM80OrLater else [],
-                      *[torch.half] if SM53OrLater else []))
+    @dtypesIfCUDA(*floating_types_and(torch.complex64,
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      *[torch.half] if SM53OrLater else [],
+                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
     @skipCUDAIf(
         not _check_cusparse_spgemm_available(),
         "cuSparse Generic API SpGEMM is not available"

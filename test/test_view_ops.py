@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, onlyNativeDeviceTypes, skipMeta)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, complex_types, all_types_and, floating_and_complex_types,
+    all_types_and_complex_and, complex_types, all_types_and,
 )
 
 # TODO: replace this with make_tensor() in common_utils.py
@@ -210,7 +210,7 @@ class TestViewOps(TestCase):
         # because view(dtype) does not support backward yet
         # TODO: Remove this when autograd support is added
         if dtype.is_floating_point or dtype.is_complex:
-            for view_dtype in floating_and_complex_types():
+            for view_dtype in floating_and_complex_types_and(torch.half, torch.bfloat16):
                 t = make_tensor((5, 5, 64), dtype=dtype, device=device, low=-5, high=5, requires_grad=True)
                 self.assertFalse(t.view(view_dtype).requires_grad)
 
