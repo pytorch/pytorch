@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/core/IList.h>
 
 namespace at { namespace native {
 

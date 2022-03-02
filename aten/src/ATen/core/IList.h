@@ -328,7 +328,7 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
     unboxed_iterator_type unboxed_iterator;
     void* _init_ptr;
     Payload() : _init_ptr(nullptr) {}
-    ~Payload() = default;
+    ~Payload() {}
   };
 
   Payload payload_;
@@ -500,7 +500,7 @@ class IList {
     const boxed_type* boxed;
     unboxed_type unboxed;
     Payload() : boxed(nullptr) {}
-    ~Payload() = default;
+    ~Payload() {}
   };
 
   Payload payload_;
