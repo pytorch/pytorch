@@ -141,7 +141,7 @@ def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
     return res
 
 def _svd_lowrank_impl(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
-                 M: Optional[Tensor] = None) -> Tuple[Tensor, Tensor, Tensor]:
+                      M: Optional[Tensor] = None) -> Tuple[Tensor, Tensor, Tensor]:
     q = 6 if q is None else q
     m, n = A.shape[-2:]
     matmul = _utils.matmul
