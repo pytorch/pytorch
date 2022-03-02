@@ -1050,6 +1050,7 @@ void initJitScriptBindings(PyObject* module) {
   // Used by torch.package to save ScriptModule objects in unified format.
   py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
       .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
+      .def(py::init<caffe2::serialize::PyTorchStreamWriter&, std::shared_ptr<SerializationStorageContext>>())
       .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
       .def(
           "write_files",
@@ -1066,6 +1067,7 @@ void initJitScriptBindings(PyObject* module) {
       SerializationStorageContext,
       std::shared_ptr<SerializationStorageContext>>(
       m, "SerializationStorageContext")
+      .def(py::init<>())
       .def("has_storage", &SerializationStorageContext::hasStorage)
       .def("get_or_add_storage", &SerializationStorageContext::getOrAddStorage);
 
@@ -2190,6 +2192,10 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
+
+  m.def(
+      "_set_should_use_format_with_string_table",
+      setShouldUseFormatWithStringTable);
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
