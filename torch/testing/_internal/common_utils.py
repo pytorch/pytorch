@@ -446,7 +446,7 @@ def _get_test_report_path():
 parser = argparse.ArgumentParser()
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
-parser.add_argument('--seed', type=int, default=1234)
+parser.add_argument('--seed', type=int, default=4321)
 parser.add_argument('--accept', action='store_true')
 parser.add_argument('--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
