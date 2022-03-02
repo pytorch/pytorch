@@ -34,6 +34,13 @@ http_archive(
 )
 
 http_archive(
+    name = "google_benchmark",
+    sha256 = "6132883bc8c9b0df5375b16ab520fac1a85dc9e4cf5be59480448ece74b278d4",
+    strip_prefix = "benchmark-1.6.1/",
+    urls = ["https://github.com/google/benchmark/archive/refs/tags/v1.6.1.tar.gz"],
+)
+
+http_archive(
   name = "pybind11_bazel",
   strip_prefix = "pybind11_bazel-7f397b5d2cc2434bbd651e096548f7b40c128044",
   urls = ["https://github.com/pybind/pybind11_bazel/archive/7f397b5d2cc2434bbd651e096548f7b40c128044.zip"],
