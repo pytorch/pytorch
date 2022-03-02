@@ -112,11 +112,11 @@ def translate(
 
         # [Note: ITensorList]
         if t.type == BaseCType(tensorListT):
-            ctx[NamedCType(t.name, BaseCType(iTensorListT))] = f"{b.expr}"
+            ctx[NamedCType(t.name, BaseCType(iTensorListT))] = f"at::ITensorList({b.expr})"
 
         # [Note: IOptTensorRefList]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
-            ctx[NamedCType(t.name, BaseCType(iOptTensorRefListT))] = f"{b.expr}"
+            ctx[NamedCType(t.name, BaseCType(iOptTensorRefListT))] = f"at::IOptTensorRefList({b.expr})"
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
