@@ -13,7 +13,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/comm.hpp>
-#include <c10d/debug.h>
+#include <c10d/debug.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>

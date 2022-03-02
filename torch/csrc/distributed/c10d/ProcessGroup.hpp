@@ -12,7 +12,7 @@
 
 #include <c10d/Types.hpp>
 #include <c10d/Utils.hpp>
-#include <c10d/debug.h>
+#include <c10d/debug.hpp>
 #include <c10d/sequence_num.hpp>
 
 // *************************************************************************
