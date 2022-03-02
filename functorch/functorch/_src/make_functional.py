@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from typing import List, Tuple
+from .named_members_polyfill import _named_parameters, _named_buffers
 import copy
 
 # Utilities to make nn.Module "functional"
@@ -46,6 +47,15 @@ def _get_nested_attr(obj: nn.Module, names: List[str]) -> None:
         _get_nested_attr(getattr(obj, names[0]), names[1:])
 
 
+def raise_parameter_tying_error():
+    raise RuntimeError(
+        "make_functional(module): we don't yet support models that "
+        "do parameter tying (also sometimes known as weight sharing). "
+        "Please try to rewrite your model by replacing all instances of the "
+        "tied parameter with another and/or comment your support in "
+        "https://github.com/pytorch/functorch/issues/446")
+
+
 def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     """
     This function removes all the Parameters from the model and
@@ -55,7 +65,11 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     Note that this function modifies the model in place and after this
     call, mod.parameters() will be empty.
     """
+    num_orig_params_with_duplicates = len(tuple(_named_parameters(mod, remove_duplicate=False)))
     orig_params = tuple(mod.parameters())
+    if len(orig_params) != num_orig_params_with_duplicates:
+        raise_parameter_tying_error()
+
     # Remove all the parameters in the model
     names = []
     for name, p in list(mod.named_parameters()):
@@ -91,7 +105,11 @@ def _swap_state(mod: nn.Module, split_names: List[str], elems):
 
 
 def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
+    num_orig_params_with_duplicates = len(tuple(_named_buffers(mod, remove_duplicate=False)))
     orig_params = tuple(mod.buffers())
+    if len(orig_params) != num_orig_params_with_duplicates:
+        raise_parameter_tying_error()
+
     # Remove all the parameters in the model
     names = []
     for name, p in list(mod.named_buffers()):
