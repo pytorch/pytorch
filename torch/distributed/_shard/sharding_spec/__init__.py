@@ -3,7 +3,8 @@ from .api import (
     DevicePlacementSpec,
     EnumerableShardingSpec,
     PlacementSpec,
-    ShardMetadata,
     ShardingSpec,
     _infer_sharding_spec_from_shards_metadata,
 )
+
+from ..metadata import ShardMetadata

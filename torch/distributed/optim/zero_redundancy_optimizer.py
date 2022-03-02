@@ -1418,7 +1418,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 self.optim: Any = self._optim_constructor(params, **self._optim_defaults)
 
             # Log information about the DDP and ZeRO bucketing
-            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            if dist.get_debug_level() != dist.DebugLevel.OFF:
                 local_numel = sum(p.numel() for p in params)
                 num_assigned_buckets = len(self._bucket_assignments_per_rank[self.global_rank])
                 logger.info(

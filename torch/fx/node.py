@@ -69,7 +69,9 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     return f'{module}.{name}'
 
 def _format_arg(arg) -> str:
-    if isinstance(arg, list):
+    if hasattr(arg, "_custom_fx_repr_fn"):
+        return arg._custom_fx_repr_fn()
+    elif isinstance(arg, list):
         items = ', '.join(_format_arg(a) for a in arg)
         return f'[{items}]'
     elif isinstance(arg, tuple):
@@ -587,7 +589,9 @@ def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
     Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
     """
     if isinstance(a, tuple):
-        return tuple(map_aggregate(elem, fn) for elem in a)
+        t = tuple(map_aggregate(elem, fn) for elem in a)
+        # Support NamedTuple (if it has `_fields`) by repacking into original type.
+        return t if not hasattr(a, '_fields') else type(a)(*t)
     elif isinstance(a, list):
         return immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
