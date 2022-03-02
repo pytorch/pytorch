@@ -2138,14 +2138,6 @@ class TestTensorCreation(TestCase):
                     torch.double,
                     torch.bfloat16):
                 torch.set_default_dtype(t)
-            elif t in (
-                    torch.complex32,
-                    torch.qint8,
-                    torch.quint8,
-                    torch.qint32,
-                    torch.quint4x2,
-                    torch.quint2x4):
-                self.assertRaises(RuntimeError, lambda: torch.set_default_dtype(t))
             else:
                 self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
 
