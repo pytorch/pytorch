@@ -223,7 +223,8 @@ if is_available():
 
         result = urlparse(backend_options.init_method)
         scheme = result.scheme
-        query: Dict[str, str] = dict(pair.split("=") for pair in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type]
+        query = dict(pair.split("=") for pair
+                     in filter(None, result.query.split("&")))  # type: ignore[misc, arg-type, var-annotated]
         if scheme == "file":
             ValueError("File initialization is not supported for Dynamic RPC")
         else:
