@@ -2464,9 +2464,6 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
-    # Tanh Gelu approximation is not supported
-    # Reference: https://github.com/pytorch/pytorch/pull/61439
-    'nn.functional.gelu'
     'conj'
 ]
 

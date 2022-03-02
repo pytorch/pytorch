@@ -271,7 +271,6 @@ bool guardDifferentiableGraph(Node* dnode) {
               t->requiresGrad().value_or(true));
         },
         prim::RequiresGradCheck);
-    setRequiresGradOnDiffGraph(dnode);
     return true;
   } else {
     // we inline the differentiable graph as a fallback
