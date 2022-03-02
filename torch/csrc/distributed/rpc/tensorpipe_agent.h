@@ -235,6 +235,9 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void prepareNames(bool isStaticGroup);
 
+  // Check the static group attribute with the value set in store
+  void checkAndSetStaticGroup(const c10::intrusive_ptr<::c10d::Store>& store);
+
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
 
   // TensorPipe read function that could be used to read response messages
