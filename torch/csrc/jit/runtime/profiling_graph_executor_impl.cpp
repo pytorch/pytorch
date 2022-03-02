@@ -402,13 +402,12 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "After CheckInplace (end of runPreAutodiffPassPipeline)\n", *graph);
 }
 
-FusionBehavior getCurrentBehavior(size_t remaining_depth) {
+FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(size_t remaining_depth) {
   size_t curr_depth = 0;
-  auto curr_strategy = getFusionStrategy();
-  for (int i = static_cast<int>(curr_strategy.size()) - 1; i >= 0; i--) {
-    curr_depth += curr_strategy[i].second;
+  for (int i = static_cast<int>(fusion_strategy_.size()) - 1; i >= 0; i--) {
+    curr_depth += fusion_strategy_[i].second;
     if (remaining_depth <= curr_depth) {
-      return curr_strategy[i].first;
+      return fusion_strategy_[i].first;
     }
   }
   // should never get here
@@ -416,7 +415,7 @@ FusionBehavior getCurrentBehavior(size_t remaining_depth) {
   return FusionBehavior::STATIC;
 }
 
-void runNoGradOptimizations(
+void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     std::shared_ptr<Graph>& graph,
     size_t remaining_bailout_depth) {
   GRAPH_DEBUG(
