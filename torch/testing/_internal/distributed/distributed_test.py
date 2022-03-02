@@ -315,7 +315,11 @@ class TwoLinLayerNet(nn.Module):
         return (a, b)
 
 
-class EmbeddingNet(nn.Module):
+class EmbeddingNetDifferentDimension(nn.Module):
+    """
+    A module containing an embedding with different dimension depending on the
+    rank.
+    """
     def __init__(self, rank):
         super().__init__()
         embedding_dim = 500 if rank == 0 else 50
@@ -428,7 +432,7 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
 
 def _build_multidim_tensor(dim, dim_size, value=None, dtype=torch.float):
     if value is None:
-        value = size
+        value = dim
     return torch.empty(size=[dim_size for _ in range(dim)], dtype=dtype).fill_(value)
 
 
@@ -742,7 +746,7 @@ class DistributedTest:
                 expected_time = time.time() + timeout.total_seconds()
                 # In debug mode, we execute a monitored_barrier before the
                 # collective, so assert on that.
-                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     exception_ctx = self.assertRaisesRegex(
                         Exception, "failed to pass monitoredBarrier"
                     )
@@ -2083,7 +2087,7 @@ class DistributedTest:
                 )
                 # DETAIL debug mode can use a pg wrapper that issues more collectives
                 # under the hood
-                if dist._get_debug_mode() != dist._DistributedDebugLevel.DETAIL:
+                if dist.get_debug_level() != dist.DebugLevel.DETAIL:
                     self.assertEqual(len(events), len(op_calls))
                 for e in events:
                     self.assertTrue(e.is_async)
@@ -2094,7 +2098,7 @@ class DistributedTest:
                     # under the hood
                     if (
                         tensor_shapes is not None
-                        and dist._get_debug_mode() != dist._DistributedDebugLevel.DETAIL
+                        and dist.get_debug_level() != dist.DebugLevel.DETAIL
                     ):
                         self.assertEqual(
                             e.input_shapes,
@@ -4064,8 +4068,8 @@ class DistributedTest:
                     dist.barrier()
 
         @sandcastle_skip_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel"
+            BACKEND == "nccl",
+            "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
@@ -4092,8 +4096,8 @@ class DistributedTest:
             )
 
         @sandcastle_skip_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel"
+            BACKEND == "nccl",
+            "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
@@ -4113,8 +4117,8 @@ class DistributedTest:
             )
 
         @sandcastle_skip_if(
-            BACKEND not in DistTestCases.backend_feature["ddp"],
-            f"The {BACKEND} backend does not support DistributedDataParallel"
+            BACKEND == "nccl",
+            "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
@@ -4376,7 +4380,7 @@ class DistributedTest:
                     rank * local_batch_size : (rank + 1) * local_batch_size
                 ]
 
-                if iteration % num_iters == 0:
+                if iteration % 2 == 0:
                     # accumulate grads locally
                     with ddp_model.no_sync():
                         step_model(ddp_model, ddp_input, ddp_target)
@@ -4387,7 +4391,7 @@ class DistributedTest:
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     if not i.requires_grad:
                         continue
-                    if iteration % num_iters == 0:
+                    if iteration % 2 == 0:
                         self.assertNotEqual(i.grad, j.grad)
                     else:
                         self.assertEqual(i.grad, j.grad)
@@ -5092,7 +5096,7 @@ class DistributedTest:
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
 
-            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "INFO"
+            dist.set_debug_level(dist.DebugLevel.INFO)
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_ddp_logging_data(is_gpu=False)
 
@@ -6515,7 +6519,7 @@ class DistributedTest:
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
-                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                        if dist.get_debug_level() == dist.DebugLevel.OFF:
                             expected_strs.append(ddp_suggest_debug_mode_str)
                         else:
                             unreduced_params = ", ".join(["net2.weight"])
@@ -6781,7 +6785,7 @@ class DistributedTest:
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
-                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                        if dist.get_debug_level() == dist.DebugLevel.OFF:
                             expected_strs.append(ddp_suggest_debug_mode_str)
                         else:
                             unreduced_params = ", ".join(["lin2.weight"])
@@ -6935,7 +6939,7 @@ class DistributedTest:
                         ]
                         # In debug mode, should show parameters that weren't reduced.
                         # Without debug mode, should show suggestion to use debug mode.
-                        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                        if dist.get_debug_level() == dist.DebugLevel.OFF:
                             expected_strs.append(ddp_suggest_debug_mode_str)
                         else:
                             unreduced_params = ", ".join(["lin2.weight"])
@@ -7007,7 +7011,7 @@ class DistributedTest:
 
             # Create a valid model. The constructor initializes the logger that we use later.
             # We never actually use the rest of the model - we only need its logger.
-            net = EmbeddingNet(0)
+            net = EmbeddingNetDifferentDimension(0)
             net = torch.nn.parallel.DistributedDataParallel(
                 net.to(self.rank),
                 device_ids=[self.rank],
@@ -7052,7 +7056,7 @@ class DistributedTest:
             # running with Gloo or with debug mode wrapper, we expect the error
             # to be caught inline.
             is_detail_dbg_mode = (
-                dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
+                dist.get_debug_level() == dist.DebugLevel.DETAIL
             )
             if self.rank == 0:
                 if dist.get_backend(group_to_use) == dist.Backend.NCCL and not is_detail_dbg_mode:
@@ -7080,7 +7084,7 @@ class DistributedTest:
             ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
 
             # Create a valid model. The constructor initializes the logger that we use later.
-            net = EmbeddingNet(0)
+            net = EmbeddingNetDifferentDimension(0)
             net = torch.nn.parallel.DistributedDataParallel(
                 net.to(self.rank),
                 device_ids=[self.rank],
@@ -7145,7 +7149,7 @@ class DistributedTest:
             ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
-            net = EmbeddingNet(self.rank)
+            net = EmbeddingNetDifferentDimension(self.rank)
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
                     net.to(self.rank),
@@ -7450,7 +7454,7 @@ class DistributedTest:
                 # wrapper PG is enabled or not, since with wrapper pg, it will
                 # fail in a collective synchronization check and not actually
                 # call into the nccl pg.
-                if dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL:
+                if dist.get_debug_level() == dist.DebugLevel.DETAIL:
                     err_regex = "Timed out waiting"
                 else:
                     err_regex = "Caught collective operation timeout"
@@ -7552,8 +7556,9 @@ class DistributedTest:
 
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
-        def test_ddp_build_param_to_name_mapping(self):
+        def test_ddp_build_debug_param_to_name_mapping(self):
             model = TwoLinLayerNet()
             net = torch.nn.parallel.DistributedDataParallel(
                 model.cuda(self.rank),
@@ -7561,7 +7566,7 @@ class DistributedTest:
             )
             expected_mapping = {0: "a.weight", 1: "b.weight"}
             net_params, _ = net._build_params_for_reducer()
-            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            param_to_name_mapping = net._build_debug_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
             # Test when DDP is used with ignored parameters.
@@ -7577,7 +7582,7 @@ class DistributedTest:
             )
             expected_mapping = {0: "b.weight"}
             net_params, _ = net._build_params_for_reducer()
-            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            param_to_name_mapping = net._build_debug_param_to_name_mapping(net_params)
             self.assertDictEqual(expected_mapping, param_to_name_mapping)
 
             # Test errors are raised when DDP and module parameters mismatch.
@@ -7600,11 +7605,11 @@ class DistributedTest:
             )
 
             with self.assertRaisesRegex(ValueError, "Expected param to name mapping"):
-                net._build_param_to_name_mapping(net_params)
+                net._build_debug_param_to_name_mapping(net_params)
 
             net_params = net_params[:-3]
             with self.assertRaisesRegex(ValueError, "Param with name"):
-                net._build_param_to_name_mapping(net_params)
+                net._build_debug_param_to_name_mapping(net_params)
 
             net_params.extend(
                 [
@@ -7617,8 +7622,9 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
         )
+        @with_dist_debug_levels(levels=["INFO"])
         @skip_if_lt_x_gpu(2)
-        def test_ddp_build_param_to_name_mapping_requires_grad(self):
+        def test_ddp_build_debug_param_to_name_mapping_requires_grad(self):
             class Net(nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -7638,16 +7644,16 @@ class DistributedTest:
                 0: "lin.weight",
             }
             net_params, _ = net._build_params_for_reducer()
-            param_to_name_mapping = net._build_param_to_name_mapping(net_params)
+            param_to_name_mapping = net._build_debug_param_to_name_mapping(net_params)
             self.assertEqual(param_to_name_mapping, expected_mapping)
 
         def _test_ddp_multiple_nested_unused_params_error(self, ignore_sparse):
-            debug_mode_off = dist._get_debug_mode() == dist._DistributedDebugLevel.OFF
+            debug_mode_off = dist.get_debug_level() == dist.DebugLevel.OFF
 
             class SubModule(nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.embedding_net = EmbeddingNet(0)
+                    self.embedding_net = EmbeddingNetDifferentDimension(0)
                     self.lin = TwoLinLayerNet()
                     self.bn = BatchNormNet()
                     self.lin_layer = nn.Linear(4, 10, bias=False)
@@ -7656,7 +7662,7 @@ class DistributedTest:
                     x = self.bn(x)
                     x = self.lin_layer(x)
                     x = self.lin.a(x)  # self.lin.b param unused
-                    # EmbeddingNet entirely unused: self.embedding_net.embedding and
+                    # EmbeddingNetDifferentDimension entirely unused: self.embedding_net.embedding and
                     # self.embedding_net.lin unused.
                     return x
 

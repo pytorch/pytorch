@@ -1795,7 +1795,7 @@ void concrete_dispatch_fn(
 
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
-    TORCH_CHECK(out == py::none(), "Expected __torch_dispatch__ for ", op.operator_name(),
+    TORCH_CHECK(out.is(py::none()), "Expected __torch_dispatch__ for ", op.operator_name(),
                 " to return None but it returned something else instead.");
   } else if (num_returns == 1) {
     torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));

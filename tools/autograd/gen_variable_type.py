@@ -85,12 +85,12 @@ DONT_REQUIRE_DERIVATIVE = {
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
-    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
+    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone', 'diag_embed',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
     'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
     '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
-    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex', 'index_put',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',

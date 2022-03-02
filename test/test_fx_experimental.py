@@ -6,6 +6,7 @@ import operator
 import sys
 import unittest
 from typing import Callable, Dict, Union, List, Optional
+from types import BuiltinFunctionType
 
 import torch
 import torch.fx.experimental.optimization as optimization
@@ -1085,14 +1086,13 @@ class {test_classname}(torch.nn.Module):
                 check = (node.op, node.target)
                 excluded_nodes = {
                     ("placeholder", "x"),
-                    ("call_function", torch.conv2d),
                     # Return type differs based on boolean dispatch :(
                     ("call_function", torch.nn.functional.max_pool2d),
-                    ("call_function", operator.add),
-                    ("call_function", torch.flatten),
                     ("output", "output"),
                 }
-                self.assertIn(check, excluded_nodes)
+                # AnnotateTypesWithSchema doesn't work with bound C++ functions
+                if not isinstance(node.target, BuiltinFunctionType):
+                    self.assertIn(check, excluded_nodes)
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
