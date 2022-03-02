@@ -180,20 +180,12 @@ class TestGradAcc(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
-        "configs",
+        "configs_args",  # (use_no_sync, num_iters)
         [
-            [_GradAccConfig(use_no_sync=True, num_iters=4)],
-            [_GradAccConfig(use_no_sync=False, num_iters=4)],
-            [
-                _GradAccConfig(use_no_sync=True, num_iters=2),
-                _GradAccConfig(use_no_sync=False, num_iters=2),
-                _GradAccConfig(use_no_sync=True, num_iters=2),
-            ],
-            [
-                _GradAccConfig(use_no_sync=False, num_iters=2),
-                _GradAccConfig(use_no_sync=True, num_iters=2),
-                _GradAccConfig(use_no_sync=False, num_iters=2),
-            ],
+            [(True, 4)],
+            [(False, 4)],
+            [(True, 2), (False, 2), (True, 2)],
+            [(False, 2), (True, 2), (False ,2)],
         ]
     )
     @parametrize(
@@ -206,7 +198,7 @@ class TestGradAcc(FSDPTest):
     )
     def test_grad_acc(
         self,
-        configs: List[_GradAccConfig],
+        configs_args: List[Tuple[bool, int]],
         cpu_offload: CPUOffload,
         backward_prefetch: Optional[BackwardPrefetch],
     ):
@@ -226,6 +218,12 @@ class TestGradAcc(FSDPTest):
         manager is not currently compatible with CPU offloading, so those tests
         are skipped.
         """
+        # Construct the `_GradAccConfig` instances here instead of directly in
+        # the `parametrize` to be parseable by internal test builds
+        configs = [
+            _GradAccConfig(use_no_sync=use_no_sync, num_iters=num_iters)
+            for (use_no_sync, num_iters) in configs_args
+        ]
         self._test_grad_acc(
             batch_dim=1,
             configs=configs,
