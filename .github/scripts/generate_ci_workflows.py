@@ -165,10 +165,10 @@ class CIWorkflow:
     build_with_debug: bool = False
     is_scheduled: str = ''
     is_default: bool = False
+    on_pull_request: bool = False
     num_test_shards: int = 1
     timeout_after: int = 240
     xcode_version: str = ''
-    only_on_pr: bool = False
     ios_arch: str = ''
     ios_platform: str = ''
     test_jobs: Any = field(default_factory=list)
@@ -195,6 +195,9 @@ class CIWorkflow:
 
         if LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels:
             self.is_default = True
+
+        if self.is_default:
+            self.on_pull_request = True
 
         self.test_jobs = self._gen_test_jobs()
         self.assert_valid()
@@ -401,6 +404,8 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         enable_force_on_cpu_test=True,
+        # TODO: Revert back to default value after https://github.com/pytorch/pytorch/issues/73489 is closed
+        timeout_after=270,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
@@ -523,6 +528,17 @@ LINUX_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        build_generates_artifacts=False,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CPU},
         ),
     ),
     CIWorkflow(
@@ -706,10 +722,10 @@ XLA_WORKFLOWS = [
         build_environment="pytorch-xla-linux-bionic-py3.7-clang8",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/xla_base",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
         enable_distributed_test=False,
         enable_xla_test=True,
         enable_default_test=False,
+        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),

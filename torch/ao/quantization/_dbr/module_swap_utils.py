@@ -17,7 +17,7 @@ def _swap_child_modules(
     module: torch.nn.Module,
     static_mappings: Dict[Callable, Any],
     dynamic_mappings: Dict[Callable, Any],
-    parent_fqn: Optional[str],
+    parent_fqn: Optional[str] = None,
 ) -> None:
     """
     For each direct child of `module`, swaps it using `static_mappings`
@@ -68,12 +68,10 @@ def _swap_child_modules(
             # int32. Do it automatically.
             # TODO(future PR): extend this logic to more dtypes, and add
             # the is_reference API flag instead of doing this automatically.
-            for orig_mod_type, _ref_mod_type in \
-                    DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.items():
-                if not isinstance(mod, orig_mod_type):  # type: ignore[arg-type]
-                    continue
-                reassign[local_fqn] = swap_module(
-                    mod, DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS, {})
+            # Note: swap modules only does the swap if the mapping for this
+            # module exists.
+            reassign[local_fqn] = swap_module(
+                mod, DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS, {})
 
         # TODO(future PR): add support for other dtypes
 
