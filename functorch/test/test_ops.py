@@ -328,8 +328,8 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
-        xfail('nn.functional.batch_norm', device_type='cuda'),
-        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
+
+        # Needs increased tolerance
         skip('nn.functional.conv_transpose3d', device_type='cuda'),
 
         # See https://github.com/pytorch/pytorch/issues/69034
@@ -358,15 +358,6 @@ class TestOperators(TestCase):
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
 
-        # Causing a CUDA assert, needs investigation
-        skip('div', 'floor_rounding', device_type='cuda'),
-        skip('div', 'no_rounding_mode', device_type='cuda'),
-        skip('div', 'trunc_rounding', device_type='cuda'),
-        skip('true_divide', device_type='cuda'),
-
-        # Causing an error with calling a forward mode of a forward mode
-        xfail('nn.functional.batch_norm', device_type='cpu'),
-
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
@@ -386,7 +377,10 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            fn, primals = normalize_op_input_output(op, sample, requires_grad=False)
+            # NB: we used requires_grad=True to determine where the primals are,
+            # but don't need that information otherwise
+            fn, primals = normalize_op_input_output(op, sample, requires_grad=True)
+            primals = tree_map(lambda x: x.detach(), primals)
             tangents = tree_map(lambda x: torch.randn_like(x), primals)
             primal_outs, tangent_outs = jvp(fn, primals, tangents)
             expected_primal_outs, expected_tangent_outs = ref_jvp(fn, primals, tangents)
@@ -659,12 +653,6 @@ class TestOperators(TestCase):
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('tensor_split'),
 
-        # Causing a CUDA assert, needs investigation
-        skip('div', 'floor_rounding', device_type='cuda'),
-        skip('div', 'no_rounding_mode', device_type='cuda'),
-        skip('div', 'trunc_rounding', device_type='cuda'),
-        skip('true_divide', device_type='cuda'),
-
         # Causing multiple forward mode AD issues, needs investigation
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
@@ -705,12 +693,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm', device_type='cuda'),
         xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
         xfail('nn.functional.hinge_embedding_loss', device_type='cuda'),
-
-        # Causing a CUDA assert, needs investigation
-        skip('div', 'floor_rounding', device_type='cuda'),
-        skip('div', 'no_rounding_mode', device_type='cuda'),
-        skip('div', 'trunc_rounding', device_type='cuda'),
-        skip('true_divide', device_type='cuda'),
 
         # Causing issues with multiple cpu levels of forward mode AD
         xfail('_masked.mean', device_type='cpu'),
