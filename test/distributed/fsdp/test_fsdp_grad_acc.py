@@ -152,55 +152,52 @@ class TestGradAcc(FSDPTest):
                 torch.cat(ts, dim=batch_dim) for ts in zip(*batches)
             )
 
-            # Run twice to check that everything works even after the first
-            # gradient synchronization
-            for _ in range(2):
-                # Establish reference gradients using the concatenated batch
-                fsdp_model.zero_grad()
-                output = fsdp_model(*concat_batch)
-                ref_loss = fsdp_model.module.get_loss(concat_batch, output)
-                ref_loss.backward()
-                ref_grads = [
-                    p.grad.detach().clone() for p in fsdp_model.parameters()
-                ]
+            # Establish reference gradients using the concatenated batch
+            fsdp_model.zero_grad()
+            output = fsdp_model(*concat_batch)
+            ref_loss = fsdp_model.module.get_loss(concat_batch, output)
+            ref_loss.backward()
+            ref_grads = [
+                p.grad.detach().clone() for p in fsdp_model.parameters()
+            ]
 
-                # Compute and accumulate the gradients
-                fsdp_model.zero_grad()
-                losses = []
-                batch_idx = 0
-                for config in configs:
-                    sync_context = fsdp_model.no_sync() if config.use_no_sync \
-                        else contextlib.suppress()
-                    with sync_context:
-                        for _ in range(config.num_iters):
-                            if batch_idx == num_iters_to_acc - 1:
-                                break  # always sync on the last iteration
-                            batch = batches[batch_idx]
-                            batch_idx += 1
-                            output = fsdp_model(*batch)
-                            loss = fsdp_model.module.get_loss(batch, output)
-                            loss.backward()
-                            losses.append(loss)
-                output = fsdp_model(*batches[-1])
-                loss = fsdp_model.module.get_loss(batches[-1], output)
-                loss.backward()
-                losses.append(loss)
-                acc_loss = sum(losses)
-                acc_grads = [
-                    p.grad.detach().clone() for p in fsdp_model.parameters()
-                ]
+            # Compute and accumulate the gradients
+            fsdp_model.zero_grad()
+            losses = []
+            batch_idx = 0
+            for config in configs:
+                sync_context = fsdp_model.no_sync() if config.use_no_sync \
+                    else contextlib.suppress()
+                with sync_context:
+                    for i in range(config.num_iters):
+                        if batch_idx == num_iters_to_acc - 1:
+                            break  # always sync on the last iteration
+                        batch = batches[batch_idx]
+                        batch_idx += 1
+                        output = fsdp_model(*batch)
+                        loss = fsdp_model.module.get_loss(batch, output)
+                        loss.backward()
+                        losses.append(loss)
+            output = fsdp_model(*batches[-1])
+            loss = fsdp_model.module.get_loss(batches[-1], output)
+            loss.backward()
+            losses.append(loss)
+            acc_loss = sum(losses)
+            acc_grads = [
+                p.grad.detach().clone() for p in fsdp_model.parameters()
+            ]
 
-                # Compare the losses and gradients
-                torch.testing.assert_close(ref_loss, acc_loss)
-                assert len(ref_grads) == len(acc_grads)
-                for ref_grad, acc_grad in zip(ref_grads, acc_grads):
-                    assert ref_grad.device == acc_grad.device
-                    assert ref_grad.size() == acc_grad.size()
-                    assert ref_grad.dtype == acc_grad.dtype
-                    torch.testing.assert_close(ref_grad, acc_grad)
+            # Compare the losses and gradients
+            torch.testing.assert_close(ref_loss, acc_loss)
+            assert len(ref_grads) == len(acc_grads)
+            for ref_grad, acc_grad in zip(ref_grads, acc_grads):
+                assert ref_grad.device == acc_grad.device
+                assert ref_grad.size() == acc_grad.size()
+                assert ref_grad.dtype == acc_grad.dtype
+                torch.testing.assert_close(ref_grad, acc_grad)
 
-                # Check that the optimizer step does not error
-                optim.step()
+            # Check that the optimizer step does not error
+            optim.step()
         finally:
             torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
 
@@ -211,14 +208,14 @@ class TestGradAcc(FSDPTest):
             _GradAccConfigs([_GradAccConfig(use_no_sync=True, num_iters=4)]),
             _GradAccConfigs([_GradAccConfig(use_no_sync=False, num_iters=4)]),
             _GradAccConfigs([
-                _GradAccConfig(use_no_sync=True, num_iters=2),
-                _GradAccConfig(use_no_sync=False, num_iters=2),
-                _GradAccConfig(use_no_sync=True, num_iters=2),
+                _GradAccConfig(use_no_sync=True, num_iters=3),
+                _GradAccConfig(use_no_sync=False, num_iters=3),
+                _GradAccConfig(use_no_sync=True, num_iters=3),
             ]),
             _GradAccConfigs([
-                _GradAccConfig(use_no_sync=False, num_iters=2),
-                _GradAccConfig(use_no_sync=True, num_iters=2),
-                _GradAccConfig(use_no_sync=False, num_iters=2),
+                _GradAccConfig(use_no_sync=False, num_iters=3),
+                _GradAccConfig(use_no_sync=True, num_iters=3),
+                _GradAccConfig(use_no_sync=False, num_iters=3),
             ]),
         ]
     )
