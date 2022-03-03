@@ -317,7 +317,7 @@ class FullyShardedDataParallel(nn.Module):
             if not isinstance(param, FlatParameter):
                 params.append(param)
 
-        num_params = sum(p.numel() for p in params)
+        #num_params = sum(p.numel() for p in params)
         #print(f"Attempting to flatten {num_params} params")
         try:
             self._fsdp_wrapped_module: FlattenParamsWrapper = FlattenParamsWrapper(
