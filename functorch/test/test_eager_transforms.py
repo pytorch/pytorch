@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest
 )
@@ -2318,6 +2319,71 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_loss, expected_loss)
         self.assertEqual(result_weights, expected_weights)
+
+    @parametrize("dropout_layer", [nn.Dropout, nn.AlphaDropout, nn.FeatureAlphaDropout])
+    def test_find_learning_rate_ensembling(self, device, dropout_layer):
+        # This example mimics what a user might do when trying to find the optimal learning rate. They would
+        # want to run a bunch of models with the same behavior (including the same dropout!) and have them
+        # each run with different learning rates. Specifically, this is an example of using same randomness with vmap
+        points, labels = torch.randn(100, 2, 2, 2, 2, device=device), torch.randint(0, 2, (100,), device=device)
+
+        class MLPClassifier(nn.Module):
+            def __init__(self, hidden_dim=32, n_classes=2):
+                super().__init__()
+                self.hidden_dim = hidden_dim
+                self.n_classes = n_classes
+
+                self.dropout = dropout_layer()
+                self.fc1 = nn.Linear(16, self.hidden_dim)
+                self.fc2 = nn.Linear(self.hidden_dim, self.n_classes)
+
+            def forward(self, x):
+                x = self.dropout(x)
+                x = torch.flatten(x, start_dim=1)
+                x = self.fc1(x)
+                x = F.relu(x)
+                x = self.fc2(x)
+                x = F.log_softmax(x, -1)
+                return x
+
+        loss_fn = nn.NLLLoss()
+
+        func_model, weights = make_functional(MLPClassifier().to(device))
+
+        def train_step_fn(weights, batch, targets, lr):
+            def compute_loss(weights, batch, targets):
+                output = func_model(weights, batch)
+                loss = loss_fn(output, targets)
+                return loss
+
+            grad_weights, loss = grad_and_value(compute_loss)(weights, batch, targets)
+            new_weights = []
+            with torch.no_grad():
+                for grad_weight, weight in zip(grad_weights, weights):
+                    new_weights.append(weight - grad_weight * lr)
+            # NB: return looks weird because torch.vmap must return Tensors
+            return (loss, *new_weights)
+
+        def unpack(train_result):
+            return train_result[0], train_result[1:]
+
+        def init_fn(num_models):
+            og_model = MLPClassifier().to(device)
+            models = tuple(copy.deepcopy(og_model) for _ in range(num_models))  # have same initialization
+            weights = tuple(make_functional(model)[1] for model in models)
+            weights = tuple(zip(*weights))
+            weights = tuple(torch.stack(shards).detach() for shards in weights)
+            return weights
+
+        batched_weights = init_fn(num_models=2)
+        parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None, 0), randomness="same")
+
+        lrs = torch.tensor([0.2, 0.4], device=device)
+        result_loss, result_weights = unpack(parallel_train_step_fn(batched_weights, points, labels, lrs))
+
+        self.assertEqual(result_loss[0], result_loss[1])
+        self.assertNotEqual(tuple(weight[0] for weight in result_weights),
+                            tuple(weight[1] for weight in result_weights))
 
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_per_sample_grads(self, device):

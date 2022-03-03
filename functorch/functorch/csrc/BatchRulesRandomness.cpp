@@ -149,6 +149,39 @@ Tensor normal_batching_rule(const Tensor& tensor, double scalar, ExtraArgs... ex
   return makeBatched(out, 0, cur_level);
 }
 
+std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, c10::optional<bool> train) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  const auto cur_level = maybe_layer->layerId();
+  RandomnessType randomness = maybe_layer->randomness();
+
+  Tensor tensor_value;
+  optional<int64_t> tensor_bdim;
+  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+  tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
+
+  if (!train.has_value() || train) {
+    check_randomness(randomness); // if we are in eval mode, we don't use about randomness
+  }
+
+  if ((train.has_value() && !train) || randomness == RandomnessType::Different) {
+    if (!tensor_bdim) {
+      tensor_value = tensor_value.unsqueeze(0).expand(maybe_layer->batchSize()); // ret value will be a batched tensor
+    }
+    auto res = at::native_dropout(tensor_value, p, train);
+    return std::make_tuple(makeBatched(std::get<0>(res), 0, cur_level), makeBatched(std::get<1>(res), 0, cur_level));
+  }
+
+  // repeated code from the CPU kernel since the CUDA one doesn't call bernoulli_ explicitly
+  double p1m = 1. - p;
+  // Check for probability of zero to avoid divide by zero and NaN results
+  double scale = p1m == 0 ? 0. : 1. / p1m;
+  Tensor mask = at::empty_like(tensor, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  mask.bernoulli_(p1m);
+  const auto output = tensor.mul(mask).mul_(scale);
+  return std::make_tuple(output, mask);
+}
+
 template <typename A, A a, typename C>
 struct RandomBatchRuleHelper;
 
@@ -240,6 +273,17 @@ struct UnaryPointwiseRandomLeadingFloatBatchRule<F, Func, typelist<A0, A1, T...>
   }
 };
 
+TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
+  #define RANDOM_INPLACE_BATCH_RULE2(op, overload) \
+    m.impl(#op"."#overload, SINGLE_ARG(\
+      RandomInplaceBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
+                            c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
+  
+  RANDOM_INPLACE_BATCH_RULE2(bernoulli_, float);
+
+  #undef RANDOM_INPLACE_BATCH_RULE2
+}
+
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #define RANDOM_BATCH_RULE(op) \
     m.impl(#op, SINGLE_ARG(\
@@ -317,6 +361,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   RAND_TWO_LEADING_SCALARS_BATCH_RULE(randint, low_generator);
 
   m.impl("bernoulli_.Tensor", at::functorch::bernoulli_inplace_Tensor_batching_rule);
+  RANDOM_INPLACE_BATCH_RULE2(bernoulli_, float);
 
   RANDPERM_BATCH_RULE(randperm);
   RANDPERM_BATCH_RULE2(randperm, generator);
@@ -324,6 +369,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   RAND_TWO_LEADING_SCALARS_BATCH_RULE(normal, float_float);
   UNARY_POINTWISE_RANDOM(normal, Tensor_float);
   UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
+
+  m.impl("native_dropout", native_dropout_batching_rule); // needs special casing because cuda version doesn't call bernoulli
 
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
