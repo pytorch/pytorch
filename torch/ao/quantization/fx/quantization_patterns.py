@@ -4,7 +4,6 @@ from torch.fx.graph import (
     Node,
     Graph,
 )
-from torch.nn.utils import fuse_conv_bn_weights
 from ..observer import (
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
@@ -617,9 +616,22 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # with conv weight
                     if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
                         fused_conv = float_conv
-                        float_conv = float_conv[0]  # type: ignore[index]
+                        float_conv = fused_conv[0]  # type: ignore[index]
                     assert qconfig is not None
                     weight_post_process = qconfig.weight()
+
+                # return early when we don't have a valid match
+                # this typically happens when we called the same conv multiple times in the
+                # same graph, and it is transformed in previous steps into a reference conv already
+                if type(float_conv) not in [torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d]:
+                    op_out = create_node_from_old_node_preserve_meta(
+                        quantized_graph,
+                        ('call_module', self.conv_node.target, args, {}),
+                        self.conv_node)
+                    return op_out
+
+                qconv_cls = get_static_quant_module_class(
+                    type(float_conv), is_reference=True)
                 # run weight observer
                 # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
                 # In the future, we should require the user to calibrate the model after calling prepare
@@ -628,8 +640,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # hardcoded for now, TODO: expose the api to user,
                 # we can have a map from module to reference module
                 # and allow user to register new ones
-                qconv_cls = get_static_quant_module_class(
-                    type(float_conv), is_reference=True)
                 ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
                 # if the parent is a fused conv (Sequential), we can replace the first
                 # item to ref conv, otherwise we can update
