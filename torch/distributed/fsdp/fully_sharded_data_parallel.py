@@ -1615,12 +1615,12 @@ class FullyShardedDataParallel(nn.Module):
                 prev_iter_outside_no_sync: bool = \
                     p.grad.size() == p._local_shard.shape  # type: ignore[attr-defined]
                 # As long as the previous iteration was outside `no_sync()`,
-                # then we must save the gradient in `_saved_grad_shard` (even
-                # if the current iteration is inside `no_sync()`). This is to
-                # prepare for any future iteration outside `no_sync()`, which
-                # may try to accumulate gradients. FSDP accumulates gradients
-                # in `_saved_grad_shard`, leaving `p.grad` to be used for the
-                # per-iteration gradient.
+                # then we must save the gradient in `_saved_grad_shard`, even
+                # if the current iteration is inside `no_sync()`. This is to
+                # prepare for the next iteration outside `no_sync()`, which may
+                # try to accumulate gradients. FSDP accumulates gradients in
+                # the separate variable `p._saved_grad_shard` to leave `p.grad`
+                # for the per-iteration gradient.
                 if prev_iter_outside_no_sync:
                     # FSDP currently does not support gradient accumulation
                     # outside `no_sync()` when using CPU offloading. Trying to
