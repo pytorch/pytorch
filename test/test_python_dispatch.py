@@ -376,7 +376,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if func.__name__ == "clone":
+                if func.overload_packet.__name__ == "clone":
                     # Return a plain tensor from clone().
                     return args[0].elem.clone()
                 raise RuntimeError("NYI")
