@@ -151,12 +151,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
-  auto* attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__").ptr();
+  py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
   return (
     !THPVariable_CheckTypeExact(tp) &&
     // TODO: test if Python key is disabled
-    attr != nullptr &&
-    attr != torch::disabled_torch_dispatch_impl()
+    attr.ptr() != nullptr &&
+    attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -419,8 +419,8 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // TODO: This check is not complete; because the user can disable torch
   // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
   // to delete this function entirely
-  auto* attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr();
-  TORCH_CHECK_TYPE(attr != nullptr && attr != torch::disabled_torch_dispatch_impl()
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_dispatch_impl()
 ,
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
