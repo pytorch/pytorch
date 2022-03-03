@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.logging_tensor import no_dispatch
+from torch.utils._pytree import tree_map
 
 import pickle
 
@@ -7958,6 +7959,48 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
             self.assertEqual(counter[0], 2)
+
+    def test_make_dual_does_not_lose_autograd_information(self):
+        class WrapperTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, e):
+                r = torch.Tensor._make_wrapper_subclass(cls, e.shape, dtype=e.dtype, requires_grad=False)
+                r.elem = e
+                return r
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            def __str__(self):
+                return f'WrapperTensor({self.elem})'
+
+            def __repr__(self):
+                return str(self)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore
+                def unwrap(e):
+                    if isinstance(e, WrapperTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(e):
+                    if isinstance(e, torch.Tensor):
+                        return WrapperTensor(e)
+                    else:
+                        return e
+
+                return tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+
+        primal = torch.tensor(1)
+
+        with fwAD.dual_level():
+            t1 = torch.tensor(2)
+            t2 = torch.tensor(3)
+            x = fwAD.make_dual(primal, t1)
+            y = fwAD.make_dual(WrapperTensor(x), t2)
+            self.assertTrue(fwAD.unpack_dual(y).tangent is t2)
+            self.assertTrue(fwAD.unpack_dual(y.elem).tangent is t1)
 
     def test_print(self):
         with fwAD.dual_level() as level:
