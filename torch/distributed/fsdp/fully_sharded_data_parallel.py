@@ -782,6 +782,7 @@ class FullyShardedDataParallel(nn.Module):
         try:
             yield
         finally:
+            assert prev_state_dict_type is not None  #  for the typing purpose
             for module in FullyShardedDataParallel.fsdp_modules(module):
                 module._state_dict_type = prev_state_dict_type
 
