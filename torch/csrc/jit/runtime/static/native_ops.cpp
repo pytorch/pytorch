@@ -39,7 +39,7 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name) {
   return SRNativeOperatorRegistry()->Has(name);
 }
 
-std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
+SROperator getNativeOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SRNativeOperatorRegistry()->Has(op_name)) {
     return SRNativeOperatorRegistry()->Create(op_name)->Generate(n);
@@ -943,6 +943,18 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         toList(stack);
         DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
+      };
+    });
+
+// See [Borrowed IValue Outputs]
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::IfThenElse,
+    prim_IfThenElse,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto condition = pnode->Input(0).toBool();
+        pnode->Output(0) = condition ? createBorrowedIValue(pnode->Input(1))
+                                     : createBorrowedIValue(pnode->Input(2));
       };
     });
 
