@@ -3,7 +3,7 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Tuple, Union, Optional
 
 try:
     import dill
@@ -78,7 +78,7 @@ def get_file_pathnames_from_root(
                 dirs.sort()
 
 
-def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: Optional[str] = None):
     if not isinstance(pathnames, Iterable):
         pathnames = [pathnames, ]
 
@@ -89,7 +89,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield pathname, StreamWrapper(open(pathname, mode))
+        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):

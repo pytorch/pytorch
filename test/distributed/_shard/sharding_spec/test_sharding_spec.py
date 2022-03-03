@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import torch
 from torch.testing._internal.common_utils import TestCase
 from torch.distributed._shard.sharding_spec import (
@@ -7,6 +8,7 @@ from torch.distributed._shard.sharding_spec import (
     DevicePlacementSpec,
     EnumerableShardingSpec,
     ShardMetadata,
+    _infer_sharding_spec_from_shards_metadata,
 )
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
@@ -18,6 +20,9 @@ from torch.distributed._shard.sharding_spec._internals import (
 from torch.testing._internal.common_utils import (
     run_tests,
     sandcastle_skip_if,
+)
+from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
+    _chunk_sharding_specs_list_for_test,
 )
 
 class TestShardingSpec(TestCase):
@@ -275,6 +280,80 @@ class TestShardingSpec(TestCase):
         result = get_chunk_sharding_params(21, 4, spec, 3)
         self.assertEqual(0, result[0])
         self.assertEqual(6, result[1])
+
+    def _infer_enum_sharding_spec_case(self):
+        shards_metadata = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[5, 5],
+                placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_sizes=[10, 5],
+                placement="cuda:1",
+            )
+        ]
+        spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
+        self.assertTrue(isinstance(spec, EnumerableShardingSpec))
+        self.assertEqual(spec.shards, shards_metadata)
+
+        shards_metadata = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[5, 5],
+                placement="rank:0/cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_sizes=[5, 5],
+                placement="rank:1/cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_sizes=[5, 5],
+                placement="rank:2/cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_sizes=[5, 5],
+                placement="rank:3/cuda:3",
+            ),
+        ]
+        spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
+        self.assertTrue(isinstance(spec, EnumerableShardingSpec))
+        self.assertEqual(spec.shards, shards_metadata)
+
+    def _infer_chunk_sharding_spec_case(self, placements, sharding_dim, st_size):
+        world_size = len(placements)
+        split_size = get_split_size(st_size[sharding_dim], world_size)
+        shards_metadata = [None] * world_size
+        for idx, placement in enumerate(placements):
+            shard_size = copy.deepcopy(st_size)
+            offsets = [0] * len(st_size)
+            offsets[sharding_dim] = split_size * idx
+            shard_size[sharding_dim] = get_chunked_dim_size(st_size[sharding_dim], split_size, idx)
+            shards_metadata[placement.rank()] = ShardMetadata(
+                shard_offsets=offsets,
+                shard_sizes=shard_size,
+                placement=placement,
+            )
+
+        spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
+        self.assertTrue(isinstance(spec, ChunkShardingSpec))
+        self.assertEqual(spec.dim, sharding_dim)
+        self.assertEqual(spec.placements, placements)
+
+    def test_infer_sharding_spec_from_shards_metadata(self):
+        self._infer_enum_sharding_spec_case()
+        chunk_specs = _chunk_sharding_specs_list_for_test([0, 0, 1, 1], seed=31)
+        for spec in chunk_specs:
+            self._infer_chunk_sharding_spec_case(spec.placements, 0, [4, 16])
+            self._infer_chunk_sharding_spec_case(spec.placements, 0, [5, 15, 16])
+            self._infer_chunk_sharding_spec_case(spec.placements, 1, [12, 16])
+            self._infer_chunk_sharding_spec_case(spec.placements, 2, [4, 18, 15])
+            self._infer_chunk_sharding_spec_case(spec.placements, 3, [7, 12, 16, 37])
+            self._infer_chunk_sharding_spec_case(spec.placements, 4, [50, 4, 18, 15, 77])
 
 if __name__ == '__main__':
     run_tests()

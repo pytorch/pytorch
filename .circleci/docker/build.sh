@@ -40,6 +40,12 @@ function extract_all_from_image_name() {
   done
 }
 
+# Use the same pre-built XLA test image from PyTorch/XLA
+if [[ "$image" == *xla* ]]; then
+  echo "Using pre-built XLA test image..."
+  exit 0
+fi
+
 if [[ "$image" == *-xenial* ]]; then
   UBUNTU_VERSION=16.04
 elif [[ "$image" == *-artful* ]]; then

@@ -55,6 +55,11 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+{%- if enable_xla_test == 1 %}
+  # This is used for XLA tests only
+  XLA_CUDA: 0
+  XLA_IMAGE_TAG: v0.2
+{%- endif %}
 {%- if build_with_debug %}
   DEBUG: 1
 {%- endif %}
@@ -74,7 +79,19 @@ jobs:
         run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout() }}
+    {%- if enable_xla_test == 1 %}
+      - name: Calculate docker image tag
+        id: calculate-tag
+        run: |
+          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
+          DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+          echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_ENV}"
+          echo "::set-output name=docker_tag::${DOCKER_TAG}"
+          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+    {%- else %}
       !{{ common.calculate_docker_image(false) }}
+    {%- endif %}
       - name: Pull Docker image
         run: |
           !{{ common.add_retry_to_env() }}
@@ -96,6 +113,9 @@ jobs:
             -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
+          {%- if enable_xla_test == 1 %}
+            -e XLA_CUDA \
+          {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -307,6 +327,9 @@ jobs:
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+          {%- if enable_xla_test == 1 %}
+            -e XLA_CUDA \
+          {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
 {%- if 'rocm' not in test_runner_type %}
             ${PROXY_ENV} \

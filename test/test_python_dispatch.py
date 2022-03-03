@@ -11,7 +11,7 @@ import logging
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
-            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
             y = x * x
             saved_x = y.grad_fn._saved_self
@@ -29,11 +29,11 @@ class TestPythonDispatch(TestCase):
             # self.assertEqual(saved_x._version, x._version)
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten.mul($0, $0)
+$1 = torch._ops.aten.mul.Tensor($0, $0)
 $2 = input('grad_y')
-$3 = torch._ops.aten.mul($2, $0)
-$4 = torch._ops.aten.mul($2, $0)
-$5 = torch._ops.aten.add($4, $3)''')
+$3 = torch._ops.aten.mul.Tensor($2, $0)
+$4 = torch._ops.aten.mul.Tensor($2, $0)
+$5 = torch._ops.aten.add.Tensor($4, $3)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -49,7 +49,7 @@ $5 = torch._ops.aten.add($4, $3)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.abs($0, out=$1)''')
+$2 = torch._ops.aten.abs.out($0, out=$1)''')
 
 
     def test_kwarg_only(self) -> None:
@@ -72,11 +72,11 @@ $2 = torch._ops.aten.abs($0, out=$1)''')
 $0 = input('x')
 $1 = input('y')
 $2 = input('z')
-$3 = torch._ops.aten.addmv($0, $1, $2)
-$4 = torch._ops.aten.addmv($0, $1, $2)
-$5 = torch._ops.aten.addmv($0, $1, $2, beta=2)
-$6 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
-$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+$3 = torch._ops.aten.addmv.default($0, $1, $2)
+$4 = torch._ops.aten.addmv.default($0, $1, $2)
+$5 = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
+$6 = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
+$7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
@@ -94,10 +94,10 @@ $7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.kl_div($0, $1)
-$3 = torch._ops.aten.kl_div($0, $1, 2)
-$4 = torch._ops.aten.kl_div($0, $1, log_target=True)
-$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
+$2 = torch._ops.aten.kl_div.default($0, $1)
+$3 = torch._ops.aten.kl_div.default($0, $1, 2)
+$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
@@ -141,7 +141,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
     def test_detach_appears_twice_when_called_once(self) -> None:
         with capture_logs() as logs:
-            x = LoggingTensor(torch.tensor([3.0], requires_grad=True))
+            x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
             x.detach()
         # FIXME: We actually want this to emit a single detach. However,
@@ -150,8 +150,8 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         # would be bad if calling .detach() once emits 3+ detaches).
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten.detach($0)
-$2 = torch._ops.aten.detach($1)''')
+$1 = torch._ops.aten.detach.default($0)
+$2 = torch._ops.aten.detach.default($1)''')
 
     def test_metadata_change_not_allowed(self) -> None:
         x = LoggingTensor(torch.ones(1))
@@ -240,7 +240,7 @@ $2 = torch._ops.aten.detach($1)''')
                 return grad_output * 2 * x
 
         with capture_logs() as logs:
-            x = LoggingTensor(torch.ones(1, requires_grad=True))
+            x = LoggingTensor(torch.ones(1), requires_grad=True)
             log_input("x", x)
             x.grad = LoggingTensor(torch.zeros(1))
             log_input("x.grad", x.grad)
@@ -262,11 +262,11 @@ $2 = torch._ops.aten.detach($1)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('x.grad')
-$2 = torch._ops.aten.pow($0, 2)
+$2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
-$4 = torch._ops.aten.mul($3, tensor(2))
-$5 = torch._ops.aten.mul($4, $0)
-$6 = torch._ops.aten.add_($1, $5)''')
+$4 = torch._ops.aten.mul.Tensor($3, tensor(2))
+$5 = torch._ops.aten.mul.Tensor($4, $0)
+$6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_subclass_creation(self):
         # Make sure these statements runs without error
@@ -365,7 +365,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
         idxs = (MyTensor(torch.tensor(0)),)
         v = torch.randn(1)
         res = x.index_put_(idxs, v)
-        self.assertEqual(called_funcs, [torch.ops.aten.index_put_])
+        self.assertEqual(called_funcs, [torch.ops.aten.index_put_.default])
 
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
@@ -515,7 +515,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 # It prevents infinite recursion.
                 with no_dispatch():
                     rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-                if func.__name__ == "add":
+                if func.overload_packet.__name__ == "add":
                     return None
                 else:
                     return rs
@@ -540,6 +540,27 @@ $6 = torch._ops.aten.add_($1, $5)''')
             s = torch.Storage()
             z = LoggingTensor(torch.empty([]))
             z.set_(s)
+
+    def test_autograd_in_attr(self):
+        # We want the wrapped Tensor to require gradients!
+        true_t = torch.rand(2, requires_grad=True)
+        t = LoggingTensor(true_t)
+
+        out = t + 2
+
+        self.assertFalse(out.requires_grad)
+        self.assertIsNone(out.grad_fn)
+
+        self.assertTrue(out.elem.requires_grad)
+        self.assertIsNotNone(out.elem.grad_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "does not require grad"):
+            out.sum().backward()
+
+        out.elem.sum().backward()
+
+        self.assertIsNone(t.grad)
+        self.assertIsNotNone(t.elem.grad)
 
 
 if __name__ == '__main__':

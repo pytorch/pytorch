@@ -201,6 +201,9 @@ struct TORCH_API BytecodeEmitMode {
 
   static bool is_default_args_before_out_args_enabled();
   static void set_default_args_before_out_args_enabled(bool enabled);
+
+  static bool is_emit_promoted_ops_enabled();
+  static void set_default_emit_promoted_ops_enabled(bool enabled);
 };
 
 // RAII guard to switch the way JIT emits the bytecode for inputs.
@@ -216,24 +219,32 @@ struct TORCH_API BytecodeEmitMode {
 struct TORCH_API BytecodeEmitModeGuard {
   BytecodeEmitModeGuard(
       bool enable_default_value_for_unspecified_arg,
-      bool enable_default_args_before_out_args)
+      bool enable_default_args_before_out_args,
+      bool enable_emit_promoted_ops)
       : prev_default_value_for_unspecified_arg_mode(
             BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()),
         prev_default_args_before_out_args(
-            BytecodeEmitMode::is_default_args_before_out_args_enabled()) {
+            BytecodeEmitMode::is_default_args_before_out_args_enabled()),
+        prev_default_emit_promoted_ops(
+            BytecodeEmitMode::is_emit_promoted_ops_enabled()) {
     BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
         enable_default_value_for_unspecified_arg);
     BytecodeEmitMode::set_default_args_before_out_args_enabled(
         enable_default_args_before_out_args);
+    BytecodeEmitMode::set_default_emit_promoted_ops_enabled(
+        enable_emit_promoted_ops);
   }
   ~BytecodeEmitModeGuard() {
     BytecodeEmitMode::set_default_value_for_unspecified_arg_enabled(
         prev_default_value_for_unspecified_arg_mode);
     BytecodeEmitMode::set_default_args_before_out_args_enabled(
         prev_default_args_before_out_args);
+    BytecodeEmitMode::set_default_emit_promoted_ops_enabled(
+        prev_default_emit_promoted_ops);
   }
   bool prev_default_value_for_unspecified_arg_mode;
   bool prev_default_args_before_out_args;
+  bool prev_default_emit_promoted_ops;
 };
 
 TORCH_API IValue to_tuple(std::vector<IValue> ivalues);

@@ -361,7 +361,7 @@ jobs:
           docker cp "${container_name}:/var/lib/jenkins/workspace/dist" "${GITHUB_WORKSPACE}/." || echo "Dist folder not found"
           docker commit "${container_name}" "${COMMIT_DOCKER_IMAGE}"
           time docker push "${COMMIT_DOCKER_IMAGE}"
-      - name: Build-Final-Artifcact
+      - name: Build final artifact
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |

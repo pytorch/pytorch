@@ -442,6 +442,21 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
         padding(),
         output_padding(),
         dilation());
+
+    // if use direct convolution implementation, compute the col_offsets
+    // of the weight matrix at model initialization stage.
+    // We need to know the shape of output matrix
+    // to compute col_offsets for direct convolution.
+    // Hence it cannot be called from inside weight packing function
+    // like other quantized conv implementation
+    if (pack_w->getPackedWForDirectconv().get() &&
+        pack_w->getPackedWForDirectconv().get()->is_first_call()) {
+          pack_w->getPackedWForDirectconv().get()->col_offsets_with_zero_pt_s8acc32_DirectConvT(
+              conv_p,
+              w_zp.data(),
+              col_offsets,
+              M);
+    }
   } else {
     output_shape = MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
   }

@@ -152,11 +152,11 @@ class AliasDb {
    * this.
    */
   // Copy `existing`s aliasing info to `new_value`, and remove `existing`.
-  void replaceWithNewValue(Value* existing, Value* new_value);
+  TORCH_API void replaceWithNewValue(Value* existing, Value* new_value);
   // Copy `from`s aliasing info to `to`.
-  void copyValue(Value* from, Value* to);
+  TORCH_API void copyValue(Value* from, Value* to);
   // Create a new `value` that does not alias anything else.
-  void createValue(const Value* value);
+  TORCH_API void createValue(const Value* value);
 
   // Enable more precise treatment of prim::TupleConstruct.
   void enablePreciseTupleContainerAnalysis();

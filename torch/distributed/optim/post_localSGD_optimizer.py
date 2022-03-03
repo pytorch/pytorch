@@ -26,8 +26,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  )
         >>>
         >>>  # Register a post-localSGD communication hook.
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>>  # Create a post-localSGD optimizer that wraps a local optimizer.

@@ -32,13 +32,14 @@ class OpOverload:
         self._op = op
         self._schema = schema
         self._overloadpacket = overloadpacket
+        self.__name__ = 'default' if schema.overload_name is '' else schema.overload_name
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
     def __str__(self):
-        return "OpOverload(op='{}.{}', overload='{}')".format(*self._schema.name.split("::"), self.overload_name)
+        return "OpOverload(op='{}.{}', overload='{}')".format(*self._schema.name.split("::"), self.__name__)
 
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
@@ -46,20 +47,13 @@ class OpOverload:
     def __getattr__(self, key):
         return getattr(self._op, key)
 
-    def __eq__(self, other):
-        if self._op == other._op:
-            return True
-        else:
-            return False
+    def __hash__(self):
+      return hash(self._op)
 
-    # `my_namespace::my_op`
+    # `my_namespace.my_op_name.overload_name`
     @property
     def name(self):
-        return "{}.{}".format(*self._schema.name.split("::"))
-
-    @property
-    def overload_name(self):
-        return self._schema.overload_name
+        return "{}.{}.{}".format(*self._schema.name.split("::"), self.__name__)
 
     @property
     def overload_packet(self):
@@ -81,18 +75,15 @@ class OpOverloadPacket:
         self._op_name = op_name
         self._op = op
 
-    def __eq__(self, other):
-        if self._op == other._op:
-            return True
-        else:
-            return False
-
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
         return self
 
     def __str__(self):
         return "OpOverloadPacket(op='{}.{}')".format(*self._qualified_op_name.split("::"))
+
+    def __hash__(self):
+      return hash(self._op)
 
     @property
     def qualified_op_name(self):

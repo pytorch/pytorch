@@ -1566,10 +1566,12 @@ def _tensor_to_object(tensor, tensor_size):
 
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
-    # It is not expected for PG to be wrapped many times, but support it just
-    # in case
-    while isinstance(pg, _ProcessGroupWrapper):
-        pg = pg.wrapped_pg
+    # Gate PG wrapper check on Gloo availability.
+    if _GLOO_AVAILABLE:
+        # It is not expected for PG to be wrapped many times, but support it just
+        # in case
+        while isinstance(pg, _ProcessGroupWrapper):
+            pg = pg.wrapped_pg
 
     return (
         is_nccl_available() and
@@ -3229,6 +3231,6 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logging.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups

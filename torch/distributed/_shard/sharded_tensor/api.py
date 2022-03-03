@@ -5,6 +5,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Sequence,
     Union
 )
 import weakref
@@ -20,6 +21,7 @@ from torch.distributed._shard.sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
     ShardingSpec,
+    _infer_sharding_spec_from_shards_metadata,
 )
 from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
@@ -357,14 +359,138 @@ class ShardedTensor(object):
         # add to metadata and local_shards
         sharded_tensor._metadata = global_sharded_tensor_metadata
         sharded_tensor._local_shards = local_shards
-        # make a EnumerableShardingSpec for sharded tensors that initialized from this API.
-        # TODO: make sharding spec a ChunkShardingSpec by inferring from the metadata list.
-        #       see issue https://github.com/pytorch/pytorch/issues/67244
-        sharded_tensor._sharding_spec = EnumerableShardingSpec(global_sharded_tensor_metadata.shards_metadata)
+        sharded_tensor._sharding_spec = _infer_sharding_spec_from_shards_metadata(
+            global_sharded_tensor_metadata.shards_metadata
+        )
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
         return sharded_tensor
+
+    @classmethod
+    def _init_from_local_tensor(
+        cls,
+        local_tensor: torch.Tensor,
+        sharding_spec: ShardingSpec,
+        *global_size: Sequence[int],
+        process_group: dist.ProcessGroup = None,
+        init_rrefs=False,
+    ) -> "ShardedTensor":
+        """
+        Initialize a ShardedTensor given only one local tensor, global sharded tensor
+        size and sharding spec on each rank.
+
+        Args:
+            local_tensor (Tensor): Single tensor of local shard stored in each rank.
+            sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`):
+                The specification describing how to shard the Tensor.
+            global_size (Sequence[int]): Size of the sharded tensor.
+            process_group (ProcessGroup, optional): The process group to aggregate on.
+                Default: None
+            init_rrefs (bool, optional): Whether or not to initialize
+                :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+                Need to initialize the RPC Framework if specified as ``True``.
+                Default: ``False``.
+
+        Returns:
+            A :class:`ShardedTensor` sharded based on the given sharding_spec with local
+                tensor stored in the current rank.
+
+        Examples:
+            >>> # All tensors below are of torch.int64 type.
+            >>> # We have 2 process groups, 2 ranks.
+            >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
+            >>> local_tensor = torch.unsqueeze(torch.cat([tensor, tensor + 2]))
+            >>> local_tensor
+            tensor([[1, 2, 3, 4]]) # Rank 0
+            tensor([[3, 4, 5, 6]]) # Rank 1
+            >>> sharding_dim = 0
+            >>> sharding_spec = ChunkShardingSpec(
+                    dim=sharding_dim,
+                    placements=[
+                        "rank:0/cuda:0",
+                        "rank:1/cuda:1",
+                    ],
+                )
+            >>> st = ShardedTensor._init_from_local_tensor(local_tensor, sharding_spec, [2, 4])
+            >>> st
+            ShardedTensor(
+                ShardedTensorMetadata(
+                    shards_metadata=[
+                        ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1, 4], placement=rank:0/cuda:0),
+                        ShardMetadata(shard_offsets=[1, 0], shard_sizes=[1, 4], placement=rank:1/cuda:1),
+                    ],
+                    size=torch.Size([2, 4])
+            )
+            >>> st.local_tensor()
+            tensor([1, 2, 3, 4]) # Rank 0
+            tensor([3, 4, 5, 6]) # Rank 1
+
+        Warning: This API is experimental and subject to change. It lacks of a fully across
+                 rank validations, and we only validate the local shard on the current rank.
+                 We fully rely on the user to ensure local tensor is sharded based on the
+                 sharding spec.
+        """
+        if not isinstance(sharding_spec, ChunkShardingSpec):
+            raise NotImplementedError('Only ChunkShardingSpec is supported.')
+        if not local_tensor.is_contiguous():
+            raise ValueError('local_tensor is not a contiguous Tensor.')
+
+        process_group = (
+            process_group
+            if process_group is not None
+            else distributed_c10d._get_default_group()
+        )
+        current_rank = dist.get_rank(process_group)
+        world_size = dist.get_world_size(process_group)
+
+        global_tensor_size = _flatten_tensor_size(global_size)
+        sharding_dim = sharding_spec.dim
+        split_size = get_split_size(global_tensor_size[sharding_dim], world_size)  # type: ignore[index]
+        current_offsets = [0] * len(global_tensor_size)
+        gathered_metadatas = [None] * world_size
+        local_shards = []
+
+        for idx, placement in enumerate(sharding_spec.placements):
+            chunked_dim_size = get_chunked_dim_size(
+                global_tensor_size[sharding_dim], split_size, idx  # type: ignore[index]
+            )
+            shard_size = copy.deepcopy(global_tensor_size)
+            shard_size[sharding_spec.dim] = chunked_dim_size  # type: ignore[index]
+            shard_metadata = ShardMetadata(
+                shard_offsets=copy.deepcopy(current_offsets),
+                shard_sizes=shard_size,
+                placement=placement,
+            )
+            if current_rank == placement.rank():  # type: ignore[union-attr]
+                local_shard = local_tensor
+            else:
+                local_shard = torch.empty(
+                    shard_size,
+                    device=placement.device(),  # type: ignore[union-attr]
+                    requires_grad=local_tensor.requires_grad,
+                )
+            shards = [
+                Shard(
+                    tensor=local_shard,
+                    metadata=shard_metadata,  # type: ignore[arg-type]
+                )
+            ]
+            if current_rank == placement.rank():  # type: ignore[union-attr]
+                local_shards = shards
+            gathered_metadatas[placement.rank()] = build_metadata_from_local_shards(  # type: ignore[call-overload, union-attr]
+                shards, global_tensor_size, placement.rank(), process_group  # type: ignore[union-attr, arg-type]
+            )
+            current_offsets[sharding_spec.dim] += chunked_dim_size  # type: ignore[index]
+
+        global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
+
+        return ShardedTensor._init_from_local_shards_and_global_metadata(
+            local_shards,
+            global_sharded_tensor_metadata,
+            process_group=process_group,
+            init_rrefs=init_rrefs,
+        )
 
     @classmethod
     def _init_from_local_shards_and_global_metadata(
@@ -455,10 +581,7 @@ class ShardedTensor(object):
 
         # done validation, add local_shards
         sharded_tensor._local_shards = local_shards
-        # make a EnumerableShardingSpec for sharded tensors that initialized from this API.
-        # TODO: make sharding spec a ChunkShardingSpec by inferring from the metadata list.
-        #       see issue https://github.com/pytorch/pytorch/issues/67244
-        sharded_tensor._sharding_spec = EnumerableShardingSpec(shards_metadata)
+        sharded_tensor._sharding_spec = _infer_sharding_spec_from_shards_metadata(shards_metadata)
 
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
@@ -953,23 +1076,9 @@ class _PartialTensor(object):
         )
 
         sharded_tensor_size = self.local_shard.size()
-        current_offsets = [0] * len(local_result.size())
-        shards = []
-        rank = self.process_group.rank()
-        for idx, placement in enumerate(resharding_spec.placements):  # type: ignore[attr-defined]
-            if rank == placement.rank():  # type: ignore[union-attr]
-                local_metadata = ShardMetadata(
-                    shard_offsets=current_offsets,
-                    shard_sizes=list(local_result.size()),
-                    placement=placement,
-                )
-                shards.append(Shard(local_result, local_metadata))
-                break
-            current_offsets[sharding_dim] += local_result.size(sharding_dim)  # type: ignore[index]
-
-        st = ShardedTensor._init_from_local_shards(
-            shards, tuple(sharded_tensor_size), process_group=self.process_group
+        return ShardedTensor._init_from_local_tensor(
+            local_result,
+            resharding_spec,
+            sharded_tensor_size,
+            process_group=self.process_group,
         )
-        st._sharding_spec = copy.deepcopy(resharding_spec)
-
-        return st
