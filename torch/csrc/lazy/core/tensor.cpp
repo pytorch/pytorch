@@ -16,6 +16,11 @@
 #include "c10/util/Exception.h"
 #include "lazy/core/ir.h"
 
+namespace c10 {
+
+  SymbolicIntImpl* SymbolicOrConcreteInt::impl_ = nullptr;
+}
+
 namespace torch {
 namespace lazy {
 
@@ -55,7 +60,7 @@ std::shared_ptr<torch::lazy::Node> LazySymbolicIntImpl::getNode(int64_t index) {
 
 int64_t LazySymbolicIntImpl::getSizeNode(torch::lazy::Value v, size_t dim) {
   auto size_node = MakeNode<torch::lazy::SizeNode>(v, dim);
-  return -dim_map.putNode(size_node) + 1;
+  return -(dim_map.putNode(size_node) + 1);
 }
 
 int64_t LazySymbolicIntImpl::add(int64_t s1, int64_t s2) {
@@ -65,7 +70,7 @@ int64_t LazySymbolicIntImpl::add(int64_t s1, int64_t s2) {
   return -(dim_map.putNode(add) + 1);
 }
 
-int64_t LazySymbolicIntImpl::equal(int64_t s1, int64_t s2) {
+bool LazySymbolicIntImpl::equal(int64_t s1, int64_t s2) {
   if (s1 == s2) {
     return true;
   }

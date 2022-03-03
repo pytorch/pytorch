@@ -779,6 +779,8 @@ def argument_type_str_pyi(t: Type) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.int:
             ret = '_int'
+        if t.name == BaseTy.BoxedInt:
+            ret = 'BoxedInt'
         elif t.name == BaseTy.float:
             ret = '_float'
         elif t.name == BaseTy.str:
