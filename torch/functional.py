@@ -586,7 +586,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modeled after the librosa_ stft function.
+    time. The interface of this function is modeled after (but *not* a drop-in
+    replacement for) librosa_ stft function.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 

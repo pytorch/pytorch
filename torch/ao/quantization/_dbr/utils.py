@@ -583,10 +583,9 @@ def get_torch_function_hook_type(
     # the direct __dict__ accesses are for performance, because
     # the default `torch.nn.Module.__getattr__` has overhead.
     parent_module_has_qstate = parent_module is not None and \
-        '_modules' in parent_module.__dict__ and \
-        '_auto_quant_state' in parent_module.__dict__['_modules']
+        '_auto_quant_state' in parent_module.__dict__
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_auto_quant_state'].cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
@@ -608,17 +607,15 @@ def get_module_hook_type(
     if cached_hook_type is not None:
         return cached_hook_type
     parent_module_has_qstate = parent_module is not None and \
-        '_modules' in parent_module.__dict__ and \
-        '_auto_quant_state' in parent_module.__dict__['_modules']
+        '_auto_quant_state' in parent_module.__dict__
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_auto_quant_state'].cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
     # We need IO hooks if
     # * we are calling forward on a module (always True here)
     # * that module has quant state
     # * that module does not need op hooks for the parent
     needs_io_hooks = (
-        '_modules' in cur_module.__dict__ and
-        '_auto_quant_state' in cur_module.__dict__['_modules'] and
+        '_auto_quant_state' in cur_module.__dict__ and
         (not needs_op_hooks)
     )
     needs_arg_dequants = parent_module_has_qstate and not needs_op_hooks
@@ -727,3 +724,18 @@ def get_cur_qconfig(
         qconfig_dict, cur_op_type, cur_fqn, global_qconfig)
 
     return qconfig
+
+
+# We store quantization state for all children on the top level module in a
+# ModuleDict. In order to properly special case this module from other
+# ModuleDict instances, we create a marker class for it.
+class AutoQuantizationStateModuleDict(torch.nn.ModuleDict):
+    pass
+
+def get_fqn_valid_for_module_dict_key(fqn: str) -> str:
+    """
+    Modifies `fqn` to make it a valid key to a ModuleDict.
+    """
+    if fqn == '':
+        fqn = ' '
+    return fqn.replace('.', ':')

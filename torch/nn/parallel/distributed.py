@@ -834,7 +834,7 @@ class DistributedDataParallel(Module, Joinable):
         }
 
     def _build_debug_param_to_name_mapping(self, parameters):
-        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+        if dist.get_debug_level() == dist.DebugLevel.OFF:
             return {}
 
         param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
@@ -1104,14 +1104,6 @@ class DistributedDataParallel(Module, Joinable):
     def train(self, mode=True):
         super(DistributedDataParallel, self).train(mode)
         return self
-
-    # When running in join mode, schedules an allreduce to match the one in the
-    # forward pass to determine the no. of currently active processes and whether
-    # all processes have joined.
-    def _schedule_shadow_all_reduce_for_fwd_pass(self):
-        all_active_procs = torch.zeros(1, device=self.device)
-        dist.all_reduce(all_active_procs, group=self.process_group)
-        return all_active_procs.item()
 
     # When running in join mode, schedules an allreduce to notify joined ranks
     # of whether backwards pass synchronization will run this iteraton or not.
