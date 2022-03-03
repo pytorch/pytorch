@@ -113,7 +113,7 @@ Tensor _nested_tensor(
   TensorOptions options = flat_tensors[0].options().merge_in(options_);
 
   return wrap_buffer(
-      at::native::cat(flat_tensors).to(options), at::native::stack(sizes));
+      at::cat(flat_tensors).to(options), at::native::stack(sizes));
 }
 } // namespace native
 } // namespace at
