@@ -5,6 +5,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 from torch.nn import init
 from torch.nn.parameter import Parameter
+from torch.nn.utils.fusion import fuse_linear_bn_weights
 
 
 class LinearReLU(nnqat.Linear, nni._FusedModule):
@@ -199,8 +200,13 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         return qat_linearbn
 
     def to_float(self):
-        linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)
-        linear.weight = torch.nn.Parameter(self.weight.detach())
-        if self.bias is not None:
-            linear.bias = torch.nn.Parameter(self.bias.detach())
-        return torch.nn.intrinsic.LinearBn1d(linear, self.bn)
+        linear = torch.nn.Linear(self.in_features, self.out_features)
+        linear.weight, linear.bias = fuse_linear_bn_weights(
+            self.weight,
+            self.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.eps,
+            self.bn.weight,
+            self.bn.bias)
+        return linear
