@@ -1375,11 +1375,19 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
     // Much faster than at::unique_dim
     const auto unique_with_counts = [](
-        const Tensor& t, int64_t len
+        const Tensor& t, int64_t len, bool is_sorted = false
     ) -> std::tuple<Tensor, Tensor, Tensor, int64_t> {
-      Tensor t_unique, t_idx;
       // t_unique will be modified to hold unique values in-place
-      std::tie(t_unique, t_idx) = at::sort(t);
+      Tensor t_unique, t_idx;
+      if (!is_sorted) {
+        std::tie(t_unique, t_idx) = at::sort(t);
+      }
+      else {
+        // faster than t_unique = t.clone()
+        t_unique = at::empty_like(t);
+        t_unique.copy_(t);
+        t_idx = at::arange(0, t.numel(), t.options());
+      }
 
       auto t_counts = at::ones_like(t_unique);
       int64_t len_unique;
@@ -1393,7 +1401,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           if (*curr != *first) {
             ++counts;
             if (++curr != first) {
-              // std::swap(*curr, *first);
               *curr = *first;
             }
           }
@@ -1410,7 +1417,12 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     Tensor dim_sort_indices, dim_indices_unique, dim_indices_counts;
     int64_t n_unique_dim_indices;
     std::tie(dim_sort_indices, dim_indices_unique, dim_indices_counts, n_unique_dim_indices)
-      = unique_with_counts(indices[dim].contiguous(), nnz);
+      = unique_with_counts(
+          indices[dim], nnz,
+          // if self is coalesced and dim == 0,
+          // indices[dim] is already sorted
+          /*is_sorted=*/self.is_coalesced() && dim == 0
+        );
 
     Tensor sel_sort_indices, sel_indices_unique, sel_indices_counts;
     int64_t n_unique_sel_indices;
