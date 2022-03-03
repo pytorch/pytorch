@@ -82,6 +82,7 @@ def inline_fusion_groups():
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
         # note: `self.dynamic_shapes` instatiated in specialization of class
@@ -109,6 +110,7 @@ class TestTEFuser(JitTestCase):
     def tearDown(self):
         self.tensorexpr_options.restore()
         torch._C._jit_set_fusion_strategy(self.old_fusion_strategy)
+        super().tearDown()
 
     def assertAllFused(self, graph, except_for=None):
         except_for = except_for if except_for is not None else set()
@@ -2475,10 +2477,12 @@ def get_name(op):
 
 class TestNNCOpInfo(JitCommonTestCase):
     def setUp(self):
+        super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
     def tearDown(self):
         self.tensorexpr_options.restore()
+        super().tearDown()
 
     def te_compile(self, device, dtype, op):
         if op.name in skip_ops:
@@ -2581,6 +2585,7 @@ instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
 class TestLoopnestRandomization(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -2620,6 +2625,7 @@ class TestLoopnestRandomization(JitTestCase):
 
         # Set it back to 0.
         os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
+        super().tearDown()
 
     @onlyCPU
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
