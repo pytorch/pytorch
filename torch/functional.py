@@ -103,11 +103,41 @@ def broadcast_shapes(*shapes):
     """
     # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
-    with torch.no_grad():
-        scalar = torch.zeros((), device="cpu")
-        tensors = [scalar.expand(shape) for shape in shapes]
-        tensors = broadcast_tensors(*tensors)
-        return tensors[0].shape
+    if not torch.jit.is_tracing():
+        max_len = 0
+        for shape in shapes:
+            if isinstance(shape, int):
+                if max_len < 1:
+                    max_len = 1
+            elif isinstance(shape, tuple) or isinstance(shape, list):
+                s = len(shape)
+                if max_len < s:
+                    max_len = s
+        result = [1] * max_len
+        for shape in shapes:
+            if isinstance(shape, int):
+                shape = (shape,)
+            if isinstance(shape, tuple) or isinstance(shape, list):
+                for i in range(-1, -1 - len(shape), -1):
+                    if shape[i] < 0:
+                        raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
+                                           .format(shape[i], shape[i]))
+                    if shape[i] == 1 or shape[i] == result[i]:
+                        continue
+                    if result[i] != 1:
+                        raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
+                    result[i] = shape[i]
+            else:
+                raise RuntimeError("Input shapes should be of type ints, a tuple of ints, or a list of ints, got ", shape)
+        return torch.Size(result)
+    else:
+        # with implementation above, torch.jit.trace hardcodes the sizes which makes subsequent replays fail
+        with torch.no_grad():
+            scalar = torch.zeros((), device="cpu")
+            tensors = [scalar.expand(shape) for shape in shapes]
+            tensors = broadcast_tensors(*tensors)
+            return tensors[0].shape
+
 
 
 def split(tensor, split_size_or_sections, dim=0):
