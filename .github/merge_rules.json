@@ -48,7 +48,7 @@
    {
       "name": "superuser",
       "patterns": ["*"],
-      "approved_by": ["albanD", "jbschlosser", "suo", "osalpekar", "malfet", "seemethere"],
+      "approved_by": ["albanD", "jbschlosser", "suo", "osalpekar", "malfet", "seemethere", "ezyang"],
       "mandatory_app_id": 12274
    }
 ]
