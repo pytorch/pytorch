@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-#boto3
+boto3==1.19.12
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
@@ -41,7 +41,7 @@ expecttest==0.1.3
 #Pinned versions:
 #test that import:
 
-#hypothesis
+hypothesis==4.53.2
 #Description: advanced library for generating parametrized tests
 #Pinned versions: 3.44.6, 4.53.2
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
@@ -180,13 +180,6 @@ scipy==1.6.3
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
 #test_spectral_ops.py, test_sparse_csr.py, test_reductions.py,test_nn.py
 #test_linalg.py, test_binary_ufuncs.py
-
-#six
-#Description: Python 2 and 3 compatibility library
-#Pinned versions: 1.16.0
-#test that import: test_unary_ufuncs.py, test_torch.py, test_sort_and_select.py,
-#test_shape_ops.py, test_reductions.py, test_optim.py, test_nn.py,
-#test_cuda.py, test_binary_ufuncs.py, test_autograd.py
 
 #tabulate
 #Description: Pretty-print tabular data
