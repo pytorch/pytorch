@@ -191,9 +191,12 @@ if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
   fi
 fi
 
+lsb_release -a
 echo $PATH
 ls /opt/cache/bin
 vi /opt/cache/bin/gcc
+echo "----print more------"
+vi /opt/cache/lib/nvcc
 echo "env ---------------------------"
 env
 which g++
