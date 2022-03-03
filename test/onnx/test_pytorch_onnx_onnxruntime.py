@@ -2678,6 +2678,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
         class ReshapeModel(torch.nn.Module):
@@ -2688,9 +2689,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(0, 3, 4)
         self.run_test(ReshapeModel(), x)
 
-    # Bug in ORT, skip test for opset version >= 14
-    # until https://github.com/microsoft/onnxruntime/pull/10665 is merged.
-    @skipIfUnsupportedMaxOpsetVersion(14)
     def test_reshape_different_rank(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, x):
