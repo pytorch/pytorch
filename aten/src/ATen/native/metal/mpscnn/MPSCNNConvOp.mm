@@ -79,7 +79,7 @@
   const int64_t iC = params.C;
   const int64_t kH = params.KH;
   const int64_t kW = params.KW;
-  MPSCNNNeuron* neuron = neuronType(t);
+  MPSCNNNeuron* neuron = at::native::metal::neuron(t);
   MPSCNNConvolutionDescriptor* desc = nil;
   if (params.isDepthwise()) {
     if (@available(iOS 11.0, *)) {
@@ -111,8 +111,11 @@
                              inputFeatureChannels:iC
                             outputFeatureChannels:oC];
       desc.groups = params.G;
-
-      desc.neuron = neuron;
+      if (@available(iOS 11.3, macOS 10.13.4, macCatalyst 13.0, *)) {
+        desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+      } else {
+        desc.neuron = neuron;
+      }
     } else {
       TORCH_CHECK(
           false,

@@ -49,3 +49,53 @@
 }
 
 @end
+
+API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
+@implementation MPSCNNNeuronOpDescriptor
+
++ (MPSNNNeuronDescriptor*)hardSigmoidDescriptor {
+  static dispatch_once_t onceToken;
+  static MPSNNNeuronDescriptor* neuronDesc = nil;
+  dispatch_once(&onceToken, ^{
+    neuronDesc = [MPSNNNeuronDescriptor
+        cnnNeuronDescriptorWithType:MPSCNNNeuronTypeHardSigmoid
+                                  a:1.0 / 6.0
+                                  b:0.5];
+  });
+  return neuronDesc;
+}
+
++ (MPSNNNeuronDescriptor*)reluDescriptor {
+  static dispatch_once_t onceToken;
+  static MPSNNNeuronDescriptor* neuronDesc = nil;
+  dispatch_once(&onceToken, ^{
+    neuronDesc =
+        [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeReLU
+                                                         a:0];
+  });
+  return neuronDesc;
+}
+
++ (MPSNNNeuronDescriptor*)sigmoidDescriptor {
+  static dispatch_once_t onceToken;
+  static MPSNNNeuronDescriptor* neuronDesc = nil;
+  dispatch_once(&onceToken, ^{
+    neuronDesc = [MPSNNNeuronDescriptor
+        cnnNeuronDescriptorWithType:MPSCNNNeuronTypeSigmoid];
+  });
+  return neuronDesc;
+}
+
++ (MPSNNNeuronDescriptor*)tanhDescriptor {
+  static dispatch_once_t onceToken;
+  static MPSNNNeuronDescriptor* neuronDesc = nil;
+  dispatch_once(&onceToken, ^{
+    neuronDesc =
+        [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeTanH
+                                                         a:1.0
+                                                         b:1.0];
+  });
+  return neuronDesc;
+}
+
+@end
