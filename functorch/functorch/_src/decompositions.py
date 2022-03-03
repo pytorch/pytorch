@@ -132,6 +132,11 @@ def mish_backward_decomposition(grad_output: Tensor, input: Tensor):
     return grad_output * (input_tanh_softplus + out)
 
 
+@register_decomposition(aten.silu)
+def silu(self: Tensor) -> Tensor:
+    return self * aten.sigmoid(self)
+
+
 @register_decomposition(aten.silu_backward)
 def silu_backward(grad_output: Tensor, self: Tensor) -> Tensor:
     sigmoid = 1 / (1 + aten.exp(aten.neg(self)))
@@ -223,16 +228,6 @@ def select_backward(grad_output: Tensor, input_sizes: List[int], dim: int, index
 def diagonal_backward(grad_output: Tensor, input_sizes: List[int], offset: int, dim1: int, dim2: int):
     grad_input = aten.new_zeros(grad_output, input_sizes)
     return aten.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
-
-
-# @register_decomposition(aten.cudnn_batch_norm)
-# def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
-#     a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
-#     return (a,b, c, aten.new_empty(input, (1,)))
-
-# @register_decomposition(aten.cudnn_batch_norm_backward)
-# def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
-#     return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
 
 
 @register_decomposition(aten._softmax_backward_data)
@@ -382,15 +377,40 @@ def native_layer_norm(input: Tensor, normalized_shape: List[int], weight: Option
     return (out, mean, rstd)
 
 
-# @register_decomposition(aten.addmm)
-# def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta=1, alpha=1):
-#     if not self.is_floating_point():
-#         beta = int(beta)
-#         alpha = int(alpha)
-#     out = alpha * aten.mm(mat1, mat2)
-#     if beta == 0:
-#         return out
-#     return beta * self + out
+@register_decomposition(aten.split_with_sizes)
+def split_with_sizes(self: Tensor, split_sizes: List[int], dim: int = 0) -> List[Tensor]:
+    num_splits = len(split_sizes)
+    splits = []
+    start_idx = 0
+    for i in range(num_splits):
+        length = split_sizes[i]
+        splits.append(self.narrow(dim, start_idx, length))
+        start_idx += length
+    return splits
+
+
+@register_decomposition(aten.split)
+def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
+    input_sizes = self.shape
+    dim_size = input_sizes[dim]
+    if split_size == 0:
+        assert(dim_size == 0)
+        return [self]
+    chunks = (dim_size + split_size - 1) // split_size
+    split_sizes = [split_size for i in range(chunks)]
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
+    return aten.split_with_sizes(self, split_sizes, dim)
+
+
+@register_decomposition(aten.addmm)
+def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
+    if not self.is_floating_point():
+        beta = int(beta)
+        alpha = int(alpha)
+    out = alpha * aten.mm(mat1, mat2)
+    if beta == 0:
+        return out
+    return beta * self + out
 
 
 @register_decomposition(aten.clamp_min)
@@ -408,15 +428,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     mask = aten.to(aten.rand_like(input) < p, dtype=torch.uint8)
     res = mask.type_as(input) * input * (1./p)
     return [res, mask]
-
-
-# Questionable decompositions
-
-# This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
-# Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach)
-def detach_decomposition(x):
-    return x
 
 
 @register_decomposition(aten.var)
@@ -445,3 +456,21 @@ def var_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: 
 @register_decomposition(aten.std)
 def std_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
     return aten.sqrt(aten.var(x, dims, correction=correction, keepdim=keepdim))
+
+
+# Questionable decompositions
+# This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
+# Note that this decomposition causes issues with in-place ops
+@register_decomposition(aten.detach)
+def detach_decomposition(x):
+    return x
+
+
+# @register_decomposition(aten.cudnn_batch_norm)
+# def cudnn_batch_norm(input: Tensor, weight: Tensor, bias: Optional[Tensor], running_mean: Optional[Tensor], running_var: Optional[Tensor], training: bool, exponential_average_factor: float, epsilon: float):
+#     a, b, c = aten.native_batch_norm(input, weight, bias, running_mean, running_var, training, exponential_average_factor, epsilon)
+#     return (a,b, c, aten.new_empty(input, (1,)))
+
+# @register_decomposition(aten.cudnn_batch_norm_backward)
+# def cudnn_batch_norm_backward(input: Tensor, grad_output: Tensor, weight: Tensor, running_mean: Optional[Tensor], running_var: Optional[Tensor], save_mean: Optional[Tensor], save_var: Optional[Tensor], epsilon: float, reserveSpace: Tensor):
+#     return aten.native_batch_norm_backward(grad_output, input, weight, running_mean, running_var, save_mean, save_var, True, epsilon, [True, True, True])
