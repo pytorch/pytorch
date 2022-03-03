@@ -430,6 +430,36 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return [res, mask]
 
 
+@register_decomposition(aten.logical_and)
+def logical_and(self: Tensor, other: Tensor) -> Tensor:
+    return self.to(dtype=torch.bool) & other.to(dtype=torch.bool)
+
+
+@register_decomposition(aten.logical_or)
+def logical_or(self: Tensor, other: Tensor) -> Tensor:
+    return self.to(dtype=torch.bool) | other.to(dtype=torch.bool)
+
+
+@register_decomposition(aten.logical_xor)
+def logical_xor(self: Tensor, other: Tensor) -> Tensor:
+    return self.to(dtype=torch.bool) ^ other.to(dtype=torch.bool)
+
+
+@register_decomposition(aten.logical_not)
+def logical_not(self: Tensor) -> Tensor:
+    return ~self.to(dtype=torch.bool)
+
+
+# Commented out due to requiring type conversions for correct behavior on OpInfo tests
+# @register_decomposition(aten.xlogy)
+# def xlogy(self: Tensor, other: Tensor) -> Tensor:
+#     return aten.where(aten.isnan(self),
+#                       self,
+#                       aten.where(self == aten.new_zeros(self, ()),
+#                                  aten.new_zeros(self, ()),
+#                                  self * aten.log(other)))
+
+
 @register_decomposition(aten.var)
 def var_decomposition(x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False):
     if dims is None:
