@@ -686,6 +686,38 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    def test_trace_buffer_slice(self):
+        bs, d_hid = 10, 23
+
+        class ExampleCode(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.lin = torch.nn.Linear(d_hid, d_hid)
+                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
+
+            def forward(self, x):
+                x = torch.mm(x, self.mm_param)
+                skip_connection = x
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param) + self.buffer[:x.shape[0]]
+                x = self.lin(x)
+                x = torch.relu(x)
+                x = x + skip_connection
+                x = torch.mm(x, self.mm_param2)
+                x = self.lin(x)
+                return x
+
+
+        ec = ExampleCode()
+
+        traced = torch.fx.symbolic_trace(ec)
+
+        x = torch.randn(bs, d_hid)
+        torch.testing.assert_allclose(ec(x), traced(x))
+
+
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],

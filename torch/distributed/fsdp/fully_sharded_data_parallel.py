@@ -756,24 +756,25 @@ class FullyShardedDataParallel(nn.Module):
         else:
             return False
 
+    @staticmethod
     @contextlib.contextmanager
-    def _state_dict_type(self, state_dict_type: StateDictType) -> Generator:
+    def state_dict_type(module: nn.Module, state_dict_type: StateDictType) -> Generator:
         """
-        A context manager to set the state_dict_type of this FSDP module and
-        its descendant FSDP modules.
-        .. note:: This API should be called for only the root FSDP module.
+        A context manager to set the state_dict_type of all the descendant FSDP
+        modules of the target module. The target module does not have to be a FSDP
+        module. If the target module is a FSDP module, its state_dict_type will
+        also be changed.
+        .. note:: This API should be called for only the top-level (root) module.
         .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
 
         Args:
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
-        if not self.check_is_root():
-            raise RuntimeError(
-                "state_dict_type context manager can only be called from the root FSDP module."
-            )
-        prev_state_dict_type = self._state_dict_type
-        for module in self.fsdp_modules(self):
-            if module._state_dict_type != prev_state_dict_type:
+        prev_state_dict_type = None
+        for module in FullyShardedDataParallel.fsdp_modules(module):
+            if prev_state_dict_type is None:
+                prev_state_dict_type = module._state_dict_type
+            if prev_state_dict_type != module._state_dict_type:
                 raise RuntimeError(
                     "All FSDP module should the same state_dict_type."
                 )
@@ -781,27 +782,8 @@ class FullyShardedDataParallel(nn.Module):
         try:
             yield
         finally:
-            for module in self.fsdp_modules(self):
+            for module in FullyShardedDataParallel.fsdp_modules(module):
                 module._state_dict_type = prev_state_dict_type
-
-    @contextlib.contextmanager
-    @staticmethod
-    def state_dict_type(module: nn.Module, state_dict_type: StateDictType) -> Generator:
-        """
-        A context manager to set the state_dict_type of all the descendant FSDP
-        modules of the target module. The target module does not have to be a FSDP
-        module. If the target module is a FSDP module, its state_dict_type will
-        also be changed.
-        .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
-
-        Args:
-            state_dict_type (StateDictType): the desired state_dict_type to set.
-        """
-        with contextlib.ExitStack() as stack:
-            for module in self.fsdp_modules(self, root_only=True):
-                stack.enter_context(module._state_dict_type(state_dict_type))
-            yield
-
 
     def _full_post_state_dict_hook(
         self,
@@ -892,7 +874,7 @@ class FullyShardedDataParallel(nn.Module):
         ``state_dict`` on every rank, which could result in OOM if the model
         cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
         available to configure between `state_dict` implementations. User can
-        thus use `with self._state_dict_type(StateDictType.LOCAL_STATE_DICT)`
+        thus use `with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`
         context manager to perform a local checkpoint that will store only local
         shards of the module. Currently, the only supported implementations are
         ``StateDictType.LOCAL_STATE_DICT`` and ``StateDictType.FULL_STATE_DICT``
@@ -949,8 +931,8 @@ class FullyShardedDataParallel(nn.Module):
         sharded, so the resulting state_dict can only be loaded after the module
         has been wrapped with FSDP.
         """
-        with self._state_dict_type(StateDictType.LOCAL_STATE_DICT):
-            return self._state_dict(*args, **kwargs)
+        with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT):
+            return self.state_dict(*args, **kwargs)
 
     def _full_pre_load_state_dict_hook(
         self,
@@ -1028,7 +1010,7 @@ class FullyShardedDataParallel(nn.Module):
         FSDP to load the full parameter context on each rank which could result
         in GPU OOM. As a result, :func:`state_dict_type` API is available to
         configure between `load_state_dict` implementations. User can thus use
-        ``with self._state_dict_type(StateDictType.LOCAL_STATE_DICT)`` context
+        ``with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`` context
         manager to load a local state dict checkpoint that will restore only
         local shards of the module. Currently, the only supported
         implementations are ``StateDictType.LOCAL_STATE_DICT`` and
@@ -1080,7 +1062,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Load states from a flatten, sharded state dictionary.
         """
-        with self._state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT):
             return self.load_state_dict(state_dict, *args)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
