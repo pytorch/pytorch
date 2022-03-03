@@ -659,7 +659,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         x = torch.randn(2)
         y = torch.randn(2)
         self.assertEqual(SubTensor(x) + SubTensor(y), x + y)
-        self.assertEqual(called, [torch.ops.aten.add])
+        self.assertEqual(called, [torch.ops.aten.add.Tensor])
 
     def test_dispatch_super_dont_autograd(self):
         called = []
@@ -685,7 +685,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
         x = SubTensor(torch.randn(2, requires_grad=True))
         x.neg()
-        self.assertEqual(called, [torch.ops.aten.neg])
+        self.assertEqual(called, [torch.ops.aten.neg.default])
 
     def test_multiple_ops_subclass(self):
         # This is a Direct Subclass, don't do that!
