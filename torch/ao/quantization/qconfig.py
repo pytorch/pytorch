@@ -284,20 +284,22 @@ def get_default_qconfig_dict(backend='fbgemm', version=0):
     qconfig = get_default_qconfig(backend, version)
     qconfig_transpose = qconfig
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to MovingAverageMinMaxObserver or another
-    # per tensor supported observer
+    # so we have to modify the weight observer to default_weight_observer or another
+    # per tensor supported observer. 
+    # see https://github.com/pytorch/pytorch/issues/47535
     if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=MovingAverageMinMaxObserver)
+        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_observer)
     return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
     qconfig = get_default_qat_qconfig(backend, version)
     qconfig_transpose = qconfig
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to MovingAverageMinMaxObserver or another
+    # so we have to modify the weight observer to default_weight_observer or another
     # per tensor supported observer
+    # see https://github.com/pytorch/pytorch/issues/47535
     if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=MovingAverageMinMaxObserver)
+        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_fake_quant)
     return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
 
 def assert_valid_qconfig(qconfig: Optional[QConfig],
