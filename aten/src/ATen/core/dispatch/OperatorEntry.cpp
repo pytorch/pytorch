@@ -283,7 +283,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   }
 
   // 3. Backend fallback
-  auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
+  auto dispatch_ix = static_cast<uint8_t>(dispatch_key);
   if (dispatcher.backendFallbackKernels_[dispatch_ix].kernel.isValid()) {
     return {dispatcher.backendFallbackKernels_[dispatch_ix], "backend fallback"};
   }
@@ -299,7 +299,10 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
 // or alias keys and their associated keysets).
 // This function should be considered a private helper for updateDispatchTable_()
 void OperatorEntry::updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) {
-  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(dispatch_key);
+  const auto dispatch_ix = c10::getDispatchTableIndexForDispatchKey(dispatch_key);
+  if (C10_UNLIKELY(dispatch_ix == -1)) {
+    return;
+  }
   dispatchTable_[dispatch_ix] = computeDispatchTableEntry(dispatcher, dispatch_key);
   dispatchKeyExtractor_.setOperatorHasFallthroughForKey(dispatch_key, dispatchTable_[dispatch_ix].isFallthrough());
 }
@@ -326,12 +329,8 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
   // Registering to backend key might affect computed entry at its Autograd backend key due to (2.1) & (2.3).
-  // In theory, we should only have to check if the given runtime key has "dense" functionality,
-  // e.g. DispatchKey::CPU (which is composed of DispatchKey::Dense and BackendComponent::CPUBit).
-  // However, there are some backends that should be included in this set that don't have the dense key set.
-  // E.g. DispatchKey::Meta, DispatchKey::ORT.
   if (c10::isBackendDispatchKey(dispatch_key)) {
-    DispatchKey autograd_key = getAutogradKeyFromBackend(toBackendComponent(dispatch_key));
+    DispatchKey autograd_key = getAutogradKeyFromBackend(dispatch_key);
     updateDispatchTableEntry_(dispatcher, autograd_key);
   }
 }
@@ -358,9 +357,8 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   // catchAll. After catchAllKernel_ is removed, Undefined now can get a kernel from either CompositeExplicitAutograd
   // or CompositeImplicitAutograd alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, CompositeImplicitAutograd)
   // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
-  updateDispatchTable_(dispatcher, DispatchKey::Undefined);
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
-    updateDispatchTable_(dispatcher, k);
+  for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+    updateDispatchTable_(dispatcher, static_cast<DispatchKey>(iter));
   }
 }
 
@@ -373,10 +371,9 @@ void OperatorEntry::checkInvariants() const {
   for (const auto& kv : kernels_) {
     TORCH_INTERNAL_ASSERT(kv.second.size() > 0, dumpState());
   }
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
-    auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), k);
-    auto idx = getDispatchTableIndexForDispatchKey(k);
-    TORCH_INTERNAL_ASSERT(expected_k._equalsBoxedAndUnboxed(dispatchTable_[idx]),
+  for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
+    auto expected_k = computeDispatchTableEntry(c10::Dispatcher::singleton(), static_cast<DispatchKey>(iter));
+    TORCH_INTERNAL_ASSERT(expected_k._equalsBoxedAndUnboxed(dispatchTable_[iter]),
       "Canonical state\n~~~~~~~~~~~\n", dumpState(), "\n\n"
       "Computed table:\n~~~~~~~~~~~\n", dumpComputedTable());
   }
@@ -387,8 +384,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   str << "[";
 
   bool has_kernels = false;
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
-    auto iter = getDispatchTableIndexForDispatchKey(k);
+  for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     if (!dispatchTable_[iter].isValid()) {
       continue;
     }
@@ -447,12 +443,8 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
 // updateDispatchTableFull_ would update the dispatch table to be)
 std::string OperatorEntry::dumpComputedTable() const {
   std::ostringstream oss;
-  // Need to handle Undefined separately, because its a runtime key that can't be represented
-  // in a DispatchKeySet.
-  std::vector<DispatchKey> runtime_keys = {DispatchKey::Undefined};
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) runtime_keys.push_back(k);
-
-  for (auto k : runtime_keys) {
+  for (uint8_t i = 0; i < static_cast<uint8_t>(DispatchKey::NumDispatchKeys); i++) {
+    auto k = static_cast<DispatchKey>(i);
     auto kernel_prov = computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
     if (kernel_prov.first.kernel.isValid()) {
       oss << toString(k) << ": "

@@ -60,16 +60,8 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
       - name: Populate binary env
         shell: bash
         run: |
@@ -104,16 +96,8 @@ jobs:
         with:
           name: !{{ config["build_name"] }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-        with:
-          path: ${{ env.PYTORCH_ROOT }}
-          submodules: recursive
-      - name: Clone pytorch/builder
-        uses: actions/checkout@v2
-        with:
-          repository: pytorch/builder
-          path: ${{ env.BUILDER_ROOT }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
       - name: Populate binary env
         shell: bash
         run: |
