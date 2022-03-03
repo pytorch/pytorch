@@ -28,7 +28,7 @@ call %INSTALLER_DIR%\install_sccache.bat
 if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
-call :retry %INSTALLER_DIR%\install_miniconda3.bat
+call %INSTALLER_DIR%\install_miniconda3.bat
 
 :: Install ninja and other deps
 if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
@@ -155,8 +155,3 @@ sccache --show-stats > stats.txt
 python -m tools.stats.upload_sccache_stats stats.txt
 sccache --stop-server
 rm stats.txt
-
-:retry
-call %* || (powershell -nop -c "& {sleep 1}" && call %*) || (powershell -nop -c "& {sleep 2}" && call %*)
-if errorlevel 1 exit /b
-if not errorlevel 0 exit /b
