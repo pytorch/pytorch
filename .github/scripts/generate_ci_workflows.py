@@ -169,7 +169,6 @@ class CIWorkflow:
     num_test_shards: int = 1
     timeout_after: int = 240
     xcode_version: str = ''
-    only_on_pr: bool = False
     ios_arch: str = ''
     ios_platform: str = ''
     test_jobs: Any = field(default_factory=list)
