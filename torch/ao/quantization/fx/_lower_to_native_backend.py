@@ -18,7 +18,9 @@ from .utils import (
     collect_producer_nodes,
     get_linear_prepack_op_for_dtype,
     get_new_attr_name_with_prefix,
+    get_qconv_prepack_op,
     graph_module_from_producer_nodes,
+    CONV_FUNCTIONAL_OPS,
 )
 from ..utils import _parent_name
 from ..qconfig import QConfigAny
@@ -229,6 +231,9 @@ LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[Weight
 #   2) The quantized version of the op fused with relu, if it exists, else None
 LOWER_FUNCTIONAL_MAP = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
+    F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
+    F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
+    F.conv3d: (torch.ops.quantized.conv3d, torch.ops.quantized.conv3d_relu),
 }
 
 WEIGHT_PREPACK_OPS = {
@@ -378,15 +383,22 @@ def _lower_weighted_ref_functional(
                 continue
 
             # Set up match pattern: (dequantize - [relu_op - ] func_op - quantize)
-            # Func args: (dequantized inputs, dequantized weights[, bias])
-            # Quantize args: (func, scale, zp, dtype)
             func_pattern: Tuple[Any, ...] = ()
-            if has_bias:
-                func_pattern = (ref_func, "dequantize", "dequantize", MatchAllNode)
+            if ref_func == F.linear:
+                # Func args: (dequantized inputs, dequantized weights[, bias])
+                if has_bias:
+                    func_pattern = (ref_func, "dequantize", "dequantize", MatchAllNode)
+                else:
+                    func_pattern = (ref_func, "dequantize", "dequantize")
+            elif ref_func in CONV_FUNCTIONAL_OPS:
+                # Func args: (dequantized inputs, dequantized weights, bias, stride, padding, dilation, groups)
+                func_pattern = (ref_func, "dequantize", "dequantize",
+                                MatchAllNode, MatchAllNode, MatchAllNode, MatchAllNode, MatchAllNode)
             else:
-                func_pattern = (ref_func, "dequantize", "dequantize")
+                raise ValueError("Lowering for functional currently only supports linear and conv ops")
             if is_relu:
                 func_pattern = (F.relu, func_pattern)
+            # Quantize args: (func, scale, zp, dtype)
             pattern = (torch.quantize_per_tensor, func_pattern, MatchAllNode, MatchAllNode, MatchAllNode)
 
             # Iterate through nodes in the graph to find a match
@@ -416,11 +428,13 @@ def _lower_weighted_ref_functional(
                     bias = func_node.args[2]
                 else:
                     bias = func_node.kwargs.get("bias", None)
-                prepack_args = (quantized_weight, bias)
                 if ref_func == F.linear:
                     prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
-                else:
-                    raise ValueError("Lowering for functional currently only supports linear op")
+                    prepack_args = (quantized_weight, bias)
+                elif ref_func in CONV_FUNCTIONAL_OPS:
+                    prepack_op = get_qconv_prepack_op(ref_func)
+                    (_, _, _, stride, padding, dilation, groups) = func_node.args
+                    prepack_args = (quantized_weight, bias, stride, padding, dilation, groups)
                 insert_prepack_after = bias if has_bias else quantized_weight
                 with model.graph.inserting_after(insert_prepack_after):
                     packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})

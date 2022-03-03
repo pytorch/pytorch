@@ -37,6 +37,12 @@ BIAS_INDEX_DICT = {
     torch.nn.functional.instance_norm : [4],
 }
 
+CONV_FUNCTIONAL_OPS = {
+    torch.nn.functional.conv1d,
+    torch.nn.functional.conv2d,
+    torch.nn.functional.conv3d,
+}
+
 def graph_pretty_str(g, shorten=True) -> str:
     """Returns a printable representation of the ops in the graph of g.
     If shorten is True, tries to abbreviate fields.

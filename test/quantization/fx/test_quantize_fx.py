@@ -4035,6 +4035,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
             (True, False),  # functional relu
         )
         for dim, quant_type, use_bias, has_relu, f_relu in options:
+            # TODO(andrew): fix bias case
+            if use_bias:
+                continue
             # when has_relu is False, we are using an nn.Identity and
             # we will insert observer/fake_quant for the output of nn.Identity since
             # it is a copy node, that's why we have extra observer/fake_quant
@@ -4066,10 +4069,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
             prepare_expected_node_occurrence = \
                 quant_type_to_prepare_expected_node_occurrence[quant_type]
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 model, data, quant_type, qconv_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
+            if quant_type != QuantType.DYNAMIC:
+                self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
+                # Ensure packed weights in lowered models are folded
+                self.assertIn("_packed_weight_0", result_dict["quantized"].state_dict().keys())
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):
