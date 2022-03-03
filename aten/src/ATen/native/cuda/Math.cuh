@@ -888,7 +888,7 @@ const auto kaiser_window_string = i0_string + jiterator_stringify(
     T y = max(T{0}, T{1} - x * x);
     return i0(beta * sqrt(y)) * inv_i0_beta;
   }
-)
+); // kaiser_window_string
 
 const auto sinc_string = jiterator_stringify(
   template <typename T>
