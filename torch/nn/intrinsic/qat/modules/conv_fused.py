@@ -250,7 +250,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         if cls._FLOAT_RELU_MODULE:  # type: ignore[attr-defined]
             relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
             modules.append(relu)
-            result = cls._FUSED_FLOAT_MODULE(*modules)  # type: ignore[operator]
+            result = cls._FUSED_FLOAT_MODULE(*modules)  # type: ignore[attr-defined]
             result.train(self.training)
             return result
         else:
