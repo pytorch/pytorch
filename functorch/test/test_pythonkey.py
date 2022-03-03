@@ -192,7 +192,6 @@ make_fx_failures = {
     xfail('allclose'),
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
-    xfail('nn.functional.ctc_loss'),
     xfail('nn.functional.fractional_max_pool3d', device_type='cpu'),
     xfail('randn_like'),  # randomness
     xfail('rand_like'),  # randomness
@@ -355,11 +354,8 @@ class TestEagerFusionOpInfo(TestCase):
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
-        xfail('__rmatmul__'),
         xfail('linalg.cholesky'),
-        xfail('matmul'),
         skip('msort'),
-        xfail('nn.functional.linear'),
         xfail('nn.functional.dropout'),
         xfail('polar'),
         xfail('special.zeta', 'grad'),
