@@ -77,7 +77,6 @@ class QuantizeDBRTestCase(QuantizationTestCase):
 
         # compare it against FX
         if do_fx_comparison:
-            # print("m_copy:", m_copy)
             m_copy_p = prepare_fx(m_copy, {'': qconfig})
             out_m_copy_p = m_copy_p(*example_args)
             # print(m_copy_p)
