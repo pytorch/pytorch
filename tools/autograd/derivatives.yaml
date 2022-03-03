@@ -1859,7 +1859,7 @@
 
 - name: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self.scalar_type())
-  result: result * _log_softmax_jvp(self_p, self_t, dim, half_to_float)
+  result: result * (self_t - logsumexp_jvp(self_p, self_t, {dim}, true))
 
 - name: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
   self: _sparse_softmax_backward_data(grad, result, dim, self)
