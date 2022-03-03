@@ -282,6 +282,7 @@ void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, 
             /*scalar_pos=*/at::cuda::jit::BinaryFuncVariant::NoScalar,
             /*scalar_val=*/0,
             /*extra_args=*/std::make_tuple(inv_alpha, beta, inv_i0_beta));
+    });
   #else
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
       using opmath_t = at::opmath_type<scalar_t>;
@@ -293,8 +294,8 @@ void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, 
         opmath_t y = std::max<opmath_t>(0, 1 - x * x);
         return calc_i0(beta * ::sqrt(y)) * inv_i0_beta;
       });
+    });
   #endif
-  });
 }
 
 const char entr_name[] = "entr";
