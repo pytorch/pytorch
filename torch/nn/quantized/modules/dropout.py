@@ -20,3 +20,7 @@ class Dropout(torch.nn.Dropout):
     @classmethod
     def from_float(cls, mod):
         return cls(mod.p, mod.inplace)
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
+        return cls(mod.p, mod.inplace)

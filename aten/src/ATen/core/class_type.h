@@ -391,6 +391,7 @@ struct TORCH_API ClassType : public NamedType {
       std::vector<std::string> unresolved_class_attributes = {});
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    (void)printer; // Suppress unused variable warning
     const auto& n = name().value();
     return n.qualifiedName();
   }
