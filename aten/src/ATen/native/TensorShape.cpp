@@ -1315,12 +1315,20 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       new_values - shape is (new_nnz,) + dense_shape
 
       if dim < len(sparse_shape):
-          for i, idx in enumerate(index):
-              for j, jdx in enumerate(indices[dim]):
-                  if idx == jdx:
-                      icol = indices[:dim][j] + (i,) + indices[dim+1:][j]
-                      new_indices.add_column(icol)
-                      new_values.add_row(values[j])
+          # Find new_indices[dim] of the output sparse tensor and
+          # indices at which to select values/indices.
+          # The CPP code uses binary search to find matches and may
+          # swap the loop order for better algorithmic complexity.
+          new_dim_indices = []
+          selected_dim_indices = []
+          for i, i_idx in enumerate(indices[dim]):
+              for j, j_idx in enumerate(index):
+                  if i_idx == j_idx:
+                      new_dim_indices.append(j)
+                      selected_dim_indices.append(i)
+          new_indices = indices.index_select(1, selected_dim_indices)
+          new_values = values.index_select(0, selected_dim_indices)
+          new_indices[dim] = new_dim_indices
       else:
           new_indices = indices
           new_values = values.index_select(dim - sparse_dim + 1, index);
@@ -1370,6 +1378,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const Tensor& t, int64_t len
     ) -> std::tuple<Tensor, Tensor, Tensor, int64_t> {
       Tensor t_unique, t_idx;
+      // t_unique will be modified to hold unique values in-place
       std::tie(t_unique, t_idx) = at::sort(t);
 
       auto t_counts = at::ones_like(t_unique);
@@ -1408,6 +1417,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     std::tie(sel_sort_indices, sel_indices_unique, sel_indices_counts, n_unique_sel_indices)
       = unique_with_counts(nneg_index, index_len);
 
+    // index intersection is aka `set(indices[dim]) - set(index)`.
+    // If `dim_indices_unique[i] == sel_indices_unique[j]`, then
+    // nnz += dim_indices_counts[i] * sel_indices_unique[j]
     const auto compute_index_intersections_and_nnz = [](
         const Tensor& t1, const Tensor& c1, int64_t l1,
         const Tensor& t2, const Tensor& c2, int64_t l2
@@ -1446,6 +1458,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       return std::make_tuple(t1_idx, t2_idx, n_intersect, nnz);
     };
 
+    // we use analytic complexity value as a threshold to decide
+    // whether to use binary search on `index` or `indices[dim]`.
     const auto search_in_index = (
         n_unique_dim_indices * std::log2(n_unique_sel_indices) < std::log2(n_unique_dim_indices) * n_unique_sel_indices
     );
