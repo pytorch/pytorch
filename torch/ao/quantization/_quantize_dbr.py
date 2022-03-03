@@ -82,6 +82,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         for v in parents_to_delete_auto_quant_state:
             del v._auto_quant_state
 
+        del model._fqn_to_auto_quant_state_map
+
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types
         for k, v in model.named_modules():

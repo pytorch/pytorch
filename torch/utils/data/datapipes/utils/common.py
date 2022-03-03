@@ -2,20 +2,16 @@ import os
 import fnmatch
 import warnings
 
+from enum import Enum
 from io import IOBase
 from typing import Iterable, List, Tuple, Union, Optional
 
-try:
-    import dill
+from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
+
+class SerializationType(Enum):
+    PICKLE = "pickle"
+    DILL = "dill"
 
 
 def check_lambda_fn(fn):
