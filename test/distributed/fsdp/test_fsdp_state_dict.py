@@ -205,9 +205,9 @@ class TestFSDPStateDict(FSDPTest):
                     "local_state_dict": StateDictType.LOCAL_STATE_DICT,
                     "sharded_state_dict": StateDictType.SHARDED_STATE_DICT,
                 }[state_dict_type]
-                with model.state_dict_type(state_dict_type):
+                with FSDP.state_dict_type(model, state_dict_type):
                     state_dict = model.state_dict()
-                with blank_model.state_dict_type(state_dict_type):
+                with FSDP.state_dict_type(blank_model, state_dict_type):
                     blank_model.load_state_dict(state_dict)
             else:
                 state_dict = self._state_dict(model, state_dict_type)
