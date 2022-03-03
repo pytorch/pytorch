@@ -250,7 +250,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         if cls._FLOAT_RELU_MODULE:  # type: ignore[attr-defined]
             relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
             modules.append(relu)
-            result = cls._REFERENCE_MODULE(*modules)  # type: ignore[operator]
+            result = cls._FUSED_FLOAT_MODULE(*modules)  # type: ignore[operator]
             result.train(self.training)
             return result
         else:
@@ -321,7 +321,8 @@ class ConvBnReLU1d(ConvBn1d):
     _FLOAT_CONV_MODULE = nn.Conv1d
     _FLOAT_BN_MODULE = nn.BatchNorm1d
     _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
-    _REFERENCE_MODULE = nni.ConvReLU1d
+    # module class after fusing bn into conv
+    _FUSED_FLOAT_MODULE = nni.ConvReLU1d
 
     def __init__(self,
                  # Conv1d args
@@ -415,7 +416,8 @@ class ConvBnReLU2d(ConvBn2d):
     _FLOAT_CONV_MODULE = nn.Conv2d
     _FLOAT_BN_MODULE = nn.BatchNorm2d
     _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
-    _REFERENCE_MODULE = nni.ConvReLU2d
+    # module class after fusing bn into conv
+    _FUSED_FLOAT_MODULE = nni.ConvReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -569,7 +571,8 @@ class ConvBnReLU3d(ConvBn3d):
     _FLOAT_CONV_MODULE = nn.Conv3d
     _FLOAT_BN_MODULE = nn.BatchNorm3d
     _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
-    _REFERENCE_MODULE = nni.ConvReLU3d
+    # module class after fusing bn into conv
+    _FUSED_FLOAT_MODULE = nni.ConvReLU3d
 
     def __init__(
         self,
