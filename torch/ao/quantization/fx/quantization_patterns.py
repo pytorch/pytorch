@@ -258,12 +258,6 @@ QAT_CONV_MODULE_CLASSES = \
      torch.nn.intrinsic.qat.ConvReLU2d,
      torch.nn.intrinsic.qat.ConvReLU3d)
 
-CONV_BN_RELU_TO_CONV_RELU = {
-    torch.nn.intrinsic.ConvBnReLU1d: torch.nn.intrinsic.ConvReLU1d,
-    torch.nn.intrinsic.ConvBnReLU2d: torch.nn.intrinsic.ConvReLU2d,
-    torch.nn.intrinsic.ConvBnReLU3d: torch.nn.intrinsic.ConvReLU3d,
-}
-
 ##########################
 # Helper Functions
 ##########################
@@ -608,9 +602,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # weight fake_quant to the conv module,
                     # weight fake_quant is assumed to be run during
                     # QAT so we don't need to run it again here
-                    print("qat module:", float_conv)
                     float_conv = float_conv.to_float()  # type: ignore[operator]
-                    print("after to float:", float_conv)
                     # change qat conv to conv
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, float_conv)
@@ -959,7 +951,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     self.linear_node)
         else:  # call_function
             assert self.linear_node.op == 'call_function'
-            if is_reference:
+            if is_reference or self.linear_node.target == torch.nn.functional.linear and\
+                    dtypes in [(torch.quint8, torch.qint8, None)]:
                 quantized_input_dtypes = [torch.float, torch.float]
                 if activation_int8_quantized:
                     quantized_input_dtypes[0] = torch.quint8
@@ -996,7 +989,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         modules,
                         quantized_graph,
                         node_name_to_scope,
-                        is_input=False)
+                        is_input=False,
+                        output_prefix="")
                 else:
                     # output for dynamically quantized linear op is not quantized
                     return op_out
