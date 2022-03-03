@@ -418,8 +418,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
-    @unittest.skip("This works in DBR, but doesn't work anymore in fx graph mode after "
-                   "the lowering refactor, we can discuss if we want to fix it")
     def test_fusion_called_multiple_times(self):
         """
         Tests that fusion works if the modules to fuse get called multiple
@@ -439,7 +437,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        # fx graph mode quant doesn't support using a single module multiple times
+        # right now, so this would crash, we can discuss to handle this case later
+        # if it is needed
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),), do_fx_comparison=False)
 
     def test_fusion_functions(self):
         class M(torch.nn.Module):
