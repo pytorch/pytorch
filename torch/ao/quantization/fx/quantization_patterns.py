@@ -4,6 +4,7 @@ from torch.fx.graph import (
     Node,
     Graph,
 )
+from torch.nn.utils import fuse_conv_bn_weights
 from ..observer import (
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
@@ -256,6 +257,12 @@ QAT_CONV_MODULE_CLASSES = \
      torch.nn.intrinsic.qat.ConvBnReLU3d,
      torch.nn.intrinsic.qat.ConvReLU2d,
      torch.nn.intrinsic.qat.ConvReLU3d)
+
+CONV_BN_RELU_TO_CONV_RELU = {
+    torch.nn.intrinsic.ConvBnReLU1d: torch.nn.intrinsic.ConvReLU1d,
+    torch.nn.intrinsic.ConvBnReLU2d: torch.nn.intrinsic.ConvReLU2d,
+    torch.nn.intrinsic.ConvBnReLU3d: torch.nn.intrinsic.ConvReLU3d,
+}
 
 ##########################
 # Helper Functions
@@ -606,13 +613,15 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # weight fake_quant to the conv module,
                     # weight fake_quant is assumed to be run during
                     # QAT so we don't need to run it again here
+                    print("qat module:", float_conv)
                     float_conv = float_conv.to_float()  # type: ignore[operator]
+                    print("after to float:", float_conv)
                     # change qat conv to conv
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, float_conv)
                     if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
                         fused_conv = float_conv
-                        float_conv = float_conv[0]
+                        float_conv = fused_conv[0]
                     weight_post_process = self.conv.weight_fake_quant
                 else:
                     # case 2. converting a conv module/fused conv module
@@ -640,6 +649,8 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # the conv instance in the module tree
                 if fused_conv is not None:
                     fused_conv[0] = ref_conv
+                    parent_name, name = _parent_name(self.conv_node.target)
+                    setattr(modules[parent_name], name, fused_conv)
                 else:
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, ref_conv)
