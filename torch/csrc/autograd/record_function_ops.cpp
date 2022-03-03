@@ -126,8 +126,11 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut_new(
 TORCH_LIBRARY_FRAGMENT(profiler, m) {
   m.class_<PythonRecordFunction>("_RecordFunction");
 
-  m.def("_record_function_enter", &record_function_enter_legacy);
-  m.def("_record_function_enter_new", &record_function_enter_new);
+  m.def("_record_function_enter(str name, str? args=None) -> Tensor",
+        &record_function_enter_legacy);
+  m.def("_record_function_enter_new(str name, str? args=None) -> "
+        "__torch__.torch.classes.profiler._RecordFunction",
+        &record_function_enter_new);
   m.def("_record_function_exit", &record_function_exit_legacy);
   m.def("_record_function_exit._RecordFunction", &record_function_exit_new);
 
