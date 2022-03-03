@@ -47,6 +47,7 @@ using at::Type;
 using c10::optional;
 
 namespace torch { namespace utils {
+
 namespace {
 const int MAX_DIMS = 128;
 
@@ -503,7 +504,22 @@ c10::TensorOptions typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::Dis
 
 } // namespace
 
-Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor make_subclass(const Tensor& other) {
+  auto data = other.detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
+  // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
+  // allow the following use case for backward compatibility:
+  //
+  // ```python
+  // rnn = torch.nn.RNN(100, 100, 2)
+  // # The following calls `torch._cudnn_rnn_flatten_weight(rnn._flat_weights, ...)`,
+  // # which changes storage of `rnn`'s weights in-place
+  // rnn.flatten_parameters()
+  // ```
+  data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
+  return data;
+}
+
+Tensor legacy_tensor_ctor(PyTypeObject *type, c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   static PythonArgParser parser({
     "new(*, Device? device=None)",
@@ -542,7 +558,13 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
-    return new_with_tensor(options, scalar_type, r.tensor(0));
+    if (type == (PyTypeObject*)THPVariableClass) {
+      return new_with_tensor(options, scalar_type, r.tensor(0));
+    } else {
+      // NB: this doesn't actually make the subclass, that happens
+      // later
+      return make_subclass(r.tensor(0));
+    }
   } else if (r.idx == 4) {
     TORCH_CHECK(false, "Legacy tensor constructor of the form torch.Tensor(tensor, device=device) " \
                 "is not supported.  Use torch.tensor(...) or torch.as_tensor(...) instead.");

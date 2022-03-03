@@ -6,7 +6,11 @@
 
 namespace torch { namespace utils {
 
-at::Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+// NB: this is not 100% legacy; the single Tensor constructor is undeprecated
+// for subclasses when passed a single Tensor (in which case _make_subclass is
+// called)
+at::Tensor legacy_tensor_ctor(PyTypeObject *type, c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+at::Tensor make_subclass(const at::Tensor& other);
 at::Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor indexing_tensor_from_data(
     c10::TensorOptions options,

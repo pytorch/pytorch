@@ -379,18 +379,7 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data =
-      r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
-  // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
-  // allow the following use case for backward compatibility:
-  //
-  // ```python
-  // rnn = torch.nn.RNN(100, 100, 2)
-  // # The following calls `torch._cudnn_rnn_flatten_weight(rnn._flat_weights, ...)`,
-  // # which changes storage of `rnn`'s weights in-place
-  // rnn.flatten_parameters()
-  // ```
-  data.unsafeGetTensorImpl()->set_allow_tensor_metadata_change(true);
+  auto data = torch::utils::make_subclass(r.tensor(1));
   data.set_requires_grad(r.toBool(2));
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
@@ -1267,7 +1256,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs
   HANDLE_TH_ERRORS
   TORCH_CHECK(type != &THPVariableType, "Cannot directly construct _TensorBase; subclass it and then construct that");
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
-  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
+  auto tensor = torch::utils::legacy_tensor_ctor(type, torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
   // given a raw pointer that will refcount bump
   return THPVariable_NewWithVar(

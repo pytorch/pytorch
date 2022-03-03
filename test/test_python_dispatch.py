@@ -105,10 +105,6 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
             class A(torch._C._TensorBase):
-                @staticmethod
-                def __new__(cls, elem):
-                    return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                     if func == torch.ops.aten.split:
@@ -125,10 +121,6 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
     def test_invalid_ret(self) -> None:
         # test invalid return gets reasonable error message
         class A(torch._C._TensorBase):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return "arf"
@@ -192,19 +184,11 @@ $2 = torch._ops.aten.detach($1)''')
         # test_overrides.py; this is just to make sure it is wired up at all
         # correctly for __torch_dispatch__
         class A(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 raise ErrorA
 
         class B(A):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 raise ErrorB
@@ -475,19 +459,11 @@ $6 = torch._ops.aten.add_($1, $5)''')
             pass
 
         class A(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 raise ErrorA
 
         class B(A):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 raise ErrorB
@@ -538,12 +514,13 @@ $6 = torch._ops.aten.add_($1, $5)''')
             __slots__ = ['elem']
 
             @staticmethod
-            def __new__(cls, elem, *args, **kwargs):
-                # Wrong device here!
-                r = torch.Tensor._make_subclass(cls, elem.to("meta"), elem.requires_grad)
-                # ...the real tensor is held as an element on the tensor.
-                r.elem = elem
+            def __new__(cls, elem):
+                r = super().__new__(cls, elem.to("meta"))
+                r.requires_grad = elem.requires_grad
                 return r
+
+            def __init__(self, elem):
+                self.elem = elem
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -690,11 +667,6 @@ $6 = torch._ops.aten.add_($1, $5)''')
     def test_multiple_ops_subclass(self):
         # This is a Direct Subclass, don't do that!
         class MySubclass(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                r = torch.Tensor._make_subclass(cls, elem)
-                return r
-
             __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
