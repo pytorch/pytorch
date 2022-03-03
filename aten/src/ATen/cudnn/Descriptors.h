@@ -21,6 +21,9 @@ std::string cudnnTypeToString(cudnnDataType_t dtype);
 inline int dataSize(cudnnDataType_t dataType)
 {
   switch (dataType) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
+    case CUDNN_DATA_BFLOAT16:
+#endif
     case CUDNN_DATA_HALF: return 2;
     case CUDNN_DATA_FLOAT: return 4;
     default: return 8;
