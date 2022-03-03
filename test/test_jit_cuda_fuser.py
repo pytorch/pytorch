@@ -2905,6 +2905,7 @@ class TestCudaFuser(JitTestCase):
                      "Requires fusion optimization pass to be effective")
     # @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_batch_norm_half(self):
+        print("is nvfuser enabled? ", torch._C._jit_nvfuser_enabled())
         with torch.backends.cudnn.flags(enabled=True):
             setups = [
                 [True, True],
