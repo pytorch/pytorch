@@ -16,8 +16,8 @@
       cnnConvolutionDescriptorWithKernelWidth:params.KW
                                  kernelHeight:params.KH
                          inputFeatureChannels:params.IC
-                        outputFeatureChannels:params.OC
-                                 neuronFilter:neuron];
+                        outputFeatureChannels:params.OC];
+  desc.neuron = neuron;
   desc.strideInPixelsX = 1;
   desc.strideInPixelsY = 1;
 
