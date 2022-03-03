@@ -295,7 +295,6 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
 void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g) {
-
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.size() == 0) {
     loadFunctions();
