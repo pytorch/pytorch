@@ -2656,7 +2656,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
 
             # in-place on BatchedTensor
-            (lambda t: t.bernoulli_(), (torch.randn(B0, 1),)),
             (lambda t: t.cauchy_(), (torch.randn(B0, 1),)),
             (lambda t: t.exponential_(), (torch.randn(B0, 1),)),
             (lambda t: t.geometric_(0.5), (torch.randn(B0, 1),)),
@@ -2664,7 +2663,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (lambda t: t.uniform_(), (torch.randn(B0, 1),)),
 
             # in-place on captured tensor
-            (lambda t: captured.bernoulli_(), (torch.randn(B0),)),
             (lambda t: captured.cauchy_(), (torch.randn(B0),)),
             (lambda t: captured.exponential_(), (torch.randn(B0),)),
             (lambda t: captured.geometric_(0.5), (torch.randn(B0),)),
@@ -3114,7 +3112,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('resize_as_'),
         xfail('tensor_split'),
         xfail('to_sparse'),
-        xfail('nn.functional.dropout'),
+        xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('view_as_complex'),
         xfail('masked_select'),
 
@@ -3223,7 +3221,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('any'),
         xfail('count_nonzero'),
         xfail('nanmean'),
-        xfail('nn.functional.dropout'),
+        xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3519,6 +3517,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             lambda _, shape: torch.normal(0., 1., shape, **kwargs),
             lambda t, _: t.normal_(**only_gen_kwarg),
             lambda t, _: t.bernoulli_(torch.tensor([0.3, 0.4, 0.5, 0.6]), **only_gen_kwarg),
+            lambda t, _: t.bernoulli_(**only_gen_kwarg),
         ]
 
         B0 = 4
@@ -3531,18 +3530,18 @@ class TestVmapOperatorsOpInfo(TestCase):
                     vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0])
                 return
 
-            passed = torch.randn(B0, B0, device=device)
+            passed = torch.randn(B0, B0, B0, device=device)
             generator = self.reset_random(generator, orig_state, use_generator, seed)
-            vmap_result = vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0])
+            vmap_result = vmap(op, in_dims=(0, None), randomness=randomness)(passed, [B0, B0])
             if randomness == "different":
-                passed = torch.randn([B0, B0], device=device)  # reset for in place operation
+                passed = torch.randn([B0, B0, B0], device=device)  # reset for in place operation
                 generator = self.reset_random(generator, orig_state, use_generator, seed)
-                expected = op(passed, [B0, B0])
+                expected = op(passed, [B0, B0, B0])
                 assert torch.allclose(vmap_result, expected)
             else:
-                passed = torch.randn(B0, device=device)  # reset for in place operation
+                passed = torch.randn(B0, B0, device=device)  # reset for in place operation
                 generator = self.reset_random(generator, orig_state, use_generator, seed)
-                expected = op(passed, [B0])
+                expected = op(passed, [B0, B0])
                 for i in range(B0):
                     assert torch.allclose(vmap_result[i], expected)
 
@@ -3577,6 +3576,38 @@ class TestVmapOperatorsOpInfo(TestCase):
             for i in range(B0):
                 assert torch.allclose(vmap_result[i], expected)
 
+    @parametrize('randomness', ['error', 'same', 'different'])
+    def test_feature_dropout(self, device, randomness):
+        # special case because functional feature dropout expects a batch dimension, so it doesn't match the
+        # pattern for other randomness
+
+        seed = 1234567
+        supported_ops = [
+            lambda t: torch.nn.functional.dropout(torch.ones_like(t), training=True),
+            lambda t: torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True),
+            lambda t: torch.nn.functional.feature_alpha_dropout(t, training=True),
+            lambda t: torch.nn.functional.dropout2d(t, training=True),
+            lambda t: torch.nn.functional.dropout3d(t.unsqueeze(-1), training=True),
+        ]
+
+        for op in supported_ops:
+            passed = torch.ones([4, 3, 3, 3, 3])
+            if randomness == 'error':
+                with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                    vmap(op, randomness=randomness)(passed)
+                return
+            torch.manual_seed(seed)
+            vmap_result = vmap(op, randomness=randomness)(passed)
+            torch.manual_seed(seed)
+            if randomness == 'different':
+                expected = op(passed.flatten(0, 1))
+                expected = expected.reshape(passed.shape[0], passed.shape[1], *expected.shape[1:])
+                assert torch.allclose(vmap_result, expected)
+            else:
+                expected = op(passed[0])
+                for i in range(4):
+                    assert torch.allclose(vmap_result[i], expected)
+
     @parametrize('use_generator', [True, False])
     @parametrize('randomness', ['error', 'same', 'different'])
     def test_random_inplace_not_batched(self, device, use_generator, randomness):
@@ -3587,7 +3618,8 @@ class TestVmapOperatorsOpInfo(TestCase):
             lambda t, _: t.random_(100, **kwargs),
             lambda t, _: t.random_(-5, 100, **kwargs),
             lambda t, _: t.normal_(**kwargs),
-            lambda t, _: t.bernoulli_(torch.tensor([0.3, 0.4, 0.5, 0.6]), **kwargs)
+            lambda t, _: t.bernoulli_(torch.tensor([0.3, 0.4, 0.5, 0.6]), **kwargs),
+            lambda t, _: t.bernoulli_(**kwargs),
         ]
 
         B0 = 4
