@@ -165,6 +165,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       }
       return {loctx()->GetParameter(device_data_node->data())};
     }
+
     std::vector<torch::jit::NamedValue> arguments;
     for (const torch::lazy::Output& output : node->operands()) {
       arguments.emplace_back(loctx()->GetOutputOp(output));
@@ -337,15 +338,9 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     std::vector<torch::jit::NamedValue> arguments;
     std::vector<torch::jit::Value*> tensor_list;
     const auto& operands = stack->operands();
-    CHECK(!operands.empty());
-    for (const torch::lazy::Output& operand : operands) {
-      tensor_list.emplace_back(loctx()->GetOutputOp(operand));
-    }
+    CHECK(operands.size() == 1);
     auto graph = function_->graph();
-    arguments.emplace_back(
-        graph
-            ->insertNode(graph->createList(tensor_list[0]->type(), tensor_list))
-            ->output());
+    arguments.emplace_back(loctx()->GetOutputOp(operands.back()));
     arguments.emplace_back(stack->dim());
     return LowerBuiltin(stack, arguments);
   }

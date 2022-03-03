@@ -22,7 +22,6 @@
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
-#include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/svd.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
@@ -346,18 +345,6 @@ void squeeze_(torch::lazy::LazyTensorPtr& input, int64_t dim) {
   input->SetIrValue(torch::lazy::MakeNode<ir::ops::Squeeze>(
       input->GetIrValue(),
       torch::lazy::GetCanonicalDimensionIndex(dim, input->shape().Get().dim())));
-}
-
-torch::lazy::LazyTensorPtr stack(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors, int64_t dim) {
-  CHECK_GT(tensors.size(), 0);
-  std::vector<torch::lazy::Value> values;
-  for (auto& tensor : tensors) {
-    values.push_back(tensor->GetIrValue());
-  }
-  int64_t canonical_dim = torch::lazy::GetCanonicalDimensionIndex(
-      dim, tensors.front()->shape().Get().dim() + 1);
-  return torch::lazy::LazyTensor::Create(
-      torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim), tensors[0]->GetDevice());
 }
 
 torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& other,

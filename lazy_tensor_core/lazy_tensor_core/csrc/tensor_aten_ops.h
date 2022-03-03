@@ -81,8 +81,6 @@ torch::lazy::LazyTensorPtr squeeze(const torch::lazy::LazyTensorPtr& input, int6
 void squeeze_(torch::lazy::LazyTensorPtr& input);
 void squeeze_(torch::lazy::LazyTensorPtr& input, int64_t dim);
 
-torch::lazy::LazyTensorPtr stack(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors, int64_t dim);
-
 torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& other,
                const at::Scalar& alpha);
 torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,

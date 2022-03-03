@@ -42,11 +42,14 @@ torch::lazy::Shape InferRepeat(const ir::ops::Repeat* repeat) {
 
 torch::lazy::Shape InferStack(const ir::ops::Stack* stack) {
   const auto& inputs = stack->operands();
-  CHECK(!inputs.empty());
+  CHECK_EQ(inputs.size(), 1);
+  auto* tensorlist = torch::lazy::NodeCast<torch::lazy::TensorList>(
+          inputs[0].node, torch::lazy::tensor_list_opkind);
+  auto operands = tensorlist->operands();
   const torch::lazy::Shape& input_shape =
-      torch::lazy::GetShapeFromTsOutput(inputs[0]);
-  for (const torch::lazy::Output& input : inputs) {
-    CHECK_EQ(torch::lazy::GetShapeFromTsOutput(input), input_shape);
+      torch::lazy::GetShapeFromTsOutput(operands[0]);
+  for (const torch::lazy::Output& operand : operands) {
+    CHECK_EQ(torch::lazy::GetShapeFromTsOutput(operand), input_shape);
   }
   const auto input_dimensions = input_shape.sizes();
   std::vector<int64_t> output_dimensions(input_dimensions.begin(),

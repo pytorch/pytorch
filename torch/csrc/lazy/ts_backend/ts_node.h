@@ -87,5 +87,17 @@ class TORCH_API TsNode : public lazy::Node {
   std::string python_stacktrace_;
 };
 
+// TODO(whc) find a way to make this derive from Node instead of TsNode
+// at minimum, probably requires moving shape() API into Node and getting rid of
+// dynamic casts to TsNode for shape extraction all over the place
+const OpKind tensor_list_opkind = OpKind::Get("lazy_tensors::tensor_list");
+struct TORCH_API TensorList : public TsNode {
+  TensorList() = delete;
+  TensorList(OpList values);
+
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                   TSLoweringContext* loctx) const override;
+};
+
 }  // namespace lazy
 }  // namespace torch
