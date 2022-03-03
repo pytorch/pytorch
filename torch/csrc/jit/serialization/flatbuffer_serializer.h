@@ -19,9 +19,12 @@ namespace jit {
 TORCH_API void save_mobile_module(
     const mobile::Module& module,
     const std::string& filename,
+    const ExtraFilesMap& extra_files = ExtraFilesMap(),
     const bool save_mobile_debug_info = false);
+
 TORCH_API flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
     const mobile::Module& module,
+    const ExtraFilesMap& extra_files = ExtraFilesMap(),
     const bool save_mobile_debug_info = false);
 
 } // namespace jit

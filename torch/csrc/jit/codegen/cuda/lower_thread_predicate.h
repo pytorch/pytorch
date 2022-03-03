@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
@@ -69,7 +69,7 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   ParallelTypeBitmap getPredicatedParallelTypes(const TensorView* tv) const;
 
   //! Returns a Bool predicate for a given TensorView.
-  kir::Bool* getPredicate(const TensorView* tv) const;
+  Bool* getPredicate(const TensorView* tv) const;
 
   //! Returns a ParallelTypeBitmap representing which domain needs
   //! blockBroadcast.
@@ -81,7 +81,7 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   void print() const;
 
   //! Generate a Bool value from PredicateInfo.
-  static kir::Bool* getPredicateFromPredicateInfo(
+  static Bool* getPredicateFromPredicateInfo(
       const ThreadPredicateMap::PredicateInfo& pred_info);
 
  private:
