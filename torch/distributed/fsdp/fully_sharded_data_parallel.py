@@ -256,7 +256,7 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fns=param_init_fns,
             )
 
-        self._rank0_print(f"Wrapping {module}")
+#        self._rank0_print(f"Wrapping {module}")
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
@@ -269,9 +269,9 @@ class FullyShardedDataParallel(nn.Module):
         is_meta_module = param_init_fns is not None
 
         if is_meta_module:
-            self._rank0_print(f"Got meta module {module}")
+#            self._rank0_print(f"Got meta module {module}")
             # Materialize the module first.
-            self._rank0_print(f"Materializing it on {torch.cuda.current_device()}")
+#            self._rank0_print(f"Materializing it on {torch.cuda.current_device()}")
 
             # Initialize parameters according to the user lambda.
             if param_init_fns is None:
