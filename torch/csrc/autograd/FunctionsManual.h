@@ -398,13 +398,6 @@ Tensor lu_factor_ex_jvp(
   const Tensor& pivs
 );
 
-Tensor _log_softmax_jvp(
-    const at::Tensor& self_p,
-    const at::Tensor& self_t,
-    int64_t dim,
-    bool half_to_float
-);
-
 Tensor batch_norm_jvp(
   const Tensor& input_p, const Tensor& input_t,
   const Tensor& weight_p, const Tensor& weight_t,
