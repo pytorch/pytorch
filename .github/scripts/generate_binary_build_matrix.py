@@ -16,7 +16,7 @@ from typing import Dict, List, Tuple
 CUDA_ARCHES = ["10.2", "11.3", "11.5"]
 
 
-ROCM_ARCHES = ["4.3.1", "4.5.2"]
+ROCM_ARCHES = ["4.5.2", "5.0"]
 
 
 def arch_type(arch_version: str) -> str:
