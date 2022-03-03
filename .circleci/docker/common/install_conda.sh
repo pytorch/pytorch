@@ -97,8 +97,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin SciPy because of failing distribution tests (see #60347)
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-  as_jenkins pip install --progress-bar off boto3==1.16.34 \
-    hypothesis==4.53.2 \
+  # as_jenkins pip install --progress-bar off boto3==1.16.34 \
+  #   hypothesis==4.53.2 \
     #pytest \
     #scipy==1.6.3 \
     #scikit-image \
