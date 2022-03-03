@@ -1146,7 +1146,7 @@ class TestDecompositionOpInfo(TestCase):
                     for orig, decomp, ref in zip(real_out, decomp_out, real_out_double):
                         orig = orig.to(dtype=TEST_DTYPE)
                         decomp = decomp.to(dtype=TEST_DTYPE)
-                        if DO_RELATIVE_CHECK:
+                        if DO_RELATIVE_CHECK and ref.dtype.is_floating_point:
                             op_assert_ref(func, orig, decomp, ref, arg_string)
                         else:
                             op_assert_equal(func, orig, decomp, arg_string)
