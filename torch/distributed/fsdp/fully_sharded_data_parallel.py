@@ -283,6 +283,8 @@ class FullyShardedDataParallel(nn.Module):
             else:
                 assert callable(param_init_fns)
                 param_init_fns(module)
+            
+            torch.cat([p.detach().reshape(-1) for p in module.parameters()])
 
 
         # device for computation, if module is on GPU, use module.device;

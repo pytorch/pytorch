@@ -11,6 +11,9 @@ import torch.nn as nn
 def always_wrap_policy(*args, **kwargs) -> bool:
     return True
 
+def wrap_if_annotated(module: nn.Module, *args, **kwargs) -> bool:
+    return getattr(module, '_should_wrap', False)
+
 def default_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
@@ -143,6 +146,8 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
             ConfigAutoWrap.wrapper_cls,
             **wrap_overrides,
         )
+    else:
+        module._should_wrap = True
     return module
 
 
