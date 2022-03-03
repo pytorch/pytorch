@@ -32,7 +32,7 @@ class OpOverload:
         self._op = op
         self._schema = schema
         self._overloadpacket = overloadpacket
-        self.__name__ = 'default' if schema.overload_name is '' else schema.overload_name
+        self.__name__ = 'default' if schema.overload_name == '' else schema.overload_name
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
@@ -48,7 +48,7 @@ class OpOverload:
         return getattr(self._op, key)
 
     def __hash__(self):
-      return hash(self._op)
+        return hash(self._op)
 
     # `my_namespace.my_op_name.overload_name`
     @property
@@ -83,7 +83,7 @@ class OpOverloadPacket:
         return "OpOverloadPacket(op='{}.{}')".format(*self._qualified_op_name.split("::"))
 
     def __hash__(self):
-      return hash(self._op)
+        return hash(self._op)
 
     @property
     def qualified_op_name(self):
