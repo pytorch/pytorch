@@ -47,9 +47,9 @@ OP_TEMPLATE = CT.from_file(
 
 try:
     # use faster C loader if available
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore[misc]
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
 
 
 def write(filename, s):

@@ -173,7 +173,7 @@ def run_clang_tidy(options, line_filters, files):
 
         with open(options.config_file) as config:
             # Here we convert the YAML config file to a JSON blob.
-            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.FullLoader))]
+            command += ["-config", json.dumps(yaml.load(config, Loader=yaml.SafeLoader))]
     command += options.extra_args
 
     if line_filters:
