@@ -135,7 +135,7 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
             and the optional TorchScript Function signature
     """
     if isinstance(op, OpOverloadPacket) or isinstance(op, OpOverload):
-        op = op._op
+        op = op.op
     override = _manual_overrides.get(op)
     if override:
         return (override, None) if return_schemas else None
