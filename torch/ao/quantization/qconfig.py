@@ -285,7 +285,7 @@ def get_default_qconfig_dict(backend='fbgemm', version=0):
     qconfig_transpose = qconfig
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
     # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer. 
+    # per tensor supported observer.
     # see https://github.com/pytorch/pytorch/issues/47535
     if backend == "fbgemm":
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_observer)
