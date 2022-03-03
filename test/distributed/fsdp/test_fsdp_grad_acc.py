@@ -107,7 +107,7 @@ class TestGradAcc(FSDPTest):
                 point to prefetch the next layer's full parameters during the
                 backward pass, if at all.
         """
-        # Gradient accumulation without `no_sync()` is not currently compatible
+        # Gradient accumulation outside `no_sync()` is not currently compatible
         # with CPU offloading
         if cpu_offload.offload_params and \
                 any(not config.use_no_sync for config in configs):
@@ -145,7 +145,8 @@ class TestGradAcc(FSDPTest):
                 batches.append(tuple(permute_tensor(t) for t in batch))
             for (batch1, batch2) in itertools.combinations(batches, r=2):
                 for t1, t2 in zip(batch1, batch2):
-                    assert not torch.all(t1 == t2)
+                    assert not torch.all(t1 == t2), \
+                        "Check the test to make sure that batches are distinct"
 
             # Concatenate the batches along the given batch dimension
             concat_batch: Tuple[torch.Tensor, ...] = tuple(
@@ -205,8 +206,6 @@ class TestGradAcc(FSDPTest):
     @parametrize(
         "configs",
         [
-            _GradAccConfigs([_GradAccConfig(use_no_sync=True, num_iters=4)]),
-            _GradAccConfigs([_GradAccConfig(use_no_sync=False, num_iters=4)]),
             _GradAccConfigs([
                 _GradAccConfig(use_no_sync=True, num_iters=3),
                 _GradAccConfig(use_no_sync=False, num_iters=3),
@@ -236,18 +235,17 @@ class TestGradAcc(FSDPTest):
         """
         Tests gradient accumulation.
 
-        This exercises gradient accumulation using the ``no_sync()`` context
-        manager, without using the ``no_sync()`` context manager, and
-        interleaving using and not using the ``no_sync()`` context manager. For
-        the interleaving, we test the case where the final iteration before the
-        gradient synchronization is in the ``no_sync()`` context and the case
-        where it is not, which is why we have four elements in the ``configs``
-        list. This test also checks for compatibility with the CPU offload and
-        backward prefetch options.
+        This exercises gradient accumulation inside and outside the
+        ``no_sync()`` context manager, in particular by interleaving the two.
+        It tests both interleaving starting with (and ending with, resp.)
+        inside versus outside ``no_sync()`` to ensure that initial conditions
+        (and final conditions, resp.) do not affect the correctness. This test
+        also checks for compatibility with the CPU offload and backward
+        prefetch options.
 
         NOTE: Gradient accumulation without using the ``no_sync()`` context
         manager is not currently compatible with CPU offloading, so those tests
-        are skipped.
+        are vacuous.
         """
         self._test_grad_acc(
             batch_dim=1,
