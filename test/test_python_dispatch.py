@@ -111,7 +111,7 @@ $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                    if func.overload_packet == torch.ops.aten.split:
+                    if func.overloadpacket == torch.ops.aten.split:
                         with no_dispatch():
                             return list_type(torch.split(*args))
                     else:
@@ -376,7 +376,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if func.overload_packet.__name__ == "clone":
+                if func.overloadpacket.__name__ == "clone":
                     # Return a plain tensor from clone().
                     return args[0].elem.clone()
                 raise RuntimeError("NYI")
@@ -594,7 +594,7 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
                 # It prevents infinite recursion.
                 with no_dispatch():
                     rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-                if func.overload_packet.__name__ == "add":
+                if func.overloadpacket.__name__ == "add":
                     return None
                 else:
                     return rs

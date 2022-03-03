@@ -67,7 +67,7 @@ class LoggingTensor(torch.Tensor):
         # It prevents infinite recursion.
         with no_dispatch():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.name}", args, kwargs, rs)
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{str(func)}", args, kwargs, rs)
         return rs
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
