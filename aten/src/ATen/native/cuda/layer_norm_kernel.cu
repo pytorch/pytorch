@@ -11,6 +11,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -636,8 +637,8 @@ void launch_vectorized_layer_norm_kernel(
 ) {
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
-    const int num_threads = 128;
-    const dim3 threads(C10_WARP_SIZE,num_threads/C10_WARP_SIZE,1);
+    const int warp_size = at::cuda::warp_size();
+    const dim3 threads(warp_size, num_threads() / warp_size, 1);
     const dim3 blocks(M);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
@@ -739,10 +740,10 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const int num_threads = 128;
+    const int warp_size = at::cuda::warp_size();
     const dim3 blocks(M);
-    int nshared = (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);
-    layer_norm_grad_input_kernel<<<blocks, num_threads, nshared, cuda_stream>>>(dY_data,
+    int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
+    layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
     X_data, mean_data, rstd_data, gamma_data, dX_data, N);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }

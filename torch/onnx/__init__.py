@@ -304,6 +304,19 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             particular types of modules to export as local functions in ONNX.
             This feature requires ``opset_version`` >= 15, otherwise the export will fail. This is because
             ``opset_version`` < 15 implies IR version < 8, which means no local function support.
+            Module variables will be exported as function attributes. There are two categories of function
+            attributes.
+
+            1. Annotated attributes: class variables that have type annotations via
+            `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_
+            will be exported as attributes.
+            Annotated attributes are not used inside the subgraph of ONNX local function because
+            they are not created by PyTorch JIT tracing, but they may be used by consumers
+            to determine whether or not to replace the function with a particular fused kernel.
+
+            2. Inferred attributes: variables that are used by operators inside the module. Attribute names
+            will have prefix "inferred::". This is to differentiate from predefined attributes retrieved from
+            python module annotations. Inferred attributes are used inside the subgraph of ONNX local function.
 
             * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
