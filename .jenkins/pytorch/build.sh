@@ -169,7 +169,7 @@ if [ -z "$MAX_JOBS" ]; then
 fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST="5.2"
+export TORCH_CUDA_ARCH_LIST="6.1"
 
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"

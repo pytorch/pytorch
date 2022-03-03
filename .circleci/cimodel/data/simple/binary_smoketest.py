@@ -164,7 +164,7 @@ WORKFLOW_DATA = [
         is_master_only=True,
         requires=["binary_linux_manywheel_3_7m_cu102_devtoolset7_build"],
         extra_props={
-            "resource_class": "gpu.medium",
+            "resource_class": "gpu.nvidia.small",
             "use_cuda_docker_runtime": miniutils.quote((str(1))),
         },
     ),
