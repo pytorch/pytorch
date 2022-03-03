@@ -10676,6 +10676,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
@@ -10684,6 +10685,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
+           supports_forward_ad=True,
            supports_out=False),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -14203,6 +14205,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
            assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
@@ -15334,6 +15338,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
         supports_out=False),
     OpInfo(
         '_masked.log_softmax',

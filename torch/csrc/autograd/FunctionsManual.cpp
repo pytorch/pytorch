@@ -5220,6 +5220,19 @@ Tensor _log_softmax_jvp(
   }
 }
 
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  auto self_p_exp = self_p.exp();
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  if (areAnyTensorSubclassLike({self_p, self_t}) || self_t._is_zerotensor()) {
+    return (self_p_exp * self_t).sum(dim, keepdim) / sumexp_p;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
+  }
+}
+
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
