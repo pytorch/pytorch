@@ -87,10 +87,10 @@
           cnnConvolutionDescriptorWithKernelWidth:kW
                                      kernelHeight:kH
                              inputFeatureChannels:iC
-                            outputFeatureChannels:oC
-                                     neuronFilter:neuron];
-
+                            outputFeatureChannels:oC];
+        
       desc.groups = 1;
+      desc.neuron = neuron;
     } else {
       TORCH_CHECK(
           false,
