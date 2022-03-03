@@ -11,7 +11,6 @@ graph {
     output: "5"
     output: "6"
     op_type: "ATen"
-    domain: "org.pytorch.aten"
     attribute {
       name: "include_last_offset"
       i: 0
@@ -42,6 +41,7 @@ graph {
       i: 0
       type: INT
     }
+    domain: "org.pytorch.aten"
   }
   name: "torch_jit"
   initializer {
@@ -100,10 +100,49 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 1
+            dim_param: "ATen3_dim_0"
           }
           dim {
-            dim_value: 8
+            dim_param: "ATen3_dim_1"
+          }
+        }
+      }
+    }
+  }
+  value_info {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_param: "ATen4_dim_0"
+          }
+        }
+      }
+    }
+  }
+  value_info {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_param: "ATen5_dim_0"
+          }
+        }
+      }
+    }
+  }
+  value_info {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: 7
+        shape {
+          dim {
+            dim_param: "ATen6_dim_0"
           }
         }
       }
@@ -112,4 +151,8 @@ graph {
 }
 opset_import {
   version: 9
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
 }

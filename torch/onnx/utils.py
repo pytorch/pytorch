@@ -940,7 +940,7 @@ def _newNode(g, opname, outputs, *args, **kwargs):
         aten = False
         ns_opname = opname
     else:
-        aten = kwargs.pop("aten", False) or opname == "ATen"
+        aten = kwargs.pop("aten", False)
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
     n = g.create(ns_opname, args, outputs)
@@ -1012,7 +1012,7 @@ def _block_op(b, opname, *args, **kwargs):
         aten = False
         ns_opname = opname
     else:
-        aten = kwargs.pop("aten", False) or opname == "ATen"
+        aten = kwargs.pop("aten", False)
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
     n = b.addNode(ns_opname, list(args))
@@ -1138,7 +1138,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 # Generate an ONNX ATen op node.
 def _aten_op(g, operator_name, *args, overload_name="", **kwargs):
-    return g.op("ATen", *args, operator_name_s=operator_name, overload_name_s=overload_name, **kwargs)
+    return g.op("ATen", *args, aten=True, operator_name_s=operator_name, overload_name_s=overload_name, **kwargs)
 
 
 # This helper function can create either constant tensor or constant scalar.
@@ -1221,6 +1221,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
+            print(f'register_custom_op_symbolic op_name={op_name}, ns={ns}, version={version}')
             sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
 

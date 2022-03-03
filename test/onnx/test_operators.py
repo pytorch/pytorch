@@ -339,7 +339,7 @@ class TestOperators(TestCase):
             def forward(self, x):
                 return MyFun.apply(x)
 
-        self.assertONNX(MyModule(), x)
+        self.assertONNX(MyModule(), x, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
     def test_clip(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -953,7 +953,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("org.pytorch.aten::ATen", weight, indices, name_s='aten::embedding',
+            output = g.at("embedding", weight, indices,
                           custom_attributes_json_s=custom_attributes_json)
             return output
 
@@ -989,7 +989,7 @@ class TestOperators(TestCase):
                 f'"sparse":{str(sparse).lower()}'
                 '}'
             )
-            output = g.op("org.pytorch.aten::ATen", weight, indices, name_s='aten::embedding',
+            output = g.at("embedding", weight, indices,
                           custom_attributes_json_s=custom_attributes_json)
 
             # do shape inference and set it via setType
@@ -1015,7 +1015,8 @@ class TestOperators(TestCase):
         x = torch.ones(32, dtype=torch.long)
         y = torch.randn(1, 8)
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=['input_1', 'input_2'],
-                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}})
+                        dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}},
+                        operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
 
