@@ -10709,6 +10709,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
+        supports_forward_ad=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -14497,6 +14498,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
+        supports_forward_ad=True,
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
@@ -14505,6 +14507,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
+        supports_forward_ad=True,
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
@@ -15349,6 +15352,7 @@ op_db: List[OpInfo] = [
                          'TestMasked', 'test_reference_masked'),
         ],
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
         supports_out=False),
     OpInfo(
         '_masked.softmin',
@@ -15430,6 +15434,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
+        supports_forward_ad=True,
         decorators=[
             # FIXME: Derivative wrt. weight not implemented
             DecorateInfo(unittest.expectedFailure, "TestCommon",

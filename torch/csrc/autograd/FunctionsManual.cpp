@@ -5200,6 +5200,26 @@ Tensor lu_factor_ex_jvp(
   }
 }
 
+Tensor _log_softmax_jvp(
+    const at::Tensor& self_p,
+    const at::Tensor& self_t,
+    int64_t dim,
+    bool half_to_float
+) {
+  // TODO: how to deal with half_to_float?
+  auto self_p_exp = self_p.exp();
+  auto sumexp_p = self_p_exp.sum(dim, true);
+
+  if (areAnyTensorSubclassLike({self_p, self_t}) || self_t._is_zerotensor()) {
+    return self_t - (self_p_exp * self_t).sum(dim, true) / sumexp_p;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, true);
+    sumexp_t /= sumexp_p;
+    return self_t - sumexp_t;
+  }
+}
+
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
