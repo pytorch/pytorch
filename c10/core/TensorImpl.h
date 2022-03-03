@@ -2247,9 +2247,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   int64_t compute_numel() const {
     int64_t n = 1;
+    bool overflow = false;
     for (auto s : sizes()) {
+#if defined(_MSC_VER) || defined(C10_ANDROID) || defined(C10_IPHONE)
       n *= s;
+#else
+      overflow |= __builtin_mul_overflow(n, s, &n);
+#endif
     }
+    TORCH_CHECK(overflow == false, "int64 overflow while computing numel");
     return n;
   }
 
