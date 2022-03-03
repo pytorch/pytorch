@@ -321,6 +321,7 @@ class GitHubPR:
 
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
+        approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
@@ -337,11 +338,14 @@ class GitHubPR:
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
+                approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo)
 
             repo.cherry_pick(rev)
-            repo.amend_commit_message(re.sub(RE_GHSTACK_SOURCE_ID, "", msg))
+            msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
+            msg += f"\nApproved by: {', '.join(approved_by)}\n"
+            repo.amend_commit_message(msg)
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
@@ -351,6 +355,7 @@ class GitHubPR:
         if not self.is_ghstack_pr():
             msg = self.get_title() + "\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+            msg += f"Approved by: {', '.join(self.get_approved_by())}\n"
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)

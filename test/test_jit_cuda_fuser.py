@@ -11,7 +11,7 @@ import operator
 import torch
 from torch.nn import functional
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
@@ -351,7 +351,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_broadcasting_2(self):
 
         def t(x: torch.Tensor, y: torch.Tensor, z: float):
@@ -393,7 +392,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_broadcasting_partition_logic_0(self):
 
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
@@ -416,7 +414,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_broadcasting_partition_logic_1(self):
 
         def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
@@ -523,7 +520,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_unary_ops(self):
         data_types = [
             *self.int_types,
@@ -1110,7 +1106,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_binary_ops_permutation(self):
         # note that num_dim is exclusive from len(x), so we are not reducing
         # to single element (codegen limitation at this moment)
@@ -1226,7 +1221,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_layer_norm_autodiff(self):
         def t_wb(shapes: List[int], x, w, b, eps: float, cudnn: bool):
             o = torch.layer_norm(x, shapes, w, b, eps, cudnn)
@@ -1329,7 +1323,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_native_layer_norm(self):
         dims = 4
         rnds = 3
@@ -1344,7 +1337,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_native_layer_norm_half(self):
         dims = 4
         rnds = 3
@@ -1419,7 +1411,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_norm_channels_last(self):
         size = [3, 4, 5, 6]
 
@@ -1432,7 +1423,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_norm(self):
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
@@ -1450,7 +1440,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_norm_large(self):
         output_elements = 262144
         channel_sizes = 67, 457, 1024
@@ -1467,7 +1456,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_norm_half(self):
         output_elements = 10000
         channel_sizes = [67, 457, 1024, 4096]
@@ -1530,7 +1518,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_softmax_dtype(self):
         def t(x: torch.Tensor, y: torch.Tensor):
             o = torch.mul(x, y)
@@ -1621,7 +1608,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_softmax(self):
         output_size = 10000
         dims = 4
@@ -1638,7 +1624,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_softmax_half(self):
         output_size = 10000
         dims = 4
@@ -1725,7 +1710,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_channels_last_with_broadcast(self):
         # setting this true forces a new graph to be generated with a new
         # input a different broadcast shape
@@ -1989,7 +1973,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_profiling_node(self):
         dtype = torch.float
         device = "cuda"
@@ -2006,7 +1989,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_reduction_sizes_op(self):
         dtype = torch.float
         device = "cuda"
@@ -2031,7 +2013,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_profile_ivalue(self):
         dtype = torch.float
         device = "cuda"
@@ -2055,7 +2036,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_sum_to_size(self):
         dtype = torch.float
         device = "cuda"
@@ -2090,7 +2070,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_grad_sum_to_size(self):
         dtype = torch.float
         device = "cuda"
@@ -2150,7 +2129,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_dropout_inference_fusion(self):
         dtype = torch.float
         device = "cuda"
@@ -2168,7 +2146,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_dropout_train_nograd_fusion(self):
         dtype = torch.float
         device = "cuda"
@@ -2186,7 +2163,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_dropout_train_nograd_prob_check(self):
         dtype = torch.float
         device = "cuda"
@@ -2218,7 +2194,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_dropout_training_fusion(self):
         dtype = torch.float
         device = "cuda"
@@ -2250,7 +2225,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_gelu(self):
         old_guard = torch._C._jit_set_nvfuser_guard_mode(True)
         dtype = torch.float
@@ -2271,7 +2245,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_dropout_training_prob_check(self):
         dtype = torch.float
         device = "cuda"
@@ -2305,7 +2278,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_linear(self):
         in_feature = 2
         out_feature = 8
@@ -2331,7 +2303,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_backward_type(self):
         # not super useful to check gradient of integer/bool, so skipping here
         type_pairs = [
@@ -2375,7 +2346,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_autocast_1(self):
         def t(x: torch.Tensor, y: torch.Tensor):
             o = x * 2.0
@@ -2413,7 +2383,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_autocast_2(self):
         def t(x: torch.Tensor):
             o = x * 2.0
@@ -2451,7 +2420,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_autocast_1_bfloat(self):
         def t(x: torch.Tensor, y: torch.Tensor):
             o = x * 2.0
@@ -2490,7 +2458,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     @unittest.skipIf(not TEST_BF16, "device does not support BFloat16")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_autocast_2_bfloat(self):
         def t(x: torch.Tensor):
             o = x * 2.0
@@ -2746,7 +2713,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(CUDA_MAJOR < 11, "requires CUDA11 or above")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_graph_rng(self):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         size = 10000
@@ -2903,9 +2869,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    # @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_batch_norm_half(self):
-        print("is nvfuser enabled? ", torch._C._jit_nvfuser_enabled())
         with torch.backends.cudnn.flags(enabled=True):
             setups = [
                 [True, True],
@@ -2920,7 +2884,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_batch_norm_impl_index_correctness(self):
         with torch.backends.cudnn.flags(enabled=True):
             batch = [2, 7, 16]
@@ -2945,7 +2908,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_softplus_fuser(self):
         def shifted_softplus(x: torch.Tensor, shift: float):
             return functional.softplus(x) - shift
@@ -2972,7 +2934,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_inplace_removal(self):
         def t(x: torch.Tensor):
             o = torch.nn.functional.softmax(x, dim=0)
@@ -2993,7 +2954,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_conv2d_bias(self):
         def t(x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor):
             o = torch.nn.functional.conv2d(x, w, bias)
@@ -3104,7 +3064,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_linear_1d_weight_mismatch_bias_dtype(self):
         def t(x: torch.Tensor, w: torch.Tensor, b: torch.Tensor):
             o = torch.nn.functional.linear(x, w, b)
@@ -3145,7 +3104,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_sibling_fusion(self):
         device = "cuda"
         dtype = torch.float
@@ -3387,7 +3345,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_view(self):
         torch._C._jit_set_nvfuser_guard_mode(True)
         self._bias_view_relu_helper([2, 3, 4, 5], [-1, 4, 5], torch.float, 'cuda', 1e-6)
@@ -3517,7 +3474,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_alias_pass_fix(self):
         x = torch.randn(4, 24, 2, 2, dtype=torch.float, device="cuda")
         w = torch.randn(24, 24, 1, 1, dtype=torch.float, device="cuda")
@@ -3583,7 +3539,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    @unittest.skipIf(IS_WINDOWS, "Failing windows test - see 73620")
     def test_build_shape_expression_native_dropout(self):
         x = torch.randn(4, 2, device="cuda")
 

@@ -301,9 +301,6 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
 
-  std::cerr << " RegisterCudaFuseGraph::isRegistered() : "
-            << RegisterCudaFuseGraph::isRegistered()
-            << std::endl;
   if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
     // With TE fuser or nvfuser, we don't generate bailouts
     LowerGradOf(*graph);
