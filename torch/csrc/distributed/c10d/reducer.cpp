@@ -1724,8 +1724,7 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(
-      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+  initialize_buckets(std::move(rebuilt_bucket_indices));
 
   return true;
 }
