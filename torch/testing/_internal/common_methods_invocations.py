@@ -14313,6 +14313,7 @@ op_db: List[OpInfo] = [
            backward_dtypes=floating_types(),
            backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
+           supports_sparse_csr=True,
            check_batched_grad=False,
            check_batched_gradgrad=False,
            skips=(
@@ -14325,6 +14326,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
+               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
+                            'TestSparseCSR', 'test_sparse_csr_consistency'),
            )
            ),
     OpInfo('logcumsumexp',
