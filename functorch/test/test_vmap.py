@@ -34,7 +34,7 @@ import types
 from collections import namedtuple
 
 import functorch
-from functorch import vmap, grad
+from functorch import vmap, grad, grad_and_value, jvp, vjp, jacrev, jacfwd
 from functorch._C import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
@@ -3662,6 +3662,38 @@ class TestVmapOperatorsOpInfo(TestCase):
                     assert torch.allclose(vmap_result[i], expected)
 
 
+class TestTransformFailure(TestCase):
+    @parametrize('transform', [vmap, grad, grad_and_value, vjp, jvp, jacrev, jacfwd])
+    def test_fails_with_autograd_function(self, device, transform):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(_, input):
+                return input
+
+            @staticmethod
+            def backward(_, grad_input):
+                return grad_input
+
+        def f(x):
+            return Test.apply(x)
+
+        if transform == grad or transform == grad_and_value:
+            input = torch.tensor(4.)
+        else:
+            input = torch.randn(5)
+
+        if transform == vjp:
+            transform = functools.partial(transform, f)
+        elif transform == jvp:
+            input = (input,)
+            transform = functools.partial(transform, f, input)
+        else:
+            transform = transform(f)
+
+        with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
+            transform(input)
+
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
 
@@ -3670,6 +3702,7 @@ instantiate_device_type_tests(
     globals(),
     only_for=only_for,
 )
+instantiate_device_type_tests(TestTransformFailure, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
