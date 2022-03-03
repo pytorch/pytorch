@@ -109,9 +109,9 @@ class Tensor(torch._C._TensorBase):
                     else:
                         raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
                     # TODO: Once we decide to break serialization FC, no longer
-                    # need to wrap with TypedStorage
+                    # need to wrap with _TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        torch.storage.TypedStorage(
+                        torch.storage._TypedStorage(
                             wrap_storage=new_storage._untyped(),
                             dtype=self.dtype),
                         self.storage_offset(),
@@ -232,9 +232,9 @@ class Tensor(torch._C._TensorBase):
             else:
                 raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
+            # need to wrap with _TypedStorage
             args_qtensor = (
-                torch.storage.TypedStorage(
+                torch.storage._TypedStorage(
                     wrap_storage=self.storage()._untyped(),
                     dtype=self.dtype),
                 self.storage_offset(),
@@ -267,9 +267,9 @@ class Tensor(torch._C._TensorBase):
             return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
         else:
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
+            # need to wrap with _TypedStorage
             args = (
-                torch.storage.TypedStorage(
+                torch.storage._TypedStorage(
                     wrap_storage=self.storage()._untyped(),
                     dtype=self.dtype),
                 self.storage_offset(),
@@ -830,9 +830,9 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
-        # NB: this returns old fashioned TypedStorage, e.g., FloatStorage, as it
+        # NB: this returns old fashioned _TypedStorage, e.g., FloatStorage, as it
         # would be pretty pointless otherwise (it would always return
-        # UntypedStorage)
+        # _UntypedStorage)
         return type(self.storage())
 
     def refine_names(self, *names):

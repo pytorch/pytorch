@@ -243,6 +243,14 @@ TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
         c = inp.reshape(shape)
         return (a, b, c)
   )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            y = x.reshape(x.shape)
+        else:
+            y = x.clone()
+        return y.clone()
+  )JIT");
 }
 
 TEST(
@@ -289,7 +297,6 @@ TEST(
         return (d)
   )JIT");
   ExpectNotToReplaceWithCopy(reshape_inplace_script);
-  ExpectNotToReplaceWithCopy(reshape_inplace_script_1);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {

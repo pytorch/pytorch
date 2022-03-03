@@ -61,6 +61,7 @@ def run_as_if_on_trunk() -> bool:
     return current_workflow_triggered_by_label
 
 def main() -> None:
+    INCLUDE_DEFAULT_TEST = True
     TEST_RUNNER_TYPE = os.getenv('TEST_RUNNER_TYPE')
     assert TEST_RUNNER_TYPE is not None
     RUN_SMOKE_TESTS_ONLY_ON_PR = os.getenv('RUN_SMOKE_TESTS_ONLY_ON_PR')
@@ -97,6 +98,7 @@ def main() -> None:
         configs['backwards_compat'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if os.getenv('ENABLE_XLA_TEST'):
         configs['xla'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
+        INCLUDE_DEFAULT_TEST = False
     if os.getenv('ENABLE_NOARCH_TEST'):
         configs['noarch'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if RUN_SMOKE_TESTS:
@@ -110,6 +112,7 @@ def main() -> None:
                 'runner': TEST_RUNNER_TYPE,
             }
             for shard in range(1, NUM_TEST_SHARDS + 1)
+            if INCLUDE_DEFAULT_TEST
         ] + [
             {
                 'config': name,

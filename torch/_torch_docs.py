@@ -1041,7 +1041,7 @@ CPU device, and not share its memory.
     :func:`torch.frombuffer` creates a tensor that always shares memory from objects that
            implement the buffer protocol.
 
-    :func:`torch.utils.dlpack.from_dlpack` creates a tensor that always shares memory from
+    :func:`torch.from_dlpack` creates a tensor that always shares memory from
            DLPack capsules.
 
 Args:

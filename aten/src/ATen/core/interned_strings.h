@@ -45,6 +45,10 @@ namespace c10 {
   _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
   _(prim, add_optional)              \
+  _(prim, view_copy)                 \
+  _(prim, reshape_copy)              \
+  _(prim, squeeze_copy)              \
+  _(prim, unsqueeze_copy)            \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \

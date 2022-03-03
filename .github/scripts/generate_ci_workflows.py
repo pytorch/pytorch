@@ -625,9 +625,8 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         enable_noarch_test=1,
-        enable_xla_test=1,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
         ),
     ),
     CIWorkflow(
@@ -655,6 +654,22 @@ LINUX_WORKFLOWS = [
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_SLOW_GRADCHECK, LABEL_CIFLOW_SLOW, LABEL_CIFLOW_SCHEDULED},
         ),
     ),
+]
+
+XLA_WORKFLOWS = [
+    CIWorkflow(
+        arch="linux",
+        build_environment="pytorch-xla-linux-bionic-py3.7-clang8",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/xla_base",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        distributed_test=False,
+        enable_xla_test=1,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
+        ),
+    ),
+
 ]
 
 ANDROID_SHORT_WORKFLOWS = [
@@ -832,7 +847,6 @@ MACOS_WORKFLOWS = [
 ]
 
 DOCKER_IMAGES = {
-    f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9",  # for pytorch/xla
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.3.1-py3.7",               # for rocm
     f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",                 # for rocm
 }
@@ -1023,6 +1037,7 @@ def main() -> None:
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
