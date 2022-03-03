@@ -4,7 +4,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
-from torch.nn.quantized.modules.utils import ReferenceableQuantizedModule
+from torch.nn.quantized.modules.utils import WeightedQuantizedModule
 from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
@@ -175,8 +175,7 @@ def is_dequantize_node(node):
     return isinstance(node, Node) and node.op == 'call_method' and node.target == 'dequantize'
 
 # Mapping from reference module class to the replacement quantized module class for lowering
-# TODO: fix typing, the key is reference module
-LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]] = {
+LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
@@ -203,7 +202,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement quantized module class for lowering
-LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[ReferenceableQuantizedModule]]] = {
+LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU)
 }
 
@@ -254,7 +253,7 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
                     continue
             else:
                 q_class = LOWER_MODULE_MAP[type(ref_module)]
-            assert issubclass(q_class, ReferenceableQuantizedModule)  # suppress mypy warnings
+            assert issubclass(q_class, WeightedQuantizedModule)  # suppress mypy warnings
             q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
 
             # replace reference module with quantized module
