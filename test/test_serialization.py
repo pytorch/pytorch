@@ -869,6 +869,9 @@ class TestWrapperSubclass(torch.Tensor):
         r.elem = elem
         return r
 
+    def clone(self):
+        return type(self)(self.elem.clone())
+
 
 class TestGetStateSubclass(torch.Tensor):
     elem: torch.Tensor

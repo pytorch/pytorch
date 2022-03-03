@@ -26,6 +26,7 @@
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "macos-10-15-py3-arm64",
@@ -33,11 +34,9 @@
       "macos-11-py3-x86-64",
       "parallelnative-linux-xenial-py3.7-gcc5.4",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
-      "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
       "periodic-linux-bionic-cuda11.5-py3.7-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
-      "periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
-      "periodic-win-vs2019-cuda11.1-py3",
+      "periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug",
       "periodic-win-vs2019-cuda11.5-py3",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
@@ -98,6 +97,7 @@
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "parallelnative-linux-xenial-py3.7-gcc5.4",
@@ -114,11 +114,9 @@
       "linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
-      "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
       "periodic-linux-bionic-cuda11.5-py3.7-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
-      "periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
-      "periodic-win-vs2019-cuda11.1-py3",
+      "periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug",
       "periodic-win-vs2019-cuda11.5-py3",
       "win-vs2019-cuda11.3-py3"
     ],
@@ -138,6 +136,7 @@
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "macos-arm64-binary-conda",
@@ -168,8 +167,8 @@
     "ciflow/libtorch": [
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
-      "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
-      "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7"
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
+      "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7"
     ],
     "ciflow/linux": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
@@ -189,14 +188,14 @@
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "parallelnative-linux-xenial-py3.7-gcc5.4",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
-      "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
       "periodic-linux-bionic-cuda11.5-py3.7-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
-      "periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
+      "periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
@@ -215,7 +214,8 @@
     ],
     "ciflow/mobile": [
       "linux-xenial-py3-clang5-mobile-build",
-      "linux-xenial-py3-clang5-mobile-custom-build-static"
+      "linux-xenial-py3-clang5-mobile-custom-build-static",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build"
     ],
     "ciflow/noarch": [
       "linux-bionic-py3.7-clang9"
@@ -236,11 +236,9 @@
       "ios-12-5-1-arm64-metal",
       "linux-docs-push",
       "periodic-libtorch-linux-bionic-cuda11.5-py3.7-gcc7",
-      "periodic-libtorch-linux-xenial-cuda11.1-py3.7-gcc7",
       "periodic-linux-bionic-cuda11.5-py3.7-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
-      "periodic-linux-xenial-cuda11.1-py3.7-gcc7-debug",
-      "periodic-win-vs2019-cuda11.1-py3",
+      "periodic-linux-xenial-cuda11.3-py3.7-gcc7-debug",
       "periodic-win-vs2019-cuda11.5-py3"
     ],
     "ciflow/slow": [
@@ -270,6 +268,7 @@
       "linux-xenial-py3.7-clang7-asan",
       "linux-xenial-py3.7-clang7-onnx",
       "linux-xenial-py3.7-gcc5.4",
+      "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
       "linux-xenial-py3.7-gcc7",
       "linux-xenial-py3.7-gcc7-no-ops",
       "macos-10-15-py3-arm64",
@@ -287,7 +286,6 @@
       "linux-vulkan-bionic-py3.7-clang9"
     ],
     "ciflow/win": [
-      "periodic-win-vs2019-cuda11.1-py3",
       "periodic-win-vs2019-cuda11.5-py3",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3"
