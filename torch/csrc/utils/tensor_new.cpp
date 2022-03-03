@@ -297,7 +297,7 @@ Tensor internal_new_from_data(
       Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
           "Expected a Storage of type ", scalar_type,
-          " or an UntypedStorage, but got ", storage_scalar_type);
+          " or an _UntypedStorage, but got ", storage_scalar_type);
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
       tensor.set_(storage);
 
@@ -534,7 +534,7 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
       TORCH_CHECK(
         storage_scalar_type == scalar_type,
         "Expected a Storage of type ", scalar_type,
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
     }
     return new_with_storage(options, scalar_type, storage);
@@ -596,7 +596,7 @@ Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_ty
       TORCH_CHECK(
         storage_scalar_type == scalar_type,
         "Expected a Storage of type ", scalar_type,
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
     }
     return new_with_storage(options, scalar_type, storage);

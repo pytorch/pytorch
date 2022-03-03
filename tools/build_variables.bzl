@@ -1,5 +1,16 @@
+# WARNING: the contents of this file must BOTH be valid Starlark (for Buck and
+
+# Bazel) as well as valid Python (for our cmake build).  This means that
+# load() directives are not allowed (as they are not recognized by Python).
+# If you want to fix this, figure out how run this file from cmake with a proper
+# Starlark interpreter as part of the default OSS build process.  If you need
+# some nontrivial Starlark features, make a separate bzl file (remember that
+
+# bzl files are not exported via ShipIt by default, so you may also need to
+# update PyTorch's ShipIt config)
+
 # In both open-source and fbcode builds, these are generated into
-# torch/csrc/{autgrad,jit}/generated.i
+# torch/csrc/{autograd,jit}/generated.i
 GENERATED_CPP = [
     "autograd/generated/Functions.cpp",
     "autograd/generated/VariableType_0.cpp",
@@ -213,6 +224,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/operator_upgraders/utils.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders_entry.cpp",
+    "torch/csrc/jit/passes/add_if_then_else.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
@@ -393,6 +405,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/multi_wait.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/core/shape_inference.cpp",
     "torch/csrc/lazy/core/tensor.cpp",
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
@@ -448,9 +461,11 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
     "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/debug.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/exception.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
+    "torch/csrc/distributed/c10d/logging.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
@@ -950,6 +965,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
+    "aten/src/ATen/NestedTensorImpl.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
     "aten/src/ATen/ParallelNative.cpp",
     "aten/src/ATen/ParallelNativeTBB.cpp",
@@ -1050,6 +1066,10 @@ aten_cpu_source_non_codegen_list = [
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
+]
+
+aten_ufunc_headers = [
+    "aten/src/ATen/native/ufunc/add.h",
 ]
 
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
@@ -1167,7 +1187,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/library.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
-    "aten/src/ATen/native/attention.cpp",
     "aten/src/ATen/native/Activation.cpp",
     "aten/src/ATen/native/AdaptiveAveragePooling.cpp",
     "aten/src/ATen/native/AdaptiveAveragePooling3d.cpp",
@@ -1289,6 +1308,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/WeightNorm.cpp",
     "aten/src/ATen/native/group_norm.cpp",
     "aten/src/ATen/native/layer_norm.cpp",
+    "aten/src/ATen/native/nested/NestedTensorMath.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
     "aten/src/ATen/native/sparse/SparseBlas.cpp",
@@ -1328,7 +1348,9 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/cuda/CUDASparseBlas.cpp",
     "aten/src/ATen/cuda/CublasHandlePool.cpp",
     "aten/src/ATen/native/cuda/Activation.cpp",
+    "aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp",
     "aten/src/ATen/native/cuda/Blas.cpp",
+    "aten/src/ATen/native/cuda/Distributions.cpp",
     "aten/src/ATen/native/cuda/Equal.cpp",
     "aten/src/ATen/native/cuda/GridSampler.cpp",
     "aten/src/ATen/native/cuda/IndexKernel.cpp",
