@@ -333,7 +333,7 @@ namespace ADInplaceOrView {
   Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      return at::alias(self);
+      return at::_ops::alias::redispatch(ks & c10::after_ADInplaceOrView_keyset, self);
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     if (!self.unsafeGetTensorImpl()->support_as_strided()) {
@@ -352,7 +352,7 @@ namespace ADInplaceOrView {
   Tensor _make_dual(c10::DispatchKeySet ks, const Tensor & primal, const Tensor & tangent, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      return at::alias(primal);
+      return at::_ops::alias::redispatch(ks & c10::after_ADInplaceOrView_keyset, primal);
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
