@@ -10,7 +10,7 @@ from torch.distributed._shard.sharding_spec._internals import (
     validate_non_overlapping_shards_metadata,
 )
 
-from ..metadata import ShardMetadata
+from torch.distributed._shard.metadata import ShardMetadata
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
 

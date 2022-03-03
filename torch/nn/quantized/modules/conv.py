@@ -12,7 +12,7 @@ import torch.nn.intrinsic.qat as nniqat
 from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _single, _pair, _triple
-from torch.nn.quantized.modules.utils import _quantize_weight, ReferenceableQuantizedModule
+from torch.nn.quantized.modules.utils import _quantize_weight, WeightedQuantizedModule
 from torch.nn.utils import fuse_conv_bn_weights
 
 _SUPPORTED_PADDING = {
@@ -29,7 +29,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
             _reversed_padding_repeated_twice.append(padding[N - idx - 1])
     return _reversed_padding_repeated_twice
 
-class _ConvNd(ReferenceableQuantizedModule):
+class _ConvNd(WeightedQuantizedModule):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
