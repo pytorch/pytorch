@@ -9,6 +9,7 @@
 
 #include <tuple>
 #include <ATen/ATen.h>
+#include <torch/library.h>
 #include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
 #include <ATen/native/quantized/packed_params.h>
 
@@ -18,6 +19,9 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
 
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>{orig_weight, bias};
 }
+
+template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightCudnn<
+    2>::unpack();
 
 #endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED

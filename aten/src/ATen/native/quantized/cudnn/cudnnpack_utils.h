@@ -1,49 +1,35 @@
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+
+#if AT_CUDNN_ENABLED()
+
+#include <ATen/native/cudnn/Macros.h>
+
+#if HAS_CUDNN_V8()
+
 #include <ATen/native/quantized/packed_params.h>
 
 template <int kSpatialDim = 2>
 struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
-      std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w,
+      at::Tensor orig_weight,
       c10::optional<at::Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
-    //   torch::List<int64_t> output_padding,
+      torch::List<int64_t> output_padding,
       torch::List<int64_t> dilation,
       int64_t groups,
-    //   uint8_t transpose,
-    //   std::vector<int32_t> col_offsets,
-    //   std::vector<int64_t> kernel,
-      std::vector<float> w_scale,
-      std::vector<int32_t> w_zp,
+      bool transpose,
       c10::QScheme q_scheme)
-      : w(std::move(w)),
+      : orig_weight(std::move(orig_weight)),
         bias(std::move(bias)),
         stride_(std::move(stride)),
         padding_(std::move(padding)),
-        // output_padding_(std::move(output_padding)),
+        output_padding_(std::move(output_padding)),
         dilation_(std::move(dilation)),
         groups_(groups),
-        // transpose_(transpose),
-        // col_offsets(std::move(col_offsets)),
-        // kernel(std::move(kernel)),
-        w_scale(std::move(w_scale)),
-        w_zp(std::move(w_zp)),
+        transpose_(transpose),
         q_scheme(q_scheme) {}
-
-  std::unique_ptr<fbgemm::PackWeightsForConv<kSpatialDim>> w;
-  c10::optional<at::Tensor> bias;
-  torch::List<int64_t> stride_;
-  torch::List<int64_t> padding_;
-  torch::List<int64_t> output_padding_;
-  torch::List<int64_t> dilation_;
-  int64_t groups_;
-  uint8_t transpose_;
-  std::vector<int32_t> col_offsets;
-  std::vector<int64_t> kernel;
-  std::vector<float> w_scale;
-  std::vector<int32_t> w_zp;
-  c10::QScheme q_scheme;
-  double requantize_multiplier;
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -57,7 +43,17 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
 
   at::Tensor apply_dynamic(
     const at::Tensor& input,
-    bool reduce_range) override;
+    bool reduce_range)
+  {
+    TORCH_CHECK(false, "apply_dynamic is currently not reported");
+  }
+
+  at::Tensor apply_dynamic_relu(
+    const at::Tensor& input,
+    bool reduce_range)
+  {
+    TORCH_CHECK(false, "apply_dynamic_relu is currently not reported");
+  }
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
@@ -100,13 +96,35 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   }
 
   bool transpose() const override {
-    return (bool)transpose_;
+    return transpose_;
   }
 
  private:
+  at::Tensor orig_weight;
+  c10::optional<at::Tensor> bias;
+  torch::List<int64_t> stride_;
+  torch::List<int64_t> padding_;
+  torch::List<int64_t> output_padding_;
+  torch::List<int64_t> dilation_;
+  int64_t groups_;
+  bool transpose_;
+  std::vector<int64_t> kernel;
+  c10::QScheme q_scheme;
+
   template <bool ReluFused>
   at::Tensor apply_impl(
       const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point);
+
+  template <bool ReluFused>
+  void apply_impl_helper(
+      const at::Tensor& quantized_output,
+      const at::Tensor& input,
+      double bias_multiplier,
+      double requantize_multiplier);
 };
+
+#endif  // HAS_CUDNN_V8
+#endif  // AT_CUDNN_ENABLED
+#endif  // USE_CUDA

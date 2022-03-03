@@ -12,12 +12,14 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <torch/library.h>
 #include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/library.h>
 
 #include <c10/util/irange.h>
+#include <iostream>
 
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
@@ -62,7 +64,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
   const int output_channels = transpose ? weight.size(1) * groups
                                         : weight.size(0);
   const auto qtype = weight.qscheme();
-
   if (bias.has_value()) {
     TORCH_CHECK(bias.value().dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
@@ -73,16 +74,82 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     // bias_contig = bias->contiguous();
   }
 
-  return c10::make_intrusive<PackedConvWeightCudnn<kSpatialDim>>(
-          weight,
+  auto ret_ptr = c10::make_intrusive<PackedConvWeightCudnn<kSpatialDim>>(
+          weight.contiguous(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think, so make it more general?
           bias,
           stride,
           padding,
           output_padding,
           dilation,
           groups,
+          transpose,
           qtype);
+  return ret_ptr;
 }
+
+// template struct PackedConvWeightCudnn<2>;
+template
+c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightCudnn<
+    2>::
+    prepack(
+        at::Tensor weight,
+        c10::optional<at::Tensor> bias_in,
+        torch::List<int64_t> stride,
+        torch::List<int64_t> padding,
+        torch::List<int64_t> output_padding,
+        torch::List<int64_t> dilation,
+        int64_t groups,
+        bool transpose);
+
+namespace at {
+namespace native {
+namespace {
+
+template <int kSpatialDim = 2>
+class QConvPackWeightInt8Cudnn final {
+ public:
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_conv(
+      Tensor weight,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups) {
+    torch::List<int64_t> output_padding;
+    output_padding.reserve(kSpatialDim);
+    for (const auto idx : c10::irange(kSpatialDim)) {
+      (void)idx; //Suppress unused variable warning
+      output_padding.push_back((int64_t)0);
+    }
+    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+                /*transpose=*/false);
+  }
+
+ private:
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> _run(
+      Tensor weight,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      bool transpose) {
+    return PackedConvWeightCudnn<kSpatialDim>::prepack(
+        weight, bias, stride, padding, output_padding, dilation, groups,
+        transpose);
+  }
+};
+
+TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
+  // Conv
+  // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8Cudnn<2>::run_conv));
+}
+
+} // namespace
+} // namespace native
+} // namespace at
 
 #endif  // HAS_CUDNN_V8
 #endif  // AT_CUDNN_ENABLED
