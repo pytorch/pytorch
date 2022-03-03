@@ -1390,13 +1390,14 @@ class FullyShardedDataParallel(nn.Module):
                     p_assert(
                         param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
                         "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
-                        f"existing shape={param._saved_grad_shard.shape} "
-                        f"new shape={output.shape}"  # type: ignore[attr-defined]
+                        f"existing grad shape={param._saved_grad_shard.shape} "
+                        f"new grad shape={output.shape}"  # type: ignore[attr-defined]
                     )
                     p_assert(
-                        not self.cpu_offload.offload_params,
-                        "FSDP does not support gradient accumulation outside "
-                        "`no_sync()` while using CPU offloading"
+                        param._saved_grad_shard.device == output.device,  # type: ignore[attr-defined]
+                        "Device mismatch when accumulating gradients: "  # type: ignore[attr-defined]
+                        f"existing grad device={param._saved_grad_shard.device} "
+                        f"new grad device={output.device}"  # type: ignore[attr-defined]
                     )
                     param._saved_grad_shard.data += output.data  # type: ignore[attr-defined]
                 else:
