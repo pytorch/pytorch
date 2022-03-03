@@ -252,9 +252,28 @@ class NaiveTypePropagator {
         copyScalarTypeAndDeviceToOutput(getInputTensorType(node, 0), node);
         break;
       }
-      case aten::_batch_norm_impl_index_backward: {
+      case aten::_batch_norm_impl_index_backward:
+      case aten::native_batch_norm_backward: {
+        int grad_input_index = 1;
+        int weight_index = -1;
+        int mask_index = -1;
+        if (node->kind() ==
+            c10::Symbol::fromQualString(
+                "aten::_batch_norm_impl_index_backward")) {
+          weight_index = 3;
+          mask_index = 10;
+        } else if (
+            node->kind() ==
+            c10::Symbol::fromQualString("aten::native_batch_norm_backward")) {
+          weight_index = 2;
+          mask_index = 9;
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              false, "unidentified node kind", node->kind().toDisplayString());
+        }
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-        auto out_mask_list = constant_as<c10::List<bool>>(node->input(10));
+        auto out_mask_list =
+            constant_as<c10::List<bool>>(node->input(mask_index));
         TORCH_INTERNAL_ASSERT(
             out_mask_list.has_value(),
             "Missing output mask for batch_norm_backward");

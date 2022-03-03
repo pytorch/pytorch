@@ -38,6 +38,7 @@ constexpr auto kNumBinaryOpsWithAlpha = 6;
 constexpr auto kNumLerpOps = 2;
 constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
+constexpr auto kNumBatchnormBwd = 2;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
 constexpr auto kNumAutocastOps = 2;
@@ -1540,162 +1541,208 @@ class IrParser {
     }
 
     {
-      auto ptr_op = getOperatorForLiteral(
-          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)");
-      REGISTER_PARSE_RULE(
-          ptr_op,
-          {
-            // discard impl_index and reservedSpace since we don't use them
-            MemoryFormat format;
-            std::list<Val*> list_val;
-            std::tie(format, list_val) = getConsistentValues(
-                c10::nullopt,
-                value_map[node->inputs()[1]->unique()],
-                value_map[node->inputs()[2]->unique()]);
-            if (format.hasPermutation() && !format.isChannelsLast()) {
+      std::array<const char*, kNumBatchnormBwd> BatchNormBwd = {
+          "aten::_batch_norm_impl_index_backward(int impl_index, Tensor input, Tensor grad_output, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var_transform, bool train, float eps, bool[3] output_mask, Tensor reservedSpace) -> (Tensor, Tensor, Tensor)",
+          "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)"};
+      for (auto signature : BatchNormBwd) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              JitValue* ts_input = nullptr;
+              JitValue* ts_grad_output;
+              JitValue* ts_weight = nullptr;
+              JitValue* ts_r_mean = nullptr;
+              JitValue* ts_r_var = nullptr;
+              JitValue* ts_save_mean = nullptr;
+              JitValue* ts_save_invstd = nullptr;
+              JitValue* ts_train = nullptr;
+              JitValue* ts_eps = nullptr;
+              JitValue* ts_mask = nullptr;
+              if (node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::_batch_norm_impl_index_backward")) {
+                ts_input = node->input(1);
+                ts_grad_output = node->input(2);
+                ts_weight = node->input(3);
+                ts_r_mean = node->input(4);
+                ts_r_var = node->input(5);
+                ts_save_mean = node->input(6);
+                ts_save_invstd = node->input(7);
+                ts_train = node->input(8);
+                ts_eps = node->input(9);
+                ts_mask = node->input(10);
+              } else if (
+                  node->kind() ==
+                  c10::Symbol::fromQualString(
+                      "aten::native_batch_norm_backward")) {
+                ts_grad_output = node->input(0);
+                ts_input = node->input(1);
+                ts_weight = node->input(2);
+                ts_r_mean = node->input(3);
+                ts_r_var = node->input(4);
+                ts_save_mean = node->input(5);
+                ts_save_invstd = node->input(6);
+                ts_train = node->input(7);
+                ts_eps = node->input(8);
+                ts_mask = node->input(9);
+              } else {
+                TORCH_INTERNAL_ASSERT(
+                    false,
+                    "Forgot to register the key for BN variation: ",
+                    node->kind().toDisplayString());
+              }
+
+              // discard impl_index and reservedSpace since we don't use them
+              MemoryFormat format;
+              std::list<Val*> list_val;
               std::tie(format, list_val) = getConsistentValues(
-                  MemoryFormat::Contiguous(),
-                  value_map[node->inputs()[1]->unique()],
-                  value_map[node->inputs()[2]->unique()]);
-            }
-            auto operand0 = list_val.front();
-            list_val.pop_front();
-            auto operand1 = list_val.front();
-            list_val.pop_front();
-            auto input = operand0->as<TensorView>();
-            auto grad_out = operand1->as<TensorView>();
+                  c10::nullopt,
+                  value_map[ts_input->unique()],
+                  value_map[ts_grad_output->unique()]);
+              if (format.hasPermutation() && !format.isChannelsLast()) {
+                std::tie(format, list_val) = getConsistentValues(
+                    MemoryFormat::Contiguous(),
+                    value_map[ts_input->unique()],
+                    value_map[ts_grad_output->unique()]);
+              }
+              auto operand0 = list_val.front();
+              list_val.pop_front();
+              auto operand1 = list_val.front();
+              list_val.pop_front();
+              auto input = operand0->as<TensorView>();
+              auto grad_out = operand1->as<TensorView>();
 
-            TensorView* weight = nullptr;
-            if (!node->input(3)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              weight = value_map[node->input(3)->unique()]->as<TensorView>();
-            }
+              TensorView* weight = nullptr;
+              if (!ts_weight->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                weight = value_map[ts_weight->unique()]->as<TensorView>();
+              }
 
-            TensorView* running_mean = nullptr;
-            if (!node->input(4)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              running_mean =
-                  value_map[node->input(4)->unique()]->as<TensorView>();
-            }
+              TensorView* running_mean = nullptr;
+              if (!ts_r_mean->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                running_mean = value_map[ts_r_mean->unique()]->as<TensorView>();
+              }
 
-            TensorView* running_var = nullptr;
-            if (!node->input(5)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              running_var =
-                  value_map[node->input(5)->unique()]->as<TensorView>();
-            }
+              TensorView* running_var = nullptr;
+              if (!ts_r_var->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                running_var = value_map[ts_r_var->unique()]->as<TensorView>();
+              }
 
-            TensorView* save_mean = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (!node->input(6)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              TensorView* save_mean = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              save_mean = value_map[node->input(6)->unique()]->as<TensorView>();
-            }
+              if (!ts_save_mean->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                save_mean = value_map[ts_save_mean->unique()]->as<TensorView>();
+              }
 
-            TensorView* save_invstd = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (!node->input(7)->type()->isSubtypeOf(
-                    static_cast<c10::TypePtr>(NoneType::get()))) {
-              save_invstd =
-                  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-                  value_map[node->input(7)->unique()]->as<TensorView>();
-            }
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto training = constant_as<bool>(node->input(8));
-            TORCH_INTERNAL_ASSERT(
-                training.has_value(),
-                "The training (bool) parameter is required.");
-            const bool kTraining = training.value();
-
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            Val* eps_ptr = nullptr;
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            if (auto eps = constant_as<float>(node->input(9))) {
-              eps_ptr = IrBuilder::create<Double>(eps.value());
-            } else {
+              TensorView* save_invstd = nullptr;
               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-              eps_ptr = value_map[node->input(7)->unique()];
-            }
+              if (!ts_save_invstd->type()->isSubtypeOf(
+                      static_cast<c10::TypePtr>(NoneType::get()))) {
+                save_invstd =
+                    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                    value_map[ts_save_invstd->unique()]->as<TensorView>();
+              }
 
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-            auto out_mask_list = constant_as<c10::List<bool>>(node->input(10));
-            TORCH_INTERNAL_ASSERT(
-                out_mask_list.has_value(),
-                "output mask for batch_norm_backward");
-            std::vector<bool> output_mask;
-            for (const auto value : out_mask_list->vec()) {
-              output_mask.emplace_back(static_cast<bool>(value));
-            }
-
-            // TODO: merge this loop below.
-            if (kTraining) {
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              auto training = constant_as<bool>(ts_train);
               TORCH_INTERNAL_ASSERT(
-                  save_mean != nullptr && save_invstd != nullptr,
-                  "When training=True, save_mean and save_invstd are required.");
-            } else {
-              // TODO: this is not a legit assumption? Can't we run with
-              // track_running_stats == false && training == false
-              // which should just run through the case above.
+                  training.has_value(),
+                  "The training (bool) parameter is required.");
+              const bool kTraining = training.value();
+
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              Val* eps_ptr = nullptr;
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              if (auto eps = constant_as<float>(ts_eps)) {
+                eps_ptr = IrBuilder::create<Double>(eps.value());
+              } else {
+                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+                eps_ptr = value_map[ts_eps->unique()];
+              }
+
+              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+              auto out_mask_list = constant_as<c10::List<bool>>(ts_mask);
               TORCH_INTERNAL_ASSERT(
-                  running_mean != nullptr && running_var != nullptr,
-                  "When training=False, running_mean and running_invstd are required.");
-            }
+                  out_mask_list.has_value(),
+                  "output mask for batch_norm_backward");
+              std::vector<bool> output_mask;
+              for (const auto value : out_mask_list->vec()) {
+                output_mask.emplace_back(static_cast<bool>(value));
+              }
 
-            auto grads = batch_norm_backward(
-                input,
-                grad_out,
-                weight,
-                running_mean,
-                running_var,
-                save_mean,
-                save_invstd,
-                kTraining,
-                eps_ptr,
-                output_mask,
-                format.isChannelsLast());
+              // TODO: merge this loop below.
+              if (kTraining) {
+                TORCH_INTERNAL_ASSERT(
+                    save_mean != nullptr && save_invstd != nullptr,
+                    "When training=True, save_mean and save_invstd are required.");
+              } else {
+                // TODO: this is not a legit assumption? Can't we run with
+                // track_running_stats == false && training == false
+                // which should just run through the case above.
+                TORCH_INTERNAL_ASSERT(
+                    running_mean != nullptr && running_var != nullptr,
+                    "When training=False, running_mean and running_invstd are required.");
+              }
 
-            if (output_mask[0]) {
-              TORCH_INTERNAL_ASSERT(grads.grad_input != nullptr);
-              value_map.emplace(
-                  node->output(0)->unique(),
-                  ValueHolder(grads.grad_input, format));
-            } else {
-              TORCH_INTERNAL_ASSERT(grads.grad_input == nullptr);
-              value_map.emplace(
-                  node->output(0)->unique(),
-                  ValueHolder(TensorViewBuilder().build(), format));
-            }
+              auto grads = batch_norm_backward(
+                  input,
+                  grad_out,
+                  weight,
+                  running_mean,
+                  running_var,
+                  save_mean,
+                  save_invstd,
+                  kTraining,
+                  eps_ptr,
+                  output_mask,
+                  format.isChannelsLast());
 
-            if (output_mask[1]) {
-              TORCH_INTERNAL_ASSERT(grads.grad_weight != nullptr);
-              value_map.emplace(node->output(1)->unique(), grads.grad_weight);
-            } else {
-              TORCH_INTERNAL_ASSERT(grads.grad_weight == nullptr);
-              value_map.emplace(
-                  node->output(1)->unique(), TensorViewBuilder().build());
-            }
+              if (output_mask[0]) {
+                TORCH_INTERNAL_ASSERT(grads.grad_input != nullptr);
+                value_map.emplace(
+                    node->output(0)->unique(),
+                    ValueHolder(grads.grad_input, format));
+              } else {
+                TORCH_INTERNAL_ASSERT(grads.grad_input == nullptr);
+                value_map.emplace(
+                    node->output(0)->unique(),
+                    ValueHolder(TensorViewBuilder().build(), format));
+              }
 
-            if (output_mask[2]) {
-              TORCH_INTERNAL_ASSERT(grads.grad_bias != nullptr);
-              value_map.emplace(node->output(2)->unique(), grads.grad_bias);
-            } else {
-              TORCH_INTERNAL_ASSERT(grads.grad_bias == nullptr);
-              value_map.emplace(
-                  node->output(2)->unique(), TensorViewBuilder().build());
-            }
-          },
-          [](const Node* node) -> bool {
-            if (isReductionNonCompatibleTensor(
-                    node->input(1)->type()->cast<TensorType>())) {
-              return false;
-            }
-            return true;
-          },
-          [](const Node* node) -> OperatorType {
-            return OperatorType::Normalization;
-          });
+              if (output_mask[1]) {
+                TORCH_INTERNAL_ASSERT(grads.grad_weight != nullptr);
+                value_map.emplace(node->output(1)->unique(), grads.grad_weight);
+              } else {
+                TORCH_INTERNAL_ASSERT(grads.grad_weight == nullptr);
+                value_map.emplace(
+                    node->output(1)->unique(), TensorViewBuilder().build());
+              }
+
+              if (output_mask[2]) {
+                TORCH_INTERNAL_ASSERT(grads.grad_bias != nullptr);
+                value_map.emplace(node->output(2)->unique(), grads.grad_bias);
+              } else {
+                TORCH_INTERNAL_ASSERT(grads.grad_bias == nullptr);
+                value_map.emplace(
+                    node->output(2)->unique(), TensorViewBuilder().build());
+              }
+            },
+            [](const Node* node) -> bool {
+              if (isReductionNonCompatibleTensor(
+                      node->input(1)->type()->cast<TensorType>())) {
+                return false;
+              }
+              return true;
+            },
+            [](const Node* node) -> OperatorType {
+              return OperatorType::Normalization;
+            });
+      }
     }
 
     {
@@ -2774,10 +2821,10 @@ class IrParser {
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
-    } else if (val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(StringType::get())) ||
-               val->type()->isSubtypeOf(
-                   static_cast<c10::TypePtr>(NoneType::get()))) {
+    } else if (
+        val->type()->isSubtypeOf(
+            static_cast<c10::TypePtr>(StringType::get())) ||
+        val->type()->isSubtypeOf(static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
       // String scalars are only used in parsing rules;
       // Do not register string with codegen IR.
@@ -3032,8 +3079,7 @@ void profileString(ProfilingRecord* pr, Node* node, size_t offset) {
       const auto& profiled_str = pn->s(strAttr);
       const auto& input_str = value.toStringRef();
       TORCH_INTERNAL_ASSERT(
-          input_str == profiled_str,
-          "profiling ivalue doesn't support merge");
+          input_str == profiled_str, "profiling ivalue doesn't support merge");
     }
     push(stack, value);
   };
@@ -3425,6 +3471,26 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
         break;
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       case 10:
+        profileBoolList(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+
+  static auto batch_norm_backward_schema =
+      getOperatorForLiteral(
+          "aten::native_batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_invstd, bool train, float eps, bool[3] output_mask) -> (Tensor, Tensor, Tensor)")
+          ->schema();
+  if (node->matches(batch_norm_backward_schema)) {
+    switch (offset) {
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      case 7: // argument 8: training;
+        profileBool(pr, node, offset);
+        break;
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      case 9:
         profileBoolList(pr, node, offset);
         break;
       default:

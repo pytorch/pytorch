@@ -93,8 +93,8 @@ Value* createConditionalConstant(Node* profile_ivalue) {
         static_cast<int>(profile_ivalue->i(Symbol::attr("profiled_int"))));
   } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_str"))) {
     // str
-    val = IValue(
-        static_cast<std::string>(profile_ivalue->s(Symbol::attr("profiled_str"))));
+    val = IValue(static_cast<std::string>(
+        profile_ivalue->s(Symbol::attr("profiled_str"))));
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_WARN(
