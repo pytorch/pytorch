@@ -7419,6 +7419,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(b.nelement(), 3 * 100 * 100)
         self.assertEqual(b.numel(), 3 * 100 * 100)
 
+    def test_empty_overflow(self):
+        with self.assertRaisesRegex(RuntimeError, "storage size calculation overflows"):
+            torch.zeros([2, 4, 536870912, 536870912], dtype=torch.float64)
+
     # Verifies that (deep)copies of dtypes are the same objects
     def test_copy_dtypes(self):
         for dtype in get_all_dtypes(include_complex32=True):

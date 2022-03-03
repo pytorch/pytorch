@@ -13,6 +13,13 @@ static c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   return c10::GetCPUAllocator();
 }
 
+static size_t checked_size_bytes(size_t size, size_t itemsize_bytes) {
+  constexpr auto int64_max = std::numeric_limits<int64_t>::max();
+  TORCH_CHECK(int64_max / itemsize_bytes > size,
+              "Tensor storage size calculation overflows");
+  return size * itemsize_bytes;
+}
+
 size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,
@@ -26,7 +33,7 @@ size_t computeStorageNbytes(
     }
     size += strides[i]*(sizes[i]-1);
   }
-  return size * itemsize_bytes;
+  return checked_size_bytes(size, itemsize_bytes);
 }
 
 TensorBase empty_generic(
@@ -39,7 +46,7 @@ TensorBase empty_generic(
 
   int64_t nelements = c10::multiply_integers(size);
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
-  int64_t size_bytes = nelements * dtype.itemsize();
+  size_t size_bytes = checked_size_bytes(nelements, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -73,7 +80,7 @@ TensorBase empty_strided_generic(
   at::detail::check_size_nonnegative(size);
 
   caffe2::TypeMeta dtype = scalarTypeToTypeMeta(scalar_type);
-  int64_t size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
+  size_t size_bytes = computeStorageNbytes(size, stride, dtype.itemsize());
   auto storage_impl = c10::make_intrusive<StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       size_bytes,

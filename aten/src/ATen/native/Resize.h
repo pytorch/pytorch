@@ -158,6 +158,12 @@ inline void setStrided(
     IntArrayRef stride,
     int64_t storage_offset) {
   TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
+  for (auto val : stride) {
+    TORCH_CHECK(val >= 0,
+                "as_strided: Negative strides are not supported at the moment, "
+                "got strides: ", stride);
+  }
+
   auto* self_ = self.unsafeGetTensorImpl();
   checkInBoundsForStorage(
       size, stride, storage_offset, self_->dtype(), self_->storage());
@@ -169,11 +175,6 @@ inline void setStrided(
   /* size and stride */
   if (self_->sizes() == size && self_->strides() == stride) {
     return;
-  }
-  for (auto val : stride) {
-    TORCH_CHECK(val >= 0,
-                "as_strided: Negative strides are not supported at the moment, "
-                "got strides: ", stride);
   }
   self_->set_sizes_and_strides(size, stride);
 }
