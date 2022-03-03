@@ -13,7 +13,8 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     """
     A simple wrapper policy that always returns ``True``,
     i.e. when passed as the `auto_wrap_policy` into FSDP,
-    this will result in all submodules being wrapped.
+    this will result in all submodules being wrapped as 
+    distinct FSDP instances.
     """
     return True
 
