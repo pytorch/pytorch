@@ -30,7 +30,7 @@ graph {
     name: "Add_3"
     op_type: "Add"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     data_type: 1
     name: "onnx::Mul_11"

@@ -13,6 +13,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Utils.hpp>
 #include <c10d/comm.hpp>
+#include <c10d/debug.h>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -109,10 +110,11 @@ C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_pt
 
 class TORCH_API Reducer {
  public:
-  // The constructor takes a list of variables for every model replica.
-  // The bucket assignment for this reducer is specified as a list of
-  // buckets, each of which is specified as a list of indices into the
-  // variables list for **a single replica** (i.e. `variables[0]`).
+  // The constructor takes a list of variables (i.e. parameters) for this
+  // process's single model replica (as DDP assumes single-process
+  // single-device). The bucket assignment for this reducer, `bucket_indices`,
+  // is specified as a list of buckets, each of which is specified as a list of
+  // indices into the bucket's `variables` list.
   explicit Reducer(
       std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
@@ -122,15 +124,15 @@ class TORCH_API Reducer {
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
-      std::unordered_map<size_t, std::string> paramNames,
+      std::unordered_map<size_t, std::string> param_names,
       int64_t first_bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
-  // To (re-)initialize bucket assignment, pass a list of buckets, each
-  // of which is specified by a list of indices in the variables list.
+  // To (re-)initialize bucket assignment, pass a list of buckets, each of
+  // which is specified by a list of indices in the bucket's `variables` list.
   // This function performs validation that the variables within a bucket
-  // all live on the same device and have the same dimensionality.
+  // have the same dtype and device.
   void initialize_buckets(
       std::vector<std::vector<size_t>> bucket_indices,
       std::vector<size_t> per_bucket_sizes);
@@ -311,7 +313,7 @@ class TORCH_API Reducer {
 
   void mark_bucket_ready(size_t bucket_index);
 
-  void finalize_bucket_dense(Bucket& replica);
+  void finalize_bucket_dense(Bucket& bucket);
 
   void finalize_backward();
 
@@ -344,117 +346,107 @@ class TORCH_API Reducer {
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
-  // A bucket replica represents [1..N] gradients to be reduced,
-  // with the same dtype, on the same device.
-  //
-  // Batching gradients together before reducing them can result in lower
-  // overhead and/or faster time to completion. Only gradients of the same type
-  // and on the same device can be batched. The tensor that represents the
-  // flattened gradient uses the same type and is placed on the same device.
-  // Buckets are filled as the gradients they hold are computed (triggered by
-  // autograd hooks). Buckets are reduced in a predetermined order that is
-  // identical across processes.
-  struct BucketReplica {
-    // Flattened (1 dimensional) contents of bucket.
-    at::Tensor contents;
+  // This function is called inside `initialize_buckets()`. It initializes both
+  // `bucket_views_in` and `bucket_views_out` with views for each variable's
+  // gradient into the bucket's flattened `gradients` tensor. Views serve as
+  // entry points to `copy_()` each grad's data in/out of the flattened
+  // `gradients` tensor.
+  void initialize_bucket_views(Bucket& bucket);
 
-    // Views into contents for each grad.  Each view will be created with
-    // layout (sizes + strides) matching the grad's expected layout
-    // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
-    // `bucket_views_in[i].copy_(grad)` and
-    // `grad.copy_(bucket_views_out[i])`
-    // provide convenient ways to move grad data in/out of contents.
-    // The reason we keep two states for bucket_views is that if DDP
-    // communication hook was registered, `bucket_views_out` could be
-    // re-initialized with the value of hook's `future_work`. We still need to
-    // keep a separate view reference to replica's original contents for
-    // `bucket_views_in[i].copy_(grad)` call.
+  // This function is called inside `finalize_backward`, it happens only if
+  // DDP communication hook was registered to recreate just bucket_views_out
+  // with the result of `future_work`.
+  void populate_bucket_views_out(Bucket& bucket, at::Tensor& tensor);
+
+  // If gradient_as_bucket_view_ is false, after allreduce buckets,
+  // copy bucket results back to grads.
+  void copy_bucket_to_grad(
+      at::Tensor& variable,
+      Reducer::Bucket& bucket,
+      size_t intra_bucket_index,
+      bool global_unused);
+  // Check layout of grad and bucket_view before copying the grad to bucket.
+  void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
+
+  // A bucket contains [1..N] gradients to be reduced, where the gradients
+  // have the same dtype and device.
+  // Coalescing gradients together before reducing can result in lower overhead
+  // and/or faster time to completion. Coalescing requires the constituent
+  // gradients to have the same dtype and device, and the resulting flattened
+  // tensor uses that common dtype and device. The flattened tensor is filled
+  // as the corresponding gradients are computed (triggered by autograd hooks),
+  // and the buckets are reduced in a predetermined order consistent across
+  // processes.
+  struct Bucket {
+    // Gradients of the bucket flattened into a 1-dimensional tensor
+    at::Tensor gradients;
+
+    // Views into the `gradients` tensor for each individual gradient
+    // Each view is created with layout (size and stride) matching the
+    // gradient's expected layout (see the "Gradient Layout Contract" in
+    // torch/csrc/autograd/functions/accumulate_grad.h).
+    // `bucket_views_in[i].copy_(grad)` and `grad.copy_(bucket_views_out[i])`
+    // provide convenient ways to copy gradient data in/out of `gradients`,
+    // respectively.
+    // We keep both `bucket_views_in` and `bucket_views_out` because
+    // registering a DDP communication hook may re-initialize
+    // `bucket_views_out` with the value of the hook's `future_work` but we
+    // still need separate views into the bucket's original flattened gradient
+    // to copy in gradient data.
     std::vector<at::Tensor> bucket_views_in;
     std::vector<at::Tensor> bucket_views_out;
 
-    // Variables that contribute to this bucket replica. Use refcounted value
-    // here so that we can easily unflatten the bucket contents into the
-    // participating variables after reduction has completed.
+    // Variables whose gradients are held in this bucket
+    // We use refcounted tensors here so that we can easily unflatten the
+    // bucket's flattened `gradients` tensor into the participating variables
+    // after reduction has completed.
     std::vector<at::Tensor> variables;
 
-    // Per-variable offset/length into the flat bucket contents tensor and grad
-    // bucket.
+    // Per-variable offset/length into the flattened `gradients` tensor and
+    // the corresponding `GradBucket` instance for communication hooks
     std::vector<size_t> offsets;
     std::vector<size_t> lengths;
 
-    // Per-variable sizes into the grad bucekt.
+    // Per-variable sizes slicing into the bucket's `gradients` tensor
     std::vector<c10::IntArrayRef> sizes_vec;
 
-    // Number of tensors to be added before this bucket is complete.
-    // This is reset to `variables.size()` every iteration.
+    // Number of gradients left to be computed before the bucket is ready to
+    // be reduced
     size_t pending;
+
+    // Global indices of participating variables in the bucket
+    std::vector<size_t> variable_indices;
+
+    // Future work handle for DDP communication hook
+    // If no hook is registered, a temporary vanilla allreduce hook is used.
+    c10::intrusive_ptr<at::ivalue::Future> future_work;
+
+    // If this bucket should expect a single sparse gradient
+    // If `true`, then this implies that `bucket.variables.size() == 1`.
+    bool expect_sparse_gradient = false;
+
+    // "Limit" of the cumulative gradient sizes that this bucket manages
+    // It is actually a soft limit because we do not shard parameter across
+    // buckets, so a single parameter may push the bucket size over the limit.
+    size_t bucket_size_limit;
 
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially
     // done on different CUDA streams. We record an event for every copy
     // so that we can synchronize with them prior to kicking off the reduction.
     // std::vector<at::cuda::CUDAEvent> events;
-  };
 
-  // This function is called inside `initialize_buckets`, it initializes both
-  // bucket_views_in and bucket_views_out into the contents tensor for each
-  // variable's grad. Views serve as entry points to copy_ each grad's data
-  // in/out of the flat contents tensor.
-  void initialize_bucket_views(BucketReplica& replica, at::Tensor& contents);
-
-  // This function is called inside `finalize_backward`, it happens only if
-  // DDP communication hook was registered to recreate just bucket_views_out
-  // with the result of `future_work`.
-  void populate_bucket_views_out(BucketReplica& replica, at::Tensor& tensor);
-
-  // If gradient_as_bucket_view_ is false, after allreduce buckets,
-  // copy bucket results back to grads.
-  void copy_bucket_to_grad(
-      at::Tensor& variable,
-      Reducer::BucketReplica& replica,
-      size_t intra_bucket_index,
-      bool global_unused);
-  // Check layout of grad and bucket_view before copying the grad to bucket.
-  void check_grad_layout(const at::Tensor& grad, const at::Tensor& bucket_view);
-
-  // A bucket holds N bucket replicas (1 per model replica).
-  //
-  // If every bucket in this struct is ready, the reduction can be kicked off.
-  // One bucket per replica. Reduction is kicked off when every bucket is ready.
-  //
-  struct Bucket {
-    std::vector<BucketReplica> replicas;
-
-    // Global indices of participating variables in the bucket
-    std::vector<size_t> variable_indices;
-
-    // Number of replicas to be marked done before this bucket is ready.
-    size_t pending;
-
-    // Keep future work handle around DDP comm hook.
-    // If no hook is registered, a temporary vanilla allreduce hook will be
-    // used.
-    c10::intrusive_ptr<at::ivalue::Future> future_work;
-
-    // If this bucket should expect a single sparse gradient.
-    // Implies: replicas[i].variables.size() == 1.
-    bool expect_sparse_gradient = false;
-    // "Limit" of cumulative parameter sizes that this bucket manages. It is
-    // actually a soft limit because we don't shard parameters across buckets
-    // so a single parameter may push it over the cap.
-    size_t bucket_size_limit;
   };
 
   std::vector<Bucket> buckets_;
 
-  // A variable locator locates a particular variable in the bucket
-  // structure. The `bucket_index` field points to the bucket in the `buckets_`
-  // vector. The `intra_bucket_index` field points to the index of the variable
-  // in any of the vector fields in the bucket replica.
+  // A variable locator locates a particular variable in the reducer's buckets
   struct VariableLocator {
-    // Index into the `buckets_` variable.
+    // Index of the bucket containing the variable in the `buckets_` vector
     size_t bucket_index;
-    // Index of parameter in single bucket replica.
+    // Index of the variable in the bucket, which may be used consistently
+    // across `bucket_views_in`, `bucket_views_out`, `variables`, `offsets`,
+    // `lengths`, `sizes_vec`, and `variable_indices` in `Bucket`
     size_t intra_bucket_index;
 
     VariableLocator() = default;
@@ -568,7 +560,7 @@ class TORCH_API Reducer {
   std::unique_ptr<CommHookInterface> comm_hook_;
   // Debug level setting. It is parsed once when Reducer is constructed, and
   // remains the same across a single invocation of DDP training.
-  DistributedDebugLevel ddp_debug_level_;
+  DebugLevel ddp_debug_level_;
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;

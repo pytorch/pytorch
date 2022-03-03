@@ -2,7 +2,10 @@
 
 import torch
 import torch.optim as optim
-import torch.distributed._shard.sharded_tensor
+from torch.distributed._shard import (
+    sharded_tensor,
+    shard_parameter
+)
 
 from copy import deepcopy
 from torch.distributed._shard.sharding_spec import (
@@ -77,8 +80,8 @@ class MyShardedLinear(torch.nn.Module):
             ],
         )
 
-        sharded_tensor.shard_parameter(self.linear1, "weight", rowwise_sharding_spec)
-        sharded_tensor.shard_parameter(self.linear2, "weight", colwise_sharding_spec)
+        shard_parameter(self.linear1, "weight", rowwise_sharding_spec)
+        shard_parameter(self.linear2, "weight", colwise_sharding_spec)
 
     def forward(self, inp):
         return self.linear2(self.gelu(self.linear1(inp)))

@@ -195,6 +195,7 @@ class _ObserverBase(ObserverBase):
             torch.qint8,
             torch.quint8,
             torch.quint4x2,
+            torch.qint32,
         ), "Default Observer only works for qint8, quint8 and quint4x2 data type"
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:

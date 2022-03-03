@@ -1,8 +1,4 @@
 #include <ATen/core/jit_type.h>
-#ifdef USE_VULKAN
-#include <ATen/native/vulkan/VulkanOpContext.h>
-#endif
-
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
