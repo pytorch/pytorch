@@ -69,6 +69,15 @@ class TestFSDPWrap(FSDPTest):
             return sequential
 
         @staticmethod
+        def verify_model_all_wrapped(cls, model):
+            cls.assertTrue(isinstance(model, FSDP))
+            cls.assertTrue(isinstance(model.module[0], FSDP))
+            cls.assertTrue(isinstance(model.module[1], FSDP))
+            cls.assertTrue(isinstance(model.module[2], FSDP))
+            cls.assertTrue(isinstance(model.module[2].module[0], FSDP))
+            cls.assertTrue(isinstance(model.module[2].module[1], FSDP))
+
+        @staticmethod
         def verify_model(cls, model):
             cls.assertTrue(isinstance(model, FSDP))
             cls.assertTrue(isinstance(model.module[0], nn.Linear))
@@ -264,9 +273,8 @@ class TestAutoWrap(TestCase):
         passed into FSDP, all submodules are wrapped.
         """
         seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
-        model = FSDP(sequential, process_group=self.process_group, fsdp_auto_wrap_policy=always_wrap_policy)
-        for mod in model.modules():
-            self.assertTrue(isinstance(mod, FSDP))
+        model = FSDP(seq, process_group=self.process_group, fsdp_auto_wrap_policy=always_wrap_policy)
+        TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
     def test_auto_wrap_api(self):
         """
