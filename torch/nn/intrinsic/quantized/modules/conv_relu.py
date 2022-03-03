@@ -56,6 +56,8 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU1d, \
+            "BatchNorm1d should be fused into Conv1d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
 class ConvReLU2d(nnq.Conv2d):
@@ -103,6 +105,8 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU2d, \
+            "BatchNorm2d should be fused into Conv2d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
 
@@ -157,4 +161,6 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU3d, \
+            "BatchNorm3d should be fused into Conv3d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
