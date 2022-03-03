@@ -3791,7 +3791,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model = LinearModel()
             quantized_module = nnqd.Linear if quant_type == QuantType.DYNAMIC else nnq.Linear
             quantized_node = ns.call_module(quantized_module)
-            self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
+            result_dict = self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
+            if quant_type in self.static_quant_types:
+                self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
 
         # Test linear-relu
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
@@ -3802,10 +3804,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         # Test linear-bn
         data = (torch.rand((4, 4), dtype=torch.float),)
-        for quant_type in [QuantType.STATIC, QuantType.QAT]:
+        for quant_type in self.static_quant_types:
             model = LinearBnModel()
             quantized_node = ns.call_module(nnq.Linear)
-            self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
+            result_dict = self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
+            self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
 
     @skipIfNoFBGEMM
     def test_functional_linear(self):
