@@ -84,7 +84,6 @@ class Conv2d(nn.Conv2d):
             return fused
         else:
             return conv
-        return conv
 
 class Conv3d(nn.Conv3d):
     r"""
@@ -198,4 +197,3 @@ class Conv3d(nn.Conv3d):
             return fused
         else:
             return conv
-        return conv
