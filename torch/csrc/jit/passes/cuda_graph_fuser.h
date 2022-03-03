@@ -29,5 +29,7 @@ struct C10_EXPORT RegisterCudaFuseGraph
   }
 };
 
+bool TORCH_API getIsNVFuserEnabled();
+
 } // namespace jit
 } // namespace torch

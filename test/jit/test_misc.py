@@ -224,3 +224,16 @@ class TestMisc(JitTestCase):
 
         self.assertTrue(torch.jit.script(sum_i)(4) == 8)
         self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
+
+    def test_nvfuser_settings(self):
+        default_setting = torch._C._jit_nvfuser_enabled()
+
+        torch._C._jit_set_nvfuser_enabled(True)
+        self.assertEqual(True, torch._C._jit_nvfuser_enabled())
+        self.assertEqual(True, torch._C._torchapi_nvfuser_enabled())
+
+        torch._C._jit_set_nvfuser_enabled(False)
+        self.assertEqual(False, torch._C._jit_nvfuser_enabled())
+        self.assertEqual(False, torch._C._torchapi_nvfuser_enabled())
+
+        torch._C._jit_set_nvfuser_enabled(default_setting)

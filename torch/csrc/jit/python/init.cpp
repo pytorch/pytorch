@@ -613,6 +613,7 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def("_torchapi_nvfuser_enabled", []() { return getIsNVFuserEnabled(); })
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
