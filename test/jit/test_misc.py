@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from torch.testing._internal.jit_utils import JitTestCase, make_global
+from torch.testing._internal.jit_utils import JitTestCase, make_global, RUN_CUDA
 from torch.testing import FileCheck
 from torch import jit
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
@@ -11,6 +11,7 @@ import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import unittest
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -225,6 +226,7 @@ class TestMisc(JitTestCase):
         self.assertTrue(torch.jit.script(sum_i)(4) == 8)
         self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
 
+    @unittest.skipIf(not RUN_CUDA, "restore device requires CUDA")
     def test_nvfuser_settings(self):
         default_setting = torch._C._jit_nvfuser_enabled()
 
