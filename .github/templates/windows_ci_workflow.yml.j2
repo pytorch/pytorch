@@ -19,7 +19,7 @@
 name: !{{ build_environment }}
 
 on:
-{%- if is_default %}
+{%- if on_pull_request %}
   pull_request:
 {%- endif %}
   push:
