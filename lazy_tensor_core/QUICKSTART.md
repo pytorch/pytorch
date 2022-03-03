@@ -25,3 +25,19 @@ If you want to debug it as well:
 ```bash
 export DEBUG=1
 ```
+
+To enable logging or any other gflags,
+
+* Recompile with `export BUILD_CAFFE2=1`
+* Run `pip install protobuf`
+* Add the following to your script:
+
+```python
+workspace.GlobalInit(
+    [
+        "--v=10", # enables verbose log of 10 and lower
+        "--minloglevel=0",
+        "--torch_lazy_use_thread_pool=false", # sets FLAGS_torch_lazy_use_thread_pool
+    ]
+)
+```
