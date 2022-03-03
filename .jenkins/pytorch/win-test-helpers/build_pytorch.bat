@@ -29,6 +29,8 @@ if errorlevel 1 exit /b
 if not errorlevel 0 exit /b
 
 call %INSTALLER_DIR%\install_miniconda3.bat
+if errorlevel 1 exit /b
+if not errorlevel 0 exit /b
 
 :: Install ninja and other deps
 if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
