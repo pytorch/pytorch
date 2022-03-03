@@ -5175,16 +5175,6 @@ class DistributedTest:
             # type if it didn't exist.
             self.assertEqual(ddp_logging_data.get("unused_parameter_size", 0), 0)
             self.assertEqual(ddp_logging_data.get("has_rebuilt_buckets"), 1)
-            init_bucket_lims = ddp_logging_data.get("initial_bucket_size_limits")
-            rebuilt_bucket_lims = ddp_logging_data.get("rebuilt_bucket_size_limits")
-            self.assertEqual(
-                int(init_bucket_lims),
-                dist._DEFAULT_FIRST_BUCKET_BYTES,
-            )
-            self.assertEqual(
-                int(rebuilt_bucket_lims),
-                dist._DEFAULT_FIRST_BUCKET_BYTES,
-            )
             self.assertEqual(
                 ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size)
             )
