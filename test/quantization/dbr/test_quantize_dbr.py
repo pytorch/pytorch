@@ -420,7 +420,7 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
     @unittest.skip("This works in DBR, but doesn't work anymore in fx graph mode after "
-    "the lowering refactor, we can discuss if we want to fix it")
+                   "the lowering refactor, we can discuss if we want to fix it")
     def test_fusion_called_multiple_times(self):
         """
         Tests that fusion works if the modules to fuse get called multiple
