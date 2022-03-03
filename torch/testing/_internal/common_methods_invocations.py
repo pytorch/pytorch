@@ -2588,6 +2588,7 @@ def sample_inputs_normal_tensor_first(self, device, dtype, requires_grad, **kwar
         ([3], [3], {}),
         ([3, 4, 2], [3, 4, 2], {}),
         ([2, 3], 1.1, {}),
+        ([1, 2, 3], [5, 2, 3], {}),  # broadcasting
     ]
 
     return sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs)
@@ -7091,16 +7092,6 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape),
                           args=(make_bool_mask(mask_shape), make_arg(other_shape)),
                           broadcasts_input=broadcasts_input)
-
-def error_inputs_where(op_info, device, **kwargs):
-    shape = (S,)
-    err_msg = "Expected all tensors to be on the same device"
-    for devices in product(('cpu', device), repeat=3):
-        if len(set(devices)) == 2:
-            si = SampleInput(make_tensor(shape, device=devices[0], dtype=torch.float32),
-                             args=(make_tensor(shape, dtype=torch.bool, device=devices[1]),
-                             make_tensor(shape, device=devices[2], dtype=torch.float32)))
-            yield ErrorInput(si, error_type=RuntimeError, error_regex=err_msg)
 
 def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -14335,6 +14326,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
+               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
+                            'TestSparseCSR', 'test_sparse_csr_consistency'),
            )
            ),
     OpInfo('logcumsumexp',
@@ -14531,12 +14525,9 @@ op_db: List[OpInfo] = [
            op=lambda self, condition, other: torch.where(condition, self, other),
            ref=lambda self, condition, other: np.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
-           error_inputs_func=error_inputs_where,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           decorators=(
-               DecorateInfo(onlyCUDA, "TestCommon", 'test_errors'),),
            skips=(
                # test does not work with passing lambda for op
                # AssertionError: False is not true :
@@ -15637,7 +15628,6 @@ unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
-sparse_csr_funcs = [op for op in op_db if op.supports_sparse_csr]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
