@@ -881,6 +881,15 @@ const auto i1e_string = jiterator_stringify(
   }
 ); // i1e_string
 
+const auto kaiser_window_string = i0_string + jiterator_stringify(
+  template <typename T>
+  T kaiser_window(T a, T inv_alpha, T beta, T inv_i0_beta) {
+    T x = a * inv_alpha - T{1};
+    T y = max(T{0}, T{1} - x * x);
+    return i0(beta * sqrt(y)) * inv_i0_beta;
+  }
+)
+
 const auto sinc_string = jiterator_stringify(
   template <typename T>
   T sinc(T a) {
