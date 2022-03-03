@@ -120,15 +120,7 @@ class TORCH_API Reducer {
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible. Returns true if the buckets were
-  // rebuilt.
+  // Returns true if the buckets were rebuilt.
   bool rebuild_buckets();
 
   void setSparseMetadata(std::map<std::string, at::Tensor>& metadata);
@@ -140,10 +132,25 @@ class TORCH_API Reducer {
       const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs);
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
-  // buckets once after the first iteration and never rebuild them if
-  // find_unused_parameters_.
+  // buckets once after the first iteration.
+  // We always rebuild bucket when find_unused_parameters=False, as graph is
+  // static when find_unused_parameters=False.
+  // There are two major cases when find_unused_parameters=True:
+  // 1. grad ready order does not change over iterations, in this case,
+  // enable rebuilt bucket after first iteration can potentially improve
+  // performance.
+  // 2. grad ready order changes over iterations, in this case,
+  // use static bucket order or dynamic bucket order in the first iteration
+  // does not matter much, as order changes per iteration. It will be expensive
+  // to rebuild bucket every iteration for this case though, as rebuilt bucket
+  // requires a broadcast collective call.
+  // So in default buckets are rebuilt when find_unused_parameters=True, but
+  // it could be disabled by setting os.environ["DISABLE_REBUILT_BUCKET"] = "1"
+  // if users want to disable this feature for debugging purpose.
   inline bool should_rebuild_buckets() const {
-    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
+    return (static_graph_ || !find_unused_parameters_ ||
+            (getCvarString({"DISABLE_REBUILT_BUCKET"}, "1") != "0")) &&
+        !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.

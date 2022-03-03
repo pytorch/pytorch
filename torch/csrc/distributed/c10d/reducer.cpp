@@ -921,7 +921,10 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+      // pushing unused parameters at the end of buckets for better performance.
+      // This code will be hit only for cases when static_graph_after_1st_iteration()
+      // is True or static_graph = False.
+      if (should_rebuild_buckets()) {
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
