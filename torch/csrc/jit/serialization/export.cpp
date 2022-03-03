@@ -657,7 +657,7 @@ void GraphEncoder::EncodeBlock(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(graph_proto != nullptr);
-  std::string block_name = "torch-jit-export";
+  std::string block_name = "torch_jit";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
   }

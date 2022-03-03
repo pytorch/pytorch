@@ -13,6 +13,7 @@ on:
       - 'ciflow/trunk/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -159,8 +160,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -327,8 +329,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -352,8 +356,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -580,8 +585,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -605,8 +612,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -851,8 +859,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1097,8 +1106,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1325,8 +1335,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1350,8 +1362,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1578,8 +1591,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1603,8 +1618,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1831,8 +1847,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1856,8 +1874,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2084,8 +2103,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -2109,8 +2130,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

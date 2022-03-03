@@ -5,6 +5,7 @@
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 {%- set timeout_minutes = 240 -%}
+{%- set win_test_timeout_minutes = 300 -%}
 
 # NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
 #       the binary builds will check out
@@ -40,11 +41,12 @@ concurrency:
 
 {%- macro parse_ref(pytorch_directory="") -%}
       - name: Parse ref
+        shell: bash
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
 {%- endif %}
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
 {%- endmacro -%}
 
 {%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="", needs_credentials=False) -%}
