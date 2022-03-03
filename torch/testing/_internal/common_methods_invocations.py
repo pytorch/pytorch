@@ -10697,6 +10697,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_jit_shape_analysis=False,
            assert_autodiffed=False,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('nn.functional.softmin',
            variant_test_name="with_dtype",
@@ -10704,6 +10705,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=False,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
@@ -15372,6 +15374,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
         supports_out=False),
     OpInfo(
         '_masked.normalize',
