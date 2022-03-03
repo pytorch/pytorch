@@ -17,11 +17,11 @@
                                  kernelHeight:params.KH
                          inputFeatureChannels:params.IC
                         outputFeatureChannels:params.OC];
-  if (@available(iOS 11.3, macOS 10.13.4, macCatalyst 13.0, *)) {
-    desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
-  } else {
-    desc.neuron = neuron;
-  }
+#if TARGET_OS_MACCATALYST
+  desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+#else
+  desc.neuron = neuron;
+#endif
   desc.strideInPixelsX = 1;
   desc.strideInPixelsY = 1;
 

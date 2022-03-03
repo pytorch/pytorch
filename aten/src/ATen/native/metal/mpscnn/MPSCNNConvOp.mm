@@ -87,10 +87,14 @@
           cnnConvolutionDescriptorWithKernelWidth:kW
                                      kernelHeight:kH
                              inputFeatureChannels:iC
-                            outputFeatureChannels:oC
-                                     neuronFilter:neuron];
+                            outputFeatureChannels:oC];
 
       desc.groups = 1;
+#if TARGET_OS_MACCATALYST
+      desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+#else
+      desc.neuron = neuron;
+#endif
     } else {
       TORCH_CHECK(
           false,
@@ -111,11 +115,11 @@
                              inputFeatureChannels:iC
                             outputFeatureChannels:oC];
       desc.groups = params.G;
-      if (@available(iOS 11.3, macOS 10.13.4, macCatalyst 13.0, *)) {
-        desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
-      } else {
-        desc.neuron = neuron;
-      }
+#if TARGET_OS_MACCATALYST
+      desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+#else
+      desc.neuron = neuron;
+#endif
     } else {
       TORCH_CHECK(
           false,

@@ -4,6 +4,10 @@
 @implementation MPSCNNNeuronOp
 
 + (MPSCNNNeuronHardSigmoid*)hardSigmoid API_AVAILABLE(ios(11.0), macos(10.13)) {
+// Remove this once we support iOS 11.3
+#if TARGET_OS_MACCATALYST
+  return nil;
+#else
   static dispatch_once_t onceToken;
   static MPSCNNNeuronHardSigmoid* neuron = nil;
   dispatch_once(&onceToken, ^{
@@ -13,9 +17,14 @@
                      b:0.5];
   });
   return neuron;
+#endif
 }
 
 + (MPSCNNNeuronReLU*)relu {
+// Remove this once we support iOS 11.3
+#if TARGET_OS_MACCATALYST
+  return nil;
+#else
   static MPSCNNNeuronReLU* relu = nil;
   static dispatch_once_t onceToken;
   dispatch_once(&onceToken, ^{
@@ -24,9 +33,14 @@
                      a:0];
   });
   return relu;
+#endif
 }
 
 + (MPSCNNNeuronSigmoid*)sigmoid {
+// Remove this once we support iOS 11.3
+#if TARGET_OS_MACCATALYST
+  return nil;
+#else
   static dispatch_once_t onceToken;
   static MPSCNNNeuronSigmoid* sigmoid = nil;
   dispatch_once(&onceToken, ^{
@@ -34,9 +48,14 @@
         initWithDevice:[MetalContext sharedInstance].device];
   });
   return sigmoid;
+#endif
 }
 
 + (MPSCNNNeuronTanH*)tanh {
+// Remove this once we support iOS 11.3
+#if TARGET_OS_MACCATALYST
+  return nil;
+#else
   static dispatch_once_t onceToken;
   static MPSCNNNeuronTanH* tanh = nil;
   dispatch_once(&onceToken, ^{
@@ -46,6 +65,7 @@
                      b:1];
   });
   return tanh;
+#endif
 }
 
 @end
