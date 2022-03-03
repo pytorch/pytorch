@@ -20,6 +20,24 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   unzip "$pkg" -d /tmp
   cd /tmp/libtorch
 elif [[ "$PACKAGE_TYPE" == conda ]]; then
+  # install dependencies before installing package
+  NUMPY_PIN=">=1.19"
+  if [[ "$DESIRED_PYTHON" == "3.9" ]]; then
+    NUMPY_PIN=">=1.20"
+  fi
+
+  retry conda install -y "numpy${NUMPY_PIN}" dataclasses typing-extensions future pyyaml six
+
+  cuda_ver="$DESIRED_CUDA"
+
+  # install cpuonly or cudatoolkit explicitly
+  if [[ "$cuda_ver" == 'cpu' ]]; then
+    retry conda install -c pytorch -y cpuonly
+  else
+    toolkit_ver="${cuda_ver:2:2}.${cuda_ver:4}"
+    retry conda install -y -c nvidia -c pytorch -c conda-forge "cudatoolkit=${toolkit_ver}"
+  fi
+  
   conda install -y "$pkg"
 else
   pip install "$pkg" -v
