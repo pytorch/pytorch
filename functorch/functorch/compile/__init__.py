@@ -1,5 +1,5 @@
 from .._src.operator_authoring import pointwise_operator
-from .._src.python_key import pythonkey_decompose, pythonkey_meta
+from .._src.python_key import pythonkey_decompose
 from .._src.decompositions import register_decomposition, decomposition_table
 from .._src.fx_minifier import minifier, check_nvfuser_subprocess
 from .._src.aot_autograd import (
