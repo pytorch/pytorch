@@ -1122,7 +1122,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return g.at(op_name, *inputs, aten=True, **attrs)
+            return g.at(op_name, *inputs, **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
@@ -1221,7 +1221,6 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
 
     for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
-            print(f'register_custom_op_symbolic op_name={op_name}, ns={ns}, version={version}')
             sym_registry.register_op(op_name, symbolic_fn, ns, version)
 
 

@@ -87,12 +87,10 @@ def is_registered_version(domain, version):
 
 
 def register_op(opname, op, domain, version):
-    print(f'domain opname={opname}, domain={domain}, version={version}')
     if domain is None or version is None:
         warnings.warn("ONNX export failed. The ONNX domain and/or version to register are None.")
     global _registry
     if not is_registered_version(domain, version):
-        print(' not registered in this (domain,version)')
         _registry[(domain, version)] = {}
     _registry[(domain, version)][opname] = op
 
