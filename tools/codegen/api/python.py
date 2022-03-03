@@ -602,10 +602,6 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         if str(t.elem) == 'Tensor':
             # Is it desired to keep '?' for simple_type with new style dispatcher?
             return 'Tensor?'
-        # int[]? resolves to a specialized OptionalIntArrayRef class
-        if isinstance(t.elem, ListType) and str(t.elem.elem) == 'int':
-            size = None if simple_type else t.elem.size
-            return f'OptionalIntArrayRef[{size}]' if size is not None else 'OptionalIntArrayRef'
         elem = argument_type_str(t.elem, simple_type=simple_type)
         if elem == 'Layout':
             # TODO: fix this special case in PythonArgParser?
