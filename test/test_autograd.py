@@ -7960,7 +7960,7 @@ class TestAutogradForwardMode(TestCase):
             fwAD.make_dual(torch.rand_like(s), s)
             self.assertEqual(counter[0], 2)
 
-    def test_make_dual_does_not_lose_autograd_information(self):
+    def test_make_dual_preserves_tangent_of_wrapped_tensor(self):
         class WrapperTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, e):
@@ -7970,33 +7970,21 @@ class TestAutogradForwardMode(TestCase):
 
             __torch_function__ = torch._C._disabled_torch_function_impl
 
-            def __str__(self):
-                return f'WrapperTensor({self.elem})'
-
-            def __repr__(self):
-                return str(self)
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore
                 def unwrap(e):
-                    if isinstance(e, WrapperTensor):
-                        return e.elem
-                    else:
-                        return e
+                    return e.elem if isinstance(e, WrapperTensor) else e
 
                 def wrap(e):
-                    if isinstance(e, torch.Tensor):
-                        return WrapperTensor(e)
-                    else:
-                        return e
+                    return WrapperTensor(e) if isinstance(e, torch.Tensor) else e
 
                 return tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
 
         primal = torch.tensor(1)
+        t1 = torch.tensor(2)
+        t2 = torch.tensor(3)
 
         with fwAD.dual_level():
-            t1 = torch.tensor(2)
-            t2 = torch.tensor(3)
             x = fwAD.make_dual(primal, t1)
             y = fwAD.make_dual(WrapperTensor(x), t2)
             self.assertTrue(fwAD.unpack_dual(y).tangent is t2)
