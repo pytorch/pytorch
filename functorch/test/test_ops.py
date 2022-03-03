@@ -1199,6 +1199,15 @@ class TestDecompositionOpInfo(TestCase):
             for op in get_names(run_decompositions):
                 f.write(f'{op}\n')
 
+
+    def test_decompositions_torchscriptable(self, device):
+        skip_list = []
+        for op, decomposition in decomposition_table.items():
+            if op in skip_list:
+                continue
+            f = torch.jit.script(decomposition)
+
+
     def test_group_norm_backward(self, device):
         # group norm will hit the decomposable ``infinitely_differentiable_group_norm_backward`` when
         # GradMode is on, which happens by default in the grad transform. This avoids that
