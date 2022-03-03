@@ -42,7 +42,6 @@ from .utils import (
     get_qconv_prepack_op,
     get_qconv_op,
     create_node_from_old_node_preserve_meta,
-    CONV_FUNCTIONAL_OPS,
 )
 
 from ..qconfig import QConfigAny
@@ -664,7 +663,12 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     self.conv_node)
         else:  # call_function
             assert self.conv_node.op == "call_function"
-            if is_reference or self.conv_node.target in CONV_FUNCTIONAL_OPS and\
+            conv_functional_ops = {
+                torch.nn.functional.conv1d,
+                torch.nn.functional.conv2d,
+                torch.nn.functional.conv3d,
+            }
+            if is_reference or self.conv_node.target in conv_functional_ops and\
                     dtypes in [(torch.quint8, torch.qint8, None)]:
                 # make sure the input and weight are quantized to torch.quint8, torch.qint8, respectively
                 load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)

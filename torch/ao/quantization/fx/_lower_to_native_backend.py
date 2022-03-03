@@ -20,13 +20,12 @@ from .utils import (
     get_new_attr_name_with_prefix,
     get_qconv_prepack_op,
     graph_module_from_producer_nodes,
-    CONV_FUNCTIONAL_OPS,
 )
 from ..utils import _parent_name
 from ..qconfig import QConfigAny
 from ..quantization_mappings import get_quantized_operator
 from .utils import create_node_from_old_node_preserve_meta
-from typing import Dict, Tuple, Type, List, Callable, Any, Union
+from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set
 from torch.fx import Node
 import operator
 
@@ -229,19 +228,25 @@ LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[Weight
 # Mapping from a functional to lower to a 2-tuple of
 #   1) The quantized version of the op
 #   2) The quantized version of the op fused with relu, if it exists, else None
-LOWER_FUNCTIONAL_MAP = {
+LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Callable]] = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
     F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
     F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
     F.conv3d: (torch.ops.quantized.conv3d, torch.ops.quantized.conv3d_relu),
 }
 
-WEIGHT_PREPACK_OPS = {
+WEIGHT_PREPACK_OPS: Set[Callable] = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv1d_prepack,
     torch._ops.ops.quantized.conv2d_prepack,
     torch._ops.ops.quantized.conv3d_prepack,
+}
+
+CONV_FUNCTIONAL_OPS: Set[Callable] = {
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
 }
 
 def fold_weight(
@@ -428,6 +433,8 @@ def _lower_weighted_ref_functional(
                     bias = func_node.args[2]
                 else:
                     bias = func_node.kwargs.get("bias", None)
+                # Use the right prepack op and prepare the corresponding args
+                prepack_args: Tuple[Any, ...] = ()
                 if ref_func == F.linear:
                     prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
                     prepack_args = (quantized_weight, bias)
