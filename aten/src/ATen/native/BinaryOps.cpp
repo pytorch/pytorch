@@ -232,10 +232,9 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
 namespace native {
 
-DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(add_clamp_stub);
-DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(div_true_stub);
 DEFINE_DISPATCH(div_floor_stub);
 DEFINE_DISPATCH(div_trunc_stub);
@@ -277,17 +276,10 @@ DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
 
-TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
-) {
-  add_stub(device_type(), *this, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
-}
-
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
-  sub_stub(device_type(), *this, alpha);
+  add_stub(device_type(), *this, -alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
