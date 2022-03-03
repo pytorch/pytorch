@@ -87,7 +87,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
 Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
   const auto in_shape = self.sizes();
   const auto ndim = static_cast<int64_t>(in_shape.size()) - 2;
-  TORCH_CHECK(padding.size() == ndim * 2,
+  TORCH_CHECK(padding.size() + 4 == in_shape.size() * 2,
               "Invalid padding size, expected ", ndim * 2, " but got ", padding.size());
 
   DimVector out_shape(in_shape.size());
