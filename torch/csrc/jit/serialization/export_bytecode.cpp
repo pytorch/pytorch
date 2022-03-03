@@ -362,14 +362,14 @@ mobile::Module jitModuleToMobile(
       backend_debug_info_map.begin(), backend_debug_info_map.end());
   m.setDebugTable(MobileDebugTable(
       debug_handle_cs_ptr_map.begin(), debug_handle_cs_ptr_map.end()));
-  auto backend_source_range_records = getBackendSourceRanges(module);
-  SourceRangeTagMap m_source_range_tags;
-  int64_t m_current_source_range_tag_ = 0;
-  updateSourceRangeTags(
-      backend_source_range_records,
-      m_source_range_tags,
-      &m_current_source_range_tag_);
-  m.setSourceRangeTags(m_source_range_tags);
+  // auto backend_source_range_records = getBackendSourceRanges(module);
+  // SourceRangeTagMap m_source_range_tags;
+  // int64_t m_current_source_range_tag_ = 0;
+  // updateSourceRangeTags(
+  //     backend_source_range_records,
+  //     m_source_range_tags,
+  //     &m_current_source_range_tag_);
+  // m.setSourceRangeTags(m_source_range_tags);
   return m;
 }
 

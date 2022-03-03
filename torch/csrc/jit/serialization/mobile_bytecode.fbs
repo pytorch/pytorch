@@ -200,6 +200,11 @@ table ExtraFile {
   content:string;
 }
 
+table JITFile {
+  name:string;
+  content:string;
+}
+
 table Module {
   version:int;
   extra_files:[ExtraFile];
@@ -210,6 +215,7 @@ table Module {
   storage_data:[StorageData];
   object_types:[ObjectType];
   mobile_debug_infos: [MobileDebugInfo];
+  jit_files: [JITFile];
 }
 
 root_type Module;

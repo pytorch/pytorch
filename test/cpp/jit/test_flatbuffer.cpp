@@ -166,7 +166,6 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
-  ASSERT_TRUE(false);
 }
 
 TEST(FlatbufferTest, Conv) {

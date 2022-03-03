@@ -92,6 +92,9 @@ struct MobileDebugInfoBuilder;
 struct ExtraFile;
 struct ExtraFileBuilder;
 
+struct JITFile;
+struct JITFileBuilder;
+
 struct Module;
 struct ModuleBuilder;
 
@@ -2501,6 +2504,77 @@ inline flatbuffers::Offset<ExtraFile> CreateExtraFileDirect(
       content__);
 }
 
+struct JITFile FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
+  typedef JITFileBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_NAME = 4,
+    VT_CONTENT = 6
+  };
+  const flatbuffers::String *name() const {
+    return GetPointer<const flatbuffers::String *>(VT_NAME);
+  }
+  flatbuffers::String *mutable_name() {
+    return GetPointer<flatbuffers::String *>(VT_NAME);
+  }
+  const flatbuffers::String *content() const {
+    return GetPointer<const flatbuffers::String *>(VT_CONTENT);
+  }
+  flatbuffers::String *mutable_content() {
+    return GetPointer<flatbuffers::String *>(VT_CONTENT);
+  }
+  bool Verify(flatbuffers::Verifier &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyOffset(verifier, VT_NAME) &&
+           verifier.VerifyString(name()) &&
+           VerifyOffset(verifier, VT_CONTENT) &&
+           verifier.VerifyString(content()) &&
+           verifier.EndTable();
+  }
+};
+
+struct JITFileBuilder {
+  typedef JITFile Table;
+  flatbuffers::FlatBufferBuilder &fbb_;
+  flatbuffers::uoffset_t start_;
+  void add_name(flatbuffers::Offset<flatbuffers::String> name) {
+    fbb_.AddOffset(JITFile::VT_NAME, name);
+  }
+  void add_content(flatbuffers::Offset<flatbuffers::String> content) {
+    fbb_.AddOffset(JITFile::VT_CONTENT, content);
+  }
+  explicit JITFileBuilder(flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  flatbuffers::Offset<JITFile> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = flatbuffers::Offset<JITFile>(end);
+    return o;
+  }
+};
+
+inline flatbuffers::Offset<JITFile> CreateJITFile(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    flatbuffers::Offset<flatbuffers::String> name = 0,
+    flatbuffers::Offset<flatbuffers::String> content = 0) {
+  JITFileBuilder builder_(_fbb);
+  builder_.add_content(content);
+  builder_.add_name(name);
+  return builder_.Finish();
+}
+
+inline flatbuffers::Offset<JITFile> CreateJITFileDirect(
+    flatbuffers::FlatBufferBuilder &_fbb,
+    const char *name = nullptr,
+    const char *content = nullptr) {
+  auto name__ = name ? _fbb.CreateString(name) : 0;
+  auto content__ = content ? _fbb.CreateString(content) : 0;
+  return torch::jit::mobile::serialization::CreateJITFile(
+      _fbb,
+      name__,
+      content__);
+}
+
 struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   typedef ModuleBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -2512,7 +2586,8 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     VT_STORAGE_DATA_SIZE = 14,
     VT_STORAGE_DATA = 16,
     VT_OBJECT_TYPES = 18,
-    VT_MOBILE_DEBUG_INFOS = 20
+    VT_MOBILE_DEBUG_INFOS = 20,
+    VT_JIT_FILES = 22
   };
   int32_t version() const {
     return GetField<int32_t>(VT_VERSION, 0);
@@ -2568,6 +2643,12 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *mutable_mobile_debug_infos() {
     return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *>(VT_MOBILE_DEBUG_INFOS);
   }
+  const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>> *jit_files() const {
+    return GetPointer<const flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>> *>(VT_JIT_FILES);
+  }
+  flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>> *mutable_jit_files() {
+    return GetPointer<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>> *>(VT_JIT_FILES);
+  }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<int32_t>(verifier, VT_VERSION) &&
@@ -2590,6 +2671,9 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyOffset(verifier, VT_MOBILE_DEBUG_INFOS) &&
            verifier.VerifyVector(mobile_debug_infos()) &&
            verifier.VerifyVectorOfTables(mobile_debug_infos()) &&
+           VerifyOffset(verifier, VT_JIT_FILES) &&
+           verifier.VerifyVector(jit_files()) &&
+           verifier.VerifyVectorOfTables(jit_files()) &&
            verifier.EndTable();
   }
 };
@@ -2625,6 +2709,9 @@ struct ModuleBuilder {
   void add_mobile_debug_infos(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>> mobile_debug_infos) {
     fbb_.AddOffset(Module::VT_MOBILE_DEBUG_INFOS, mobile_debug_infos);
   }
+  void add_jit_files(flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>>> jit_files) {
+    fbb_.AddOffset(Module::VT_JIT_FILES, jit_files);
+  }
   explicit ModuleBuilder(flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -2646,8 +2733,10 @@ inline flatbuffers::Offset<Module> CreateModule(
     int32_t storage_data_size = 0,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>> storage_data = 0,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>> object_types = 0,
-    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>> mobile_debug_infos = 0) {
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>> mobile_debug_infos = 0,
+    flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>>> jit_files = 0) {
   ModuleBuilder builder_(_fbb);
+  builder_.add_jit_files(jit_files);
   builder_.add_mobile_debug_infos(mobile_debug_infos);
   builder_.add_object_types(object_types);
   builder_.add_storage_data(storage_data);
@@ -2670,13 +2759,15 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
     int32_t storage_data_size = 0,
     const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>> *storage_data = nullptr,
     const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>> *object_types = nullptr,
-    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *mobile_debug_infos = nullptr) {
+    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>> *mobile_debug_infos = nullptr,
+    const std::vector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>> *jit_files = nullptr) {
   auto extra_files__ = extra_files ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ExtraFile>>(*extra_files) : 0;
   auto methods__ = methods ? _fbb.CreateVector<uint32_t>(*methods) : 0;
   auto ivalues__ = ivalues ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::IValue>>(*ivalues) : 0;
   auto storage_data__ = storage_data ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::StorageData>>(*storage_data) : 0;
   auto object_types__ = object_types ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::ObjectType>>(*object_types) : 0;
   auto mobile_debug_infos__ = mobile_debug_infos ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::MobileDebugInfo>>(*mobile_debug_infos) : 0;
+  auto jit_files__ = jit_files ? _fbb.CreateVector<flatbuffers::Offset<torch::jit::mobile::serialization::JITFile>>(*jit_files) : 0;
   return torch::jit::mobile::serialization::CreateModule(
       _fbb,
       version,
@@ -2687,7 +2778,8 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
       storage_data_size,
       storage_data__,
       object_types__,
-      mobile_debug_infos__);
+      mobile_debug_infos__,
+      jit_files__);
 }
 
 inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type) {
@@ -2841,4 +2933,3 @@ inline void FinishSizePrefixedModuleBuffer(
 
 #endif  // FLATBUFFERS_GENERATED_MOBILEBYTECODE_TORCH_JIT_MOBILE_SERIALIZATION_H_
 // @generated
-
