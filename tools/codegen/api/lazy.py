@@ -2,11 +2,10 @@ from typing import List, Union, Tuple
 from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
                                  ListType, OperatorName, FunctionSchema,
                                  Return, TensorOptionsArguments)
-from tools.codegen.api.types import (BaseCppType, BaseCType, OptionalCType,
-                                     ConstRefCType, NamedCType,
-                                     MutRefCType, deviceT, layoutT,
+from tools.codegen.api.types import (CType, BaseCppType, BaseCType, OptionalCType,
+                                     NamedCType, deviceT, layoutT,
                                      VectorCType, boolT, longT, doubleT, ListCType, stringT,
-                                     scalarT, scalarTypeT, ArrayRefCType, ArrayCType, TupleCType)
+                                     scalarT, scalarTypeT)
 
 valueT = BaseCppType('torch::lazy', 'Value')
 
@@ -64,8 +63,7 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
         raise AssertionError(f"unrecognized type {repr(typ)}")
 
 
-def isValueType(typ: Union[Type, BaseCType, OptionalCType, ConstRefCType, MutRefCType,
-                           ListCType, ArrayRefCType, ArrayCType, VectorCType, TupleCType]) -> bool:
+def isValueType(typ: CType) -> bool:
     """
     Given a type, determine if it is a Value-like type.  This is equivalent to
     being Tensor-like, but assumes the type has already been transformed.

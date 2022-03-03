@@ -9,7 +9,7 @@ graph {
     name: "Add_0"
     op_type: "Add"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input_1"
     type {

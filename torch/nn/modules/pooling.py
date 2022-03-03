@@ -508,7 +508,7 @@ class AvgPool1d(_AvgPoolNd):
         count_include_pad: when True, will include the zero-padding in the averaging calculation
 
     Shape:
-        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in}`.
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
         - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
@@ -1192,7 +1192,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
                      be the same as that of the input.
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
         - Output: :math:`(N, C, S_{0}, S_{1}, S_{2})` or :math:`(C, S_{0}, S_{1}, S_{2})`,
           where :math:`S=\text{output\_size}`.
 
