@@ -151,10 +151,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
   return (
     !THPVariable_CheckTypeExact(tp) &&
     // TODO: test if Python key is disabled
-    PyObject_FastGetAttrString(obj, "__torch_dispatch__").ptr() != nullptr
+    attr.ptr() != nullptr &&
+    attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -414,7 +416,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
   // key, which will immediately segfault because the data pointer is null.  By
   // forcing users to define __torch_dispatch__ we ensure this does not happen
-  TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
+  // TODO: This check is not complete; because the user can disable torch
+  // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
+  // to delete this function entirely
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_dispatch_impl()
+,
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
