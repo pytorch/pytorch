@@ -33,6 +33,9 @@ import torch.ao.quantization._quantize_dbr as _quantize_dbr
 import torch.ao.ns._numeric_suite_dbr as ns
 # TODO(future PR): move these utils out of the FX folder
 import torch.ao.ns._numeric_suite_fx as ns_fx
+from torch.ao.quantization._dbr.torchscript_utils import (
+    remove_redundant_aliases,
+)
 
 def _allclose(a, b):
     if isinstance(a, tuple):
@@ -1303,6 +1306,34 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         input_shape = (1, 1, 1, 1)
         self._test_serialization(M, input_shape)
 
+    def test_jit_tracing_removes_aliases(self):
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+            ),
+        )
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mq = _quantize_dbr.convert(mp)
+        mqs = torch.jit.trace(mq, example_args)
+        FileCheck().check_count("aten::alias", 5, exactly=True).run(
+            mqs.inlined_graph)
+        res1 = mqs(*example_args)
+        mqs = remove_redundant_aliases(mqs)
+        res2 = mqs(*example_args)
+        self.assertTrue(torch.allclose(res1, res2))
+        # TODO(future PR): figure out why aliasing still appears in the inlined
+        # graph, and if that is fixed then just check the inlined graph.
+        for graph in (
+            mqs.graph,
+            getattr(mqs, '1').graph,
+            getattr(getattr(mqs, '1'), '0').graph,
+        ):
+            FileCheck().check_count("aten::alias", 0, exactly=True).run(graph)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):
     """
@@ -1543,3 +1574,18 @@ class TestQuantizeDBRModels(QuantizeDBRTestCase):
             m, qconfig, (torch.randn(1, 3, 224, 224),),
             # TODO fix this (reason TBD)
             do_torchscript_checks=False)
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v2_removes_aliases(self):
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False)\
+            .eval().float()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 3, 224, 224),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mq = _quantize_dbr.convert(mp)
+        mqs = torch.jit.trace(mq, example_args)
+        res1 = mqs(*example_args)
+        mqs = remove_redundant_aliases(mqs)
+        res2 = mqs(*example_args)
+        self.assertTrue(torch.allclose(res1, res2))
