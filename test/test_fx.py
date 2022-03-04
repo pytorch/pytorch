@@ -1965,6 +1965,26 @@ class TestFX(JitTestCase):
         new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
 
+    def test_immutable_list_pytree_ops(self):
+        rand_tensor = torch.randn(5, 3)
+        l = immutable_list([3, [rand_tensor, 42]])
+
+        flattened, spec = pytree.tree_flatten(l)
+        assert flattened == [3, rand_tensor, 42]
+
+        unflattened = pytree.tree_unflatten(flattened, spec)
+        assert unflattened == l
+
+    def test_immutable_dict_pytree_ops(self):
+        rand_tensor = torch.randn(5, 3)
+        d = immutable_dict({'a': 3, 'b': [rand_tensor, 42]})
+
+        flattened, spec = pytree.tree_flatten(d)
+        assert flattened == [3, rand_tensor, 42]
+
+        unflattened = pytree.tree_unflatten(flattened, spec)
+        assert unflattened == d
+
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         x : torch.fx.Node = graph.create_node('placeholder', 'x')
