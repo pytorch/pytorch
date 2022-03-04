@@ -49,8 +49,7 @@ TEST(BoundsInference, _1) {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
   ExprHandle n(100);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -73,8 +72,7 @@ TEST(BoundsInference, _2) {
   // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
   VarHandle n("n", kInt);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -97,9 +95,8 @@ TEST(BoundsInference, _3) {
   // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
   ExprHandle n(100);
   BufHandle a("a", {n + 10}, kFloat);
-  Tensor b = Compute("b", {{n, "i"}}, [&](const VarHandle& i) {
-    return a.load(i) * a.load(i + 10);
-  });
+  Tensor b = Compute(
+      "b", {n}, [&](const VarHandle& i) { return a.load(i) * a.load(i + 10); });
   LoopNest l({b});
   auto bounds_info = inferBounds(l.root_stmt());
 
@@ -126,14 +123,12 @@ TEST(BoundsInference, _4) {
   ExprHandle W(320);
   ExprHandle H(200);
   BufHandle a("a", {H, W}, kFloat);
-  Tensor b = Compute(
-      "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return x * y;
-      });
-  Tensor c = Compute(
-      "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a.load(y, x) * b.load(y, x);
-      });
+  Tensor b = Compute("b", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
+    return x * y;
+  });
+  Tensor c = Compute("c", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
+    return a.load(y, x) * b.load(y, x);
+  });
   LoopNest l({c});
   std::vector<ForPtr> loops = l.getLoopStmtsFor(c);
   StmtPtr body = l.getLoopBodyFor(c);
@@ -204,8 +199,7 @@ TEST(BoundsInference, _5) {
   //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
   ExprHandle n(100);
   BufHandle a("a", {n}, kFloat);
-  Tensor b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a.load(i); });
+  Tensor b = Compute("b", {n}, [&](const VarHandle& i) { return a.load(i); });
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -258,12 +252,11 @@ TEST(BoundsInference, _6) {
   ExprHandle CW(32);
   ExprHandle CH(20);
   BufHandle a("a", {H, W}, kFloat);
-  Tensor b = Compute(
-      "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return x * y;
-      });
-  Tensor c = Compute(
-      "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
+  Tensor b = Compute("b", {H, W}, [&](const VarHandle& y, const VarHandle& x) {
+    return x * y;
+  });
+  Tensor c =
+      Compute("c", {CH, CW}, [&](const VarHandle& y, const VarHandle& x) {
         return a.load(y + 100, x + 100) * b.load(y * 2, x * 5);
       });
   LoopNest l({c});
@@ -325,10 +318,9 @@ TEST(BoundsInference, _6) {
 TEST(BoundsInference, Adjacent) {
   ExprHandle H(6);
   BufHandle a("a", {20}, kFloat);
-  Tensor b =
-      Compute("b", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x); });
-  Tensor c = Compute(
-      "c", {{H, "x"}}, [&](const VarHandle& x) { return a.load(x + H); });
+  Tensor b = Compute("b", {H}, [&](const VarHandle& x) { return a.load(x); });
+  Tensor c =
+      Compute("c", {H}, [&](const VarHandle& x) { return a.load(x + H); });
   LoopNest l({b, c});
   std::vector<ForPtr> loops = NodeFinder<For>::find(l.root_stmt());
 
@@ -383,12 +375,11 @@ TEST(BoundsInference, Adjacent) {
 
 TEST(BoundsInference, MultipleTopLoopLoad) {
   BufHandle a("a", {100}, kFloat);
-  Tensor b =
-      Compute("b", {{64, "x"}}, [&](const VarHandle& x) { return a.load(x); });
-  Tensor c = Compute(
-      "c", {{32, "x"}}, [&](const VarHandle& x) { return a.load(x + 10); });
-  Tensor d = Compute(
-      "d", {{96, "x"}}, [&](const VarHandle& x) { return a.load(x + 2); });
+  Tensor b = Compute("b", {64}, [&](const VarHandle& x) { return a.load(x); });
+  Tensor c =
+      Compute("c", {32}, [&](const VarHandle& x) { return a.load(x + 10); });
+  Tensor d =
+      Compute("d", {96}, [&](const VarHandle& x) { return a.load(x + 2); });
   LoopNest l({b, c, d});
 
   auto bounds_info = inferBounds(l.root_stmt());
@@ -496,16 +487,15 @@ TEST(BoundsInference, MultipleTopLoopStore) {
 }
 
 TEST(BoundsInference, CacheReads) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 30, j + 3);
       });
-  Tensor C = Compute(
-      "C", {{20, "i"}, {10, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor C =
+      Compute("C", {20, 10}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i + 10, j + 20) + A.load(i + 30, j + 40);
       });
 
@@ -562,7 +552,7 @@ TEST(BoundsInference, CacheReads) {
 TEST(BoundsInference, Flattened) {
   Tensor b = Compute(
       "b",
-      {{3, "z"}, {4, "y"}, {5, "x"}},
+      {3, 4, 5},
       [&](const VarHandle& z, const VarHandle& y, const VarHandle& x) {
         return x * y + z;
       });
@@ -637,14 +627,12 @@ TEST(BoundsInference, GetPotentialHazards) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return (i + 1) * (j + 1);
-      });
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B = Compute("B", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return (i + 1) * (j + 1);
+  });
 
   LoopNest l({A, B});
 
@@ -663,12 +651,11 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
-  Tensor B = Compute(
-      "B", {{64, "i"}, {64, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
+  Tensor B =
+      Compute("B", {64, 64}, [&](const VarHandle& i, const VarHandle& j) {
         return A.load(i, j) + 5;
       });
 
@@ -688,10 +675,9 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
 }
 
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
-  Tensor A = Compute(
-      "A", {{64, "i"}, {64, "j"}}, [](const VarHandle& i, const VarHandle& j) {
-        return i * j;
-      });
+  Tensor A = Compute("A", {64, 64}, [](const VarHandle& i, const VarHandle& j) {
+    return i * j;
+  });
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

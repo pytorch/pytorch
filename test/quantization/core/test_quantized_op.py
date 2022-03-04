@@ -441,8 +441,9 @@ class TestQuantizedOps(TestCase):
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
         memory_formats = (torch.channels_last, torch.contiguous_format)
-        test_cases = itertools.product(shapes, dtypes, memory_formats)
-        for shape, dtype, memory_format in test_cases:
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
             if memory_format == torch.channels_last and len(shape) != 4:
                 continue
             X, scale, zero_point, torch_type = \
@@ -454,7 +455,7 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             op = torch.nn.functional.gelu
-            dqY = op(dqX)
+            dqY = op(dqX, approximate=approximate)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
@@ -4138,10 +4139,8 @@ class TestQuantizedConv(TestCase):
            W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.sampled_from([0]),
-           # TODO: enable bias
-           use_bias=st.sampled_from([False]),
-           # TODO: enable relu
-           use_relu=st.sampled_from([False]),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
            # TODO: enable channelwise
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
@@ -4181,8 +4180,10 @@ class TestQuantizedConv(TestCase):
         pads = (pad_h, pad_w)
         dilations = (dilation, dilation)
 
-        qconv = torch.ops.quantized.conv2d_cudnn
-        assert not use_relu, "conv2d_relu_cudnn is not supported yet"
+        if use_relu:
+            qconv = torch.ops.quantized.conv2d_relu_cudnn
+        else:
+            qconv = torch.ops.quantized.conv2d_cudnn
         conv_op = torch.nn.Conv2d(
             input_channels,
             output_channels,

@@ -30,7 +30,7 @@ inline void reduce_all_impl_vec(
   auto input_data = input.data_ptr<scalar_t>();
   // NOTE: parallel_reduce not support bool type
   scalar_t result = at::parallel_reduce(0, input_numel, internal::GRAIN_SIZE, ident_v,
-    [&](int64_t start, int64_t end, const scalar_t ident) -> scalar_t {
+    [&](int64_t start, int64_t end, const scalar_t /*ident*/) -> scalar_t {
       scalar_t partial_out = vec::reduce_all<scalar_t>(
         [=](Vec x, Vec y) { return vop(x, y); },
         input_data + start,
