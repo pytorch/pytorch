@@ -831,8 +831,8 @@ class TestHub(TestCase):
             pathlib.Path(file_path_legacy).touch()
         with open(file_path_legacy, "a") as f:
             f.write('ailzhang_torchhub_example_master')
-        # the repo + branch is in the legacy list so it is considered a trusted repo, and the user isn't prompted 
-        # anything
+        # the repo + branch is in the legacy list so it is considered
+        # a trusted repo, and the user isn't prompted anything
         model = torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
