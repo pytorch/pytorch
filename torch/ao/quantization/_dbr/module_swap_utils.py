@@ -1,4 +1,4 @@
-from typing import Dict, Callable, Any
+from typing import Dict, Callable, Any, Optional
 
 import torch
 
@@ -13,6 +13,7 @@ def _swap_child_modules(
     module: torch.nn.Module,
     static_mappings: Dict[Callable, Any],
     dynamic_mappings: Dict[Callable, Any],
+    parent_fqn: Optional[str] = None,
 ) -> None:
     """
     For each direct child of `module`, swaps it using `static_mappings`
@@ -22,26 +23,41 @@ def _swap_child_modules(
     Recursively calls itself on each child.
     """
 
+    qstate = getattr(module, '_auto_quant_state', None)
+
     reassign = {}
-    for name, mod in module.named_children():
+    for local_fqn, mod in module.named_children():
+        if parent_fqn is None:
+            global_fqn = local_fqn
+        else:
+            global_fqn = f"{parent_fqn}.{local_fqn}"
         # both fused modules and observed custom modules are
         # swapped as one unit
         if not isinstance(mod, _FusedModule):
-            _swap_child_modules(mod, static_mappings, dynamic_mappings)
+            _swap_child_modules(
+                mod, static_mappings, dynamic_mappings, global_fqn)
 
         qconfig = getattr(mod, 'qconfig', None)
         if not qconfig:
             continue
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
         op_int8_dynamically_quantized = op_is_int8_dynamically_quantized(qconfig)
+
+        # Get the output observer from qstate and attach it to the module,
+        # to match the API for Eager mode module swaps
+        if qstate is not None:
+            output_obs = qstate.get_output_observer_from_fqn(global_fqn)
+            if output_obs is not None:
+                mod.activation_post_process = output_obs
+
         if activation_int8_quantized:
             if not type(mod) in static_mappings:
                 continue
-            reassign[name] = swap_module(mod, static_mappings, {})
+            reassign[local_fqn] = swap_module(mod, static_mappings, {})
         elif op_int8_dynamically_quantized:
             if not type(mod) in dynamic_mappings:
                 continue
-            reassign[name] = swap_module(mod, dynamic_mappings, {})
+            reassign[local_fqn] = swap_module(mod, dynamic_mappings, {})
         # TODO(future PR): add support for other dtypes
 
     for key, value in reassign.items():

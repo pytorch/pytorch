@@ -233,9 +233,6 @@ def get_func_output_obs_type(
     seen_q_op_info: SeenQOpInfo,
 ) -> FuncOutputObsType:
     op_type = seen_q_op_info.type
-    is_module = isinstance(op_type, type(torch.nn.Module))
-    if is_module:
-        return FuncOutputObsType.NONE
 
     if seen_q_op_info.qconfig is None:
         return FuncOutputObsType.NONE
@@ -267,6 +264,8 @@ def get_func_output_obs_type(
             seen_q_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
         ):
             return FuncOutputObsType.NONE
+    elif op_type in (torch.nn.LSTM,):
+        return FuncOutputObsType.NONE
     return FuncOutputObsType.NEW_OBS
 
 def converted_func_needs_scale_zp(seen_q_op_info: SeenQOpInfo) -> bool:
