@@ -14,6 +14,8 @@ static const int OPSET_VERSION_10 = 10;
 static const int OPSET_VERSION_11 = 11;
 static const int OPSET_VERSION_12 = 12;
 static const int OPSET_VERSION_13 = 13;
+static const int OPSET_VERSION_14 = 14;
+static const int OPSET_VERSION_15 = 15;
 
 using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 
@@ -58,6 +60,13 @@ Node* transformToONNXConcatNode(
     Node* lc_node,
     bool need_new_input,
     int opset_version);
+
+class ScalarTypeHashFunction {
+ public:
+  size_t operator()(const c10::ScalarType& type) const {
+    return static_cast<size_t>(type);
+  }
+};
 
 } // namespace jit
 } // namespace torch

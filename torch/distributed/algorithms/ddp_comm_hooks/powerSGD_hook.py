@@ -7,6 +7,8 @@ import torch.distributed as dist
 
 from . import default_hooks as default
 
+logger = logging.getLogger(__name__)
+
 
 def _orthogonalize(matrix, epsilon=0):
     """
@@ -45,7 +47,7 @@ def _orthogonalize_gram_schmidt(matrix, epsilon=0):
             try:
                 col /= torch.norm(col)
             except ZeroDivisionError:
-                logging.error(
+                logger.error(
                     "The matrix to be orthogonalized has at least a column of all 0s. Please set a small value such as 1e-8 "
                     "as `orthogonalization_epsilon` in PowerSGD state."
                 )
@@ -95,7 +97,7 @@ def _report_compression_stats(bucket, state):
         and state.iter >= state.next_stats_report
     ):
         stats = state.compression_stats()
-        logging.info(
+        logger.info(
             "Compression stats: iter {}, total before compression {}, total after compression {}, "
             "rate {}".format(state.iter, stats[1], stats[2], stats[0])
         )
@@ -168,7 +170,7 @@ class PowerSGDState(object):
         random_seed=0,
         compression_stats_logging_frequency=10_000,
     ):
-        logging.info(
+        logger.info(
             "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; "
             "min_compression_rate = {}; orthogonalization_epsilon = {}; use_error_feedback = {}; warm_start = {}; "
             "random_seed = {}; compression_stats_logging_frequency = {}".format(
@@ -250,7 +252,7 @@ class PowerSGDState(object):
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
-            logging.info(
+            logger.info(
                 "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
@@ -358,7 +360,7 @@ def powerSGD_hook(
         if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
-            logging.info(
+            logger.info(
                 "A zero tensor of length {} that represents local error is created.".format(
                     total_length
                 )
@@ -417,7 +419,7 @@ def powerSGD_hook(
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
-            logging.info(
+            logger.info(
                 "Allocating contiguous memory of length {} for Ps, and of length {} for Qs, respectively.".format(
                     total_Ps_size, total_Qs_size
                 )
@@ -643,7 +645,7 @@ def batched_powerSGD_hook(
         if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
-            logging.info(
+            logger.info(
                 "A zero tensor of length {} that represents local error is created.".format(
                     padded_total_length
                 )
@@ -664,7 +666,7 @@ def batched_powerSGD_hook(
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
-            logging.info(
+            logger.info(
                 "Initializing low-rank tensors P and Q, each of which has a shape of {} x {}.".format(
                     square_side_length, state.matrix_approximation_rank
                 )

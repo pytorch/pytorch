@@ -88,6 +88,7 @@ struct TORCH_API MobileCode : Code {
       std::string function_name,
       bool emit_default_input_instructions = true,
       bool support_default_args_before_out = true,
+      bool emit_promoted_ops = true,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };

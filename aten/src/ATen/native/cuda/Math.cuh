@@ -111,7 +111,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 
 // See note [Jiterator]
 // TODO: elaborate in this comment on the structure of math.cuh
-#ifdef USE_JITERATOR
+#if AT_USE_JITERATOR()
 
 const auto ndtri_string = jiterator_stringify(
   /*
@@ -1406,7 +1406,7 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
-#else // !USE_JITERATOR -- kernels must be precompiled
+#else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
@@ -1672,7 +1672,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   return (_x < scalar_t{0.0}) ? -out : out;
 }
 
-#endif // USE_JITERATOR (this closes the "else" branch of a if/else preprocessor directive)
+#endif // AT_USE_JITERATOR() (this closes the "else" branch of a if/else preprocessor directive)
 
 } // namespace native
 } // namespace at

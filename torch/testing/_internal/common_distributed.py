@@ -224,6 +224,7 @@ def with_dist_debug_levels(levels):
             old_level = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
             for level in levels:
                 os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
+                c10d.set_debug_level_from_env()
                 ret = func(*args, **kwargs)
                 c10d.barrier()
                 if old_level is not None:
