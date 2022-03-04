@@ -18,11 +18,8 @@ struct Code;
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(
-      std::shared_ptr<Graph> graph,
-      std::string function_name)
-      : code(graph, std::move(function_name)),
-        graph(std::move(graph)) {}
+  ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
+      : code(graph, std::move(function_name)), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -33,8 +30,8 @@ struct ExecutionPlan {
 };
 
 // Notice that those structs don't manage lifetime of their members.
-// They are only valid only right after you call getDebugState() and should never
-// be used again once another GraphExecutor function is called.
+// They are only valid only right after you call getDebugState() and should
+// never be used again once another GraphExecutor function is called.
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GraphExecutorState {

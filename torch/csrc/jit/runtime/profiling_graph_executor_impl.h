@@ -15,8 +15,9 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
 
-  const ExecutionPlan& getPlanFor(Stack& stack, c10::optional<size_t> remaining_bailout_depth)
-    override;
+  const ExecutionPlan& getPlanFor(
+      Stack& stack,
+      c10::optional<size_t> remaining_bailout_depth) override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 

@@ -694,8 +694,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   replaceFallbackGraphWithFallbackFunction(copy->block());
   runFinalOptimizations(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
-  optimized_plan_ =
-      ExecutionPlan(copy, function_name_);
+  optimized_plan_ = ExecutionPlan(copy, function_name_);
   return *optimized_plan_;
 }
 
