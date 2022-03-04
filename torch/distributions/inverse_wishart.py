@@ -189,7 +189,7 @@ class InverseWishart(ExponentialFamily):
                 fill_value=float("Inf"),
                 dtype=nu.dtype,
                 device=nu.device,
-            ).expand(self._batch_shape + self._event_shape)
+            ).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
         )
 
     @property
@@ -225,7 +225,7 @@ class InverseWishart(ExponentialFamily):
                 fill_value=float("Inf"),
                 dtype=nu.dtype,
                 device=nu.device,
-            ).expand(self._batch_shape + self._event_shape)
+            ).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
         )
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
