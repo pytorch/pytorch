@@ -940,7 +940,7 @@ def _newNode(g, opname, outputs, *args, **kwargs):
         aten = False
         ns_opname = opname
     else:
-        aten = kwargs.pop("aten", False)
+        aten = kwargs.pop("aten", False) or opname == "ATen"
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
     n = g.create(ns_opname, args, outputs)
@@ -1012,7 +1012,7 @@ def _block_op(b, opname, *args, **kwargs):
         aten = False
         ns_opname = opname
     else:
-        aten = kwargs.pop("aten", False)
+        aten = kwargs.pop("aten", False) or opname == "ATen"
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
     n = b.addNode(ns_opname, list(args))
