@@ -21,7 +21,7 @@ name: !{{ build_environment }}
       SKIP_ALL_TESTS: 1
 {%- if config["package_type"] == "libtorch" %}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
-      DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+      LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
