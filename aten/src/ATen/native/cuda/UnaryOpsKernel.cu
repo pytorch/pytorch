@@ -39,7 +39,7 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
     #if AT_USE_JITERATOR()
-      const auto exp_string = jiterator_stringify(
+      static const auto exp_string = jiterator_stringify(
           template <typename T>
           T exp_kernel(T x) {
             return std::exp(x);
