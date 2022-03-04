@@ -59,7 +59,7 @@ inline bool _dimreduce_return_trivial(const Tensor &result, const Tensor &self,
 }
 
 inline bool _dimreduce_return_trivial_no_ident(Tensor &result, const Tensor &self,
-                                               int64_t dim, bool keepdim, const char *fn_name) {
+                                               int64_t /*dim*/, bool /*keepdim*/, const char* /*fn_name*/) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
@@ -128,7 +128,7 @@ inline DimVector shape_from_dim_mask(const Tensor& self, DimMask mask, bool keep
 
 static void resize_reduction_result(
     Tensor& result, const Tensor& self, DimMask mask, bool keepdim,
-    ScalarType dtype)
+    ScalarType /*dtype*/)
 {
   auto shape = shape_from_dim_mask(self, mask, keepdim);
   TORCH_CHECK(result.defined(), "Cannot create a new tensor inside a reduction op. You likely tried to call an operator with an out argument but the out argument was an undefined tensor.");
@@ -357,7 +357,7 @@ static TensorIterator make_reduction(
     IntArrayRef dims,
     bool keepdim,
     ScalarType dtype1,
-    ScalarType dtype2) {
+    ScalarType /*dtype2*/) {
   int64_t ndim = self.dim();
   auto mask = at::native::make_dim_mask(dims, ndim);
   auto viewed_result1 = at::native::review_reduce_result(result1, ndim, mask, keepdim);
