@@ -39,7 +39,7 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name) {
   return SRNativeOperatorRegistry()->Has(name);
 }
 
-std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
+SROperator getNativeOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SRNativeOperatorRegistry()->Has(op_name)) {
     return SRNativeOperatorRegistry()->Create(op_name)->Generate(n);
@@ -292,8 +292,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::slice, aten_slice, [](Node* n) -> SROpera
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     const auto in1_i = p_node->Input(1).toInt();
-    const auto in2_i = p_node->Input(2).toInt();
-    const auto in3_i = p_node->Input(3).toInt();
+    const auto in2_i = p_node->Input(2).toOptional<int64_t>();
+    const auto in3_i = p_node->Input(3).toOptional<int64_t>();
     const auto in4_i = p_node->Input(4).toInt();
     p_node->Output(0) = at::native::slice(in0_t, in1_i, in2_i, in3_i, in4_i);
   };
@@ -664,17 +664,26 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::add,
     aten_add,
     [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
+      if (n->matches(torch::schema("aten::add.t(t[] a, t[] b) -> (t[])"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& a = pnode->Input(0).toList();
+          const auto& b = pnode->Input(1).toList();
+          auto ret = a.copy();
+          ret.append(b);
+          pnode->Output(0) = ret;
+        };
       }
-      return [](ProcessedNode* pnode) {
-        const auto& a = pnode->Input(0).toList();
-        const auto& b = pnode->Input(1).toList();
-        auto ret = a.copy();
-        ret.append(b);
-        pnode->Output(0) = ret;
-      };
+
+      if (n->matches(torch::schema("aten::add.int(int a, int b) -> (int)"))) {
+        return [](ProcessedNode* pnode) {
+          const auto a = pnode->Input(0).toInt();
+          const auto b = pnode->Input(1).toInt();
+          pnode->Output(0) = a + b;
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -934,6 +943,18 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         toList(stack);
         DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
+      };
+    });
+
+// See [Borrowed IValue Outputs]
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::IfThenElse,
+    prim_IfThenElse,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        const auto condition = pnode->Input(0).toBool();
+        pnode->Output(0) = condition ? createBorrowedIValue(pnode->Input(1))
+                                     : createBorrowedIValue(pnode->Input(2));
       };
     });
 

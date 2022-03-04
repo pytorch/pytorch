@@ -441,8 +441,9 @@ class TestQuantizedOps(TestCase):
         shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
         dtypes = (torch.quint8, torch.qint8)
         memory_formats = (torch.channels_last, torch.contiguous_format)
-        test_cases = itertools.product(shapes, dtypes, memory_formats)
-        for shape, dtype, memory_format in test_cases:
+        approximation = ['none', 'tanh']
+        test_cases = itertools.product(shapes, dtypes, memory_formats, approximation)
+        for shape, dtype, memory_format, approximate in test_cases:
             if memory_format == torch.channels_last and len(shape) != 4:
                 continue
             X, scale, zero_point, torch_type = \
@@ -454,7 +455,7 @@ class TestQuantizedOps(TestCase):
             dqX = qX.dequantize()
 
             op = torch.nn.functional.gelu
-            dqY = op(dqX)
+            dqY = op(dqX, approximate=approximate)
             qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
                                            dtype=torch_type)
             qY_hat = op(qX)
@@ -2879,6 +2880,18 @@ class TestDynamicQuantizedOps(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
+    @given(
+        input_channels=st.integers(16, 32),
+        output_channels=st.integers(4, 8),
+        exponent=st.integers(0, 8))
+    def test_linear_prepack_fp16_numerics(self, input_channels, output_channels, exponent):
+        w = torch.randn(output_channels, input_channels) * 10**exponent
+        bias = None
+        w_packed_fp16 = torch.ops.quantized.linear_prepack_fp16(w, bias)
+        w_unpacked_fp16 = torch.ops.quantized.linear_unpack_fp16(w_packed_fp16)
+        w_fp16 = w.to(torch.float16).to(torch.float32)
+        self.assertTrue(torch.equal(w_fp16, w_unpacked_fp16[0]))
+
     @skipIfNoFBGEMM
     def test_qlinear_dynamic_fp16(self):
 
@@ -4138,10 +4151,8 @@ class TestQuantizedConv(TestCase):
            W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.sampled_from([0]),
-           # TODO: enable bias
-           use_bias=st.sampled_from([False]),
-           # TODO: enable relu
-           use_relu=st.sampled_from([False]),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
            # TODO: enable channelwise
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
@@ -4181,8 +4192,10 @@ class TestQuantizedConv(TestCase):
         pads = (pad_h, pad_w)
         dilations = (dilation, dilation)
 
-        qconv = torch.ops.quantized.conv2d_cudnn
-        assert not use_relu, "conv2d_relu_cudnn is not supported yet"
+        if use_relu:
+            qconv = torch.ops.quantized.conv2d_relu_cudnn
+        else:
+            qconv = torch.ops.quantized.conv2d_cudnn
         conv_op = torch.nn.Conv2d(
             input_channels,
             output_channels,

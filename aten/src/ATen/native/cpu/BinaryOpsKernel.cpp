@@ -21,27 +21,6 @@ namespace {
 
 using namespace vec;
 
-// Note: Undefined behavior when performing addition is intentionally
-// ignored.
-void add_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) {
-  if (iter.dtype() == ScalarType::Bool) {
-      using scalar_t = bool;
-      auto alpha = alpha_scalar.to<scalar_t>();
-      cpu_kernel(iter,
-        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; });
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "add_cpu/sub_cpu", [&]() {
-      auto alpha = alpha_scalar.to<scalar_t>();
-      auto alpha_vec = Vectorized<scalar_t>(alpha);
-      cpu_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) __ubsan_ignore_undefined__ -> scalar_t { return a + alpha * b; },
-        [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) __ubsan_ignore_undefined__ {
-          return vec::fmadd(b, alpha_vec, a);
-        });
-      });
-  }
-}
-
 void add_clamp_kernel(TensorIterator& iter, const Scalar& alpha_scalar, const Scalar& min_val, const Scalar& max_val) {
   AT_DISPATCH_ALL_TYPES(iter.dtype(), "add_clamp_cpu", [&]() {
     auto alpha = alpha_scalar.to<scalar_t>();
@@ -72,12 +51,6 @@ void atan2_kernel(TensorIteratorBase& iter) {
       return a.atan2(b);
     });
   });
-}
-
-// Note: Undefined behavior when performing subtraction is intentionally
-// ignored.
-void sub_kernel(TensorIteratorBase& iter, const Scalar& alpha_scalar) __ubsan_ignore_undefined__ {
-  add_kernel(iter, -alpha_scalar);
 }
 
 void mul_kernel(TensorIteratorBase& iter) {
@@ -836,7 +809,7 @@ void tanh_backward_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void mse_kernel(TensorIterator& iter) {
+void mse_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Half) {
     TORCH_WARN_ONCE("Applying the CPU mse kernel on half-type tensors. "
                     "This may be slower than using float or double-type tensors.");
@@ -1133,9 +1106,7 @@ void zeta_kernel(TensorIteratorBase& iter) {
 
 } // namespace
 
-REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
-REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
 REGISTER_DISPATCH(div_true_stub, &div_true_kernel);
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_kernel);
