@@ -1104,6 +1104,7 @@ endif()
 # If master flag for buildling Caffe2 is disabled, we also disable the
 # build for Caffe2 related operator modules.
 if(BUILD_CAFFE2)
+  add_definitions(-DPYTORCH_ONNX_CAFFE2_BUNDLE)
   add_subdirectory(modules)
 endif()
 
