@@ -1,6 +1,8 @@
 # https://developercommunity.visualstudio.com/t/install-specific-version-of-vs-component/1142479
 # Where to find the links: https://docs.microsoft.com/en-us/visualstudio/releases/2019/history#release-dates-and-build-numbers
 
+Get-ItemProperty -Path HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem
+
 # BuildTools from S3
 $VS_DOWNLOAD_LINK = "https://s3.amazonaws.com/ossci-windows/vs${env:VS_VERSION}_BuildTools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
@@ -63,3 +65,5 @@ if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     Copy-Item -Path "${env:TEMP}\vslogs.zip" -Destination "C:\w\build-results\"
     exit 1
 }
+
+
