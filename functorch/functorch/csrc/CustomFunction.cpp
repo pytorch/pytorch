@@ -27,7 +27,6 @@ public:
 
   void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
-    const auto num_returns = schema.returns().size();
 
     const auto num_arguments = schema.arguments().size();
     auto arguments = torch::jit::pop(*stack, num_arguments);
@@ -56,7 +55,7 @@ public:
         // // just gets passed positionally
     py::dict kwargs;
 
-    for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
+    for (int64_t idx = 0; idx < (int64_t)arguments.size() - default_suffix_len; idx++) {
       PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
     }
 
@@ -131,10 +130,10 @@ std::vector<Tensor> invoke_backward_fn(
   py::gil_scoped_acquire g;
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(grads.size() + intermediates.size()));
   py::dict kwargs;
-  for (int64_t idx = 0; idx < grads.size(); idx++) {
+  for (int64_t idx = 0; idx < (int64_t) grads.size(); idx++) {
     PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(grads[idx]).release().ptr());
   }
-  for (int64_t idx = 0; idx < intermediates.size(); idx++) {
+  for (int64_t idx = 0; idx < (int64_t) intermediates.size(); idx++) {
     PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(intermediates[idx + grads.size()]).release().ptr());
   }
 
@@ -209,11 +208,6 @@ using torch::autograd::deleteNode;
 using torch::autograd::flatten_tensor_args;
 
 void customFunctionBoxed(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  const auto& schema = op.schema();
-  const auto num_returns = schema.returns().size();
-  const auto num_arguments = schema.arguments().size();
-  const auto arguments = torch::jit::last(stack, num_arguments);
-
   auto tensors = torch::jit::pop(stack).toTensorList().vec();
   auto tensors_ = unpack(tensors, "tensors", 0);
   auto _any_requires_grad = compute_requires_grad(tensors);
