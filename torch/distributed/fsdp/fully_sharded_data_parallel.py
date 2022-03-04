@@ -246,10 +246,6 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=process_group,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
-                # Note that recursive_wap should not call FSDP with wrapping
-                # enabled, as this recursive call handles all wrapping,
-                # including for nested children.
-                auto_wrap_policy=None,
             )
 
         self.process_group = process_group or _get_default_group()
