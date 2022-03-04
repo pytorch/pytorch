@@ -30,7 +30,6 @@ from .utils import (
     iterate_and_apply,
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
-    get_producer_of_seen_q_op_info,
     clone_detach_tensor_without_dispatch,
     get_input_args_quant_dequant_info,
     get_cur_qconfig,
@@ -826,19 +825,13 @@ class AutoQuantizationState(torch.nn.Module):
             seen_q_op_info = self._get_cur_seen_q_op_info()
             func_output_dtype_type = get_func_output_dtype_type(seen_q_op_info)
             if func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEPENDS_ON_QCONFIG:
-                if isinstance(op, torch.nn.Module):
-                    # For now, assume that eager mode convert has attached qconfig
-                    # objects to any leaf module which needs quantization
-                    if hasattr(op, 'activation_post_process'):
-                        dtype_to_use = op.activation_post_process.dtype
-                    else:
-                        dtype_to_use = torch.float
+                qconfig = get_cur_qconfig(
+                    self.qconfig_dict, seen_q_op_info.fqn,
+                    seen_q_op_info.type)
+                if qconfig is None:
+                    dtype_to_use = torch.float
                 else:
-                    qconfig = get_cur_qconfig(self.qconfig_dict, seen_q_op_info.fqn, op)
-                    if qconfig is None:
-                        dtype_to_use = torch.float
-                    else:
-                        dtype_to_use = qconfig.activation().dtype
+                    dtype_to_use = qconfig.activation().dtype
 
             elif func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX:
                 dtype_to_use = torch.float
@@ -939,48 +932,23 @@ class AutoQuantizationState(torch.nn.Module):
             assert seen_q_op_info.input_tensor_infos[0] is not None
             first_input_tensor_id = seen_q_op_info.input_tensor_infos[0].id
 
-            first_input_obs = None
-            if str(first_input_tensor_id) in self.tensor_id_to_observer:
-                first_input_obs = \
-                    self.tensor_id_to_observer[str(first_input_tensor_id)]
-            else:
-                # This observer may be in a module (handled by eager
-                # convert), in which case it's not in our map. For now,
-                # copy it from the module. In the future, we could look
-                # into having a soft link.
-                # TODO: make this handle more cases
-                # TODO: handle module -> add_scalar -> add_scalar
-                prev_op = get_producer_of_seen_q_op_info(
-                    self.idx_to_seen_q_op_infos, seen_q_op_info)
-                assert prev_op is not None
-                # TODO: the following line needs to only check fqn
-                # for modules, not for functions
-                fqn_last_part = prev_op.fqn.split('.')[-1]
-                if hasattr(root_module, fqn_last_part):
-                    first_input_mod = getattr(root_module, fqn_last_part)
-                else:
-                    first_input_mod = None
-                # Currently, both tracing for module fusion and tracing for
-                # quantization go through this code path. When tracing
-                # for module fusion, quantizeable modules do not have
-                # observers yet. For this path to not crash, we create one.
-                # When tracing for quantization, this will be ignored.
-                # TODO(future PR): refactor to avoid this.
-                if first_input_mod and hasattr(first_input_mod, 'activation_post_process'):
-                    first_input_obs = first_input_mod.activation_post_process
-                else:
-                    # TODO(future PR): check qconfig is None
-                    qconfig = get_cur_qconfig(
-                        self.qconfig_dict, seen_q_op_info.fqn, seen_q_op_info.type)
-                    assert qconfig is not None
-                    first_input_obs = qconfig.activation()
-
+            first_input_obs = \
+                self.tensor_id_to_observer[str(first_input_tensor_id)]
             self.tensor_id_to_observer[str(output_tensor_id)] = first_input_obs
 
     def insert_observers(self, root_module: torch.nn.Module):
         for idx, seen_q_op_info in self.idx_to_seen_q_op_infos.items():
             self._maybe_insert_input_observers(seen_q_op_info)
             self._maybe_insert_output_observers(seen_q_op_info, root_module)
+
+    def get_output_observer_from_fqn(self, fqn: str) -> Optional[torch.nn.Module]:
+        for idx, seen_q_op_info in self.idx_to_seen_q_op_infos.items():
+            if seen_q_op_info.fqn != fqn:
+                continue
+            output_tensor_id = seen_q_op_info.output_tensor_infos[0].id
+            if str(output_tensor_id) in self.tensor_id_to_observer:
+                return self.tensor_id_to_observer[str(output_tensor_id)]
+        return None
 
     # This is a hack to enable nn.Sequential to properly work with
     # this class.
