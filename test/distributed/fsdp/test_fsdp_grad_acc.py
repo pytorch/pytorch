@@ -3,8 +3,8 @@
 import contextlib
 import itertools
 import sys
-from typing import List, Optional, Tuple
 from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import torch
 from torch import distributed as dist
@@ -170,7 +170,7 @@ class TestGradAcc(FSDPTest):
                 sync_context = fsdp_model.no_sync() if config.use_no_sync \
                     else contextlib.suppress()
                 with sync_context:
-                    for i in range(config.num_iters):
+                    for _ in range(config.num_iters):
                         if batch_idx == num_iters_to_acc - 1:
                             break  # always sync on the last iteration
                         batch = batches[batch_idx]
@@ -190,11 +190,11 @@ class TestGradAcc(FSDPTest):
 
             # Compare the losses and gradients
             torch.testing.assert_close(ref_loss, acc_loss)
-            assert len(ref_grads) == len(acc_grads)
+            self.assertEqual(len(ref_grads), len(acc_grads))
             for ref_grad, acc_grad in zip(ref_grads, acc_grads):
-                assert ref_grad.device == acc_grad.device
-                assert ref_grad.size() == acc_grad.size()
-                assert ref_grad.dtype == acc_grad.dtype
+                self.assertEqual(ref_grad.device, acc_grad.device)
+                self.assertEqual(ref_grad.size(), acc_grad.size())
+                self.assertEqual(ref_grad.dtype, acc_grad.dtype)
                 torch.testing.assert_close(ref_grad, acc_grad)
 
             # Check that the optimizer step does not error
