@@ -5,7 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
-#include <ATen/core/ITensorList.h>
+#include <ATen/core/IList.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
