@@ -161,7 +161,7 @@ class FullyShardedDataParallel(nn.Module):
         since FSDP will shard parameters in-place and this will break any
         previously initialized optimizers.
 
-    .. warning:
+    .. warning::
         Module should be already placed on the destination device or
         device is set properly using torch.cuda.set_device(device_id).
         FSDP will get compute device from module first, if module device
