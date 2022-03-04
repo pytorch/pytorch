@@ -1,6 +1,4 @@
-from .conv_expanded_weights import Conv1dPerSampleGrad
-from .conv_expanded_weights import Conv2dPerSampleGrad
-from .conv_expanded_weights import Conv3dPerSampleGrad
+from .conv_expanded_weights import ConvPerSampleGrad
 from .embedding_expanded_weights import EmbeddingPerSampleGrad
 from .group_norm_expanded_weights import GroupNormPerSampleGrad
 from .layer_norm_expanded_weights import LayerNormPerSampleGrad

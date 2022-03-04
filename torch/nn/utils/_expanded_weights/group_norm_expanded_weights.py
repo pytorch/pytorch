@@ -8,7 +8,7 @@ from typing import List, Optional
 @implements_per_sample_grads(F.group_norm)
 class GroupNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
+    def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
         output, mean, rstd = forward_helper(torch._group_norm_all_outputs, expanded_args, expanded_kwargs)
         ctx.input, ctx.num_groups = expanded_args
@@ -23,7 +23,8 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
         mean, rstd = ctx.mean, ctx.rstd
 
         results: List[Optional[torch.Tensor]] = []
-        results.append(None)
+        results.append(None)  # for kwarg names
+        results.append(None)  # for op reference
 
         if input.requires_grad:
             weight_c = unpack_expanded_weight_or_tensor(weight, lambda t: t.contiguous())
