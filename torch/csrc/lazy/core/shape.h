@@ -25,7 +25,7 @@ class TORCH_API Shape {
   int64_t size(int64_t dim) const { return sizes_.at(dim); }
   void set_size(int64_t dim, int64_t size) { sizes_.at(dim) = size; }
   size_t numel() const;
-  hash_t hash() const;
+  hash_t hash(bool bakeInSizes) const;
 
   bool operator==(const Shape& other) const;
 

@@ -20,7 +20,7 @@ void addr_kernel(TensorIterator &iter,
     // nans and infs in self should not propagate.
     if (beta_val == false) {
       cpu_kernel(iter,
-        [=](scalar_t self_val,
+        [=](scalar_t /*self_val*/,
             scalar_t vec1_val,
             scalar_t vec2_val) __ubsan_ignore_undefined__ -> scalar_t {
           return alpha_val && vec1_val && vec2_val;
@@ -53,12 +53,12 @@ void addr_kernel(TensorIterator &iter,
       // nans and infs in self should not propagate.
       if (beta_val == zero_val) {
         cpu_kernel_vec(iter,
-          [=](scalar_t self_val,
+          [=](scalar_t /*self_val*/,
               scalar_t vec1_val,
               scalar_t vec2_val) __ubsan_ignore_undefined__ -> scalar_t {
             return alpha_val * vec1_val * vec2_val;
           },
-          [=](Vec self_vec,
+          [=](Vec /*self_vec*/,
               Vec vec1_vec,
               Vec vec2_vec) __ubsan_ignore_undefined__ {
             return alpha_vec * vec1_vec * vec2_vec;

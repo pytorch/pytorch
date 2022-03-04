@@ -1451,7 +1451,7 @@ class TripletMarginLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-                  input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math`(N, D)`; a scalar otherwise.
 
     Examples::
 
