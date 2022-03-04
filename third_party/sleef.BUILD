@@ -20,7 +20,7 @@ SLEEF_COPTS = [
 
 SLEEF_COMMON_TARGET_COPTS = [
     "-DSLEEF_STATIC_LIBS=1",
-    "-DENABLE_ALIAS=1",
+    # "-DENABLE_ALIAS=1",
 ]
 
 SLEEF_PRIVATE_HEADERS = glob([
@@ -202,13 +202,13 @@ cc_library(
         "src/libm/rempitab.c",
         "src/libm/sleefdp.c",
         "src/libm/sleefld.c",
-        "src/libm/sleefqp.c",
+        # "src/libm/sleefqp.c",
         "src/libm/sleefsp.c",
     ],
     hdrs = SLEEF_PUBLIC_HEADERS,
     copts = SLEEF_PRIVATE_INCLUDES + SLEEF_COPTS + SLEEF_COMMON_TARGET_COPTS + [
         "-DDORENAME=1",
-        "-DENABLEFLOAT128=1",
+        # "-DENABLEFLOAT128=1",
         "-Wno-unused-result",
     ],
     includes = SLEEF_PUBLIC_INCLUDES,
