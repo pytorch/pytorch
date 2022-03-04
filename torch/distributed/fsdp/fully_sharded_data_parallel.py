@@ -167,6 +167,12 @@ class FullyShardedDataParallel(nn.Module):
         FSDP will get compute device from module first, if module device
         is CPU, FSDP will then get compute device from current device.
 
+    .. warning::
+        FSDP currently does not support gradient accumulation outside
+        `no_sync()` when using CPU offloading. Trying to do so yields incorrect
+        results since FSDP will use the newly-reduced gradient instead of
+        accumulating with any existing gradient.
+
     Args:
         module (nn.Module):
             module to be wrapped with FSDP.
@@ -1399,7 +1405,7 @@ class FullyShardedDataParallel(nn.Module):
                         f"existing grad device={param._saved_grad_shard.device} "
                         f"new grad device={output.device}"  # type: ignore[attr-defined]
                     )
-                    param._saved_grad_shard.data += output.data  # type: ignore[attr-defined]
+                    param._saved_grad_shard += output  # type: ignore[attr-defined]
                 else:
                     param._saved_grad_shard = output  # type: ignore[attr-defined]
                 grad = param._saved_grad_shard  # type: ignore[attr-defined]
@@ -1624,10 +1630,8 @@ class FullyShardedDataParallel(nn.Module):
                 # for the per-iteration gradient.
                 if prev_iter_outside_no_sync:
                     # FSDP currently does not support gradient accumulation
-                    # outside `no_sync()` when using CPU offloading. Trying to
-                    # do so yields incorrect results since FSDP will use the
-                    # newly-reduced gradient instead of accumulating with any
-                    # existing gradient.
+                    # outside `no_sync()` when using CPU offloading (see the
+                    # warning in the class's docstring).
                     if not offloaded:
                         p._saved_grad_shard = p.grad.data  # type: ignore[attr-defined]
                 p.grad = None
