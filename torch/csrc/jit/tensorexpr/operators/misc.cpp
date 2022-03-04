@@ -642,6 +642,60 @@ Tensor computeCat(
       });
 }
 
+Tensor computeStack(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+  auto inputList = c10::get<BufList>(inputs[0]);
+  auto argDim = inputs[1];
+  auto catInfo = processCatList(inputList);
+  ScalarType highType = catInfo.first;
+  std::vector<BufHandle> nonEmptyInputs = catInfo.second;
+  return Compute(
+      "aten_stack", outputShape, [&](const std::vector<VarHandle>& axes) {
+        if (nonEmptyInputs.size() == 0) {
+          return ExprHandle(0);
+        }
+
+        int64_t dim_ = c10::get<int64_t>(argDim);
+        auto dim = normalizeAndCheckIndex(dim_, axes.size());
+        auto inputBuf = nonEmptyInputs[0];
+        std::vector<ExprHandle> newAxes(axes.begin(), axes.begin()+dim);
+        newAxes.insert(newAxes.end(), axes.begin()+dim+1, axes.end());
+        // Promote input types.
+        // Note that we need to consider all inputs, including empty - they
+        // also affect the resultant dtype.
+
+        // Now we know the final dtype, we know what inputs are non-empty,
+        // and we know that there is at least one such an input. With all
+        // that we construct a tensor expression performing the
+        // concatenation.
+        // The expression we build here is a cascading if-then-else that
+        // essentially represents:
+        //
+        //              inp1[i, j, k]         if 0   < i < l1,
+        // out[i,j,k] = inp2[i, j-l1, k]      if l1 =< i < l1 + l2,
+        //              ...
+        //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
+        // where l_i is the corresponding size of the i-th input.
+        ExprHandle load = promoteToDtype(
+            tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
+
+        for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
+          auto input = nonEmptyInputs[ii];
+          load = ifThenElse(
+              CompareSelect::make(axes[dim], LongImm::make(ii), kEQ),
+              promoteToDtype(tensorOrConstant(input, newAxes), highType),
+              load);
+        }
+
+        return load;
+      });
+}
+
+
 Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,

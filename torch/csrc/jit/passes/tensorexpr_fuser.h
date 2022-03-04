@@ -17,7 +17,7 @@ TORCH_API void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size = 2,
     bool add_composed_op = false,
-    bool fuse_to_dynamic_shapes = false);
+    bool fuse_to_dynamic_shapes = true);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
