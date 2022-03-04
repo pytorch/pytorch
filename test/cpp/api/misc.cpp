@@ -90,3 +90,23 @@ TEST(UtilsTest, AmbiguousOperatorDefaults) {
   at::_test_ambiguous_defaults(tmp, 1, 1);
   at::_test_ambiguous_defaults(tmp, 2, "2");
 }
+
+int64_t get_first_element_0(c10::optional<c10::IntArrayRef> arr) {
+  return arr.value()[0];
+}
+
+int64_t get_first_element_1(c10::OptionalIntArrayRef arr) {
+  return arr.value()[0];
+}
+
+TEST(OptionalArrayRefTest, DanglingPointerFix) {
+  // `optional<ArrayRef>` has a problem with its converting constructor that
+  // creates a dangling pointer when given a single value or initializer list.
+  // In these cases, the `optional<ArrayRef>` ends up containing garbage data.
+  ASSERT_TRUE(get_first_element_0(100) != 100);
+  ASSERT_TRUE(get_first_element_0({200}) != 200);
+
+  // `OptionalArrayRef` fixes the dangling pointer issue
+  ASSERT_TRUE(get_first_element_1(300) == 300);
+  ASSERT_TRUE(get_first_element_1({400}) == 400);
+}
