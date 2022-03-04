@@ -161,7 +161,7 @@ class TestExpandedWeightFunctional(TestCase):
             for (result_grad, expected_grad) in zip(expanded_weight_grad, per_sample_grad):
                 if result_grad is None:
                     result_grad = torch.zeros_like(expected_grad)
-                assert torch.allclose(result_grad, expected_grad), f"Got {result_grad}, expected {expected_grad}"
+                self.assertEqual(result_grad, expected_grad)
 
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_unsupported_expand_weights(self, device, dtype, op):
@@ -187,10 +187,12 @@ class TestExpandedWeightFunctional(TestCase):
     def test_expanded_weight_forward(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in supported_inputs(op, sample_inputs):
+            if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
+                sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
-            expanded_weight_result = op(ew_input, *ew_args, **ew_kwargs)
-            normal_result = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
+            normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result)
 
     def test_expanded_weight_error(self, device):
@@ -239,7 +241,7 @@ class TestExpandedWeightFunctional(TestCase):
 
         expected = [torch.stack(grad) for grad in zip(*expected)]
         for (res, exp) in zip(result, expected):
-            assert torch.allclose(res, exp, atol=1e-4, rtol=5e-5)
+            self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
 
 
 class TestExpandedWeightModule(TestCase):
@@ -263,7 +265,7 @@ class TestExpandedWeightModule(TestCase):
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
         self.assertEqual(actual_res, expected_res)
-        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        [self.assertEqual(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def _do_test_multi_input(self, module, input):
         class TestModule(nn.Module):
@@ -291,7 +293,7 @@ class TestExpandedWeightModule(TestCase):
                 res = module(input[i].unsqueeze(0)).sum()
                 expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        assert [torch.allclose(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        assert [self.assertEqual(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def test_per_sample_api_failing(self):
         module = nn.Linear(10, 10)
