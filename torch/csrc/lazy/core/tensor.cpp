@@ -486,7 +486,6 @@ LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
   return lazy_tensor;
 }
 
-// TODO(whc) deprecated?
 std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   std::vector<LazyTensorPtr> ltc_tensors;
   ltc_tensors.reserve(tensors.size());

@@ -36,7 +36,6 @@ const OpKindWrapper ltc_cast("lazy_tensors::cast");
 const OpKindWrapper ltc_collective_permute("lazy_tensors::collective_permute");
 const OpKindWrapper ltc_cross_replica_sum("lazy_tensors::cross_replica_sum");
 const OpKindWrapper ltc_device_data("lazy_tensors::device_data");
-
 const OpKindWrapper ltc_get_dimensions_size(
     "lazy_tensors::ltc_get_dimensions_size");
 const OpKindWrapper ltc_moving_average("lazy_tensors::moving_average");

@@ -77,6 +77,5 @@ std::string Node::ToString() const {
   return ss.str();
 }
 
-
 } // namespace lazy
 } // namespace torch
