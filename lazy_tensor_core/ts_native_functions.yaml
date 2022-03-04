@@ -115,6 +115,7 @@ full_codegen:
   - std
   - std.dim
   - std.correction
+  - sub.Tensor
   - sum
   - sum.dim_IntList
   - tanh
@@ -167,8 +168,6 @@ supported:
   - transpose_
   - unsqueeze
   - unsqueeze_
-  - sub.Tensor
-  - sub.Scalar
   - view
   - alias
   - _unsafe_view

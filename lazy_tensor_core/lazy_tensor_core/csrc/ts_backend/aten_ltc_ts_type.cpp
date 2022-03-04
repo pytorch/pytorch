@@ -22,58 +22,6 @@
 namespace torch_lazy_tensors {
 namespace {
 
-void CheckSubOperandTypes(at::ScalarType type1, at::ScalarType type2) {
-  CHECK(type1 != at::kBool || type2 != at::kBool)
-      << "Subtraction, the `-` operator, with two bool tensors is not "
-         "supported. Use the `^` or `logical_xor()` operator instead.";
-  CHECK(type1 != at::kBool && type2 != at::kBool)
-      << "Subtraction, the `-` operator, with a bool tensor is not "
-         "supported. If you are trying to invert a mask, use the `~` or "
-         "`logical_not()` operator instead.";
-}
-
-std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> GetBinaryOperands(const at::Tensor& self,
-                                                    const at::Tensor& other) {
-  torch::lazy::LazyTensorPtr self_tensor;
-  torch::lazy::LazyTensorPtr other_tensor;
-  auto self_xtensor = torch::lazy::TryGetLtcTensor(self);
-  if (!self_xtensor) {
-    other_tensor = torch::lazy::TryGetLtcTensor(other);
-    self_tensor = GetOrCreateLtcTensor(self, other_tensor->GetDevice());
-  } else {
-    self_tensor = self_xtensor;
-    other_tensor = GetOrCreateLtcTensor(other, self_tensor->GetDevice());
-  }
-  return std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr>(self_tensor, other_tensor);
-}
-
-template <typename B>
-at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
-                      const B& bin_op) {
-  at::ScalarType dtype = at::result_type(self, other);
-  std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> operands =
-      GetBinaryOperands(torch::lazy::UnwrapNumber(self, dtype),
-                        torch::lazy::UnwrapNumber(other, dtype));
-  torch::lazy::LazyTensorPtr result = bin_op(operands.first, operands.second);
-  return torch::lazy::CreateAtenFromLtcTensor(result);
-}
-
-template <typename B>
-at::Tensor DoBinaryOp(const at::Tensor& self, const at::Scalar& other,
-                      const B& bin_op) {
-  torch::lazy::LazyTensorPtr self_tensor = torch::lazy::GetLtcTensor(self);
-  torch::lazy::LazyTensorPtr result = bin_op(self_tensor, other);
-  return torch::lazy::CreateAtenFromLtcTensor(result);
-}
-
-at::Tensor subtensor(const at::Tensor& tensor, int dim, int groups, int g) {
-  if (!tensor.defined()) {
-    return at::Tensor();
-  }
-  int64_t n = tensor.sizes()[dim] / groups;
-  return tensor.narrow(dim, n * g, n).contiguous();
-}
-
 at::Tensor CreateLtcTensor(const at::Tensor& tensor,
                            const c10::optional<torch::lazy::BackendDevice>& device) {
   if (tensor.defined() && device) {
@@ -519,29 +467,6 @@ at::Tensor& LazyNativeFunctions::squeeze_(at::Tensor& self, int64_t dim) {
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   lazy_tensor_aten_ops::squeeze_(self_tensor, dim);
   return self;
-}
-
-at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
-                                    const at::Tensor& other,
-                                    const at::Scalar& alpha) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  CheckSubOperandTypes(self.scalar_type(), other.scalar_type());
-  at::native::alpha_check(at::result_type(self, other), alpha);
-  return DoBinaryOp(self, other,
-                    [&](const torch::lazy::LazyTensorPtr& xself, const torch::lazy::LazyTensorPtr& xother) {
-                      return lazy_tensor_aten_ops::sub(xself, xother, alpha);
-                    });
-}
-
-at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
-                                    const at::Scalar& other,
-                                    const at::Scalar& alpha) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  CheckSubOperandTypes(self.scalar_type(), other.type());
-  return DoBinaryOp(self, other,
-                    [&](const torch::lazy::LazyTensorPtr& xself, const at::Scalar& other) {
-                      return lazy_tensor_aten_ops::sub(xself, other, alpha);
-                    });
 }
 
 at::Tensor LazyNativeFunctions::t(const at::Tensor& self) {
