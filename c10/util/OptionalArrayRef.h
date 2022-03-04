@@ -18,7 +18,7 @@ namespace c10 {
 
 template <typename T>
 class OptionalArrayRef final {
-public:
+ public:
   // Constructors
 
   constexpr OptionalArrayRef() noexcept {}
@@ -198,12 +198,13 @@ public:
   }
 
   template <typename U, typename... Args>
-  constexpr ArrayRef<T>&
-  emplace(std::initializer_list<U> il, Args&&... args) noexcept {
+  constexpr ArrayRef<T>& emplace(
+      std::initializer_list<U> il,
+      Args&&... args) noexcept {
     return wrapped_opt_array_ref.emplace(il, args...);
   }
 
-private:
+ private:
   optional<ArrayRef<T>> wrapped_opt_array_ref;
 };
 
