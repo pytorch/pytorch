@@ -213,7 +213,6 @@ def tol1(op_name, override_dct, *, device_type=None):
 def opsToleranceOverride(test_case_name, base_test_name, overrides):
     all_opinfos = functorch_lagging_op_db + additional_op_db
     for override in overrides:
-        print(override)
         op_name, variant_name, override, device_type = override
         matching_opinfos = [o for o in all_opinfos
                             if o.name == op_name and o.variant_test_name == variant_name]
