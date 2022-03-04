@@ -241,32 +241,19 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
   int64_t outputH,
   int64_t outputW,
   const Tensor& randomSamples,
+  int64_t numBatch,
+  int64_t numPlanes,
+  int64_t inputT,
+  int64_t inputH,
+  int64_t inputW,
   const Tensor& output,
-  const Tensor& indices
-) {
-
-  int64_t planeDim = 0;
-  int64_t dimt = 1;
-  int64_t dimh = 2;
-  int64_t dimw = 3;
-
-  int64_t ndims = input.ndimension();
-  if (ndims == 5) {
-    planeDim++;
-    dimt++;
-    dimh++;
-    dimw++;
-  }
-
-  /* sizes */
-  int64_t numPlanes = input.size(planeDim);
-  int64_t inputT = input.size(dimt);
-  int64_t inputH = input.size(dimh);
-  int64_t inputW = input.size(dimw);
+  const Tensor& indices) {
 
   auto output_ = output;
   auto indices_ = indices;
   auto input_ = input;
+
+  int64_t ndims = input_.ndimension();
   if(ndims == 4) {
     output_ = output_.reshape({1, numPlanes, outputT, outputH, outputW});
     indices_ = indices_.reshape({1, numPlanes, outputT, outputH, outputW});

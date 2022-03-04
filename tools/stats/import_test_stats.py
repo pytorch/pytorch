@@ -8,19 +8,20 @@ import re
 from typing import Any, Callable, Dict, List, Optional, cast
 from urllib.request import urlopen
 
-# PYTORCH_IGNORE_DISABLED_ISSUES should only be set during CI (along with IN_CI) as a
-# comma-separated list of issue numbers. The intent is to re-enable any disabled tests
-# associated with the issues in this list.
-#
-# There is normally no reason to use this locally as the disabled tests list should not
-# affect your local development and every test should be enabled. If for whatever reason
-# you would like to use this during local development, please note the following caveat:
-#
-# Whenever you set OR reset PYTORCH_IGNORE_DISABLED_ISSUES, you should delete the existing
-# .pytorch-disabled-tests.json and redownload/parse the file for your change to apply, as
-# PYTORCH_IGNORE_DISABLED_ISSUES is used during the parsing stage. To download the files,
-# run test/run_test.py with IN_CI=1.
-IGNORE_DISABLED_ISSUES: List[str] = os.getenv('PYTORCH_IGNORE_DISABLED_ISSUES', '').split(',')
+def get_disabled_issues() -> List[str]:
+    pr_body = os.getenv('PR_BODY', '')
+    # The below regex is meant to match all *case-insensitive* keywords that
+    # GitHub has delineated would link PRs to issues, more details here:
+    # https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue.
+    # E.g., "Close #62851", "fixES #62851" and "RESOLVED #62851" would all match, but not
+    # "closes  #62851" --> extra space, "fixing #62851" --> not a keyword, nor "fix 62851" --> no #
+    regex = '(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) #([0-9]+)'
+    issue_numbers = [x[4] for x in re.findall(regex, pr_body)]
+    print("Ignoring disabled issues: ", issue_numbers)
+    return issue_numbers
+
+
+IGNORE_DISABLED_ISSUES: List[str] = get_disabled_issues()
 
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'

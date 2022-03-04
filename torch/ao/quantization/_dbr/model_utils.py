@@ -6,6 +6,7 @@ type.
 import torch
 import torch.nn.functional as F
 toq = torch.ops.quantized
+from .mappings import conv_ops, conv_prepack_fns
 from .quantization_state import AutoQuantizationState
 from torch.quantization import (
     ObserverBase,
@@ -30,7 +31,7 @@ def pack_weights_for_functionals(
             if packable_args_len == 0:
                 continue
 
-            if seen_q_op_info.type == F.conv2d:
+            if seen_q_op_info.type in conv_ops:
                 # fetch all the info needed for packed params
                 assert seen_q_op_info.packable_tensor_idx_to_name[1] is not None
                 weight = getattr(module, seen_q_op_info.packable_tensor_idx_to_name[1])
@@ -51,7 +52,7 @@ def pack_weights_for_functionals(
                 qweight = torch.quantize_per_tensor(weight, scale, zp, torch.qint8)
 
                 # create the packed params
-                packed_params = toq.conv2d_prepack(
+                packed_params = conv_prepack_fns[seen_q_op_info.type](
                     qweight, bias, stride, padding, dilation, groups)
 
                 # attach to module
