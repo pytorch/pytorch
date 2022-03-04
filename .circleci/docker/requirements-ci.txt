@@ -1,6 +1,6 @@
 # Python dependencies required for unit tests
 
-#awscli==1.6
+#awscli==1.6 #this breaks some platforms
 #Description: AWS command line interface
 #Pinned versions: 1.6
 #test that import:
@@ -10,7 +10,7 @@ boto3==1.19.12
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-#click
+click
 #Description: Command Line Interface Creation Kit
 #Pinned versions:
 #test that import:
@@ -20,7 +20,7 @@ boto3==1.19.12
 #Pinned versions: 5.0b5
 #test that import:
 
-#dataclasses
+dataclasses
 #Description: Provides decorators for auto adding special methods to user classes
 #Pinned versions:
 #test that import:
