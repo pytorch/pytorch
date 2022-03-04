@@ -253,6 +253,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
      DispatchKey::Metal,
      DispatchKey::QuantizedCPU,
      DispatchKey::QuantizedCUDA,
+     DispatchKey::QuantizedXPU,
      DispatchKey::CustomRNGKeyId,
      DispatchKey::MkldnnCPU,
      DispatchKey::SparseCPU,
