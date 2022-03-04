@@ -116,10 +116,16 @@ def get_extensions():
     return ext_modules
 
 
+class BuildExtension_(BuildExtension):
+    def build_extensions(self, *args, **kwargs):
+        if '-Wstrict-prototypes' in self.compiler.compiler_so:
+            self.compiler.compiler_so.remove('-Wstrict-prototypes')
+        super().build_extensions(*args, **kwargs)
+
+
 if __name__ == '__main__':
     print("Building wheel {}-{}".format(package_name, version))
     write_version_file()
-
     setup(
         # Metadata
         name=package_name,
@@ -135,6 +141,6 @@ if __name__ == '__main__':
         extras_require=extras,
         ext_modules=get_extensions(),
         cmdclass={
-            "build_ext": BuildExtension.with_options(no_python_abi_suffix=True),
+            "build_ext": BuildExtension_.with_options(no_python_abi_suffix=True),
             'clean': clean,
         })

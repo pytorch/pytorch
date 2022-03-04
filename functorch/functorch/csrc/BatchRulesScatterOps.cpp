@@ -203,7 +203,7 @@ namespace {
     // Eg. Given `indexed_shape.size()` is 5 and
     // shape of `values` is (N, 2, 3), then following block
     // will reshape `values` to (N, 1, 1, 2, 3).
-    if (indexed_shape.size() > values_.dim()) {
+    if ( (int64_t) indexed_shape.size() > values_.dim()) {
       auto values_sizes = values_.sizes();
 
       // number of unit dims (for broadcasting value to indexed_shape)
@@ -344,7 +344,7 @@ std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
     bool accumulate) {
   TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
   // find the batch_size
-  int64_t batch_size;
+  int64_t batch_size = 0;
   if (self_bdim || values_bdim) {
     batch_size = get_bdim_size2(self, self_bdim, values, values_bdim);
   } else {

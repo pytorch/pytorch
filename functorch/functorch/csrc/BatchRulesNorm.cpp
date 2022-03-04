@@ -445,7 +445,7 @@ C10_ALWAYS_INLINE bool has_same_shape(
   if (!tensor.defined()) {
     return true;
   }
-  if (rankWithoutBatchDim(tensor, tensor_bdim) != normalized_shape.size()) {
+  if (rankWithoutBatchDim(tensor, tensor_bdim) != (int64_t) normalized_shape.size()) {
     return false;
   }
   const auto tensor_shape = tensor.sizes();
