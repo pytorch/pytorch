@@ -13,6 +13,7 @@ namespace lazy {
 
 TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d(const at::Tensor & self, at::IntArrayRef output_size);
 TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(const at::Tensor & grad_output, const at::Tensor & self);
+TORCH_API std::vector<Shape> compute_shape__amp_foreach_non_finite_check_and_unscale_(at::TensorList self, at::Tensor & found_inf, const at::Tensor & inv_scale);
 TORCH_API std::vector<Shape> compute_shape_abs(const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out);
 TORCH_API std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction);
@@ -50,6 +51,7 @@ TORCH_API std::vector<Shape> compute_shape_relu(const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_relu_(at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta);
 TORCH_API std::vector<Shape> compute_shape_sort(const at::Tensor & self, int64_t dim, bool descending);
+TORCH_API std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, bool unbiased);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);

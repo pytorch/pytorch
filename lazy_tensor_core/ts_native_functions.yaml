@@ -112,6 +112,7 @@ full_codegen:
   - softplus_backward
   - sort
   - sqrt
+  - stack
   - std
   - std.dim
   - std.correction
@@ -161,7 +162,6 @@ supported:
   - squeeze.dim
   - squeeze_
   - squeeze_.dim
-  - stack
   - t
   - t_
   - _to_copy

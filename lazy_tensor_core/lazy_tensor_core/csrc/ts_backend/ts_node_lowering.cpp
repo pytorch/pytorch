@@ -24,7 +24,6 @@
 
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
-#include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
@@ -139,11 +138,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerSqueeze(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Squeeze>(
               node, torch::lazy::OpKind(at::aten::squeeze)));
-    }
-    if (node->op().op == at::aten::stack) {
-      return LowerStack(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Stack>(
-              node, torch::lazy::OpKind(at::aten::stack)));
     }
     if (node->op().op == at::aten::unsqueeze) {
       return LowerUnsqueeze(
@@ -332,17 +326,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       arguments.push_back(node->dim());
     }
     return LowerBuiltin(node, arguments);
-  }
-
-  TSOpVector LowerStack(const torch_lazy_tensors::ir::ops::Stack* stack) {
-    std::vector<torch::jit::NamedValue> arguments;
-    std::vector<torch::jit::Value*> tensor_list;
-    const auto& operands = stack->operands();
-    CHECK(operands.size() == 1);
-    auto graph = function_->graph();
-    arguments.emplace_back(loctx()->GetOutputOp(operands.back()));
-    arguments.emplace_back(stack->dim());
-    return LowerBuiltin(stack, arguments);
   }
 
   TSOpVector LowerSelectViewUpdate(const torch::lazy::SelectViewUpdate* node) {

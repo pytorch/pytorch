@@ -140,6 +140,11 @@ std::vector<Shape> compute_shape_abs(const at::Tensor & self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape__amp_foreach_non_finite_check_and_unscale_(at::TensorList self, at::Tensor & found_inf, const at::Tensor & inv_scale) {
+  // TODO(whc)
+  return {};
+}
+
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
   if(reduction == at::Reduction::None) {
     return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -533,12 +538,30 @@ std::vector<Shape> compute_shape_clamp_min(const at::Tensor & self, const at::Sc
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-TORCH_API std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<at::MemoryFormat> memory_format) {
+std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<at::MemoryFormat> memory_format) {
   if(dtype){
     return {Shape(*dtype, self.sizes().vec())};
   }
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
+
+std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
+  auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
+
+  // Copied from 'check_stack_inputs' in TensorShape.cpp
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  for (const auto i : c10::irange(1, tensors.size())) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
+  }
+
+  auto result_sizes = tensors[0].sizes().vec();
+  result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+  return {Shape(tensors[0].scalar_type(), result_sizes)};
+}
+
 // Restore unused-parameters warnings
 #pragma GCC diagnostic pop
 

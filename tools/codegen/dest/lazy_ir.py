@@ -7,7 +7,7 @@ from tools.codegen.model import (BackendIndex, NativeFunction,
 from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
-from tools.codegen.api.lazy import LazyIrSchema, isValueType
+from tools.codegen.api.lazy import LazyIrSchema, isValueType, valueT, tensorListValueT
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
 def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
@@ -21,6 +21,8 @@ def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
         if isinstance(arg.type, BaseCType):
             if arg.name in schema.wrapped_scalar_names:
                 return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
+            elif arg.type.type is tensorListValueT:
+                return f"lazy_{arg.name}_tensorlist"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             if arg.name in schema.wrapped_scalar_names:
@@ -31,7 +33,7 @@ def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
                    f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : " \
                    "c10::nullopt"
         else:
-            raise AssertionError("TODO not sure if there are other valid types to handle here")
+            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.type})")
     else:
         if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
             return f"std::vector<{arg.type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
@@ -108,13 +110,13 @@ class LazyIR(ABC):
         base_ctor_value_args_list = []
         optional_values = []
         for t in value_types:
-            if isinstance(t.type, BaseCType):
+            if isinstance(t.type, BaseCType) or isinstance(t.type, VectorCType):
                 base_ctor_value_args_list.append(f"{t.name}")
             elif isinstance(t.type, OptionalCType):
                 base_ctor_value_args_list.append(f"{t.name}.value_or(kNullValue)")
                 optional_values.append(t.name)
             else:
-                raise AssertionError("TODO not sure if there are other valid types to handle here")
+                raise AssertionError(f"TODO not sure if there are other valid types to handle here ({t.type})")
         base_ctor_value_args = ", ".join(base_ctor_value_args_list)
         has_optional_decls = "\n  ".join([f"bool has_{value}: 1;" for value in optional_values])
         has_optional_defs = "\n    ".join([f"has_{value} = !!{value};" for value in optional_values])
@@ -180,17 +182,21 @@ def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: 
         if t.name in schema.wrapped_scalar_names:
             # no lazy tensor wrapper for scalars that are promoted to IR values
             continue
-        if isinstance(t.type, BaseCType):
-            lazy_tensor_decls.append(
-                f"{tensor_class}Ptr lazy_{t.name} = "
-                f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({t.name}, *common_device);")
+        elif isinstance(t.type, BaseCType):
+            if t.type.type is tensorListValueT:
+                lazy_tensor_decls.append(
+                    f"auto lazy_{t.name}_tensorlist = torch::lazy::GetTensorList({t.name});")
+            else:
+                lazy_tensor_decls.append(
+                    f"{tensor_class}Ptr lazy_{t.name} = "
+                    f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({t.name}, *common_device);")
         elif isinstance(t.type, OptionalCType):
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
             lazy_tensor_decls.append(
                 f"    {tensor_class}Ptr lazy_{t.name} = torch::lazy::TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
-            raise AssertionError("TODO not sure if there are other valid types to handle here")
+            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({t.type})")
     return ("\n        ").join(lazy_tensor_decls)
 
 @dataclass(frozen=True)
@@ -254,8 +260,8 @@ class GenLazyNativeFuncDefinition:
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
-            assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
-                                        "and has tuple outputs."
+            assert returns_length <= 1, "We assumed there was no such case where an op is an in-place variant " \
+                                        f"and has tuple outputs, but got tuple of len {returns_length}."
             bridge_str = f"""lazy_{first_tensor_name}->SetInPlaceIrValue(node);
         auto& result = {first_tensor_name};"""
 
