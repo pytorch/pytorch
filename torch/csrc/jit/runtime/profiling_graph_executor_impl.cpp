@@ -402,7 +402,8 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "After CheckInplace (end of runPreAutodiffPassPipeline)\n", *graph);
 }
 
-FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(size_t remaining_depth) {
+FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(
+    size_t remaining_depth) {
   size_t curr_depth = 0;
   for (int i = static_cast<int>(fusion_strategy_.size()) - 1; i >= 0; i--) {
     curr_depth += fusion_strategy_[i].second;
