@@ -34,6 +34,8 @@ class OpOverload:
         self._overloadpacket = overloadpacket
         self._overloadname = 'default' if schema.overload_name == '' else schema.overload_name
         self.__name__ = "{}.{}".format(self._schema.name.split("::")[1], self._overloadname)
+        self.__module__ = overloadpacket.__module__
+        op.__module__ = overloadpacket.__module__
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
