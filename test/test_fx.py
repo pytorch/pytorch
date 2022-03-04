@@ -1974,6 +1974,7 @@ class TestFX(JitTestCase):
 
         unflattened = pytree.tree_unflatten(flattened, spec)
         assert unflattened == l
+        assert isinstance(unflattened, immutable_list)
 
     def test_immutable_dict_pytree_ops(self):
         rand_tensor = torch.randn(5, 3)
@@ -1984,6 +1985,7 @@ class TestFX(JitTestCase):
 
         unflattened = pytree.tree_unflatten(flattened, spec)
         assert unflattened == d
+        assert isinstance(unflattened, immutable_dict)
 
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()

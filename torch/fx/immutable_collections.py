@@ -37,13 +37,13 @@ def _immutable_dict_flatten(d: Dict[Any, Any]) -> Tuple[List[Any], Context]:
     return list(d.values()), list(d.keys())
 
 def _immutable_dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
-    return {key: value for key, value in zip(context, values)}
+    return immutable_dict({key: value for key, value in zip(context, values)})
 
 def _immutable_list_flatten(d: List[Any]) -> Tuple[List[Any], Context]:
     return d, None
 
 def _immutable_list_unflatten(values: List[Any], context: Context) -> List[Any]:
-    return list(values)
+    return immutable_list(values)
 
 
 _register_pytree_node(immutable_dict, _immutable_dict_flatten, _immutable_dict_unflatten)
