@@ -467,13 +467,13 @@ TEST(DynamicShapes, GraphWithCatAndBroadcast) {
 TEST(DynamicShapes, MultiThreadedExecution) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_template = R"IR(
-      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=${device),
-            %y : Float(SS(-2), SS(-3), requires_grad=0, device=${device),
+      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=${device}),
+            %y : Float(SS(-2), SS(-3), requires_grad=0, device=${device}),
             %SS_2 : int,
             %SS_3 : int):
-        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=${device) = aten::tanh(%x)
-        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=${device) = aten::erf(%3)
-        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=${device) = aten::mul(%4, %y)
+        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::tanh(%x)
+        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::erf(%3)
+        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::mul(%4, %y)
         return (%5))IR";
   for (bool use_cuda : {false, true}) {
     if (!torch::cuda::is_available() && use_cuda) {
