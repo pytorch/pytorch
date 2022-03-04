@@ -383,14 +383,15 @@ def _lower_weighted_ref_functional(
     modules = dict(model.named_modules(remove_duplicate=False))
     nodes = list(model.graph.nodes)
     for n in model.graph.nodes:
+
         # Step 0: Find nodes that match this pattern (dequantize - functional op - quantize)
         # We search for the pattern backwards, starting with the quantize node
         # Quantize node args: (func, scale, zp, dtype)
-        if n.target != torch.quantize_per_tensor:
+        if n.op != "call_function" or n.target != torch.quantize_per_tensor:
             continue
         q_node = n
         (func_node, output_scale_node, output_zp_node, _) = q_node.args
-        if func_node.op != "call_function":
+        if should_skip_lowering(func_node, qconfig_map):
             continue
         # Handle cases where the functional op is wrapped in a ReLU
         if func_node.target == F.relu:
@@ -398,22 +399,25 @@ def _lower_weighted_ref_functional(
             func_node = relu_node.args[0]
         else:
             relu_node = None
-        if func_node.target not in LOWER_FUNCTIONAL_MAP:
+        # Linear args: (dequantized inputs, dequantized weights[, bias])
+        # Conv args: (dequantized inputs, dequantized weights[, bias, stride, padding, dilation, groups])
+        if func_node.op != "call_function" or func_node.target not in LOWER_FUNCTIONAL_MAP:
             continue
-        if should_skip_lowering(func_node, qconfig_map):
+        (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
+        if input_dq_node.target != "dequantize" or weight_dq_node.target != "dequantize":
+            continue
+        quantized_weight = weight_dq_node.args[0]
+        if quantized_weight.op != "call_function" or\
+                quantized_weight.target not in (torch.quantize_per_tensor, torch.quantize_per_channel):
             continue
 
         # Step 1: Replace quantized weights with packed weights, which will be folded later
-        # Linear args: (dequantized inputs, dequantized weights[, bias])
-        # Conv args: (dequantized inputs, dequantized weights[, bias, stride, padding, dilation, groups])
-        (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
-        quantized_weight = weight_dq_node.args[0]
-        weight_dtype = quantized_weight.args[-1]
         # Use the right prepack op and prepare the corresponding args
         # Linear prepack args: (quantized weights[, bias])
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
         if func_node.target == F.linear:
+            weight_dtype = quantized_weight.args[-1]
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
             prepack_op = get_qconv_prepack_op(func_node.target)
