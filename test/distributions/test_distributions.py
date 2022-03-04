@@ -2569,7 +2569,7 @@ class TestDistributions(TestCase):
         df = torch.rand([]) + ndim + 3
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(ndim, ndim))
         d = InverseWishart(df=df, scale_tril=scale_tril)
-        samples = d.rsample((100000,))
+        samples = d.rsample((ndim * ndim * 100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=5, rtol=0)
         empirical_var = samples.var(0)
