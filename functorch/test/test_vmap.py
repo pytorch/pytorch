@@ -2658,20 +2658,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             # (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
             (lambda t: torch.randint_like(captured, 2), (torch.rand(B0),)),
             (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
-
-            # in-place on BatchedTensor
-            (lambda t: t.cauchy_(), (torch.randn(B0, 1),)),
-            (lambda t: t.exponential_(), (torch.randn(B0, 1),)),
-            (lambda t: t.geometric_(0.5), (torch.randn(B0, 1),)),
-            (lambda t: t.log_normal_(), (torch.randn(B0, 1),)),
-            (lambda t: t.uniform_(), (torch.randn(B0, 1),)),
-
-            # in-place on captured tensor
-            (lambda t: captured.cauchy_(), (torch.randn(B0),)),
-            (lambda t: captured.exponential_(), (torch.randn(B0),)),
-            (lambda t: captured.geometric_(0.5), (torch.randn(B0),)),
-            (lambda t: captured.log_normal_(), (torch.randn(B0),)),
-            (lambda t: captured.uniform_(), (torch.randn(B0),)),
         ]
         for op, args in random_ops:
             with self.assertRaisesRegex(RuntimeError,
@@ -3528,6 +3514,11 @@ class TestVmapOperatorsOpInfo(TestCase):
             lambda _, shape: torch.randint(100, shape, **kwargs),
             lambda _, shape: torch.randint(5, 100, shape, **kwargs),
             lambda t, _: t.random_(**only_gen_kwarg),
+            lambda t, _: t.cauchy_(**only_gen_kwarg),
+            lambda t, _: t.exponential_(**only_gen_kwarg),
+            lambda t, _: t.geometric_(0.5, **only_gen_kwarg),
+            lambda t, _: t.log_normal_(**only_gen_kwarg),
+            lambda t, _: t.uniform_(**only_gen_kwarg),
             lambda _, shape: torch.normal(0., 1., shape, **kwargs),
             lambda t, _: t.normal_(**only_gen_kwarg),
             lambda t, _: t.bernoulli_(torch.tensor([0.3, 0.4, 0.5, 0.6]), **only_gen_kwarg),
@@ -3634,6 +3625,11 @@ class TestVmapOperatorsOpInfo(TestCase):
             lambda t, _: t.normal_(**kwargs),
             lambda t, _: t.bernoulli_(torch.tensor([0.3, 0.4, 0.5, 0.6]), **kwargs),
             lambda t, _: t.bernoulli_(**kwargs),
+            lambda t, _: t.cauchy_(**kwargs),
+            lambda t, _: t.exponential_(**kwargs),
+            lambda t, _: t.geometric_(0.5, **kwargs),
+            lambda t, _: t.log_normal_(**kwargs),
+            lambda t, _: t.uniform_(**kwargs),
         ]
 
         B0 = 4
