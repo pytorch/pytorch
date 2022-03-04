@@ -6,12 +6,28 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
+#include <ATen/core/jit_type_base.h>
+#include "c10/util/Exception.h"
 
 namespace torch {
 namespace lazy {
 
 class LazyTensor;
 using LazyTensorPtr = c10::intrusive_ptr<LazyTensor>;
+
+class LazySymbolicInt : public c10::SymbolicInt {
+  
+  virtual SymbolicInt* add(SymbolicInt* b) override {
+    TORCH_INTERNAL_ASSERT("NYI");
+    return nullptr;
+  }
+  virtual SymbolicInt* add(int64_t) override {
+    TORCH_INTERNAL_ASSERT("NYI");
+    return nullptr;
+  }
+
+  torch::lazy::NodePtr node_;
+};
 
 class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
  public:

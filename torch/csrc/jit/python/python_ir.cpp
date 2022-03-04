@@ -22,6 +22,7 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
+#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 namespace jit {
@@ -204,6 +205,30 @@ void initPythonIRBindings(PyObject* module_) {
           "has_writers",
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
+
+  py::class_<c10::SymbolicOrConcreteInt>(m, "SymbolicOrConcreteInt")
+      .def("__add__", [](c10::SymbolicOrConcreteInt a, c10::SymbolicOrConcreteInt b) -> SymbolicOrConcreteInt {
+
+        auto result = a + b;
+        return result;
+      })
+      .def("size", [](at::Tensor t, size_t dim) {
+        return c10::SymbolicOrConcreteInt(t.size(dim));
+      })
+      .def("create", [](int64_t data) {
+        return c10::SymbolicOrConcreteInt(data);
+      })
+      .def("__int__", [](c10::SymbolicOrConcreteInt self) {
+        TORCH_CHECK(!self.isSymbolicInt());
+        return self.data_;
+      })
+      .def("__str__", [](c10::SymbolicOrConcreteInt self) {
+        std::stringstream ss;
+        ss << "SymbolicOrConcreteInt("
+          << self.data_ 
+          << ")";
+        return ss.str();
+      });
 
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")

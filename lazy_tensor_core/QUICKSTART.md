@@ -28,7 +28,7 @@ export DEBUG=1
 
 To enable logging or any other gflags,
 
-* Recompile with `export BUILD_CAFFE2=1`
+* Recompile pytorch with `export BUILD_CAFFE2=1`
 * Run `pip install protobuf`
 * Add the following to your script:
 

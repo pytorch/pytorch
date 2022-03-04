@@ -15,6 +15,7 @@
 #include <ostream>
 #include <sstream>
 #include <type_traits>
+#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
@@ -1236,6 +1237,23 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
+struct SymbolicOrConcreteIntType;
+using SymbolicOrConcreteIntTypePtr = SingletonTypePtr<SymbolicOrConcreteIntType>;
+struct TORCH_API SymbolicOrConcreteIntType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "BoxedInt";
+  }
+  static const TypeKind Kind = TypeKind::SymbolicOrConcreteIntType;
+  // global singleton
+  static SymbolicOrConcreteIntTypePtr get();
+
+ private:
+  SymbolicOrConcreteIntType() : Type(TypeKind::SymbolicOrConcreteIntType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1695,6 +1713,13 @@ template <>
 struct getTypePtr_<int64_t> final {
   static decltype(auto) call() {
     return IntType::get();
+  }
+};
+
+template <>
+struct getTypePtr_<SymbolicOrConcreteInt> final {
+  static decltype(auto) call() {
+    return SymbolicOrConcreteIntType::get();
   }
 };
 template <>

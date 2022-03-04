@@ -143,6 +143,11 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
+std::ostream& operator<<(std::ostream& os, const SymbolicOrConcreteInt& s) {
+  os << "SymbolicOrConcreteInt(" << s.data_ << ")";
+  return os;
+}
+
 AnyTypePtr AnyType::get() {
   static AnyTypePtr value(new AnyType());
   return value;
@@ -254,6 +259,11 @@ AnyClassTypePtr AnyClassType::get() {
 
 AnyEnumTypePtr AnyEnumType::get() {
   static AnyEnumTypePtr value(new AnyEnumType());
+  return value;
+}
+
+SymbolicOrConcreteIntTypePtr SymbolicOrConcreteIntType::get() {
+  static SymbolicOrConcreteIntTypePtr value(new SymbolicOrConcreteIntType());
   return value;
 }
 

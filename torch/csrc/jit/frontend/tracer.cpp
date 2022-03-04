@@ -24,6 +24,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 namespace jit {
@@ -590,6 +591,16 @@ void TracingState::setValue(const IValue& v, Value* value) {
 }
 
 void addInputs(Node* n, const char* name, int64_t value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else {
+    detail::genericAddInput(n, value);
+  }
+}
+
+void addInputs(Node* n, const char* name, c10::SymbolicOrConcreteInt value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
     Value* v = ArgumentStash::popValue(name);

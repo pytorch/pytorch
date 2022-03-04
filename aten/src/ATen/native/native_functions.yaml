@@ -3248,14 +3248,14 @@
   dispatch:
     CompositeExplicitAutograd: mvlgamma_
 
-- func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
+- func: narrow_copy(Tensor self, int dim, int start, SymbolicOrConcreteInt length) -> Tensor
   variants: function, method
   dispatch:
     CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
     CompositeExplicitAutograd: narrow_copy_dense
 
-- func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
+- func: narrow_copy.out(Tensor self, int dim, int start, SymbolicOrConcreteInt length, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 

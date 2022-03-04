@@ -127,6 +127,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
+  _(SymbolicOrConcreteInt)   \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -541,6 +542,18 @@ public:
   // Int
   IValue(int64_t i) : tag(Tag::Int), is_intrusive_ptr(false) {
     payload.u.as_int = i;
+  }
+
+  IValue(c10::SymbolicOrConcreteInt i) : tag(Tag::SymbolicOrConcreteInt), is_intrusive_ptr(false) {
+    payload.u.as_int = i.data_;
+  }
+
+  bool isSymbolicOrConcreteInt() const {
+    return Tag::SymbolicOrConcreteInt == tag;
+  }
+
+  c10::SymbolicOrConcreteInt toSymbolicOrConcreteInt() const {
+    return c10::SymbolicOrConcreteInt(payload.u.as_int);
   }
 
   // allow you to pass literals (3, 4) without ambiguity

@@ -594,7 +594,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                        BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr]:
+                        BaseTy.Dimname, BaseTy.Stream, BaseTy.ConstQuantizerPtr, BaseTy.SymbolicOrConcreteInt]:
             # These python schema type names line up with their function schema names
             return t.name.name
 
@@ -777,6 +777,8 @@ def argument_type_str_pyi(t: Type) -> str:
     if isinstance(t, BaseType):
         if t.name == BaseTy.int:
             ret = '_int'
+        if t.name == BaseTy.SymbolicOrConcreteInt:
+            ret = 'SymbolicOrConcreteInt'
         elif t.name == BaseTy.float:
             ret = '_float'
         elif t.name == BaseTy.str:
@@ -1011,6 +1013,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return 'deviceWithDefault' if has_default else 'device'
         elif t.name == BaseTy.int:
             return 'toInt64'
+        elif t.name == BaseTy.SymbolicOrConcreteInt:
+            return 'toSymbolicOrConcreteInt'
         elif t.name == BaseTy.bool:
             return 'toBool'
         elif t.name == BaseTy.float:
