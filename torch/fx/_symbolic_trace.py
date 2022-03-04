@@ -12,7 +12,7 @@ import torch.utils._pytree as pytree
 
 from ._compatibility import compatibility
 from .node import Argument, map_aggregate, base_types
-from .graph import Graph, _PyTreeInfo
+from .graph import Graph, _PyTreeInfo, _PyTreeCodeGen
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy, ParameterProxy
 
@@ -452,14 +452,14 @@ class Tracer(TracerBase):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._pytree_info = _PyTreeInfo(orig_args[:total_args], in_spec, None)
+            self.graph._codegen = _PyTreeCodeGen(_PyTreeInfo(orig_args[:total_args], in_spec, None))
 
             def flatten_fn(*args):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                assert(self.graph._pytree_info is not None)
-                self.graph._pytree_info = self.graph._pytree_info._replace(out_spec=out_spec)
+                assert(isinstance(self.graph._codegen, _PyTreeCodeGen))
+                self.graph._codegen.pytree_info = self.graph._codegen.pytree_info._replace(out_spec=out_spec)
                 return out_args
 
             return flatten_fn, flat_args
@@ -467,8 +467,8 @@ class Tracer(TracerBase):
 
 
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-        if isinstance(attr_val, torch.nn.Parameter):
-            for n, p in self.root.named_parameters():
+        def maybe_get_proxy_for_attr(attr_val, collection_to_search, parameter_proxy_cache):
+            for n, p in collection_to_search:
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
                         kwargs = {}
@@ -478,6 +478,17 @@ class Tracer(TracerBase):
                         val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
+            return None
+
+        if isinstance(attr_val, torch.nn.Parameter):
+            maybe_parameter_proxy = maybe_get_proxy_for_attr(attr_val, self.root.named_parameters(), parameter_proxy_cache)
+            if maybe_parameter_proxy is not None:
+                return maybe_parameter_proxy
+
+        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
+            maybe_buffer_proxy = maybe_get_proxy_for_attr(attr_val, self.root.named_buffers(), parameter_proxy_cache)
+            if maybe_buffer_proxy is not None:
+                return maybe_buffer_proxy
 
         return attr_val
 

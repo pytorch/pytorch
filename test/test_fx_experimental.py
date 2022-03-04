@@ -814,6 +814,37 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_with_buffer(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('buffer', torch.randn(5, 5))
+
+            def forward(self, x):
+                x = torch.relu(x)
+                x = x + self.buffer
+                x = torch.sigmoid(x)
+                return x
+
+        f = Foo()
+        traced = torch.fx.symbolic_trace(f)
+        seen_relu = False
+
+        def split_callback(n):
+            nonlocal seen_relu
+            if n.op == torch.relu:
+                seen_relu = True
+
+            if seen_relu:
+                return 0
+            else:
+                return 1
+        split = split_module(traced, f, split_callback)
+
+        print([k for k, v in f.named_buffers()])
+        print([k for k, v in traced.named_buffers()])
+        print([k for k, v in split.named_buffers()])
+
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
         # Smoke test trivially splitting resnet into 1 partition works
@@ -1124,6 +1155,47 @@ class {test_classname}(torch.nn.Module):
 
         module_with_submodule = split_module(traced, mm, split_cb)
         self.assertEqual(module_with_submodule(a, b, c, d), traced(a, b, c, d))
+
+    def test_split_qualname_mapping(self):
+        d_hid = 4
+
+        class ExampleCode(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.lin = torch.nn.Linear(d_hid, d_hid)
+
+            def forward(self, x):
+                x = torch.mm(x, self.mm_param)
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param)
+                x = self.lin(x)
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param2)
+                x = self.lin(x)
+                return x
+
+        my_module = ExampleCode()
+        my_module_traced = symbolic_trace(my_module)
+
+        part_idx = 0
+
+        def split_callback(n : torch.fx.Node):
+            nonlocal part_idx
+            if (n.op, n.target) == ('call_module', 'lin'):
+                part_idx += 1
+            return part_idx
+
+        # split module in module with submodules
+        qualname_map : Dict[str, str] = {}
+        module_with_submodules = split_module(
+            my_module_traced, my_module, split_callback, qualname_map
+        )
+        expected_qualname_map = {
+            'submod_1.lin': 'lin', 'submod_2.lin': 'lin'
+        }
+        self.assertEqual(qualname_map, expected_qualname_map)
 
     def test_traceable_function_with_nonstandard_name(self):
         def foo(x):

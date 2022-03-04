@@ -44,12 +44,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
   te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       te::Sum(),
       [&](const te::ExprHandle& m,
           const te::ExprHandle& n,
           const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
-      {{K, "K"}});
+      {K});
   te::LoopNest loop({CT});
   loop.prepareForCodegen();
   te::StmtPtr s = loop.root_stmt();
@@ -66,12 +66,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
   te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       te::Sum(),
       [&](const te::ExprHandle& m,
           const te::ExprHandle& n,
           const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
-      {{K, "K"}});
+      {K});
   te::LoopNest loop({CT});
 
   {
@@ -124,12 +124,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
   te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       te::Sum(),
       [&](const te::ExprHandle& m,
           const te::ExprHandle& n,
           const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
-      {{K, "K"}});
+      {K});
   te::LoopNest loop({CT});
 
   {
@@ -182,12 +182,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
   te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       te::Sum(),
       [&](const te::ExprHandle& m,
           const te::ExprHandle& n,
           const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
-      {{K, "K"}});
+      {K});
   te::LoopNest loop({CT});
 
   {
@@ -248,12 +248,12 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
   te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
-      {{M, "M"}, {N, "N"}},
+      {M, N},
       te::Sum(),
       [&](const te::ExprHandle& m,
           const te::ExprHandle& n,
           const te::ExprHandle& k) { return AP.load(m, k) * BP.load(k, n); },
-      {{K, "K"}});
+      {K});
   te::LoopNest loop({CT});
 
   {
