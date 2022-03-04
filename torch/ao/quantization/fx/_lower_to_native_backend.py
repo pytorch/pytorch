@@ -437,6 +437,7 @@ def _lower_weighted_ref_functional(
         func_node.target = q_relu_func if relu_node is not None else q_func
         func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
         q_node.replace_all_uses_with(func_node)
+        # Move func_node after output_zp_node in the graph
         output_zp_node.append(func_node)
 
         # Clean up: Remove dequantize and quantize nodes and the old func node
