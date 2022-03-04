@@ -22,6 +22,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest
 )
+from torch.testing._internal.common_device_type import \
+     toleranceOverride, tol
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
@@ -29,6 +31,8 @@ from common_utils import (
     xfail,
     skipOps,
     check_vmap_fallback,
+    tol1,
+    opsToleranceOverride,
 )
 import types
 from collections import namedtuple
@@ -3148,6 +3152,11 @@ class TestVmapOperatorsOpInfo(TestCase):
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', (
+        tol1('linalg.det',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
+    ))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
     def test_vmap_exhaustive(self, device, dtype, op):
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -3161,11 +3170,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                     if op.name == 'empty_like' or op.name == 'new_empty':
                         self.assertEqual(loop_out.shape, batched_out.shape)
                         continue
-                    self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                    self.assertEqual(loop_out, batched_out)
                 for a_op in op.aliases:
                     a_generator = get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values, opinfo=op)
                     for loop_out, batched_out in a_generator:
-                        self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                        self.assertEqual(loop_out, batched_out)
             # todo(chilli): Garbage hack I added to deal with indexing not working
             except Exception as e:
                 # Checking if we're throwing an error because of dynamic shapes.
@@ -3174,6 +3183,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                 raise e
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @opsToleranceOverride('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', (
+        tol1('linalg.det',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cuda'),
+    ))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('complex'),
         xfail('copysign'),
@@ -3281,11 +3295,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                     if op.name == 'empty_like' or op.name == 'new_empty':
                         self.assertEqual(loop_out.shape, batched_out.shape)
                         continue
-                    self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                    self.assertEqual(loop_out, batched_out)
                 for a_op in op.aliases:
                     a_generator = get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values, opinfo=op)
                     for loop_out, batched_out in a_generator:
-                        self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                        self.assertEqual(loop_out, batched_out)
         check_vmap_fallback(self, test, op)
 
     def test_conv_double_backward(self, device):
