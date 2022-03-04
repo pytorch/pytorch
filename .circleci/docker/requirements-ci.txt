@@ -15,12 +15,12 @@ click
 #Pinned versions:
 #test that import:
 
-#coremltools
+coremltools==5.0b5
 #Description: Apple framework for ML integration
 #Pinned versions: 5.0b5
 #test that import:
 
-#dataclasses
+#dataclasses #this breaks some platforms
 #Description: Provides decorators for auto adding special methods to user classes
 #Pinned versions:
 #test that import:
