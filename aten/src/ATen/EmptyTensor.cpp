@@ -2,86 +2,77 @@
 #include <ATen/EmptyTensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/safe_numerics.h>
 
-// GCC has __builtin_mul_overflow from before it supported __has_builtin
-#ifdef __GNUC__
-#define HAS_BUILTIN_OVERFLOW() (1)
-#elif defined(__has_builtin)
-#define HAS_BUILTIN_OVERFLOW() (                    \
-      __has_builtin(__builtin_mul_overflow) &&      \
-      __has_builtin(__builtin_and_overflow))
-#else
-#define HAS_BUILTIN_OVERFLOW() (0)
-#endif
+#include <limits>
 
 namespace at {
 namespace detail {
-
-static c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
+namespace {
+c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
   if (pin_memory) {
     return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
   }
   return c10::GetCPUAllocator();
 }
 
-static size_t computeStorageNbytesContiguous(
+constexpr uint64_t storage_max() {
+  // int64_t and size_t are used somewhat inconsistently throughout ATen.
+  // To be safe, storage size calculations must fit in both types.
+  constexpr auto int64_max = static_cast<uint64_t>(
+      std::numeric_limits<int64_t>::max());
+  constexpr auto size_max = static_cast<uint64_t>(
+      std::numeric_limits<size_t>::max());
+  return std::min(int64_max, size_max);
+}
+
+}  // namespace (anonymous)
+
+size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
-    size_t itemsize_bytes) {
+    size_t itemsize_bytes,
+    size_t storage_offset
+  ) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  size_t size = 1;
+  uint64_t size = 1;
   bool overflowed = false;
-  for (const auto i : c10::irange(sizes.size())) {
-#if HAS_BUILTIN_OVERFLOW()
-    overflowed |= __builtin_mul_overflow(size, sizes[i], &size);
-#else
-    size *= sizes[i];
-#endif
+  for (const auto s : sizes) {
+    overflowed |= c10::mul_overflows(size, s, &size);
   }
-
-#if HAS_BUILTIN_OVERFLOW()
-  overflowed |= __builtin_mul_overflow(size, itemsize_bytes, &size);
-#else
-  size *= itemsize_bytes;
-#endif
-
+  overflowed |= c10::add_overflows(size, storage_offset, &size);
+  overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
+  overflowed |= size > storage_max();
   TORCH_CHECK(!overflowed,
               "Storage size calculation overflowed with sizes=", sizes);
-  return size;
+  return static_cast<size_t>(size);
 }
 
 size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,
-    size_t itemsize_bytes) {
+    size_t itemsize_bytes,
+    size_t storage_offset
+  ) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  size_t size = 1;
+  uint64_t size = storage_offset + 1;
   bool overflowed = false;
   for (const auto i : c10::irange(sizes.size())) {
-    if(sizes[i] == 0) {
+    if (sizes[i] == 0) {
       return 0;
     }
 
-#if HAS_BUILTIN_OVERFLOW()
-    size_t strided_size;
-    overflowed |= __builtin_mul_overflow(strides[i], sizes[i] - 1, &strided_size);
-    overflowed |= __builtin_add_overflow(size, strided_size, &size);
-#else
-    size += strides[i] * (sizes[i] - 1);
-#endif
+    uint64_t strided_size;
+    overflowed |= c10::mul_overflows(strides[i], sizes[i] - 1, &strided_size);
+    overflowed |= c10::add_overflows(size, strided_size, &size);
   }
-
-#if HAS_BUILTIN_OVERFLOW()
-  overflowed |= __builtin_mul_overflow(size, itemsize_bytes, &size);
-#else
-  size *= itemsize_bytes;
-#endif
-
+  overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
+  overflowed |= size > storage_max();
   TORCH_CHECK(!overflowed,
               "Storage size calculation overflowed with sizes=",
               sizes, " and strides=", strides);
-  return size;
+  return static_cast<size_t>(size);
 }
 
 TensorBase empty_generic(

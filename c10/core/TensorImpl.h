@@ -16,9 +16,11 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
+#include <c10/util/safe_numerics.h>
 
 #include <algorithm>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <numeric>
 
@@ -2284,11 +2286,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute the number of elements based on the sizes of a tensor.
    */
   int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
-    }
-    return n;
+#if C10_HAS_BUILTIN_OVERFLOW()
+    // Use overflow checks if supported by the compiler
+    return safe_compute_numel();
+#else
+    auto size = sizes();
+    return c10::multiply_integers(size.begin(), size.end());
+#endif
   }
 
   /**
@@ -2297,14 +2301,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * using a sparse layout has multiple dimensions with large sizes.
    */
   int64_t safe_compute_numel() const {
-    int64_t n = 1;
+    uint64_t n = 1;
+    bool overflows = false;
     for (auto s : sizes()) {
-      TORCH_CHECK(
-          s == 0 || n <= std::numeric_limits<int64_t>::max() / s,
-          "numel: integer multiplication overflow");
-      n *= s;
+      overflows |= c10::mul_overflows(n, s, &n);
     }
-    return n;
+    constexpr auto numel_max = std::min(
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+        static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
+
+    overflows |= (n > numel_max);
+    TORCH_CHECK(!overflows, "numel: integer multiplication overflow");
+    return static_cast<int64_t>(n);
   }
 
   /**
