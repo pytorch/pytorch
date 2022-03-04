@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/DeviceType.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -632,13 +631,13 @@ TEST(DynamicShapes, MultiThreadedExecution) {
 #ifdef TORCH_ENABLE_LLVM
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   const auto graph_string = R"IR(
-      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0),
-            %y : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0),
+      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
+            %y : Float(SS(-2), SS(-3), requires_grad=0, device=cpu),
             %SS_2 : int,
             %SS_3 : int):
-        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0) = aten::tanh(%x)
-        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0) = aten::erf(%3)
-        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0) = aten::mul(%4, %y)
+        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::tanh(%x)
+        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::erf(%3)
+        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=cpu) = aten::mul(%4, %y)
         return (%5))IR";
   torch::jit::parseIR(graph_string, graph.get());
 
@@ -659,9 +658,9 @@ TEST(DynamicShapes, MultiThreadedExecution) {
 
   auto run_kernel = [&](int dim1, int dim2) {
     auto a =
-        at::rand({dim1, dim2}, at::TensorOptions(at::kCUDA).dtype(at::kFloat));
+        at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
     auto b =
-        at::rand({dim1, dim2}, at::TensorOptions(at::kCUDA).dtype(at::kFloat));
+        at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
     auto ref = at::mul(at::erf(at::tanh(a)), b);
 
