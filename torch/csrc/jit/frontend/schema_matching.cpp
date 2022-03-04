@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -158,6 +159,11 @@ static Value* tryMatchArgument(
     bool allow_conversions,
     TypeEnv& type_env) {
   Value* value = named_value.value(graph);
+
+  if (arg.type()->kind() == TypeKind::SymIntType &&
+      value->type()->kind() == TypeKind::IntType) {
+    return value;
+  }
 
   // Some functions that take lists of integers or floats for fixed size arrays
   // also allow single ints/floats to be passed in their place. The single

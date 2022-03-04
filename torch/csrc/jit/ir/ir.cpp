@@ -1029,7 +1029,9 @@ bool Node::matches(const FunctionSchema& schema) const {
     // we will not succeed at matching T. However None <: Optional[T] so this
     // check can still succeed.
 
-    if (!actuals[i]->type()->isSubtypeOf(*formal)) {
+    bool skip_int2symint = formal->kind() == TypeKind::SymIntType &&
+        actuals[i]->type()->kind() == TypeKind::IntType;
+    if (!actuals[i]->type()->isSubtypeOf(*formal) && !skip_int2symint) {
       return false;
     }
   }
