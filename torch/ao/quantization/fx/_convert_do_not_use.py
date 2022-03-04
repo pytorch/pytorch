@@ -322,7 +322,7 @@ def _convert_do_not_use(
 
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
-                convert_weighted_module(node, modules, observed_module_names):
+                convert_weighted_module(node, modules, observed_node_names, quantized_reference_module_mapping):
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
