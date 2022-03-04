@@ -6,7 +6,7 @@ on:
       pytorch_version:
         description: "The version of PyTorch to test"
         required: true
-        default: "1.9.0"
+        default: "1.11.0"
 
 jobs:
   release-testing:
@@ -37,11 +37,13 @@ jobs:
       - name: Install PyTorch and setup environment
         run: |
           . activate reltest
-          conda install -y cudatoolkit=10.2 numpy
-          conda install -y -c pytorch pytorch=1.9.1 torchvision
-          # conda install -y -c pytorch-test pytorch=1.10.0 torchvision
-          echo "RESULT_DIR=${HOME}/release-testing/1.9.1" >> $GITHUB_ENV
+          conda install -y cudatoolkit=11.3 numpy magma-cuda113
+          conda install -y -c pytorch-test pytorch=1.11.0 torchvision torchtext
+          # conda install -y -c pytorch pytorch=1.10.0 torchvision torchtext
+          echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
           python -c "import torch"
+          python -c "import torchvision"
+          python -c "import torchtext"
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
           echo "Result dir: ${RESULT_DIR} "
       - name: Check machine tuned
