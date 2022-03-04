@@ -49,4 +49,5 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
    notebooks/jacobians_hessians.ipynb
    notebooks/ensembling.ipynb
    notebooks/per_sample_grads.ipynb
+   notebooks/neural_tangent_kernels.ipynb
    notebooks/aot_autograd_optimizations.ipynb
