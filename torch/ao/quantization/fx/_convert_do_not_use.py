@@ -127,7 +127,7 @@ def convert_weighted_module(
        not is_observed or \
        not is_weight_quantized or \
        not is_activation_quantized:
-        continue
+        return
 
     float_module = original_module
     fused_module = None
@@ -317,7 +317,7 @@ def _convert_do_not_use(
                 convert_standalone_module(node, modules)
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
-                convert_weighted_module(node, modules)
+                convert_weighted_module(node, modules):
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
