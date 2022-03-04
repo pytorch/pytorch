@@ -9,19 +9,13 @@
 #include <test/cpp/tensorexpr/test_base.h>
 
 #include <test/cpp/tensorexpr/padded_buffer.h>
-#include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include <torch/torch.h>
-#include <cmath>
-#include <sstream>
-#include <stdexcept>
-#include <thread>
+
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Half.h>
@@ -451,8 +445,7 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   ExprHandle add_value = load_output + load_data;
   StorePtr store_output = output_buf.store({0}, add_value);
   ForPtr for_output = For::make(i1, 0, N, store_output);
-  StmtPtr reduce_block =
-      torch::jit::tensorexpr::Block::make({init_store, for_output});
+  StmtPtr reduce_block = Block::make({init_store, for_output});
   VarHandle thread_idx("tidx", kInt);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
@@ -535,7 +528,7 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   StorePtr store_b = b_buf.store({0}, add_value);
   ForPtr for_b = For::make(t, 0, N, store_b, thread_idx_options);
 
-  StmtPtr reduce_block = torch::jit::tensorexpr::Block::make({for_init, for_b});
+  StmtPtr reduce_block = Block::make({for_init, for_b});
 
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
@@ -623,8 +616,8 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   StorePtr store_a1_v2 = a_buf.store({1}, v2);
   ForPtr loop_a_1 = For::make(l, 0, 2, store_a1_v2);
 
-  StmtPtr reduce_block = torch::jit::tensorexpr::Block::make(
-      {store_a0_0, loop_a_0, loop_b_1, store_a1_1, loop_a_1});
+  StmtPtr reduce_block =
+      Block::make({store_a0_0, loop_a_0, loop_b_1, store_a1_1, loop_a_1});
 
   VarHandle block_idx("bidx", kInt);
   LoopOptions block_idx_options;
@@ -748,7 +741,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
     block.push_back(free_stmt);
   }
 
-  BlockPtr reduce_body = torch::jit::tensorexpr::Block::make(block);
+  BlockPtr reduce_body = Block::make(block);
   ForPtr loop_k1 = For::make(k, 0, 1, reduce_body, block_idx_opt);
 
   // TODO: check the generated code for correctness.
@@ -874,11 +867,11 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
     block_n.push_back(free_stmt);
   }
   {
-    BlockPtr block_n_stmt = torch::jit::tensorexpr::Block::make(block_n);
+    BlockPtr block_n_stmt = Block::make(block_n);
     ForPtr for_n = For::make(n, 0, N, block_n_stmt, thread_idx_opt);
     block_k.push_back(for_n);
   }
-  BlockPtr block_k_stmt = torch::jit::tensorexpr::Block::make(block_k);
+  BlockPtr block_k_stmt = Block::make(block_k);
   ForPtr loop_k = For::make(k, 0, 1, block_k_stmt, block_idx_opt);
 
   CudaCodeGen cuda_cg(loop_k, a, b);
@@ -1097,12 +1090,8 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
-  ForPtr loop = For::make(
-      i,
-      0,
-      12,
-      torch::jit::tensorexpr::Block::make({c.store({i}, ite)}),
-      block_idx_opt);
+  ForPtr loop =
+      For::make(i, 0, 12, Block::make({c.store({i}, ite)}), block_idx_opt);
 
   CudaCodeGen cuda_cg(loop, a, b, c);
 
@@ -1797,7 +1786,7 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
       i,
       0,
       OUTER_SIZE,
-      torch::jit::tensorexpr::Block::make(
+      Block::make(
           {For::make(
                j,
                0,
@@ -1935,7 +1924,7 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
       i,
       0,
       OUTER_SIZE,
-      torch::jit::tensorexpr::Block::make(
+      Block::make(
           {For::make(
                j,
                0,
@@ -2298,63 +2287,6 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   cudaFree(b_dev);
   cudaFree(c_dev);
   cudaFree(d_dev);
-}
-
-TEST(Cuda, MultithreadDynamic_CUDA) {
-  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
-  const auto graph_string = R"IR(
-      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0),
-            %y : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0),
-            %SS_2 : int,
-            %SS_3 : int):
-        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0) = aten::tanh(%x)
-        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0) = aten::erf(%3)
-        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=cuda:0) = aten::mul(%4, %y)
-        return (%5))IR";
-  torch::jit::parseIR(graph_string, graph.get());
-
-  std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
-
-  std::vector<torch::jit::StrideInput> input_desc = {
-      torch::jit::StrideInput::TENSOR_CONT};
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides;
-  symbolic_strides[graph->inputs().at(0)] = input_desc;
-  symbolic_strides[graph->inputs().at(1)] = input_desc;
-  symbolic_strides[graph->outputs().at(0)] = input_desc;
-
-  TensorExprKernel kernel(
-      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
-
-  auto run_kernel = [&](int dim1, int dim2) {
-    auto a =
-        at::rand({dim1, dim2}, at::TensorOptions(at::kCUDA).dtype(at::kFloat));
-    auto b =
-        at::rand({dim1, dim2}, at::TensorOptions(at::kCUDA).dtype(at::kFloat));
-
-    auto ref = at::mul(at::erf(at::tanh(a)), b);
-
-    std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
-    stack.emplace_back(dim1);
-    stack.emplace_back(dim2);
-    kernel.run(stack);
-
-    auto o = stack[0].toTensor();
-    ASSERT_TRUE(at::allclose(o, ref));
-  };
-
-  // Run the kernel in parallel to ensure that the run() method calls in
-  // TensorExprKernel are not changing any state.
-  constexpr size_t kNumThreads = 4;
-  std::vector<std::thread> threads;
-  for (size_t id = 0; id < kNumThreads; ++id) {
-    threads.emplace_back(run_kernel, id + 5, id + 20);
-  }
-  for (auto& t : threads) {
-    t.join();
-  }
 }
 
 } // namespace jit
