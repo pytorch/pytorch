@@ -2605,6 +2605,41 @@ class TestIndividualWorkerQueue(TestCase):
                 self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers + 1)
 
 
+class TestMultiEpochDataset(IterableDataset):
+    def __init__(self, length):
+        self.length = length
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        assert worker_info is not None
+        worker_id = worker_info.id
+        assert self.length % worker_info.num_workers == 0
+        for idx in range(self.length // worker_info.num_workers):
+            if worker_id == 0:
+                time.sleep(0.001)
+            yield worker_id
+
+    def __len__(self):
+        return self.length
+
+
+class TestMultiEpochDeterminism(TestCase):
+    def test_multi_epochs_deter(self):
+        num_workers = 2
+        batch_size = 10
+        num_epochs = 3
+
+        dataset = TestMultiEpochDataset(batch_size*num_workers)
+
+        loader = DataLoader(
+            dataset, batch_size=batch_size, num_workers=num_workers,
+            shuffle=False,  persistent_workers=True, timeout=5
+        )
+        for ind in range(num_epochs):
+            for batch_idx, sample in enumerate(loader):
+                self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
+
+
 class SetAffinityDataset(IterableDataset):
 
     def __iter__(self):

@@ -895,7 +895,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             multiprocessing_context = loader.multiprocessing_context
 
         self._worker_init_fn = loader.worker_init_fn
-        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
         self._worker_pids_set = False
