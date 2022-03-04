@@ -32,14 +32,15 @@ class OpOverload:
         self._op = op
         self._schema = schema
         self._overloadpacket = overloadpacket
-        self.__name__ = 'default' if schema.overload_name == '' else schema.overload_name
+        self._overloadname = 'default' if schema.overload_name == '' else schema.overload_name
+        self.__name__ = "{}.{}".format(self._schema.name.split("::")[1], self._overloadname)
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
     def __repr__(self):
-        return "<OpOverload(op='{}.{}', overload='{}')>".format(*self._schema.name.split("::"), self.__name__)
+        return "<OpOverload(op='{}.{}', overload='{}')>".format(*self._schema.name.split("::"), self._overloadname)
 
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
@@ -52,7 +53,7 @@ class OpOverload:
 
     # `my_namespace.my_op_name.overload_name`
     def __str__(self):
-        return "{}.{}.{}".format(*self._schema.name.split("::"), self.__name__)
+        return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
     @property
     def overloadpacket(self):
