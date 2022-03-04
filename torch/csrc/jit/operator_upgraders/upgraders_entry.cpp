@@ -91,6 +91,12 @@ def div__Scalar_0_3(self: Tensor, other: number) -> Tensor:
 def div__Scalar_mode_0_3(self: Tensor, other: number, *, rounding_mode: Optional[str]=None) -> Tensor:
   return self.divide_(other, rounding_mode=rounding_mode)
 )SCRIPT"},
+    {"full_names_0_4", R"SCRIPT(
+def full_names_0_4(size:List[int], fill_value:number, *, names:Optional[List[str]]=None,
+                   dtype:Optional[int]=None, layout:Optional[int]=None, device:Optional[Device]=None,
+                   pin_memory:Optional[bool]=None) -> Tensor:
+  return torch.full(size, fill_value, names=names, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+)SCRIPT"},
     {"full_0_4", R"SCRIPT(
 def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
              layout:Optional[int]=None, device:Optional[Device]=None,

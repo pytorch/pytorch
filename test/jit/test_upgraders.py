@@ -139,6 +139,20 @@ class TestUpgraders(JitTestCase):
         self.assertTrue(version == 4)
 
     @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_full_other_variants(self):
+        def test_func():
+            a = torch.full([4, 5, 6], 4, names=["a", "b", "c"], dtype=torch.int64)
+            return a
+
+        scripted_func = torch.jit.script(test_func)
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_func, buffer)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 5)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_linspace(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_linspace_v7.ptl"
         loaded_model = torch.jit.load(model_path)
