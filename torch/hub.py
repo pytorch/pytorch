@@ -370,8 +370,8 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=skip_validation,
-                                    trust_repo=trust_repo, calling_fn="list")
+    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "list", verbose=True,
+                                    skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
@@ -421,8 +421,8 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=skip_validation,
-                                    trust_repo=trust_repo, calling_fn="help")
+    repo_dir = _get_cache_or_reload(github, force_reload, trust_repo, "help", verbose=True,
+                                    skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
@@ -511,8 +511,8 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
             f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
     if source == 'github':
-        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose=verbose, skip_validation=skip_validation,
-                                           trust_repo=trust_repo, calling_fn="load")
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, trust_repo, "load",
+                                           verbose=verbose, skip_validation=skip_validation)
 
     model = _load_local(repo_or_dir, model, *args, **kwargs)
     return model
