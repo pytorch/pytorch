@@ -834,7 +834,7 @@ class DistributedDataParallel(Module, Joinable):
         }
 
     def _build_debug_param_to_name_mapping(self, parameters):
-        if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+        if dist.get_debug_level() == dist.DebugLevel.OFF:
             return {}
 
         param_to_param_index = {parameters[i]: i for i in range(len(parameters))}
