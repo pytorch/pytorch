@@ -440,7 +440,10 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
 
         m = M().eval()
         qconfig = torch.quantization.default_qconfig
-        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
+        # fx graph mode quant doesn't support using a single module multiple times
+        # right now, so this would crash, we can handle this case later
+        # if it is needed
+        self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),), do_fx_comparison=False)
 
     def test_fusion_functions(self):
         class M(torch.nn.Module):

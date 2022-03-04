@@ -1038,7 +1038,6 @@ class TestQuantizeFx(QuantizationTestCase):
             result_eager = m_eager(*self.img_data_dict[dim][0])
             self.assertEqual(result, result_eager)
 
-
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
         class Linear(torch.nn.Module):
