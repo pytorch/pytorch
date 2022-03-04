@@ -155,7 +155,7 @@ export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
 if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
-  if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
+  if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
     export DEBUG=1
   fi
   export DESIRED_DEVTOOLSET=""
