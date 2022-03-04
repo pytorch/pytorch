@@ -9,7 +9,6 @@
 #if HAS_CUDNN_V8()
 
 #include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/ConvUtils.h>
@@ -21,12 +20,8 @@
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
-#include <unordered_map>
 #include <iostream>
-
-// namespace at { namespace native{
-
-// namespace {
+#include <unordered_map>
 
 uint8_t getAlignment(const at::Tensor &t) {
   // alignment are in bytes
@@ -199,9 +194,6 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
   return {N, M, Y_H, Y_W};
 }
 
-
-// } // namespace
-// }} // at::native
 
 // the parameter quantized_output is a quantized tensor
 template <int kSpatialDim>
@@ -492,11 +484,6 @@ template at::Tensor PackedConvWeightCudnn<2>::apply_relu(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point);
-
-// template at::Tensor PackedConvWeightCudnn<2>::apply_impl<false>(
-//     const at::Tensor& act,
-//     double output_scale,
-//     int64_t output_zero_point);
 
 namespace at {
 namespace native {

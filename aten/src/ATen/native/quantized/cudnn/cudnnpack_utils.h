@@ -1,3 +1,5 @@
+#pragma once
+
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
@@ -7,7 +9,9 @@
 
 #if HAS_CUDNN_V8()
 
+#include <ATen/Tensor.h>
 #include <ATen/native/quantized/packed_params.h>
+#include <c10/core/QScheme.h>
 
 template <int kSpatialDim = 2>
 struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
@@ -43,15 +47,13 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
 
   at::Tensor apply_dynamic(
     const at::Tensor& input,
-    bool reduce_range)
-  {
+    bool reduce_range) {
     TORCH_CHECK(false, "apply_dynamic is currently not reported");
   }
 
   at::Tensor apply_dynamic_relu(
     const at::Tensor& input,
-    bool reduce_range)
-  {
+    bool reduce_range) {
     TORCH_CHECK(false, "apply_dynamic_relu is currently not reported");
   }
 
@@ -68,12 +70,6 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
       bool transpose);
 
   const float* GetBiasData(at::Tensor* bias);
-
-  void GetQuantizationParams(
-      float act_scale,
-      float out_scale,
-      std::vector<float>* output_multiplier_float,
-      std::vector<float>* act_times_w_scale);
 
   torch::List<int64_t> stride() const override {
     return stride_;
@@ -108,7 +104,6 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   torch::List<int64_t> dilation_;
   int64_t groups_;
   bool transpose_;
-  std::vector<int64_t> kernel;
   c10::QScheme q_scheme;
 
   template <bool ReluFused>

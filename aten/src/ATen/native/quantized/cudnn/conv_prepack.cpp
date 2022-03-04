@@ -7,19 +7,17 @@
 
 #if HAS_CUDNN_V8()
 
-#include "c10/core/QScheme.h"
-#include <array>
-#include <vector>
-
 #include <ATen/ATen.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/quantized/Quantizer.h>
+#include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
-#include <c10/util/irange.h>
-#include <iostream>
+#include <array>
+#include <vector>
 
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
@@ -69,13 +67,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
     TORCH_CHECK(
         bias.value().size(0) == output_channels,
         "bias should have K elements: " + std::to_string(output_channels));
-    // we create a broadcasted_bias tensor later so I think we don't need to make this contiguous here.
+    // TODO: we create a broadcasted_bias tensor later so I think we don't need to make this contiguous here.
     // we will revisit this when nvidia adds proper support for broadcasting
     // bias_contig = bias->contiguous();
   }
 
   auto ret_ptr = c10::make_intrusive<PackedConvWeightCudnn<kSpatialDim>>(
-          weight.contiguous(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think, so make it more general?
+          weight.contiguous(c10::MemoryFormat::ChannelsLast), // TODO: this assumes 2D I think. make it more general?
           bias,
           stride,
           padding,
@@ -87,7 +85,6 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<
   return ret_ptr;
 }
 
-// template struct PackedConvWeightCudnn<2>;
 template
 c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightCudnn<
     2>::
