@@ -34,7 +34,7 @@ const OptionalScalarRef max) {
 }
 
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
-  const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert
+  const Tensor& elements, const Tensor& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
@@ -42,7 +42,7 @@ TORCH_META_FUNC2(isin, Tensor_Tensor) (
 }
 
 TORCH_META_FUNC2(isin, Tensor_Scalar) (
-  const Tensor& elements, const c10::Scalar& test_elements, bool assume_unique, bool invert
+  const Tensor& elements, const c10::Scalar& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.type());
@@ -50,7 +50,7 @@ TORCH_META_FUNC2(isin, Tensor_Scalar) (
 }
 
 TORCH_META_FUNC2(isin, Scalar_Tensor) (
-  const c10::Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert
+  const c10::Scalar& elements, const Tensor& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
   check_for_unsupported_isin_dtype(elements.type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
@@ -485,10 +485,10 @@ std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdi
 
 TORCH_IMPL_FUNC(clamp_out)
 (
- const Tensor& self,
+ const Tensor& /*self*/,
  const OptionalScalarRef min,
  const OptionalScalarRef max,
- const Tensor& result) {
+ const Tensor& /*result*/) {
   using at::native::detail::ClampLimits;
   if (min && max) {
     clamp_scalar_stub(device_type(), *this, min.get(), max.get());
@@ -646,13 +646,13 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {
+Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& self, Dimname dim, bool keepdim) {
+Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
-Tensor argsort(const Tensor& self, Dimname dim, bool keepdim) {
+Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argsort");
 }
 std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {
