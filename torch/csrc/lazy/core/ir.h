@@ -91,7 +91,6 @@ struct TORCH_API Value {
   size_t index = 0;
 };
 
-
 // The Kind of operation a Node can be associated to.
 struct TORCH_API OpKind {
   OpKind() = default;
@@ -244,8 +243,6 @@ const T* NodeCast(const Node* node, OpKind op) {
   return &dynamic_cast<const T&>(*node);
 #endif
 }
-
-
 
 } // namespace lazy
 } // namespace torch
