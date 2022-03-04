@@ -2880,6 +2880,19 @@ class TestDynamicQuantizedOps(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
+    @override_qengines
+    @given(
+        input_channels=st.integers(16, 32),
+        output_channels=st.integers(4, 8),
+        exponent=st.integers(0, 8))
+    def test_linear_prepack_fp16_numerics(self, input_channels, output_channels, exponent):
+        w = torch.randn(output_channels, input_channels) * 10**exponent
+        bias = None
+        w_packed_fp16 = torch.ops.quantized.linear_prepack_fp16(w, bias)
+        w_unpacked_fp16 = torch.ops.quantized.linear_unpack_fp16(w_packed_fp16)
+        w_fp16 = w.to(torch.float16).to(torch.float32)
+        self.assertTrue(torch.equal(w_fp16, w_unpacked_fp16[0]))
+
     @skipIfNoFBGEMM
     def test_qlinear_dynamic_fp16(self):
 
