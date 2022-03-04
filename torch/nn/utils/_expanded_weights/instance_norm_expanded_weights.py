@@ -10,7 +10,7 @@ from typing import List, Optional
 @implements_per_sample_grads(F.instance_norm)
 class InstanceNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
+    def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         instance_norm = partial(torch._instance_norm_all_outputs, cudnn_enabled=True)
         expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
         output, mean, rstd, reserve, idx = forward_helper(instance_norm, expanded_args, expanded_kwargs)
@@ -28,7 +28,8 @@ class InstanceNormPerSampleGrad(torch.autograd.Function):
         mean, rstd, reserve, idx = ctx.mean, ctx.rstd, ctx.reserve, ctx.idx
 
         results: List[Optional[torch.Tensor]] = []
-        results.append(None)
+        results.append(None)  # for kwarg names
+        results.append(None)  # for op reference
         if input.requires_grad:
             b = input.shape[0]
             c = input.shape[1]
