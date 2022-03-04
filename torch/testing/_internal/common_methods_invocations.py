@@ -2429,12 +2429,15 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), False)
     )
     samples = []
-
-    for shape, dim, keepdim in inputs:
-        t = make_tensor(shape, dtype=dtype, device=device,
-                        low=None, high=None,
-                        requires_grad=requires_grad)
-        samples.append(SampleInput(t, args=(dim, keepdim)))
+    # Test large inputs to check numerical stability
+    lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64) else (None,)
+    for low in lows:
+        high = low * 2 if low is not None else None
+        for shape, dim, keepdim in inputs:
+            t = make_tensor(shape, dtype=dtype, device=device,
+                            low=low, high=high,
+                            requires_grad=requires_grad)
+            samples.append(SampleInput(t, args=(dim, keepdim)))
 
     return tuple(samples)
 
