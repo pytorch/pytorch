@@ -266,8 +266,8 @@ def get_target_activation_dtype_for_node(
     qconfig: QConfigAny,
     inputs_seen_counter: int,
     outputs_seen_counter: int,
-    input_quantized_idxs: List[int],
-    output_quantized_idxs: List[int],
+    input_quantized_idxs: Dict[int, torch.dtype],
+    output_quantized_idxs: Dict[int, torch.dtype],
     qhandler: Optional[QuantizeHandler],
     modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
@@ -285,8 +285,8 @@ def get_target_activation_dtype_for_node(
     if node.op == 'placeholder':
         if inputs_seen_counter in input_quantized_idxs:
             return {
-                "input_activation_dtype": torch.quint8,
-                "output_activation_dtype": torch.quint8,
+                "input_activation_dtype": None,
+                "output_activation_dtype": input_quantized_idxs[inputs_seen_counter],
             }
         else:
             # if dtype is fp32 (default), do nothing
@@ -342,9 +342,10 @@ def get_target_activation_dtype_for_node(
 
     elif node.op == 'output':
         if outputs_seen_counter in output_quantized_idxs:
+            # TODO use dict for input/output activation dtype
             return {
                 "input_activation_dtype": torch.quint8,
-                "output_activation_dtype": torch.quint8
+                "output_activation_dtype": None,
             }
         else:
             # if dtype is fp32 (default), do nothing
@@ -696,19 +697,10 @@ def maybe_insert_observers_before_graph_output(
     for those nodes.
     """
 
-    # TODO(future PR): update the output_quantized_idxs API to match
-    # arbitrary data structures. There is always a single output, and
-    # that output can have arbitrary nesting of values. List[int] is
-    # not the right data type for this.
-    assert output_quantized_idxs == [0] or output_quantized_idxs == [], \
-        'unrecognized format of output_quantized_idxs'
-
     # Currently dequants are inserted in the convert step. So, we only
     # have to do anything if the output is hardcoded to be quantized
-    if output_quantized_idxs == []:
+    if len(output_quantized_idxs) == 0:
         return
-    # TODO(future PR): support more dtypes in model outputs, if necessary
-    output_target_dtype = torch.quint8
 
     def _recursive_maybe_replace_node_with_obs(
         maybe_node: Argument,
@@ -774,10 +766,27 @@ def maybe_insert_observers_before_graph_output(
 
     new_args = []
     for old_arg in graph_output_node.args:
-        new_args.append(
-            _recursive_maybe_replace_node_with_obs(
-                old_arg, output_target_dtype, node_name_to_target_dtype,
-                qconfig_map, model, modules, graph))
+        if isinstance(old_arg, (list, tuple)):
+            results = []
+            for arg_idx, inner_node in enumerate(old_arg):
+                if arg_idx in output_quantized_idxs:
+                    output_target_dtype = output_quantized_idxs[arg_idx]
+                else:
+                    output_target_dtype = torch.quint8
+                results.append(
+                    _recursive_maybe_replace_node_with_obs(
+                        inner_node, output_target_dtype, node_name_to_target_dtype,
+                        qconfig_map, model, modules, graph))
+            if isinstance(old_arg, list):
+                new_args.append(results)
+            else:
+                new_args.append(tuple(results))
+        else:
+            output_target_dtype = output_quantized_idxs[0]
+            new_args.append(
+                _recursive_maybe_replace_node_with_obs(
+                    old_arg, output_target_dtype, node_name_to_target_dtype,
+                    qconfig_map, model, modules, graph))
 
     graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 
@@ -951,8 +960,8 @@ def insert_observers_for_model(
     graph: Graph,
     prepare_custom_config_dict: Dict[str, Any],
     equalization_config_map: Dict[str, Any],
-    input_quantized_idxs: List[int],
-    output_quantized_idxs: List[int],
+    input_quantized_idxs: Dict[int, torch.dtype],
+    output_quantized_idxs: Dict[int, torch.dtype],
     backend_config_dict: Optional[Dict[str, Any]],
     observed_node_names: Set[str],
     is_qat: bool,
@@ -1384,10 +1393,10 @@ def prepare(
         model.graph, modules, patterns, qconfig_map, standalone_module_names,
         standalone_module_classes, custom_module_classes)
 
-    input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
-        "input_quantized_idxs", [])
-    output_quantized_idxs: List[int] = prepare_custom_config_dict.get(
-        "output_quantized_idxs", [])
+    input_quantized_idxs: Dict[int, torch.dtype] = prepare_custom_config_dict.get(
+        "input_quantized_idxs", {})
+    output_quantized_idxs: Dict[int, torch.dtype] = prepare_custom_config_dict.get(
+        "output_quantized_idxs", {})
 
     run_prepare_fx_on_standalone_modules(
         model, is_qat, modules, matches, prepare_custom_config_dict, backend_config_dict)
