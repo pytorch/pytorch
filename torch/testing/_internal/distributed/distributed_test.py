@@ -5179,7 +5179,7 @@ class DistributedTest:
             rebuilt_bucket_lims = ddp_logging_data.get("rebuilt_bucket_size_limits")
             self.assertEqual(
                 int(init_bucket_lims),
-                dist._DEFAULT_FIRST_BUCKET_BYTES,
+                -1,
             )
             self.assertEqual(
                 int(rebuilt_bucket_lims),
@@ -8161,7 +8161,10 @@ class DistributedTest:
                 ]
                 # first_bucket_bytes is actually the last because we reverse
                 # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
-                self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
+                if i <= 1:
+                    self.assertEqual(bucket_size_limits[-1], -1)
+                else:
+                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
                 for j, bucket_size in enumerate(bucket_size_limits):
                     if j != len(bucket_size_limits) - 1:
                         self.assertEqual(bucket_size, default_bucket_cap_mb)
