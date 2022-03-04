@@ -612,38 +612,6 @@ fractional_max_pool3d = boolean_dispatch(
 )
 
 
-# Decorator to raise warning when keyword-only args are passed as positional args
-# for max_poolNd operators, inspired from https://github.com/scikit-learn/scikit-learn/pull/13311
-def _deprecate_positional_args_max_pool(f):
-    from inspect import signature, Parameter
-    from functools import wraps
-
-    sig = signature(f)
-    kwonly_args_future = []
-    all_args = []
-
-    for name, param in sig.parameters.items():
-        if name in ["return_indices", "ceil_mode"]:
-            kwonly_args_future.append(name)
-        elif param.kind == Parameter.POSITIONAL_OR_KEYWORD:
-            all_args.append(name)
-
-    @wraps(f)
-    def inner_f(*args, **kwargs):
-        extra_args = len(args) - len(all_args)
-        if extra_args > 0:
-            args_msg = ['{}={}'.format(name, arg)
-                        for name, arg in zip(kwonly_args_future[:extra_args],
-                                             args[-extra_args:])]
-            with warnings.catch_warnings():
-                warnings.simplefilter("once", category=DeprecationWarning)
-                warnings.warn("Pass {} as keyword args. In the later versions "
-                              "passing these as positional arguments will "
-                              "result in an error".format(", ".join(args_msg)), DeprecationWarning)
-        return f(*args, **kwargs)
-    return inner_f
-
-
 def max_pool1d_with_indices(
     input: Tensor, kernel_size: BroadcastingList1[int],
     stride: Optional[BroadcastingList1[int]] = None,
@@ -723,8 +691,8 @@ max_pool1d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
     default=False,
-    if_true=_deprecate_positional_args_max_pool(max_pool1d_with_indices),
-    if_false=_deprecate_positional_args_max_pool(_max_pool1d),
+    if_true=max_pool1d_with_indices,
+    if_false=_max_pool1d,
     module_name=__name__,
     func_name="max_pool1d",
 )
@@ -809,8 +777,8 @@ max_pool2d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
     default=False,
-    if_true=_deprecate_positional_args_max_pool(max_pool2d_with_indices),
-    if_false=_deprecate_positional_args_max_pool(_max_pool2d),
+    if_true=max_pool2d_with_indices,
+    if_false=_max_pool2d,
     module_name=__name__,
     func_name="max_pool2d",
 )
@@ -895,8 +863,8 @@ max_pool3d = boolean_dispatch(
     arg_name="return_indices",
     arg_index=6,
     default=False,
-    if_true=_deprecate_positional_args_max_pool(max_pool3d_with_indices),
-    if_false=_deprecate_positional_args_max_pool(_max_pool3d),
+    if_true=max_pool3d_with_indices,
+    if_false=_max_pool3d,
     module_name=__name__,
     func_name="max_pool3d",
 )
