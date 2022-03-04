@@ -38,7 +38,7 @@ jobs:
         run: |
           . activate reltest
           conda install -y cudatoolkit=11.3 numpy
-          conda install -y -c pytorch magama-cuda113
+          conda install -y -c pytorch magma-cuda113
           conda install -y -c pytorch-test pytorch=1.11.0 torchvision torchtext
           # conda install -y -c pytorch pytorch=1.10.0 torchvision torchtext
           echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
