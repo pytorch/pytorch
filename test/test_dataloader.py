@@ -2613,7 +2613,6 @@ class TestMultiEpochDataset(IterableDataset):
         worker_info = torch.utils.data.get_worker_info()
         assert worker_info is not None
         worker_id = worker_info.id
-        assert self.length % worker_info.num_workers == 0
         for idx in range(self.length // worker_info.num_workers):
             if worker_id == 0:
                 time.sleep(0.001)
@@ -2629,15 +2628,16 @@ class TestMultiEpochDeterminism(TestCase):
         batch_size = 10
         num_epochs = 3
 
-        dataset = TestMultiEpochDataset(batch_size*num_workers)
+        dataset = TestMultiEpochDataset(batch_size * num_workers)
 
-        loader = DataLoader(
-            dataset, batch_size=batch_size, num_workers=num_workers,
-            shuffle=False,  persistent_workers=True, timeout=5
-        )
-        for ind in range(num_epochs):
-            for batch_idx, sample in enumerate(loader):
-                self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
+        for persistent in [True, False]:
+            loader = DataLoader(
+                dataset, batch_size=batch_size, num_workers=num_workers,
+                shuffle=False, persistent_workers=persistent, timeout=5
+            )
+            for ind in range(num_epochs):
+                for batch_idx, sample in enumerate(loader):
+                    self.assertEqual(sample.tolist(), [batch_idx % num_workers] * batch_size)
 
 
 class SetAffinityDataset(IterableDataset):
