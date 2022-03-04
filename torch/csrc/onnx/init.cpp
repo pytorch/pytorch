@@ -40,10 +40,10 @@ void initONNXBindings(PyObject* module) {
 
   onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
 
-#ifdef BUILD_CAFFE2
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = true;
+#ifdef PYTORCH_ONNX_CAFFE2_BUNDLE
+    onnx.attr("_CAFFE2_ATEN_FALLBACK") = true;
 #else
-  onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
+    onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
 #endif
 }
 } // namespace onnx
