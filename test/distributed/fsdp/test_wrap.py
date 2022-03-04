@@ -4,7 +4,7 @@ from enum import Enum, auto
 import functools
 import os
 import tempfile
-import unittest 
+import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -266,7 +266,6 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
-    
     @skip_if_lt_x_gpu(2)
     def test_always_wrap(self):
         """
