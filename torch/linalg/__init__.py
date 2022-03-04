@@ -842,8 +842,6 @@ the output has the same batch dimensions.
 
 """ + fr"""
 .. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.ldl_factor_ex")}
-
-.. warning:: {common_notes["experimental_warning"]}
 """ + r"""
 
 Args:
