@@ -7093,6 +7093,16 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
                           args=(make_bool_mask(mask_shape), make_arg(other_shape)),
                           broadcasts_input=broadcasts_input)
 
+def error_inputs_where(op_info, device, **kwargs):
+    shape = (S,)
+    err_msg = "Expected all tensors to be on the same device"
+    for devices in product(('cpu', device), repeat=3):
+        if len(set(devices)) == 2:
+            si = SampleInput(make_tensor(shape, device=devices[0], dtype=torch.float32),
+                             args=(make_tensor(shape, dtype=torch.bool, device=devices[1]),
+                             make_tensor(shape, device=devices[2], dtype=torch.float32)))
+            yield ErrorInput(si, error_type=RuntimeError, error_regex=err_msg)
+
 def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -8739,12 +8749,14 @@ op_db: List[OpInfo] = [
            ),
            supports_out=False),
     OpInfo('broadcast_to',
+           ref=np.broadcast_to,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
     OpInfo('broadcast_tensors',
+           ref=np.broadcast_arrays,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -14525,9 +14537,12 @@ op_db: List[OpInfo] = [
            op=lambda self, condition, other: torch.where(condition, self, other),
            ref=lambda self, condition, other: np.where(condition, self, other),
            sample_inputs_func=sample_inputs_where,
+           error_inputs_func=error_inputs_where,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           decorators=(
+               DecorateInfo(onlyCUDA, "TestCommon", 'test_errors'),),
            skips=(
                # test does not work with passing lambda for op
                # AssertionError: False is not true :
