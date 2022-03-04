@@ -86,10 +86,10 @@ def convert_standalone_module(
     for idx in range(len(args)):
         if idx in sm_input_quantized_idxs:
             arg = args[idx]
-            if arg.op == "call_method" and arg.target == "dequantize":
-                quantize_node = arg.args[0]
+            if arg.op == "call_method" and arg.target == "dequantize":  # type: ignore[union-attr]
+                quantize_node = arg.args[0]  # type: ignore[union-attr]
                 node.replace_input_with(arg, quantize_node)
-                if len(arg.users) == 0:
+                if len(arg.users) == 0:  # type: ignore[union-attr]
                     model.graph.erase_node(arg)
     # add dequantize node for output
     sm_output_quantized_idxs = \
@@ -120,7 +120,7 @@ def convert_weighted_module(
         modules: Dict[str, torch.nn.Module],
         observed_node_names: Set[str],
         quantized_reference_module_mapping: Dict[Callable, Any]):
-    original_module = modules[node.target]
+    original_module = modules[str(node.target)]
     qconfig = original_module.qconfig
 
     is_observed = node.name in observed_node_names
@@ -160,7 +160,7 @@ def convert_weighted_module(
             fused_module = original_module
             float_module = fused_module[0]  # type: ignore[index]
         assert qconfig is not None
-        weight_post_process = qconfig.weight()
+        weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
         # run weight observer
         weight_post_process(float_module.weight)  # type: ignore[operator]
     weight_qparams = get_qparam_dict(weight_post_process)
@@ -322,7 +322,7 @@ def _convert_do_not_use(
 
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
-                convert_weighted_module(node, modules, observed_node_names, quantized_reference_module_mapping):
+                convert_weighted_module(node, modules, observed_node_names, quantized_reference_module_mapping)
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
