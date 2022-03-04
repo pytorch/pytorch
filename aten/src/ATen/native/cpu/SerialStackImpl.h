@@ -22,7 +22,7 @@ struct InputMeta {
 // This kernel is used by two TensorList types:
 // 1. stack_serial_kernel uses at::ArrayRef<Tensor>
 // 2. Static runtime calls this kernel directly (csrc/jit/runtime/static/ops.cpp) with
-//    VarStackNodeWrapper.
+//    ProcessedNodeInputWrapper.
 // When making changes, make sure that they are compatible with both types!
 template <typename scalar_t, typename TensorListType>
 void stack_serial_kernel_impl(Tensor& result, TensorListType tensors, int64_t dim) {

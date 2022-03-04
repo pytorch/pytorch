@@ -49,8 +49,6 @@ fi
 if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
   # run the full test suite for force_on_cpu test
   export USE_CUDA=0
-elif [[ "$TEST_CONFIG" == "smoke_tests" ]]; then
-  export RUN_SMOKE_TESTS_ONLY=1
 fi
 
 run_tests() {
@@ -64,30 +62,20 @@ run_tests() {
 
     if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python.bat
-
-        if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
-          "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-          "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-          "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-        fi
+        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
         if [[ "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat
-
-            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-              if [[ "${USE_CUDA}" == "1" ]]; then
-                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
-              fi
+            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+            if [[ "${USE_CUDA}" == "1" ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat
             fi
-
         elif [[ "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat
-
-            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-              "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-            fi
+            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         fi
     fi
 }
