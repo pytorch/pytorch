@@ -33,9 +33,9 @@ def conv_backward(func, ctx, grad_output):
 
     def weight_grad_sample(weight):
         if (batch_size < THRESHOLD and groups == 1):
-            return conv_group_weight_grad_sample(input, grad_output, weight, stride, padding, dilation, batch_size, func)
+            return conv_group_weight_grad_sample(ctx.input, grad_output, weight_shape, stride, padding, dilation, batch_size, func)
         else:
-            return conv_unfold_weight_grad_sample(input, grad_output, weight, kernel_size,
+            return conv_unfold_weight_grad_sample(ctx.input, grad_output, weight_shape, kernel_size,
                                                   stride, padding, dilation, groups, func)
 
     def expand(param):
@@ -44,24 +44,25 @@ def conv_backward(func, ctx, grad_output):
         else:
             return param
 
-    input, weight, bias = ctx.input, ctx.weight, ctx.bias
+    weight_shape = ctx.weight_shape
     stride, padding, dilation, groups = expand(ctx.stride), expand(ctx.padding), expand(ctx.dilation), ctx.groups
 
     kernel_size = []
     for i in range(2, conv_picker(func, 3, 4, 5)):
-        kernel_size.append(weight.shape[i])
+        kernel_size.append(weight_shape[i])
 
-    batch_size = input.shape[0]
+    batch_size = ctx.batch_size
     results: List[Optional[torch.Tensor]] = []
-    results.append(None)
+    results.append(None)  # for kwarg names
+    results.append(None)  # for op reference
 
-    if input.requires_grad:
+    if ctx.input.requires_grad:
         output_padding = []
         input_dims = conv_picker(func, 1, 2, 3)
         for i in range(input_dims):
-            input_dim = input.shape[2 + i]
+            input_dim = ctx.input.shape[2 + i]
             output_padding.append((2 * padding[i] + input_dim - (kernel_size[i] * dilation[i] - dilation[i] + 1)) % stride[i])
-        weight_ = unpack_expanded_weight_or_tensor(weight)
+        weight_ = unpack_expanded_weight_or_tensor(ctx.weight)
         transpose_func = conv_picker(func, F.conv_transpose1d, F.conv_transpose2d, F.conv_transpose3d)
         results.append(transpose_func(grad_output, weight_, None, stride, padding, tuple(output_padding), groups, dilation))
     else:
@@ -70,11 +71,11 @@ def conv_backward(func, ctx, grad_output):
     results = results + [None] * 6
 
     # set grad_sample field for weight and bias with per sample gradients
-    set_grad_sample_if_exists(weight, weight_grad_sample)
-    set_grad_sample_if_exists(bias, lambda _: grad_output.reshape(*grad_output.shape[:2], -1).sum(dim=2))
+    set_grad_sample_if_exists(ctx.weight, weight_grad_sample)
+    set_grad_sample_if_exists(ctx.bias, lambda _: grad_output.reshape(*grad_output.shape[:2], -1).sum(dim=2))
     return tuple(results)
 
-def conv_unfold_weight_grad_sample(input, grad_output, weight, kernel_size, stride, padding, dilation, groups, func):
+def conv_unfold_weight_grad_sample(input, grad_output, weight_shape, kernel_size, stride, padding, dilation, groups, func):
     n = input.shape[0]
     in_channels = input.shape[1]
 
@@ -104,11 +105,11 @@ def conv_unfold_weight_grad_sample(input, grad_output, weight, kernel_size, stri
         np.prod(kernel_size),
     )
     weight_grad_sample = torch.einsum("ngrg...->ngr...", weight_grad_sample).contiguous()
-    shape = [n] + list(weight.shape)
+    shape = [n] + list(weight_shape)
     weight_grad_sample = weight_grad_sample.view(shape)
     return weight_grad_sample
 
-def conv_group_weight_grad_sample(input, grad_output, weight, stride, padding, dilation, batch_size, func):
+def conv_group_weight_grad_sample(input, grad_output, weight_shape, stride, padding, dilation, batch_size, func):
     I = input.shape[1]
     O = grad_output.shape[1]
 
@@ -118,7 +119,7 @@ def conv_group_weight_grad_sample(input, grad_output, weight, stride, padding, d
     weight_grad_sample = func(input_, grad_output_, None, stride=dilation, padding=padding, dilation=stride, groups=batch_size)
     input_dims = conv_picker(func, 3, 4, 5)
     for i in range(2, input_dims):
-        weight_grad_sample = weight_grad_sample.narrow(i, 0, weight.shape[i])
+        weight_grad_sample = weight_grad_sample.narrow(i, 0, weight_shape[i])
     weight_grad_sample = weight_grad_sample.view(I, batch_size, O, *weight_grad_sample.shape[2:])
     weight_grad_sample = weight_grad_sample.movedim(0, 2)
     return weight_grad_sample
