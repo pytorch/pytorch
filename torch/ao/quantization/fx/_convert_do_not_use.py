@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Callable
 import torch
 from torch.fx import (
     GraphModule,
@@ -69,7 +69,10 @@ def insert_dequantize_node(
 
 def convert_standalone_module(
         node: Node,
-        modules: Dict[str, torch.nn.Module]):
+        modules: Dict[str, torch.nn.Module],
+        model: torch.fx.GraphModule,
+        is_reference: bool,
+        backend_config_dict: Dict[str, Any]):
     convert = torch.ao.quantization._quantize_fx_do_not_use._convert_do_not_use  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
     # it's produced by us
@@ -115,7 +118,8 @@ def convert_standalone_module(
 def convert_weighted_module(
         node: Node,
         modules: Dict[str, torch.nn.Module],
-        observed_node_names: Dict[str]):
+        observed_node_names: Set[str],
+        quantized_reference_module_mapping: Dict[Callable, Any]):
     original_module = modules[node.target]
     qconfig = original_module.qconfig
 
@@ -314,10 +318,11 @@ def _convert_do_not_use(
                 replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
             elif is_observed_standalone_module(modules[node.target]):
                 # TODO: move this to a separate function
-                convert_standalone_module(node, modules)
+                convert_standalone_module(node, modules, model, is_reference, backend_config_dict)
+
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
-                convert_weighted_module(node, modules):
+                convert_weighted_module(node, modules, observed_module_names):
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
