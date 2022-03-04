@@ -1232,8 +1232,9 @@ void initJITBindings(PyObject* module) {
           auto operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-                            auto func = py::cpp_function(
-              [op, symbol](py::args args, py::kwargs kwargs) {
+              auto func = py::cpp_function([op, symbol](
+                                               py::args args,
+                                               py::kwargs kwargs) {
                 std::vector<py::handle> overloaded_args;
                 size_t total_arg_num = args.size() + kwargs.size();
                 for (const auto i : c10::irange(args.size())) {
@@ -1266,11 +1267,12 @@ void initJITBindings(PyObject* module) {
                   py::object ret;
                   std::string ns = symbol.ns().toUnqualString();
                   std::string method_name = symbol.toUnqualString();
-                  auto self_func = py::module::import("torch")
-                                       .attr("ops")
-                                       .attr(ns.c_str())
-                                       .attr(method_name.c_str())
-                                       .attr(op->schema().overload_name().c_str());
+                  auto self_func =
+                      py::module::import("torch")
+                          .attr("ops")
+                          .attr(ns.c_str())
+                          .attr(method_name.c_str())
+                          .attr(op->schema().overload_name().c_str());
                   std::string module_name("torch.ops");
                   module_name.append(ns);
                   return pybind11::reinterpret_steal<py::object>(
