@@ -11,21 +11,6 @@
 
 namespace at { namespace functorch {
 
-static Tensor reshape_bdim_into_front(
-    const Tensor& value,
-    optional<int64_t> bdim,
-    int64_t batch_size,
-    bool is_no_batch_dim_case) {
-  auto value_ = ensure_has_bdim(value, bdim.has_value(), batch_size);
-  if (!bdim.has_value()) {
-    bdim = 0;
-  }
-  if (is_no_batch_dim_case) {
-    return moveBatchDimToFront(value_, bdim);
-  }
-  return reshape_dim_into(*bdim, 0, value_);
-}
-
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
 max_pool2d_with_indices_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
