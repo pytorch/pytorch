@@ -161,7 +161,7 @@ class TestExpandedWeightFunctional(TestCase):
             for (result_grad, expected_grad) in zip(expanded_weight_grad, per_sample_grad):
                 if result_grad is None:
                     result_grad = torch.zeros_like(expected_grad)
-                assert torch.allclose(result_grad, expected_grad), f"Got {result_grad}, expected {expected_grad}"
+                self.assertEqual(result_grad, expected_grad)
 
     @ops(filter(lambda op: op.supports_expanded_weight, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
     def test_unsupported_expand_weights(self, device, dtype, op):
@@ -239,7 +239,7 @@ class TestExpandedWeightFunctional(TestCase):
 
         expected = [torch.stack(grad) for grad in zip(*expected)]
         for (res, exp) in zip(result, expected):
-            assert torch.allclose(res, exp, atol=1e-4, rtol=5e-5)
+            self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
 
 
 class TestExpandedWeightModule(TestCase):
@@ -263,7 +263,7 @@ class TestExpandedWeightModule(TestCase):
                 expected_res += res
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
         self.assertEqual(actual_res, expected_res)
-        assert [torch.allclose(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        [self.assertEqual(actual, expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def _do_test_multi_input(self, module, input):
         class TestModule(nn.Module):
@@ -291,7 +291,7 @@ class TestExpandedWeightModule(TestCase):
                 res = module(input[i].unsqueeze(0)).sum()
                 expected_grads.append(torch.autograd.grad(res, module.parameters(), torch.ones_like(res)))
             expected_grads = tuple(torch.stack(grad) for grad in zip(*expected_grads))
-        assert [torch.allclose(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
+        assert [self.assertEqual(actual, 2 * expected) for (actual, expected) in zip(actual_grads, expected_grads)]
 
     def test_per_sample_api_failing(self):
         module = nn.Linear(10, 10)
