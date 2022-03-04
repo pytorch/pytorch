@@ -1,6 +1,6 @@
 # Python dependencies required for unit tests
 
-awscli==1.6
+#awscli==1.6
 #Description: AWS command line interface
 #Pinned versions: 1.6
 #test that import:
