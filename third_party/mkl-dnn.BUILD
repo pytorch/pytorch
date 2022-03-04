@@ -62,6 +62,7 @@ cc_library(
     name = "mkl-dnn",
     srcs = glob([
         "third_party/oneDNN/src/common/*.cpp",
+        "third_party/oneDNN/src/common/ittnotify/jitprofiling.c",
         "third_party/oneDNN/src/cpu/**/*.cpp",
     ], exclude=[
         "third_party/oneDNN/src/cpu/aarch64/**/*.cpp",
@@ -74,7 +75,7 @@ cc_library(
         "third_party/oneDNN/src/cpu/**/*.hpp",
         "third_party/oneDNN/src/cpu/**/*.h",
         "third_party/oneDNN/src/common/*.hpp",
-        "third_party/oneDNN/src/common/ittnotify/jitprofiling.h",
+        "third_party/oneDNN/src/common/ittnotify/*.h",
     ], exclude=[
         "third_party/oneDNN/src/cpu/aarch64/**/*.hpp",
         "third_party/oneDNN/src/cpu/aarch64/**/*.h",
@@ -96,6 +97,7 @@ cc_library(
         "@platforms//os:macos": [
             "-Xpreprocessor",
             "-openmp",
+            # "-Iexternal/openmp/openmp/include/",
         ],
         "//conditions:default": ["-fopenmp"],
     }),
@@ -118,6 +120,6 @@ cc_library(
         "@platforms//os:macos": ["@openmp"],
     }) + select({
         "@//tools/config:thread_sanitizer": [],
-        "//conditions:default": ["@tbb"],
+        "//conditions:default": [], #["@tbb//:libtbb.dylib"],
     }),
 )

@@ -223,7 +223,7 @@ cc_library(
     # U __subtf3
     # in bazel-bin/external/sleef/_objs/sleef/sleefqp.pic.o
     linkopts = [
-        "-lgcc",
+        # "-lgcc",
     ],
     linkstatic = True,
     visibility = SLEEF_VISIBILITY,

@@ -47,7 +47,7 @@ LIBUV_LINUX_SRCS = LIBUV_POSIX_SRCS + [
 
 cc_library(
     name = "libuv",
-    srcs = LIBUV_COMMON_SRCS + LIBUV_LINUX_SRCS,
+    srcs = LIBUV_COMMON_SRCS,# + LIBUV_LINUX_SRCS,
     includes = [
         "third_party/libuv/include",
         "third_party/libuv/src",
@@ -129,7 +129,7 @@ TENSORPIPE_CPU_HEADERS = glob(
         "tensorpipe/transport/*.h",
         "tensorpipe/transport/*/*.h",
     ],
-    exclude=TENSORPIPE_CUDA_HEADERS)
+    exclude=TENSORPIPE_CUDA_HEADERS + ["tensorpipe/common/epoll_loop.h"])
 
 TENSORPIPE_CPU_SOURCES = glob(
     [
@@ -141,7 +141,14 @@ TENSORPIPE_CPU_SOURCES = glob(
         "tensorpipe/transport/*.cc",
         "tensorpipe/transport/*/*.cc",
     ],
-    exclude=TENSORPIPE_CUDA_SOURCES)
+    exclude=TENSORPIPE_CUDA_SOURCES + [
+        "tensorpipe/channel/cma/*.cc",
+        "tensorpipe/common/epoll_loop.cc",
+        "tensorpipe/common/ibv.cc",
+        "tensorpipe/common/shm_segment.cc",
+        "tensorpipe/transport/ibv/*.cc",
+        "tensorpipe/transport/shm/*.cc",
+    ])
 
 cc_library(
     name = "tensorpipe_cpu",

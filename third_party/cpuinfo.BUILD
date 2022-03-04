@@ -20,10 +20,13 @@ cc_library(
     srcs = glob(
         [
             "src/*.c",
-            "src/linux/*.c",
+            "src/mach/*.c",
+            #"src/linux/*.c",
+            "src/x86/mach/topology.c",
             "src/x86/*.c",
+            "src/x86/mach/init.c",
             "src/x86/cache/*.c",
-            "src/x86/linux/*.c",
+            #"src/x86/linux/*.c",
         ],
         exclude = [
             "src/x86/mockcpuid.c",
@@ -35,9 +38,10 @@ cc_library(
         "src/*.h",
         "src/cpuinfo/*.h",
         "src/include/*.h",
+        "src/mach/api.h",
         "src/x86/*.h",
-        "src/x86/linux/*.h",
-        "src/linux/*.h",
+        #"src/x86/linux/*.h",
+        #"src/linux/*.h",
     ]),
     copts = [
         "-DCPUINFO_LOG_LEVEL=2",

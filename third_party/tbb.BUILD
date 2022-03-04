@@ -17,7 +17,7 @@ template_rule(
 )
 
 cc_library(
-    name = "tbb",
+    name = "libtbb.dylib",
     srcs = [":version_string"] + glob(
         [
             "src/old/*.h",
@@ -68,8 +68,9 @@ cc_library(
     linkopts = [
         "-ldl",
         "-lpthread",
-        "-lrt",
+        # "-lrt",
     ],
+    linkstatic = False,
     textual_hdrs = ["src/tbb/tools_api/ittnotify_static.c"],
     visibility = ["//visibility:public"],
 )
