@@ -1,14 +1,12 @@
-// Optimization for ArrayRef<T>. We take advantage of an unused bit pattern in
-// ArrayRef (inspired by Arthur O'Dwyer's tombstone_traits -- see
-// https://youtu.be/MWBfmmg8-Yo?t=2466) to keep the size of
-// c10::optional::ArrayRef<T> down to 16 bytes, which allows it to be passed to
-// functions in registers instead of getting passed in memory per item 5c of the
-// classification algorithm in section 3.2.3 of the System V ABI document
-// (https://www.uclibc.org/docs/psABI-x86_64.pdf).
+// This file defines OptionalArrayRef<T>, a class that has almost the same
+// exact functionality as c10::optional<ArrayRef<T>>, except that its
+// converting constructor fixes a dangling pointer issue.
 //
-// c10::optional<ArrayRef<T>> as well as std::optional<ArrayRef<T>> have a
-// problem where the implicit converting constructor will cause the underlying
-// ArrayRef<T> to store a dangling pointer. OptionalArrayRef<T> prevents this.
+// The implicit converting constructor of both c10::optional<ArrayRef<T>> and
+// std::optional<ArrayRef<T>> can cause the underlying ArrayRef<T> to store
+// a dangling pointer. OptionalArrayRef<T> prevents this by wrapping
+// a c10::optional<ArrayRef<T>> and fixing the constructor implementation.
+//
 // See https://github.com/pytorch/pytorch/issues/63645 for more on this.
 
 #pragma once
@@ -16,22 +14,11 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
-#include <initializer_list>
-#include <iostream>
-#include <vector>
-
 namespace c10 {
 
-/**
- * @brief Class template for optional ArrayRef<T> values.
- *
- * @tparam T type of the ArrayRef elements.
- */
 template <typename T>
 class OptionalArrayRef final {
- public:
-  using value_type = ArrayRef<T>;
-
+public:
   // Constructors
 
   constexpr OptionalArrayRef() noexcept {}
@@ -42,29 +29,14 @@ class OptionalArrayRef final {
 
   OptionalArrayRef(OptionalArrayRef&& other) = default;
 
-  constexpr OptionalArrayRef(const optional<ArrayRef<T>>& other) noexcept {
-    if (other.has_value()) {
-      if (initialized()) {
-        storage.value = other.value();
-      } else {
-        ::new (&storage.value) ArrayRef<T>(other.value());
-      }
-    }
-  }
+  constexpr OptionalArrayRef(const optional<ArrayRef<T>>& other) noexcept
+      : wrapped_opt_array_ref(other) {}
 
-  constexpr OptionalArrayRef(optional<ArrayRef<T>>&& other) noexcept {
-    if (other.has_value()) {
-      if (initialized()) {
-        storage.value = std::move(other.value());
-      } else {
-        ::new (&storage.value) ArrayRef<T>(std::move(other.value()));
-      }
-      other.reset();
-    }
-  }
+  constexpr OptionalArrayRef(optional<ArrayRef<T>>&& other) noexcept
+      : wrapped_opt_array_ref(other) {}
 
   constexpr OptionalArrayRef(const T& value) noexcept
-      : storage(in_place, value) {}
+      : wrapped_opt_array_ref(value) {}
 
   template <
       typename U = ArrayRef<T>,
@@ -77,7 +49,7 @@ class OptionalArrayRef final {
           bool> = false>
   constexpr OptionalArrayRef(U&& value) noexcept(
       std::is_nothrow_constructible<ArrayRef<T>, U&&>::value)
-      : storage(in_place, std::forward<U>(value)) {}
+      : wrapped_opt_array_ref(value) {}
 
   template <
       typename U = ArrayRef<T>,
@@ -89,35 +61,18 @@ class OptionalArrayRef final {
           bool> = false>
   constexpr explicit OptionalArrayRef(U&& value) noexcept(
       std::is_nothrow_constructible<ArrayRef<T>, U&&>::value)
-      : storage(in_place, std::forward<U>(value)) {}
+      : wrapped_opt_array_ref(value) {}
 
-  template <
-      typename... Args,
-      std::enable_if_t<
-          std::is_constructible<ArrayRef<T>, Args&&...>::value,
-          bool> = false>
-  constexpr explicit OptionalArrayRef(in_place_t, Args&&... args) noexcept(
-      std::is_nothrow_constructible<ArrayRef<T>, Args&&...>::value)
-      : storage(in_place, std::forward<Args>(args)...) {}
+  template <typename... Args>
+  constexpr explicit OptionalArrayRef(in_place_t ip, Args&&... args) noexcept
+      : wrapped_opt_array_ref(ip, args...) {}
 
-  template <
-      typename U,
-      typename... Args,
-      std::enable_if_t<
-          std::is_constructible<
-              ArrayRef<T>,
-              std::initializer_list<U>&,
-              Args&&...>::value,
-          bool> = false>
+  template <typename U, typename... Args>
   constexpr explicit OptionalArrayRef(
-      in_place_t,
+      in_place_t ip,
       std::initializer_list<U> il,
-      Args&&... args) noexcept(std::
-                                   is_nothrow_constructible<
-                                       ArrayRef<T>,
-                                       std::initializer_list<U>&,
-                                       Args&&...>::value)
-      : storage(il, std::forward<Args>(args)...) {}
+      Args&&... args)
+      : wrapped_opt_array_ref(ip, il, args...) {}
 
   // Destructor
 
@@ -126,7 +81,7 @@ class OptionalArrayRef final {
   // Assignment
 
   constexpr OptionalArrayRef& operator=(nullopt_t) noexcept {
-    reset();
+    wrapped_opt_array_ref = c10::nullopt;
     return *this;
   }
 
@@ -136,30 +91,13 @@ class OptionalArrayRef final {
 
   constexpr OptionalArrayRef& operator=(
       const optional<ArrayRef<T>>& other) noexcept {
-    if (other.has_value()) {
-      if (initialized()) {
-        storage.value = other.value();
-      } else {
-        ::new (&storage.value) ArrayRef<T>(other.value());
-      }
-    } else {
-      reset();
-    }
+    wrapped_opt_array_ref = other;
     return *this;
   }
 
   constexpr OptionalArrayRef& operator=(
       optional<ArrayRef<T>>&& other) noexcept {
-    if (other.has_value()) {
-      if (initialized()) {
-        storage.value = std::move(other.value());
-      } else {
-        ::new (&storage.value) ArrayRef<T>(std::move(other.value()));
-      }
-      other.reset();
-    } else {
-      reset();
-    }
+    wrapped_opt_array_ref = other;
     return *this;
   }
 
@@ -172,112 +110,82 @@ class OptionalArrayRef final {
   operator=(U&& value) noexcept(
       std::is_nothrow_constructible<ArrayRef<T>, U&&>::value&&
           std::is_nothrow_assignable<ArrayRef<T>&, U&&>::value) {
-    if (initialized()) {
-      storage.value = std::forward<U>(value);
-    } else {
-      ::new (&storage.value) ArrayRef<T>(std::forward<U>(value));
-    }
+    wrapped_opt_array_ref = value;
     return *this;
   }
 
   // Observers
 
   constexpr ArrayRef<T>* operator->() noexcept {
-    return &storage.value;
+    return &wrapped_opt_array_ref.value();
   }
 
   constexpr const ArrayRef<T>* operator->() const noexcept {
-    return &storage.value;
+    return &wrapped_opt_array_ref.value();
   }
 
   constexpr ArrayRef<T>& operator*() & noexcept {
-    return storage.value;
+    return wrapped_opt_array_ref.value();
   }
 
   constexpr const ArrayRef<T>& operator*() const& noexcept {
-    return storage.value;
+    return wrapped_opt_array_ref.value();
   }
 
   constexpr ArrayRef<T>&& operator*() && noexcept {
-    return std::move(storage.value);
+    return std::move(wrapped_opt_array_ref.value());
   }
 
   constexpr const ArrayRef<T>&& operator*() const&& noexcept {
-    return std::move(storage.value);
+    return std::move(wrapped_opt_array_ref.value());
   }
 
   constexpr explicit operator bool() const noexcept {
-    return initialized();
+    return wrapped_opt_array_ref.has_value();
   }
 
   constexpr bool has_value() const noexcept {
-    return initialized();
+    return wrapped_opt_array_ref.has_value();
   }
 
   constexpr ArrayRef<T>& value() & {
-    if (!initialized()) {
-      throw c10::bad_optional_access("");
-    }
-    return storage.value;
+    return wrapped_opt_array_ref.value();
   }
 
   constexpr const ArrayRef<T>& value() const& {
-    if (!initialized()) {
-      throw c10::bad_optional_access("");
-    }
-    return storage.value;
+    return wrapped_opt_array_ref.value();
   }
 
   constexpr ArrayRef<T>&& value() && {
-    if (!initialized()) {
-      throw c10::bad_optional_access("");
-    }
-    return std::move(storage.value);
+    return std::move(wrapped_opt_array_ref.value());
   }
 
   constexpr const ArrayRef<T>&& value() const&& {
-    if (!initialized()) {
-      throw c10::bad_optional_access("");
-    }
-    return std::move(storage.value);
+    return std::move(wrapped_opt_array_ref.value());
   }
 
   template <typename U>
   constexpr std::
       enable_if_t<std::is_convertible<U&&, ArrayRef<T>>::value, ArrayRef<T>>
       value_or(U&& default_value) const& {
-    return initialized()
-        ? storage.value
-        : static_cast<ArrayRef<T>>(std::forward<U>(default_value));
+    return wrapped_opt_array_ref.value_or(default_value);
   }
 
   template <typename U>
   constexpr std::
       enable_if_t<std::is_convertible<U&&, ArrayRef<T>>::value, ArrayRef<T>>
       value_or(U&& default_value) && {
-    return initialized()
-        ? std::move(storage.value)
-        : static_cast<ArrayRef<T>>(std::forward<U>(default_value));
+    return wrapped_opt_array_ref.value_or(default_value);
   }
 
   // Modifiers
 
   constexpr void swap(OptionalArrayRef& other) noexcept {
-    if (initialized() && other.initialized()) {
-      std::swap(storage.value, other.storage.value);
-    } else if (initialized()) {
-      ::new (&other.storage.value) ArrayRef<T>(std::move(storage.value));
-      reset();
-    } else if (other.initialized()) {
-      ::new (&storage.value) ArrayRef<T>(std::move(other.storage.value));
-      other.reset();
-    }
+    std::swap(wrapped_opt_array_ref, other.wrapped_opt_array_ref);
   }
 
   constexpr void reset() noexcept {
-    if (initialized()) {
-      ::new (&storage.empty) Empty();
-    }
+    wrapped_opt_array_ref.reset();
   }
 
   template <typename... Args>
@@ -286,52 +194,17 @@ class OptionalArrayRef final {
       ArrayRef<T>&>
   emplace(Args&&... args) noexcept(
       std::is_nothrow_constructible<ArrayRef<T>, Args&&...>::value) {
-    ::new (&storage.value) ArrayRef<T>(std::forward<Args>(args)...);
-    return storage.value;
+    return wrapped_opt_array_ref.emplace(args...);
   }
 
   template <typename U, typename... Args>
-  constexpr std::enable_if_t<
-      std::is_constructible<ArrayRef<T>, std::initializer_list<U>&, Args&&...>::
-          value,
-      ArrayRef<T>&>
-  emplace(std::initializer_list<U> il, Args&&... args) noexcept(
-      std::is_nothrow_constructible<
-          ArrayRef<T>,
-          std::initializer_list<U>&,
-          Args&&...>::value) {
-    ::new (&storage.value) ArrayRef<T>(il, std::forward<Args>(args)...);
-    return storage.value;
+  constexpr ArrayRef<T>&
+  emplace(std::initializer_list<U> il, Args&&... args) noexcept {
+    return wrapped_opt_array_ref.emplace(il, args...);
   }
 
- private:
-  struct Empty {
-    // ArrayRef has the invariant that if Data is nullptr then
-    // Length must be zero, so this is an unused bit pattern.
-    const T* data{nullptr};
-    typename ArrayRef<T>::size_type size{1};
-  };
-
-  union Storage {
-    constexpr Storage() noexcept : empty() {}
-
-    template <typename... Args>
-    constexpr explicit Storage(in_place_t, Args&&... args)
-        : value(std::forward<Args>(args)...) {}
-
-    template <typename U, typename... Args>
-    constexpr explicit Storage(std::initializer_list<U> il, Args&&... args)
-        : value(il, std::forward<Args>(args)...) {}
-
-    Empty empty;
-    ArrayRef<T> value;
-  };
-
-  Storage storage;
-
-  constexpr bool initialized() const noexcept {
-    return storage.empty.data != nullptr || storage.empty.size == 0;
-  }
+private:
+  optional<ArrayRef<T>> wrapped_opt_array_ref;
 };
 
 using OptionalIntArrayRef = OptionalArrayRef<int64_t>;
