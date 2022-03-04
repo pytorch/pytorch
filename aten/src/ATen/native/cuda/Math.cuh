@@ -881,13 +881,6 @@ const auto i1e_string = jiterator_stringify(
   }
 ); // i1e_string
 
-const auto sigmoid_string = jiterator_stringify(
-  template <typename T>
-  T sigmoid(T x) {
-    return T{1} / (T{1} + std::exp(-x));
-  }
-); // sigmoid_string
-
 const auto sinc_string = jiterator_stringify(
   template <typename T>
   T sinc(T a) {
