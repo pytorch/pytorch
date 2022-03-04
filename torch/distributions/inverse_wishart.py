@@ -191,7 +191,6 @@ class InverseWishart(ExponentialFamily):
                 device=nu.device,
             ).expand(self._batch_shape + self._event_shape)
         )
-            
 
     @property
     def variance(self):
