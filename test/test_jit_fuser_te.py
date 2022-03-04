@@ -1594,47 +1594,48 @@ class TestTEFuser(JitTestCase):
                 )
 
     def test_binary_tensor_scalar_ops(self):
-        def apply_with_scalar(fn, scalar):
-            return lambda x: fn(x, scalar)
+        with torch._jit_internal._disable_emit_hooks():
+            def apply_with_scalar(fn, scalar):
+                return lambda x: fn(x, scalar)
 
-        # FIXME: Fails in IR Eval: torch.int64 and_ cpu
-        binary_ops = [
-            operator.__and__,
-            operator.__or__,
-            operator.__xor__,
-            torch.add,
-            torch.sub,
-            torch.mul,
-            torch.eq,
-            torch.ne,
-            torch.ge,
-            torch.lt,
-            torch.gt,
-        ]
-        devices = self.devices
-        # Maybe we should split this into separate tests to speed it up by
-        # only using  scalar values relevant to particular ops
-        scalars = [1.5, 3, 0, -2.0, -1]
-        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
-            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
-                continue
-            try:
-                x = self.data_for(dtype, device)
-                fn = apply_with_scalar(op, scalar)
-                ref = fn(x)
-            except Exception:
-                # If eager mode doesn't support a dtype/op/device combo,
-                # neither does the fuser.  Catch everything to avoid needing to
-                # guess what errors might be thrown by eager.
-                continue
-            try:
-                t = torch.jit.trace(fn, (x))
-                self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
-            except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+            # FIXME: Fails in IR Eval: torch.int64 and_ cpu
+            binary_ops = [
+                operator.__and__,
+                operator.__or__,
+                operator.__xor__,
+                torch.add,
+                torch.sub,
+                torch.mul,
+                torch.eq,
+                torch.ne,
+                torch.ge,
+                torch.lt,
+                torch.gt,
+            ]
+            devices = self.devices
+            # Maybe we should split this into separate tests to speed it up by
+            # only using  scalar values relevant to particular ops
+            scalars = [1.5, 3, 0, -2.0, -1]
+            for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
+                if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
+                    continue
+                try:
+                    x = self.data_for(dtype, device)
+                    fn = apply_with_scalar(op, scalar)
+                    ref = fn(x)
+                except Exception:
+                    # If eager mode doesn't support a dtype/op/device combo,
+                    # neither does the fuser.  Catch everything to avoid needing to
+                    # guess what errors might be thrown by eager.
+                    continue
+                try:
+                    t = torch.jit.trace(fn, (x))
+                    self.assertEqual(ref, t(x))
+                    self.assertAllFused(t.graph_for(x))
+                except Exception as e:
+                    raise RuntimeError(
+                        " ".join(["Failed:", str(dtype), op.__name__, device])
+                    )
 
     def test_binary_div_ops(self):
         def apply_with_scalar(fn, scalar):
