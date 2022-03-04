@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <ATen/code_template.h>
+#include <c10/core/DeviceType.h>
 #include <test/cpp/tensorexpr/test_base.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -631,18 +632,19 @@ TEST(DynamicShapes, GraphFromModel) {
 TEST(DynamicShapes, MultiThreadedExecution) {
 #ifdef TORCH_ENABLE_LLVM
   const auto graph_template = R"IR(
-      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=${device),
-            %y : Float(SS(-2), SS(-3), requires_grad=0, device=${device),
+      graph(%x : Float(SS(-2), SS(-3), requires_grad=0, device=${device}),
+            %y : Float(SS(-2), SS(-3), requires_grad=0, device=${device}),
             %SS_2 : int,
             %SS_3 : int):
-        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=${device) = aten::tanh(%x)
-        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=${device) = aten::erf(%3)
-        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=${device) = aten::mul(%4, %y)
+        %3 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::tanh(%x)
+        %4 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::erf(%3)
+        %5 : Float(SS(-2), SS(-3), requires_grad=0, device=${device}) = aten::mul(%4, %y)
         return (%5))IR";
   for (bool use_cuda : {false, true}) {
     if (!torch::cuda::is_available() && use_cuda) {
       continue;
     }
+    auto device = use_cuda ? at::kCUDA : at::kCPU;
     at::jit::TemplateEnv env;
     env.s("device", use_cuda ? "cuda:0" : "cpu");
     const auto graph_string = format(graph_template, env);
@@ -666,9 +668,9 @@ TEST(DynamicShapes, MultiThreadedExecution) {
 
     auto run_kernel = [&](int dim1, int dim2) {
       auto a =
-          at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+          at::rand({dim1, dim2}, at::TensorOptions(device).dtype(at::kFloat));
       auto b =
-          at::rand({dim1, dim2}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+          at::rand({dim1, dim2}, at::TensorOptions(device).dtype(at::kFloat));
 
       auto ref = at::mul(at::erf(at::tanh(a)), b);
 
