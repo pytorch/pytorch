@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import List, cast
 
 import torch
-from torch.distributed._shard.sharding_spec import ShardMetadata
+from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed.remote_device import _remote_device
 
 
