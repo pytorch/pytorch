@@ -178,8 +178,20 @@ class InverseWishart(ExponentialFamily):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         if nu.le(p + 1).any():
-            raise ValueError("Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1.")
-        return self.covariance_matrix / (nu - p - 1).view(self._batch_shape + (1, 1))
+            warnings.warn(
+                "Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1."
+            )
+        return torch.where(
+            nu.ge(p + 1),
+            self.covariance_matrix / (nu - p - 1).view(self._batch_shape + (1, 1)),
+            torch.full_like(
+                nu,
+                fill_value=float("Inf"),
+                dtype=nu.dtype,
+                device=nu.device,
+            ).expand(self._batch_shape + self._event_shape)
+        )
+            
 
     @property
     def variance(self):
@@ -203,17 +215,17 @@ class InverseWishart(ExponentialFamily):
         eff_df = (nu - p).view(self._batch_shape + (1, 1))
 
         return torch.where(
-            eff_df.ge(3),
+            nu.ge(p + 3),
             _clamp_with_eps(
                 (
                     (eff_df + 1) * V.pow(2) + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
                 ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
             ),
             torch.full_like(
-                eff_df,
+                nu,
                 fill_value=float("Inf"),
-                dtype=eff_df.dtype,
-                device=eff_df.device,
+                dtype=nu.dtype,
+                device=nu.device,
             ).expand(self._batch_shape + self._event_shape)
         )
 
