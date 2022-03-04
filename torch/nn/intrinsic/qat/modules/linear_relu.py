@@ -8,12 +8,17 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
     A LinearReLU module fused from Linear and ReLU modules, attached with
     FakeQuantize modules for weight, used in
     quantization aware training.
+
     We adopt the same interface as :class:`torch.nn.Linear`.
+
     Similar to `torch.nn.intrinsic.LinearReLU`, with FakeQuantize modules initialized to
     default.
+
     Attributes:
         weight: fake quant module for weight
+
     Examples::
+
         >>> m = nn.qat.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)
