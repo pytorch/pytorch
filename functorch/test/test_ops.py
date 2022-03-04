@@ -15,6 +15,8 @@ from contextlib import contextmanager
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_dtype import integral_types
+from torch.testing._internal.common_device_type import \
+     toleranceOverride, tol
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
@@ -23,6 +25,9 @@ from common_utils import (
     xfail,
     skip,
     skipOps,
+    tol1,
+    # tol2,
+    opsToleranceOverride,
     check_vmap_fallback,
     loop,
     IS_FBCODE,
@@ -330,9 +335,6 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs okay on cuda
 
-        # Needs increased tolerance
-        skip('nn.functional.conv_transpose3d', device_type='cuda'),
-
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
         xfail('minimum'),
@@ -365,6 +367,10 @@ class TestOperators(TestCase):
 
 
     }))
+    @opsToleranceOverride('TestOperators', 'test_jvp', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
+    ))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
         if not op.supports_forward_ad:
@@ -392,8 +398,11 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
         skip('nn.functional.fractional_max_pool2d'),  # fails on cpu, runs okay on cuda
         skip('nn.functional.fractional_max_pool3d'),  # fails on cpu, runs okay on cuda
-        skip('nn.functional.conv_transpose3d', device_type='cuda'),  # numerical precision
     }))
+    @opsToleranceOverride('TestOperators', 'test_vjp', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
+    ))
     def test_vjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -429,9 +438,12 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         xfail('nn.functional.fractional_max_pool3d'),
-        skip('nn.functional.conv_transpose3d'),  # numerical precision problem
         xfail('nn.functional.binary_cross_entropy'),  # testing problem
     }))
+    @opsToleranceOverride('TestOperators', 'test_vjp', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
+    ))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -465,6 +477,7 @@ class TestOperators(TestCase):
             self.assertEqual(result_vjps, expected_vjps)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapvjpvjp(self, device, dtype, op):
         self.skipTest("Skipped; these tests take too long")
         op_skip = set({
@@ -508,7 +521,7 @@ class TestOperators(TestCase):
 
             generator = get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}, opinfo=op)
             for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                self.assertEqual(loop_out, batched_out)
 
     vmapvjp_fail = vjp_fail.union({
         # The following are not bugs and are expected behavior
@@ -569,6 +582,7 @@ class TestOperators(TestCase):
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -586,7 +600,7 @@ class TestOperators(TestCase):
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op):
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                self.assertEqual(loop_out, batched_out)
 
     # There are several variations we care about
     # 1) primal batched (TODO)
@@ -594,6 +608,7 @@ class TestOperators(TestCase):
     # 3) both batched (TODO)
     # The below tests (2) only.
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapjvp', {
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
@@ -680,9 +695,13 @@ class TestOperators(TestCase):
             args = tuple([*arg_values, *kwarg_values])
             fn, args = get_jvp_variant(op, sample)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op, bdims=(0,)):
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                self.assertEqual(loop_out, batched_out)
 
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @opsToleranceOverride('TestOperators', 'test_vjp', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
+    ))
     @skipOps('TestOperators', 'test_vmapjvpall', {
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
@@ -734,6 +753,7 @@ class TestOperators(TestCase):
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
     })
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that coresponds to "batched forward-mode AD" testing in PyTorch core
@@ -755,9 +775,10 @@ class TestOperators(TestCase):
             args = tuple([*arg_values, *kwarg_values])
             fn, args = get_jvp_variant_primals_tangents(op, sample)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op):
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+                self.assertEqual(loop_out, batched_out)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         xfail('view_as_complex'),
         xfail('__getitem__', ''),
