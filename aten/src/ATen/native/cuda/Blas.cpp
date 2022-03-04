@@ -107,11 +107,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+    // Turning off for now since we've observed a couple of issues.
+    // Will enable for newer CUDA versions once we have more tests.
+    //
     // Strangely, if mat2 has only 1 row or column, we get
     // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
     // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
     // is to use lt interface only when self is bias.
-    useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+    /*useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
         result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
         self.is_contiguous() &&
         (scalar_type == at::ScalarType::Double ||
@@ -124,7 +127,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     // Batch size > 65535 does not work in most cases.
     if (mat1_sizes[0] > 65535) {
       useLtInterface = false;
-    }
+    }*/
 #endif
     if (!useLtInterface) {
       self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
