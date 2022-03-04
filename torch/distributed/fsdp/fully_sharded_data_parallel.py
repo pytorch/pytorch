@@ -325,7 +325,7 @@ class FullyShardedDataParallel(nn.Module):
             )
         except Exception as e:
             num_params = sum(p.numel() for p in params)
-            raise ValueError(f" {self.my_seq} : Error when wrapping {num_params} params: {str(e)}")
+            raise ValueError(f" {self.my_seq}, is_meta={is_meta_module} : Error when wrapping {num_params} params: {str(e)}")
         #num_params = sum(p.numel() for p in params)
         #self._rank0_print(f"Successfully wrapped {num_params} params {self.my_seq}")
         assert getattr(self, FSDP_WRAPPED_MODULE) is self._fsdp_wrapped_module
@@ -429,6 +429,7 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Module: self
         """
+        raise ValueError("Called fsdp apply....")
         uninitialized = self._is_root is None
         self._assert_state(TrainingState_.IDLE)
         with self.summon_full_params(recurse=False, writeback=True):
@@ -705,6 +706,7 @@ class FullyShardedDataParallel(nn.Module):
                 device=self.compute_device,
                 dtype=p.dtype,
             )
+            print(f"Created full param padded: {p._full_param_padded}")
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
     def _set_is_root(self) -> None:
