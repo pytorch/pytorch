@@ -20,7 +20,7 @@ click
 #Pinned versions: 5.0b5
 #test that import:
 
-dataclasses
+#dataclasses
 #Description: Provides decorators for auto adding special methods to user classes
 #Pinned versions:
 #test that import:
