@@ -334,45 +334,6 @@ std::ostream& operator<< (std::ostream& os, const std::vector<DynamicLayer>& dls
   return os;
 }
 
-static bool allTensors(
-    ArrayRef<IValue> args,
-    std::function<bool(const Tensor&)> pred) {
-  for (const auto& ivalue : args) {
-    // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
-    if (ivalue.isList()) {
-      for (const auto& elt : ivalue.toListRef()) {
-        if (elt.isTensor() && !pred(elt.toTensor())) {
-            return false;
-        }
-      }
-      continue;
-    }
-    if (ivalue.isTensorList()) {
-      for (const auto& elt : ivalue.toTensorList()) {
-        if (!pred(elt)) {
-          return false;
-        }
-      }
-      continue;
-    }
-    TORCH_INTERNAL_ASSERT(!ivalue.isGenericDict(), "No operators can accept GenericDict");
-    if (!ivalue.isTensor()) {
-      continue;
-    }
-    if (!pred(ivalue.toTensor())) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static bool anyTensors(
-    ArrayRef<IValue> args,
-    std::function<bool(const Tensor&)> pred) {
-  // Demorgan's law
-  return !allTensors(args, [&](const Tensor& self) { return !pred(self); });
-}
-
 static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto num_args = op.schema().arguments().size();
   foreachTensorInplace(*stack, stack->size() - num_args, stack->size(),
@@ -384,23 +345,6 @@ static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* s
         TORCH_INTERNAL_ASSERT(batched == nullptr);
         return tensor;
       });
-}
-
-static bool batchedAtCurrentLevel(const Tensor& tensor) {
-  auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  auto layer = dynamicLayerStack.back();
-  auto level = layer.layerId();
-
-  auto* batched = maybeGetBatchedImpl(tensor);
-  if (!batched) {
-    return false;
-  }
-  auto batched_at_level = batched->level();
-  return batched_at_level == level;
-}
-
-static bool notBatchedAtCurrentLevel(const Tensor& tensor) {
-  return !batchedAtCurrentLevel(tensor);
 }
 
 bool isInplaceOp(const FunctionSchema& schema) {
@@ -467,11 +411,13 @@ static DispatchKeySet keysForEnteringDynamicLayer(DispatchKey key) {
   }
 }
 
+#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
 static void dump_local_tls() {
   auto tls = c10::impl::tls_local_dispatch_key_set();
   std::cout << "[Local Include] " << tls.included_ << std::endl;
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
+#endif
 
 static DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(DispatchKey key) {
   DispatchKeySet exclude = all_dynlayer_keyset;
