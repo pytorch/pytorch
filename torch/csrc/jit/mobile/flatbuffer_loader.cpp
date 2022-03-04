@@ -220,10 +220,11 @@ mobile::Module FlatbufferLoader::parseModule(
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
 
-  auto mobile_debug_infos = module->mobile_debug_infos();
-  ska::flat_hash_map<int64_t, SourceRange> srMap;
-  ska::flat_hash_map<int64_t, DebugInfoTuple> callStackTrace =
-      parseMobileDebugInfo(mobile_debug_infos, srMap);
+  if (const auto* mobile_debug_infos = module->mobile_debug_infos()) {
+    ska::flat_hash_map<int64_t, SourceRange> srMap;
+    ska::flat_hash_map<int64_t, DebugInfoTuple> callStackTrace =
+        parseMobileDebugInfo(mobile_debug_infos, srMap);
+  }
 
   for (uint32_t i = 0; i < ivalues->size(); i++) {
     const auto* ival = ivalues->Get(i);
