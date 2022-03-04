@@ -353,7 +353,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   RANDOM_INPLACE_BATCH_RULE2(random_, from);
   RANDOM_INPLACE_BATCH_RULE2(random_, to);
 
+  RANDOM_INPLACE_BATCH_RULE(cauchy_);
+  RANDOM_INPLACE_BATCH_RULE(exponential_);
+  RANDOM_INPLACE_BATCH_RULE(geometric_);
+  RANDOM_INPLACE_BATCH_RULE(log_normal_);
   RANDOM_INPLACE_BATCH_RULE(normal_);
+  RANDOM_INPLACE_BATCH_RULE(uniform_);
 
   RANDINT_BATCH_RULE(randint);
   RANDINT_BATCH_RULE2(randint, generator);
