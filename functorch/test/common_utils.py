@@ -14,6 +14,7 @@ from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 import os
 import unittest
+from torch.testing._internal.common_device_type import toleranceOverride
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
@@ -194,6 +195,35 @@ def skipOps(test_case_name, base_test_name, to_skip):
                                                test_case_name, base_test_name,
                                                device_type=device_type, dtypes=dtypes))
             opinfo.decorators = tuple(decorators)
+
+    # This decorator doesn't modify fn in any way
+    def wrapped(fn):
+        return fn
+    return wrapped
+
+
+def tol2(op_name, variant_name, override_dct, *, device_type=None):
+    return (op_name, variant_name, override_dct, device_type)
+
+
+def tol1(op_name, override_dct, *, device_type=None):
+    return tol2(op_name, '', override_dct, device_type=device_type)
+
+
+def opsToleranceOverride(test_case_name, base_test_name, overrides):
+    all_opinfos = functorch_lagging_op_db + additional_op_db
+    for override in overrides:
+        print(override)
+        op_name, variant_name, override, device_type = override
+        matching_opinfos = [o for o in all_opinfos
+                            if o.name == op_name and o.variant_test_name == variant_name]
+        assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
+        opinfo = matching_opinfos[0]
+        decorators = list(opinfo.decorators)
+        decorators.append(DecorateInfo(
+            toleranceOverride(override),
+            test_case_name, base_test_name, device_type=device_type))
+        opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
