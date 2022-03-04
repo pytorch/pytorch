@@ -213,7 +213,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   auto a_broadcasts_over_b = (a_batch_sizes != b_batch_sizes);
   Tensor a_buffer, a_was_accessed, a_buffer_3d;
   std::function<void(int64_t)> check_if_copy_needed_for_a
-    = [](int64_t a_curr_linear_batch_idx){};
+    = [](int64_t /*a_curr_linear_batch_idx*/){};
   if (a_broadcasts_over_b) {
     a_buffer = at::empty_strided(a.sizes(), a.strides(), a.options())
       .copy_(a);
@@ -364,7 +364,7 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
  * successful (info = 0) or not, and report in case of the latter.
  */
 static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
-  for (size_t i = 0; i < infos.size(); i++) {
+  for (const auto i : c10::irange(infos.size())) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
   }
@@ -376,7 +376,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10
 static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < infos.numel(); i++) {
+  for (const auto i : c10::irange(infos.numel())) {
     auto info = infos_data[i];
     singleCheckErrors(info, name, i);
   }
