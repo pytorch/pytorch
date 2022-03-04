@@ -182,6 +182,14 @@ http_archive(
     sha256 = "aa96a691d3a8177f3215b14b0edc9641787abaaa30363a080165d06ab65e1161",
 )
 
+http_archive(
+    name = "gnu_sed",
+    build_file = "//third_party:gnu_sed.BUILD",
+    url = "https://ftp.gnu.org/gnu/sed/sed-4.8.tar.xz",
+    sha256 = "f79b0cfea71b37a8eeec8490db6c5f7ae7719c35587f21edb0617f370eeff633",
+    strip_prefix = "sed-4.8/",
+)
+
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
 python_configure(name = "local_config_python")
 
