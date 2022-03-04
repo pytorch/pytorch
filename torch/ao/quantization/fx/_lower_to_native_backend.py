@@ -410,15 +410,23 @@ def _lower_weighted_ref_functional(
         quantized_weight = weight_dq_node.args[0]
         weight_dtype = quantized_weight.args[-1]
         # Use the right prepack op and prepare the corresponding args
-        prepack_args = tuple([quantized_weight] + remaining_func_args)
+        # Linear prepack args: (quantized weights[, bias])
+        # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
+        prepack_args = [quantized_weight] + remaining_func_args
         if func_node.target == F.linear:
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
         elif func_node.target in CONV_FUNCTIONAL_OPS:
             prepack_op = get_qconv_prepack_op(func_node.target)
+            # For conv1d, the stride, padding, and dilation args may be ints,
+            # in which case we need to convert them to tuples
+            if func_node.target == F.conv1d:
+                for i in [2, 3, 4]:
+                    if len(prepack_args) > i and isinstance(prepack_args[i], int):
+                        prepack_args[i] = (prepack_args[i],)
         else:
             raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(output_scale_node):
-            packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})
+            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
 
         # Step 2: Replace reference pattern with the corresponding quantized op
         (q_func, q_relu_func) = LOWER_FUNCTIONAL_MAP[func_node.target]
