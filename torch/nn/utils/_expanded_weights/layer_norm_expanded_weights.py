@@ -9,7 +9,7 @@ from typing import List, Optional
 @implements_per_sample_grads(F.layer_norm)
 class LayerNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, kwarg_names, *expanded_args_and_kwargs):
+    def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
         input = expanded_args[0]
         normalized_shape = expanded_args[1]
@@ -34,7 +34,8 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         mean, rstd = ctx.mean, ctx.rstd
 
         results: List[Optional[torch.Tensor]] = []
-        results.append(None)
+        results.append(None)  # for kwarg names
+        results.append(None)  # for op reference
         if input.requires_grad:
             weight_ = unpack_expanded_weight_or_tensor(weight)
             bias_ = unpack_expanded_weight_or_tensor(bias)
