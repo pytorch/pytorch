@@ -391,14 +391,14 @@ def _lower_weighted_ref_functional(
             continue
         q_node = n
         (func_node, output_scale_node, output_zp_node, _) = q_node.args
-        if should_skip_lowering(func_node, qconfig_map):
-            continue
         # Handle cases where the functional op is wrapped in a ReLU
         if func_node.target == F.relu:
             relu_node = func_node
             func_node = relu_node.args[0]
         else:
             relu_node = None
+        if should_skip_lowering(func_node, qconfig_map):
+            continue
         # Linear args: (dequantized inputs, dequantized weights[, bias])
         # Conv args: (dequantized inputs, dequantized weights[, bias, stride, padding, dilation, groups])
         if func_node.op != "call_function" or func_node.target not in LOWER_FUNCTIONAL_MAP:
