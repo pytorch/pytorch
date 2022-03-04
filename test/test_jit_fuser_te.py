@@ -2475,14 +2475,21 @@ def get_name(op):
         l.append(op.variant_test_name)
     return '.'.join(l)
 
-class TestNNCOpInfo(JitCommonTestCase):
+# Purpose of this class is to allow super() calls.
+# super() [with no arguments] fails, presumably because of how instantiate_device_type_tests works.
+# super(TestNNCOpInfo, self) fails because TestNNCOpInfo gets deleted from global scope.
+# super(JitCommonTestCase, self).fn() would skip JitCommonTestCase.fn() implementation
+class TestNNCOpInfoParent(JitCommonTestCase):
+    pass
+
+class TestNNCOpInfo(TestNNCOpInfoParent):
     def setUp(self):
-        super().setUp()
+        super(TestNNCOpInfoParent, self).setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
     def tearDown(self):
         self.tensorexpr_options.restore()
-        super().tearDown()
+        super(TestNNCOpInfoParent, self).tearDown()
 
     def te_compile(self, device, dtype, op):
         if op.name in skip_ops:
@@ -2582,10 +2589,13 @@ def f({', '.join(param_names)}):
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
+# Purpose of this class is to allow super() calls. (See TestNNCOpInfoParent)
+class TestLoopnestRandomizationParent(JitTestCase):
+    pass
 
-class TestLoopnestRandomization(JitTestCase):
+class TestLoopnestRandomization(TestLoopnestRandomizationParent):
     def setUp(self):
-        super().setUp()
+        super(TestLoopnestRandomizationParent, self).setUp()
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -2625,7 +2635,7 @@ class TestLoopnestRandomization(JitTestCase):
 
         # Set it back to 0.
         os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
-        super().tearDown()
+        super(TestLoopnestRandomizationParent, self).tearDown()
 
     @onlyCPU
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
