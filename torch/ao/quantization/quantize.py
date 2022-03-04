@@ -523,12 +523,13 @@ def _convert(
                  Modules
         inplace: carry out model transformations in-place, the original module
                  is mutated
+        is_reference: a flag to enable quantized reference module
 
     """
-    if is_reference:
-        mapping = get_default_static_quant_reference_module_mappings()
     if mapping is None:
         mapping = get_default_static_quant_module_mappings()
+        if is_reference:
+            mapping = get_default_static_quant_reference_module_mappings()
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
