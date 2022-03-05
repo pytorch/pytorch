@@ -549,12 +549,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       auto iter = tidSeq2activity.find(key);
       if (iter != tidSeq2activity.end()) {
         libkineto::GenericTraceActivity* fwd = iter->second;
-#ifdef USE_KINETO_UPDATED
         fwd->flow.start = true;
-#else
-        activity.flow.linkedActivity = fwd; // Only destination side set this,
-                                            // to distinguish with start side.
-#endif
         activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
         activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
         ++fwd_bwd_link_id;
