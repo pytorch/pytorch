@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.distributed.fsdp import CPUOffload
-from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch
+from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch, ShardingStrategy
 
 
 if not dist.is_available():
@@ -71,7 +71,11 @@ class TestParityWithDDP(FSDPTest):
         "backward_prefetch",
         [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
     )
-    def test_nested_wrapped_model(self, cpu_offload, backward_prefetch):
+    @parametrize(
+        "sharding_strategy",
+        [ShardingStrategy.SHARD_GRAD_OP, None]
+    )
+    def test_nested_wrapped_model(self, cpu_offload, backward_prefetch, sharding_strategy):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -80,6 +84,7 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)

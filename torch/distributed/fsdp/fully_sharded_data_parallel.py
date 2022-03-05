@@ -48,6 +48,35 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 
 
 @dataclass
+class ShardingStrategy(Enum):
+    """
+    Specify which sharding strategy will be used for the distributed training.
+    FULL_SHARD: Shard parameters, gradients and optimizer states, this algorithm
+                inserts all_gather before forward and backward computation to gather
+                parameters, also inserts reduce_scatter after backward computation for
+                synchronizing and sharding gradients. Sharded optimizer states are
+                updated locally.
+    SHARD_GRAD_OP: Shard optimizer states and gradients, this algorithm inserts all_gather
+                   before forward computation and keeps the full parameters in
+                   GPU memory until backward computation is done. It inserts reduce_scater
+                   after backward computation for synchronizing and sharding gradients.
+                   Sharded optimizer states are updated locally.
+    NO_SHARD(future support): Parameters, gradients and optimizer states are replicated
+                              among ranks, all_reduce is inserted after backward computation
+                              is done for synchronizing gradients. Full optimizer states
+                              are updated in each rank.
+    HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intrad node and
+                                  apply NO_SHARD algorithm in the inter nodes.
+
+    """
+    FULL_SHARD = auto()
+    SHARD_GRAD_OP = auto()
+    # TODO
+    # NO_SHARD = auto()
+    # HYBRID_SHARD = auto()
+
+
+@dataclass
 class CPUOffload:
     """
     CPU offlaoding config. Currently, only parameter and gradient CPU
@@ -215,6 +244,7 @@ class FullyShardedDataParallel(nn.Module):
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
+        sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         fsdp_auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
@@ -240,6 +270,7 @@ class FullyShardedDataParallel(nn.Module):
                 only_wrap_children=True,
                 # FSDP arguments follow.
                 process_group=process_group,
+                sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
                 # Note that recursive_wap should not call FSDP with wrapping
@@ -255,9 +286,6 @@ class FullyShardedDataParallel(nn.Module):
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
 
-        # Free full params and keep shard only after forward
-        self.reshard_after_forward = True
-
         # setting two factors to avoid underflow and overflow
         self.gradient_predivide_factor: float = self._get_gradient_predivide_factor(
             self.world_size
@@ -269,6 +297,9 @@ class FullyShardedDataParallel(nn.Module):
         self.numel_padded_per_param: List[int] = []
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
+        self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
+
+        self._init_reshard_after_forward()
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
@@ -338,6 +369,19 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+    def _init_reshard_after_forward(self):
+        if self.sharding_strategy == ShardingStrategy.FULL_SHARD:
+            # Free full params and keep shard only after forward
+            self.reshard_after_forward = True
+        elif self.sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
+            # Keep full params in the GPU memory until backward
+            # computation is done
+            self.reshard_after_forward = False
+        else:
+            raise RuntimeError(
+                "sharding_strategy only supports FULL_SHARD and SHARD_GRAD_OP right now."
+            )
 
     @classmethod
     def _check_wrapped(cls, begin_module, check_fn, err_fn):
@@ -543,6 +587,9 @@ class FullyShardedDataParallel(nn.Module):
                 # reset attributes that are added in _init_param_attributes, as
                 # part of _lazy_init
                 del p._local_shard  # type: ignore[attr-defined]
+        # reset 'reshard_after_forward' flag as well, as it could be changed during
+        # training loop, e.g, it was set as False for root module in _lazy_init().
+        self._init_reshard_after_forward()
 
     def _lazy_init(self) -> None:
         """Initialization steps that should happen lazily, typically right
@@ -1325,7 +1372,15 @@ class FullyShardedDataParallel(nn.Module):
                 "FSDP only works with gradients that don't require gradients"
             )
 
-        self._free_full_params(cast(List[FlatParameter], [param]))
+        if self._require_backward_grad_sync or self.reshard_after_forward:
+            # Free full params. As a special case, we don't free the full params
+            # when in a ``no_sync`` context (as inversely indicated by
+            # ``self._require_backward_grad_sync``) and
+            # self.reshard_after_forward = False (sharding_strategy=SHARD_GRAD_OP),
+            # since the params will not get updated before the next forward,
+            # there is no need to call all_gather to sync params among ranks. This
+            # saves networking bandwidth but uses more GPU memory.
+            self._free_full_params(cast(List[FlatParameter], [param]))
 
         # Switch to local shard after backward.
         self._use_param_local_shard(cast(List[FlatParameter], [param]))
