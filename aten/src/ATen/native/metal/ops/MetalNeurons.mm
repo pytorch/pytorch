@@ -51,19 +51,19 @@ Tensor& neuronKernel_(Tensor& input, MPSCNNNeuron* neuron) {
   return input;
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor relu(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return neuronKernel(input, [MPSCNNNeuronOp relu]);
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor& relu_(Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return neuronKernel_(input, [MPSCNNNeuronOp relu]);
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor sigmoid(const Tensor& input) {
   return neuronKernel(input, [MPSCNNNeuronOp sigmoid]);
 }
@@ -74,7 +74,7 @@ Tensor& hardsigmoid_(Tensor& input) {
   return neuronKernel_(input, [MPSCNNNeuronOp hardSigmoid]);
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor tanh(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return neuronKernel(input, [MPSCNNNeuronOp tanh]);
