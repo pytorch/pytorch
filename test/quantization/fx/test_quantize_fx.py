@@ -1301,8 +1301,6 @@ class TestQuantizeFx(QuantizationTestCase):
         quantized_interface_config = {
             "input_quantized_idxs": [0],  # quantized input
             "output_quantized_idxs": [0],  # quantized output
-            #"input_quantized_idxs": {0: torch.quint8}, #[0],  # quantized input
-            #"output_quantized_idxs": {0: torch.quint8}, #[0],  # quantized output
         }
         interface_config = quantized_interface_config
         # observer for input and output of first conv
