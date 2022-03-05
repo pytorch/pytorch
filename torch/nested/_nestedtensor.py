@@ -62,10 +62,7 @@ class NestedTensor:
         """
         The dimension of ```self``` NestedTensor.
         """
-        tensors = self.unbind()
-        if len(tensors) == 0:
-            return 1
-        return int(tensors[0].dim() + 1)
+        return self._impl.dim()
 
     def numel(self):
         """
