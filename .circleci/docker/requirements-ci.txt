@@ -36,7 +36,7 @@ flatbuffers==2.0
 #Pinned versions: 2.0
 #test that import:
 
-future
+#future #this breaks linux-bionic-rocm4.5-py3.7
 #Description: compatibility layer between python 2 and python 3
 #Pinned versions:
 #test that import:
