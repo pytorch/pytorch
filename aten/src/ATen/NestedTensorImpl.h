@@ -53,6 +53,9 @@ struct NestedTensorImpl : public c10::TensorImpl {
     return buffer_;
   }
 
+ protected:
+  const char* tensorimpl_type_name() const override;
+
  private:
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
