@@ -208,33 +208,28 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
                                          c10::optional<bool> pin_memory,
                                          bool non_blocking,
                                          c10::optional<at::MemoryFormat> memory_format) {
-    
+
     if (force_eager_fallback(at::aten::_to_copy)) {
       TORCH_INTERNAL_ASSERT(false,
         "Fallback is currently impossible for _to_copy since the fallback helper itself reinvokes _to_copy");
     }
 
     auto options = self.options();
-    if (dtype) {
-      // I put each of these setters in a conditional instead of doing `self.options().dtype(dtype).layout(layout)...
-      // because calling .dtype(nullopt) on an options() that already has dtype appears to wipe it
-      options = options.dtype(dtype);
+    options = options.dtype(dtype.value_or(options.dtype_opt()));
+    options = options.layout(layout.value_or(options.layout_opt()));
+    options = options.memory_format(memory_format.value_or(options.memory_format_opt()));
+    if (pin_memory) {
+      // TODO(whc) can we honor 'pin_memory' in some/all cases?
+      options = options.pinned_memory(pin_memory);
+      TORCH_WARN_ONCE("Pinned memory used in lazy _to_copy, check if the behavior is as intended");
     }
-    if (layout) {
-      options = options.layout(layout);
-    }
-    // TODO(whc) can we honor 'pin_memory' in some/all cases?
-    if (memory_format) {
-      options = options.memory_format(memory_format);
-    }
-    // TODO(whc) is it safe to use 'non_blocking' arg from this API to feed some/all of our copy APIs,
-    // or do some of them always need to be blocking for safety reasons?
+
     TORCH_LAZY_FN_COUNTER("lazy::");
     auto lazy_self = torch::lazy::TryGetLtcTensor(self);
     if (!lazy_self && device && device->type() == c10::kLazy) {
       // Case 1: eager->lazy (we create a new lazy tensor)
 
-      auto eager_tensor = self.to(options, /*non_blocking=*/false, /*copy=*/true);
+      auto eager_tensor = self.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
       lazy_self = torch::lazy::GetOrCreateLtcTensor(eager_tensor,
                                                     torch::lazy::atenDeviceToBackendDevice(*device));
       return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
@@ -244,7 +239,7 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       TORCH_INTERNAL_ASSERT(lazy_self);
       auto eager_tensor = lazy_self.ToTensor(/*detached=*/true);
       options = options.device(device);
-      auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/false, /*copy=*/true);
+      auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
       return moved_eager_tensor;
     } else if (device &&
                device->type() == c10::kLazy &&
