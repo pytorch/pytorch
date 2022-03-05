@@ -8249,6 +8249,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
 
+    @unittest.skipIf(IS_WINDOWS, 'MSVC does not support fast overflow checks')
+    def test_numel_overflow(self):
+        with self.assertRaisesRegex(RuntimeError, "overflow"):
+            torch.empty(0x100000000, 0x10000000, 0x10)
+
+
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
 # Functions to test negative dimension wrapping
