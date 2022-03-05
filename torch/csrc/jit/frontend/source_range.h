@@ -354,7 +354,10 @@ struct StackEntry {
   SourceRange range;
 };
 
-C10_EXPORT void format_stack_trace(
+// TODO(dberard) is it safe to switch this to TORCH_API?
+// reason - it's also in libtorch_lite_eager_symbolication
+// but... I read through
+TORCH_API void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries);
 
