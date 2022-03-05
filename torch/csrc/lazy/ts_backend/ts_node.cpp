@@ -159,10 +159,10 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
 
 TensorList::TensorList(OpList values)
   : TsNode(/*op=*/tensor_list_opkind,
-           /*operands=*/std::move(values),
-           /*shapes=*/std::move(std::vector<Shape>()),
+           /*operands=*/values,
+           /*shapes=*/std::vector<Shape>(),
          /*num_outputs=*/1,
-         /*node_hash=*/OperandHashes(values, /*hash_seed=*/kHashSeed, enableDynamicShape())) {}
+         /*hash_seed=*/OperandHashes(values, /*seed=*/kHashSeed, enableDynamicShape())) {}
 
 TSOpVector TensorList::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                              TSLoweringContext* loctx) const {

@@ -59,7 +59,7 @@ c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
     if (auto lt = TryGetLtcTensor(tensor)) {
       return lt->GetDevice();
     }
-  } 
+  }
   return c10::nullopt;
 }
 

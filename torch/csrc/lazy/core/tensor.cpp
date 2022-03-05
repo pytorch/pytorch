@@ -461,11 +461,11 @@ int64_t LazyTensor::GetNextTensorId() {
 
 torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
   std::vector<Value> values;
-  for (auto t: tensors) {
+  for (const auto& t: tensors) {
     auto* impl = dynamic_cast<LTCTensorImpl*>(t.unsafeGetTensorImpl());
     TORCH_INTERNAL_ASSERT(impl,
       "GetTensorList only supports lists of valid tensors, but optional support could be added");
-    values.push_back(std::move(impl->tensor()->GetIrValue()));
+    values.push_back(impl->tensor()->GetIrValue());
   }
 
   return torch::lazy::Value(torch::lazy::MakeNode<TensorList>(std::move(values)));
