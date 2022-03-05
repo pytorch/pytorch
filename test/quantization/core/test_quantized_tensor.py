@@ -351,7 +351,7 @@ class TestQuantizedTensor(TestCase):
         qr = torch.quantize_per_tensor(r, scale, zero_point, torch.quint8)
         self.assertRaises(RuntimeError, lambda: qr.new(device='cpu'))
         self.assertRaises(RuntimeError, lambda: qr.new(r.storage()))
-        self.assertRaises(RuntimeError, lambda: qr.new(r))
+        self.assertRaises(TypeError, lambda: qr.new(r))
         self.assertRaises(RuntimeError, lambda: qr.new(torch.Size([2, 3])))
         self.assertRaises(RuntimeError, lambda: qr.new([6]))
 

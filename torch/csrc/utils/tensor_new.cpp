@@ -351,13 +351,14 @@ void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Devic
 }
 
 TensorOptions build_options(c10::optional<std::pair<c10::Backend, at::ScalarType>> backend_and_scalar_type) {
-  c10::optional<Device> device;
-  c10::optional<ScalarType> scalar_type;
   if (backend_and_scalar_type.has_value()) {
-    device = backendToDeviceType(backend_and_scalar_type->first);
-    scalar_type = backend_and_scalar_type->second;
+    // NB: have to go through dispatch key as backend affects layout (sparse),
+    // not only device.  TODO: Better strategy is to extract Layout + Device
+    // from Backend
+    return dispatchKeyToTensorOptions(backendToDispatchKey(backend_and_scalar_type->first)).dtype(backend_and_scalar_type->second);
+  } else {
+    return TensorOptions();
   }
-  return TensorOptions().device(device).dtype(scalar_type);
 }
 
 // Invariant: initial options is populated from Tensor::options() or the
