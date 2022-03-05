@@ -10,8 +10,8 @@ TORCH_META_FUNC(upsample_nearest3d) (
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w
+    c10::optional<double> /*scales_h*/,
+    c10::optional<double> /*scales_w*/
 ) {
   auto full_output_size = native::upsample_3d_common_check(input.sizes(), output_size);
 
@@ -27,9 +27,9 @@ TORCH_META_FUNC(upsample_nearest3d) (
 TORCH_META_FUNC(_upsample_nearest_exact3d) (
   const Tensor& input,
   IntArrayRef output_size,
-  c10::optional<double> scales_d,
-  c10::optional<double> scales_h,
-  c10::optional<double> scales_w
+  c10::optional<double> /*scales_d*/,
+  c10::optional<double> /*scales_h*/,
+  c10::optional<double> /*scales_w*/
 ) {
   auto full_output_size = native::upsample_3d_common_check(input.sizes(), output_size);
 
@@ -46,9 +46,9 @@ TORCH_META_FUNC(upsample_nearest3d_backward) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w
+    c10::optional<double> /*scales_d*/,
+    c10::optional<double> /*scales_h*/,
+    c10::optional<double> /*scales_w*/
 ) {
   auto full_output_size = native::upsample_3d_common_check(input_size, output_size);
 
@@ -71,9 +71,9 @@ TORCH_META_FUNC(_upsample_nearest_exact3d_backward) (
   const Tensor& grad_output,
   IntArrayRef output_size,
   IntArrayRef input_size,
-  c10::optional<double> scales_d,
-  c10::optional<double> scales_h,
-  c10::optional<double> scales_w
+  c10::optional<double> /*scales_d*/,
+  c10::optional<double> /*scales_h*/,
+  c10::optional<double> /*scales_w*/
 ) {
   auto full_output_size = native::upsample_3d_common_check(input_size, output_size);
 
@@ -98,7 +98,7 @@ namespace native {
 
 TORCH_IMPL_FUNC(upsample_nearest3d_out_cpu) (
     const Tensor& input,
-    IntArrayRef output_size,
+    IntArrayRef /*output_size*/,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
@@ -109,7 +109,7 @@ TORCH_IMPL_FUNC(upsample_nearest3d_out_cpu) (
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact3d_out_cpu) (
     const Tensor& input,
-    IntArrayRef output_size,
+    IntArrayRef /*output_size*/,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
@@ -120,8 +120,8 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_out_cpu) (
 
 TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_cpu) (
     const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
+    IntArrayRef /*output_size*/,
+    IntArrayRef /*input_size*/,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
@@ -132,8 +132,8 @@ TORCH_IMPL_FUNC(upsample_nearest3d_backward_out_cpu) (
 
 TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_cpu) (
     const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
+    IntArrayRef /*output_size*/,
+    IntArrayRef /*input_size*/,
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,

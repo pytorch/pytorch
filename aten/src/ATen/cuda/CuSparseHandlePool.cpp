@@ -16,6 +16,7 @@ void destroyCusparseHandle(cusparseHandle_t handle) {
 // the handle as a workaround.
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
+    (void)handle; // Suppress unused variable warning
 #else
     cusparseDestroy(handle);
 #endif

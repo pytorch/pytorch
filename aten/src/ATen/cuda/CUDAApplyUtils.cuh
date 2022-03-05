@@ -247,7 +247,7 @@ template <typename Op,
 struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offset> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op,
-                  int n, IndexType linearIndex, Offset offset) {
+                  int /*n*/, IndexType /*linearIndex*/, Offset offset) {
   op(a.data[offset]);
 }
 };
@@ -260,7 +260,7 @@ template <typename Op,
 struct ApplyOp1<Op, scalar, IndexType, ADims, 0, Offsets...> {
 __device__ __forceinline__
 static void apply(detail::TensorInfo<scalar, IndexType> &a, const Op &op, int n,
-                 IndexType linearIndex, Offsets... offsets) {
+                 IndexType /*linearIndex*/, Offsets... offsets) {
   op(n, a.data[offsets]...);
 }
 };
