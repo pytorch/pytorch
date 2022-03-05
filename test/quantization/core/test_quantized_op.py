@@ -2880,7 +2880,7 @@ class TestDynamicQuantizedOps(TestCase):
         self.assertEqual(Y_fp32, Y_fp32_ref,
                          msg="torch.ops.quantized.fbgemm_linear_dynamic results are off")
 
-    @override_qengines
+    @skipIfNoFBGEMM
     @given(
         input_channels=st.integers(16, 32),
         output_channels=st.integers(4, 8),
