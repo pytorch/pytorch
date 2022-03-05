@@ -18,6 +18,7 @@
 #endif
 
 #if defined(_MSC_VER)
+#include <c10/util/llvmMathExtras.h>
 #include <intrin.h>
 #endif
 
@@ -43,12 +44,9 @@ C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
   return __builtin_mul_overflow(a, b, out);
 #elif defined(_MSC_VER)
   *out = a * b;
-
-  // Avoid division by using bsr to test if:
-  // log2(a) + log2(b) >= 64
-  unsigned long i1 = 0, i2 = 0;
+  // This test isnt exact, but avoids doing integer division
   return (
-      _BitScanForward64(&i1, a) & _BitScanForward64(&i2, b) & (i1 + i2 >= 64));
+      (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
 #else
   auto result = a * b;
   *out = result;
