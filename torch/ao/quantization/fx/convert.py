@@ -39,7 +39,6 @@ from .utils import (
     is_get_tensor_info_node,
     node_return_type_is_int,
     quantize_node,
-    get_new_attr_name_with_prefix,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
     get_custom_module_class_keys,
@@ -60,15 +59,6 @@ from ..quantization_mappings import (
     DEFAULT_QAT_MODULE_MAPPINGS,
 )
 
-# weight prepacking ops
-WEIGHT_PREPACK_OPS = {
-    torch._ops.ops.quantized.linear_prepack,
-    torch._ops.ops.quantized.linear_prepack_fp16,
-    torch._ops.ops.quantized.conv1d_prepack,
-    torch._ops.ops.quantized.conv2d_prepack,
-    torch._ops.ops.quantized.conv3d_prepack,
-}
-
 def run_weight_observers(observed: GraphModule) -> None:
     r''' Extract the subgraph that produces the weight for dynamic quant
     or weight only quant node and run the subgraph to observe the weight.
@@ -87,62 +77,6 @@ def run_weight_observers(observed: GraphModule) -> None:
                                 observed, weight_observer_nodes)
                         # run the weight observer
                         weight_observer_module()
-
-def fold_weight(
-        quantized: QuantizedGraphModule,
-        node_name_to_scope: Dict[str, Tuple[str, type]]) -> QuantizedGraphModule:
-    """
-    Trace back from the weight node util we hit getattr, reconstruct the
-    graph module with the traced nodes and run the graph module to pack the
-    weight. then replace the original chain of ops with the packed weight.
-    """
-    packed_weights = dict()
-    # map from folded node name to the prepacked weight name
-    folded_nodes = dict()
-    # get packed weights
-    for node in quantized.graph.nodes:
-        if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
-            nodes_to_fold = collect_producer_nodes(node)
-            if nodes_to_fold is not None:
-                for node_to_fold in nodes_to_fold:
-                    folded_nodes[node_to_fold.name] = node
-
-                prepacking_module = graph_module_from_producer_nodes(
-                    quantized, nodes_to_fold)
-                packed_weight = prepacking_module()
-                packed_weights[node.name] = packed_weight
-
-    # remove folded nodes and replace the prepacking node with getattr
-    folded_graph = Graph()
-    env: Dict[Any, Any] = {}
-
-    def load_arg(a):
-        return map_arg(a, lambda node: env[node.name])
-    quantized_root = quantized
-    quantized_graph = quantized.graph
-
-    for node in quantized_graph.nodes:
-        prepack_node = folded_nodes.get(node.name, None)
-        if prepack_node is node:
-            packed_weight = packed_weights[node.name]
-            # add a prepacked attribute to root
-            op_node = list(prepack_node.users)[0]
-            module_path, _ = node_name_to_scope[op_node.name]
-            get_new_packed_weight_name = \
-                get_new_attr_name_with_prefix(module_path + '_packed_weight_')
-            packed_weight_name = get_new_packed_weight_name(quantized_root)
-            setattr(quantized_root, packed_weight_name, packed_weight)
-            # replace prepack node with a getattr node
-            env[node.name] = folded_graph.create_node(
-                'get_attr', packed_weight_name, (), {})
-        elif prepack_node is not None:
-            # remove the foled node
-            continue
-        else:
-            # copy other nodes
-            env[node.name] = folded_graph.node_copy(node, load_arg)
-    quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
-    return quantized
 
 def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     quantized_root = quantized
@@ -645,8 +579,7 @@ def convert(model: GraphModule, is_reference: bool = False,
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
         model = duplicate_dequantize_node(model)
-        model = fold_weight(model, node_name_to_scope)
-        model = lower_to_fbgemm(model, qconfig_map)
+        model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
     return model

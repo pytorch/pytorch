@@ -19,7 +19,7 @@
 name: !{{ build_environment }}
 
 on:
-{%- if is_default %}
+{%- if on_pull_request %}
   pull_request:
 {%- endif %}
   push:
@@ -31,13 +31,13 @@ on:
       - '!{{ label }}/*'
   {%- endif %}
 {%- endfor %}
-{%- if not is_scheduled and not only_on_pr %}
+{%- if not is_scheduled %}
     branches:
       - master
       - main
       - release/*
 {%- endif %}
-{%- if is_scheduled and not only_on_pr %}
+{%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
 {%- endif %}
@@ -139,7 +139,7 @@ jobs:
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
     name: !{{ test_job.name }}
-    timeout-minutes: !{{ common.win_test_timeout_minutes }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: !{{ test_job.shard }}

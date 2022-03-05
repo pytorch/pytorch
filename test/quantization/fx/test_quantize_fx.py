@@ -11,6 +11,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.multiprocessing as mp
+from torch.ao.quantization import is_activation_post_process
 
 # graph mode quantization based on fx
 from torch.ao.quantization.quantize_fx import (
@@ -49,6 +50,7 @@ from torch.ao.quantization import (
     get_default_qconfig,
     get_default_qat_qconfig,
     get_default_qconfig_dict,
+    get_default_qat_qconfig_dict,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -525,7 +527,14 @@ class TestFuseFx(QuantizationTestCase):
             self.assertFalse(hasattr(m, "bn"))
             self.assertFalse(hasattr(m, "relu"))
 
-    def test_root_node_getter(self):
+    def test_fusion_pattern_with_multiple_inputs(self):
+        """ This test tests two keys in backend_config_dict: root_node_getter and
+        extra_inputs_getter,
+        root_node_getter is used to identify a "root" module in the node pattern,
+        the node that we'll keep after fusion.
+        extra_inputs_getter will return a list of node that needs to be added to the
+        fused node as extra inputs.
+        """
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -556,10 +565,20 @@ class TestFuseFx(QuantizationTestCase):
             bn, conv = bn_pattern
             return conv
 
+        def conv_bn_res_relu_extra_inputs_getter(pattern):
+            """ get inputs pattern for extra inputs, inputs for root node
+            are assumed to be copied over from root node to the fused node
+            """
+            relu, add_pattern = pattern
+            _, bn_pattern, extra_input = add_pattern
+            bn, conv = bn_pattern
+            return [extra_input]
+
         conv_bn_res_relu_config = {
             "pattern": (nn.ReLU, (torch.add, (nn.BatchNorm2d, nn.Conv2d), MatchAllNode)),
             "fuser_method": fuse_conv_bn_relu,
             "root_node_getter": conv_bn_res_relu_root_node_getter,
+            "extra_inputs_getter": conv_bn_res_relu_extra_inputs_getter
         }
 
         backend_config_dict = {
@@ -570,6 +589,12 @@ class TestFuseFx(QuantizationTestCase):
         # check bn and relu are gone since we replaced the whole pattern to conv
         self.assertFalse(hasattr(m, "bn"))
         self.assertFalse(hasattr(m, "relu"))
+
+        # check conv module has two inputs
+        named_modules = dict(m.named_modules())
+        for node in m.graph.nodes:
+            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
+                self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
@@ -1012,7 +1037,6 @@ class TestQuantizeFx(QuantizationTestCase):
             m_eager = convert(m_eager)
             result_eager = m_eager(*self.img_data_dict[dim][0])
             self.assertEqual(result, result_eager)
-
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
@@ -3645,6 +3669,46 @@ class TestQuantizeFx(QuantizationTestCase):
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
 
+    def test_qconfig_dict_setup(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.Conv1d = torch.nn.Conv1d(1, 1, 1)
+                self.Conv2d = torch.nn.Conv2d(1, 1, 1)
+                self.Conv3d = torch.nn.Conv3d(1, 1, 1)
+                self.ConvTranspose1d = torch.nn.ConvTranspose1d(1, 1, 1)
+                self.ConvTranspose2d = torch.nn.ConvTranspose2d(1, 1, 1)
+                self.ConvTranspose3d = torch.nn.ConvTranspose3d(1, 1, 1)
+                self.Linear = torch.nn.Linear(1, 1, 1)
+
+            def forward(self, x):
+                x = self.Conv1d(x)
+                x = self.Conv2d(x)
+                x = self.Conv3d(x)
+                x = self.ConvTranspose1d(x)
+                x = self.ConvTranspose2d(x)
+                x = self.ConvTranspose3d(x)
+                x = self.Linear(x)
+                x = torch.nn.functional.conv1d(x, torch.rand(2, 2))
+                x = torch.nn.functional.conv2d(x, torch.rand(2, 2))
+                x = torch.nn.functional.conv3d(x, torch.rand(2, 2))
+                x = torch.nn.functional.linear(x, torch.rand(2, 2))
+                return x
+
+        backends = ["qnnpack", "fbgemm"]
+        for func in [get_default_qconfig_dict, get_default_qat_qconfig_dict]:
+            for backend in backends:
+                m = M().eval()
+                qconfig_dict = func(backend)
+                m = prepare_fx(m, qconfig_dict)
+                for name, mod in m.named_modules():
+                    if is_activation_post_process(mod) and mod.dtype == torch.quint8:
+                        if backend == "fbgemm":
+                            self.assertEqual(mod.quant_min, 0)
+                            self.assertEqual(mod.quant_max, 127)
+                        else:
+                            self.assertEqual(mod.quant_min, 0)
+                            self.assertEqual(mod.quant_max, 255)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -3796,10 +3860,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
             prepare_expected_node_occurrence = \
                 quant_type_to_prepare_expected_node_occurrence[quant_type]
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 model, data, quant_type, qlinear_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
+            if quant_type != QuantType.DYNAMIC:
+                self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
+                # Ensure packed weights in lowered models are folded
+                self.assertIn("_packed_weight_0", result_dict["quantized"].state_dict().keys())
 
     def test_linear_dynamic_fp16(self):
         class FuncLinear(torch.nn.Module):
@@ -4382,7 +4450,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m, {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')},
             prepare_custom_config_dict={"input_quantized_idxs": [0]})
         expected_node_occurrence = {
-            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 0,
+            ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 1,
         }
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
@@ -5134,6 +5202,47 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # not runnable
         quantized = convert_fx(prepared, is_reference=True)
 
+
+    @skipIfNoFBGEMM
+    def test_ave_pool_with_custom_cfg(self):
+        """ A test that checks correct patterns are produced for
+        avg_pool2d with customized config
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.avg_pool2d = torch.nn.AvgPool2d(3)
+
+
+            def forward(self, x):
+                x = self.avg_pool2d(x)
+                return x
+
+        # This model is not executable since we just put all ops
+        # in the same forward
+        m = M().eval()
+        # nothing to fuse so skipping the fuse step
+        qconfig_dict = {'': default_qconfig}
+        prepared = prepare_fx(m, qconfig_dict, prepare_custom_config_dict={"input_quantized_idxs": [0]})
+
+        # not runnable
+        quantized = convert_fx(prepared)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers
+        # check exact counts of quantize and dequantize
+        count_check = {
+            ns.call_method('dequantize') : 1
+        }
+        order_check = [
+            ns.call_module(nn.AvgPool2d),
+            ns.call_method('dequantize'),
+        ]
+        self.checkGraphModuleNodes(
+            quantized,
+            expected_node_occurrence=count_check,
+            expected_node_list=order_check)
 
     @skipIfNoFBGEMM
     def test_general_value_ops(self):
