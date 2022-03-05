@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/Pool.h>
