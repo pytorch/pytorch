@@ -80,55 +80,7 @@ WORKFLOW_DATA = [
         "binary_macos_libtorch_3_7_cpu_build",
         is_master_only=True,
     ),
-    SmoketestJob(
-        "binary_windows_build",
-        ["libtorch", "3.7", "cpu", "debug"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_debug_build",
-        is_master_only=True,
-    ),
-    SmoketestJob(
-        "binary_windows_build",
-        ["libtorch", "3.7", "cpu", "release"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_release_build",
-        is_master_only=True,
-    ),
-    SmoketestJob(
-        "binary_windows_build",
-        ["wheel", "3.7", "cu113"],
-        None,
-        "binary_windows_wheel_3_7_cu113_build",
-        is_master_only=True,
-    ),
 
-    SmoketestJob(
-        "binary_windows_test",
-        ["libtorch", "3.7", "cpu", "debug"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_debug_test",
-        is_master_only=True,
-        requires=["binary_windows_libtorch_3_7_cpu_debug_build"],
-    ),
-    SmoketestJob(
-        "binary_windows_test",
-        ["libtorch", "3.7", "cpu", "release"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_release_test",
-        is_master_only=False,
-        requires=["binary_windows_libtorch_3_7_cpu_release_build"],
-    ),
-    SmoketestJob(
-        "binary_windows_test",
-        ["wheel", "3.7", "cu113"],
-        None,
-        "binary_windows_wheel_3_7_cu113_test",
-        is_master_only=True,
-        requires=["binary_windows_wheel_3_7_cu113_build"],
-        extra_props={
-            "executor": "windows-with-nvidia-gpu",
-        },
-    ),
 
 
 ]
