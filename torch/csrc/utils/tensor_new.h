@@ -6,8 +6,12 @@
 
 namespace torch { namespace utils {
 
-at::Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
-at::Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
+// backend_and_scalar_type handles calls from contexts like FloatTensor or
+// CUDAIntTensor
+at::Tensor legacy_tensor_ctor(PyObject* args, PyObject* kwargs, c10::optional<std::pair<c10::Backend, at::ScalarType>> backend_and_scalar_type = c10::nullopt);
+// new, on the other hand, takes the tensor options of the self tensor the
+// method was invoked from
+at::Tensor legacy_tensor_new(PyObject* args, PyObject* kwargs, c10::TensorOptions);
 at::Tensor indexing_tensor_from_data(
     c10::TensorOptions options,
     at::ScalarType scalar_type,

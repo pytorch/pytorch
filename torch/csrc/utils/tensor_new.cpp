@@ -50,47 +50,47 @@ namespace torch { namespace utils {
 namespace {
 const int MAX_DIMS = 128;
 
-TensorOptions build_options(c10::TensorOptions options, at::ScalarType scalar_type, const c10::optional<Device>& device=c10::nullopt) {
-  options = options.dtype(scalar_type);
-  if (device.has_value()) {
-    return options.device(device);
-  }
-  return options;
-}
-
 void maybe_initialize_cuda(const Device device) {
   if (device.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
 }
 
-// NB: It appears there is some consistency invariant between options and device, where
-// if device is non-empty, its type must be consistent with the device type in
-// options.
-// TODO: Refactor this so we just pass everything in via options
-
-Tensor dispatch_ones(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
+Tensor new_with_sizes(c10::TensorOptions options, IntArrayRef sizes) {
   maybe_initialize_cuda(options.device());
   pybind11::gil_scoped_release no_gil;
-  return torch::ones(sizes, build_options(options, scalar_type, device));
+  return torch::empty(sizes, options);
 }
 
-Tensor new_with_sizes(c10::TensorOptions options, at::ScalarType scalar_type, const optional<Device>& device, IntArrayRef sizes) {
-  maybe_initialize_cuda(options.device());
-  pybind11::gil_scoped_release no_gil;
-  return torch::empty(sizes, build_options(options, scalar_type, device));
-}
-
-Tensor new_with_storage(c10::TensorOptions options, at::ScalarType scalar_type, Storage storage) {
-  auto tensor = at::empty({}, build_options(options, scalar_type));
+// TODO: there probably is invariant that storage_scalar_type != Undefined if
+// is_typed_storage
+Tensor new_with_storage(c10::TensorOptions options, Storage storage, at::ScalarType storage_scalar_type, bool is_typed_storage) {
+  if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage && options.has_dtype()) {
+    // dtype check is required because the storage proper doesn't actually
+    // have an associated dtype.  But be aware that this is the legacy
+    // (typed storage) path; if you pass in an untyped storage no checking
+    // will occur
+    TORCH_CHECK(
+      storage_scalar_type == c10::typeMetaToScalarType(options.dtype()),
+      "Expected a Storage of type ", c10::typeMetaToScalarType(options.dtype()),
+      " or an _UntypedStorage, but got type ", storage_scalar_type,
+      " for argument 1 'storage'");
+  }
+  // set_ will take care of the device check
+  auto tensor = at::empty({}, options);
   tensor.set_(std::move(storage));
   return tensor;
 }
 
-Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, const Tensor& other) {
-  options = options.dtype(scalar_type);
-  TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
-                   options, " (got ", other.options(), ")");
+Tensor new_with_tensor(c10::TensorOptions options, const Tensor& other) {
+  if (options.has_device()) {
+    TORCH_CHECK_TYPE(other.device().type() == options.device().type(),
+      "expected device ", options.device().type(), " (got ", other.device().type() , ")");
+  }
+  if (options.has_dtype()) {
+    TORCH_CHECK_TYPE(options.dtype() == other.dtype(),
+      "expected dtype ", options.dtype(), " (got ", other.dtype(), ")");
+  }
   return other.alias();
 }
 
@@ -217,8 +217,6 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
 
 Tensor internal_new_from_data(
     c10::TensorOptions options,
-    at::ScalarType scalar_type,
-    c10::optional<Device> device_opt,
     PyObject* data,
     bool copy_variables,
     bool copy_numpy,
@@ -227,6 +225,9 @@ Tensor internal_new_from_data(
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
+
+  auto device = options.device();
+  auto scalar_type = c10::typeMetaToScalarType(options.dtype());
 
   if (THPVariable_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");
@@ -237,8 +238,7 @@ Tensor internal_new_from_data(
     }
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
-    const auto& inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : var.device();
+    auto inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -249,7 +249,6 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
     auto tensor = tensor_from_cuda_array_interface(data);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : options.device();
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
@@ -259,14 +258,11 @@ Tensor internal_new_from_data(
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from numpy");
     auto tensor = tensor_from_numpy(data, /*warn_if_not_writeable=*/!copy_numpy);
     const auto& inferred_scalar_type = type_inference ? tensor.scalar_type() : scalar_type;
-    auto device = device_opt.has_value() ? *device_opt : options.device();
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
 #endif
-
-  auto device = device_opt.has_value() ? *device_opt : options.device();
 
   auto sizes = compute_sizes(data, scalar_type);
 
@@ -330,64 +326,19 @@ Tensor internal_new_from_data(
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
 
-Tensor new_from_data_copy(
-    c10::TensorOptions options,
-    at::ScalarType scalar_type,
-    c10::optional<Device> device,
-    PyObject* data) {
-  return internal_new_from_data(options, scalar_type, device, data,
+Tensor new_from_data_copy(c10::TensorOptions options, PyObject* data) {
+  return internal_new_from_data(options, data,
                                 /*copy_variables=*/true, /*copy_numpy=*/true,
                                 /*type_inference=*/false);
 }
 
-Tensor legacy_new_from_sequence(
-    c10::TensorOptions options,
-    at::ScalarType scalar_type,
-    c10::optional<Device> device,
-    PyObject* data) {
+Tensor legacy_new_from_sequence(c10::TensorOptions options, PyObject* data) {
   if (!PySequence_Check(data)) {
     throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
-  return internal_new_from_data(options, scalar_type, device, data,
+  return internal_new_from_data(options, data,
                                 /*copy_variables=*/false, /*copy_numpy=*/false,
                                 /*type_inference=*/false);
-}
-
-// "base" here refers to the Tensor type on which the function was invoked, e.g.:
-// in x.new(y), 'x' is the base.
-// TODO: Rewrite this using dispatchKeyToTensorOptions
-void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
-  if (expected_layout == c10::kStrided) {
-    constexpr c10::DispatchKeySet expected_key_set({
-        c10::DispatchKey::CPU,
-        c10::DispatchKey::CUDA,
-        c10::DispatchKey::HIP,
-        c10::DispatchKey::XLA,
-        c10::DispatchKey::Lazy,
-        c10::DispatchKey::XPU,
-        c10::DispatchKey::HPU,
-    });
-    TORCH_CHECK(expected_key_set.has(dispatch_key),
-        "new(): expected key in ",
-        expected_key_set,
-        " but got: ",
-        dispatch_key);
-  } else if(expected_layout == c10::kSparse) {
-    // NOTE: no sparse XLA or Lazy
-    constexpr c10::DispatchKeySet expected_key_set({
-        c10::DispatchKey::SparseCPU,
-        c10::DispatchKey::SparseCUDA,
-        c10::DispatchKey::SparseHIP,
-        c10::DispatchKey::SparseXPU,
-    });
-    TORCH_CHECK(expected_key_set.has(dispatch_key),
-        "new(): expected key in ",
-        expected_key_set,
-        " but got: ",
-        dispatch_key);
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "unexpected layout");
-  }
 }
 
 // TODO: Make this accept options instead of dispatch key
@@ -399,13 +350,53 @@ void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Devic
   }
 }
 
+TensorOptions build_options(c10::optional<std::pair<c10::Backend, at::ScalarType>> backend_and_scalar_type) {
+  c10::optional<Device> device;
+  c10::optional<ScalarType> scalar_type;
+  if (backend_and_scalar_type.has_value()) {
+    device = backendToDeviceType(backend_and_scalar_type->first);
+    scalar_type = backend_and_scalar_type->second;
+  }
+  return TensorOptions().device(device).dtype(scalar_type);
+}
+
+// Invariant: initial options is populated from Tensor::options() or the
+// dtype-specialized legacy constructor
+c10::TensorOptions checked_add_device(c10::TensorOptions options, c10::optional<Device> device) {
+  if (device.has_value()) {
+    if (options.has_device()) {
+      // NB: we don't care if the device indices don't match up.  Two possible
+      // situations:
+      // CUDAFloatTensor(...) ~> options.device() == {CUDA, -1}; the explicit
+      // device makes it more accurate
+      // cuda_tensor.new(...) ~> options.device() == {CUDA, 2}; can change
+      // index
+      TORCH_CHECK(options.device().type() == device->type(),
+               "legacy constructor expects device type: ", options.device().type(),
+               " but device type: ", device->type(), " was passed");
+    }
+    return options.device(device);
+  } else {
+    return options;
+  }
+}
+
+// Don't add device if it is not set.  Different from default TensorOptions
+// behavior which will clear device if you pass nullopt
+c10::TensorOptions maybe_add_device(c10::TensorOptions options, c10::optional<Device> device) {
+  if (device.has_value()) {
+    return options.device(device);
+  } else {
+    return options;
+  }
+}
+
 enum class CtorOrNew {
   CTOR,
   NEW,
 };
 
-Tensor legacy_sparse_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs, CtorOrNew ctor_or_new) {
-  auto options = dispatchKeyToTensorOptions(dispatch_key);
+Tensor legacy_sparse_tensor_generic_ctor_new(PyObject* args, PyObject* kwargs, c10::TensorOptions options, CtorOrNew ctor_or_new) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(*, int64_t cdata)|hidden",
@@ -413,13 +404,11 @@ Tensor legacy_sparse_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::
     "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
     "new(IntArrayRef size, *, Device? device=None)",
   });
-  if (ctor_or_new == CtorOrNew::NEW) check_base_legacy_new(dispatch_key, c10::kSparse);
+  TORCH_INTERNAL_ASSERT(options.layout() == c10::Layout::Sparse);
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    return at::empty({0}, build_options(options, scalar_type, deviceOptional));
+    return at::empty({0}, checked_add_device(options, r.deviceOptional(0)));
   } else if (r.idx == 1) {
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
@@ -427,20 +416,20 @@ Tensor legacy_sparse_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(2);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
+    checked_add_device(options, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
     // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
     // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
+    checked_add_device(options, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   } else if (r.idx == 4) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
+    options = checked_add_device(options, deviceOptional);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
@@ -452,17 +441,9 @@ Tensor legacy_sparse_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::
                         "or construct a strided tensor and convert it to sparse via to_sparse.");
       }
     }
-    return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
+    return new_with_sizes(options, r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
-}
-
-Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::CTOR);
-}
-
-Tensor legacy_sparse_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::NEW);
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
@@ -477,8 +458,7 @@ c10::TensorOptions typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::Dis
 
 } // namespace
 
-Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs, CtorOrNew ctor_or_new) {
-  auto options = dispatchKeyToTensorOptions(dispatch_key);
+Tensor legacy_tensor_generic_ctor_new(PyObject* args, PyObject* kwargs, c10::TensorOptions options, CtorOrNew ctor_or_new) {
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(Storage storage)",
@@ -489,36 +469,34 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     "new(PyObject* data, *, Device? device=None)",
   });
 
-  if (isSparse(dispatchKeyToBackend(dispatch_key))) {
-    return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, ctor_or_new);
+  if (options.layout() == c10::Layout::Sparse) {
+    // TODO: update this function to take backend_and_scalar_type directly
+    return legacy_sparse_tensor_generic_ctor_new(
+      args, kwargs, options, ctor_or_new);
   }
 
-  if (ctor_or_new == CtorOrNew::NEW) check_base_legacy_new(dispatch_key, c10::kStrided);
+  if (ctor_or_new == CtorOrNew::NEW) {
+    TORCH_CHECK(options.layout() == c10::kStrided);
+  }
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::empty({0}, build_options(options, scalar_type));
+    return at::empty({0}, checked_add_device(options, r.deviceOptional(0)));
   } else if (r.idx == 1) {
     at::ScalarType storage_scalar_type;
     bool is_typed_storage = false;
     at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
-    if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
-      TORCH_CHECK(
-        storage_scalar_type == scalar_type,
-        "Expected a Storage of type ", scalar_type,
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
-        " for argument 1 'storage'");
-    }
-    return new_with_storage(options, scalar_type, storage);
+    return new_with_storage(options, storage, storage_scalar_type, is_typed_storage);
   } else if (r.idx == 2) {
+    // this is bad and you should feel bad
+    // TODO: also technically we should check that you didn't do
+    // FloatTensor(cdata=...pointer to IntTensor...) but I cannot
+    // bring myself to actually write this code
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
-    return new_with_tensor(options, scalar_type, r.tensor(0));
+    return new_with_tensor(options, r.tensor(0));
   } else if (r.idx == 4) {
     if (ctor_or_new == CtorOrNew::CTOR) {
       TORCH_CHECK(false, "Legacy tensor constructor of the form torch.Tensor(tensor, device=device) " \
@@ -529,28 +507,25 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     }
   } else if (r.idx == 5) {
     PyObject* arg = r.pyobject(0);
-    auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
+    options = checked_add_device(options, r.deviceOptional(1));
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
+      return legacy_new_from_sequence(options, r.pyobject(0));
     }
-    return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
+    return new_with_sizes(options, r.intlist(0));
   } else if (r.idx == 6) {
-    auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
+    return legacy_new_from_sequence(checked_add_device(options, r.deviceOptional(1)), r.pyobject(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
-Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  return legacy_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::CTOR);
+Tensor legacy_tensor_ctor(PyObject* args, PyObject* kwargs, c10::optional<std::pair<c10::Backend, at::ScalarType>> backend_and_scalar_type) {
+  return legacy_tensor_generic_ctor_new(args, kwargs, build_options(backend_and_scalar_type), CtorOrNew::CTOR);
 }
 
-Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  return legacy_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::NEW);
+Tensor legacy_tensor_new(PyObject* args, PyObject* kwargs, c10::TensorOptions options) {
+  return legacy_tensor_generic_ctor_new(args, kwargs, options, CtorOrNew::NEW);
 }
 
 Tensor indexing_tensor_from_data(
@@ -562,11 +537,11 @@ Tensor indexing_tensor_from_data(
   // indexing tensor (type Byte or Long)
   ScalarType inferred_scalar_type = infer_scalar_type(data);
   if (inferred_scalar_type == ScalarType::Byte || inferred_scalar_type == ScalarType::Bool) {
-    return internal_new_from_data(options, inferred_scalar_type, device, data,
+    return internal_new_from_data(maybe_add_device(options.dtype(inferred_scalar_type), device), data,
                                   /*copy_variables=*/false, /*copy_numpy=*/false,
                                   /*type_inference=*/false);
   } else {
-    return internal_new_from_data(options, scalar_type, device, data,
+    return internal_new_from_data(maybe_add_device(options.dtype(scalar_type), device), data,
                                   /*copy_variables=*/false, /*copy_numpy=*/false,
                                   /*type_inference=*/false);
   }
@@ -610,15 +585,14 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
 
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+    Tensor values = internal_new_from_data(maybe_add_device(inferred_options.dtype(inferred_scalar_type), r.deviceOptional(DEVICE_TYPE_ARG)),
                                            r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor crow_indices =  internal_new_from_data(values.options(),
-      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(CROW_INDICES_ARG),
+    Tensor crow_indices =  internal_new_from_data(maybe_add_device(values.options().dtype(crow_indices_scalar_type), r.deviceOptional(DEVICE_TYPE_ARG)), r.pyobject(CROW_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    Tensor col_indices = internal_new_from_data(values.options(),
-      col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG), r.pyobject(COL_INDICES_ARG),
+    Tensor col_indices = internal_new_from_data(maybe_add_device(values.options().dtype(
+      col_indices_scalar_type), r.deviceOptional(DEVICE_TYPE_ARG)), r.pyobject(COL_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
 
@@ -631,14 +605,14 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_scalar_type = r.scalartypeWithDefault(TYPE_INFERENCE_ARG, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(DEVICE_TYPE_ARG));
 
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+    Tensor values = internal_new_from_data(maybe_add_device(inferred_options.dtype(inferred_scalar_type), r.deviceOptional(DEVICE_TYPE_ARG)),
                                            r.pyobject(VALUES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
-    Tensor crow_indices = internal_new_from_data(values.options(),
-      crow_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+    Tensor crow_indices = internal_new_from_data(maybe_add_device(values.options().dtype(
+      crow_indices_scalar_type), r.deviceOptional(DEVICE_TYPE_ARG)),
       r.pyobject(CROW_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
-    Tensor col_indices = internal_new_from_data(values.options(), col_indices_scalar_type, r.deviceOptional(DEVICE_TYPE_ARG),
+    Tensor col_indices = internal_new_from_data(maybe_add_device(values.options().dtype(col_indices_scalar_type), r.deviceOptional(DEVICE_TYPE_ARG)),
       r.pyobject(COL_INDICES_ARG), /*copy_variables=*/false, /*copy_numpy=*/true,
       /*type_inference=*/true);
     return at::sparse_csr_tensor(crow_indices, col_indices, values,
@@ -670,15 +644,15 @@ Tensor _sparse_csr_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
   const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
   at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
-  Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES),
+  Tensor values = internal_new_from_data(maybe_add_device(inferred_options.dtype(inferred_scalar_type), r.deviceOptional(ARG_DEVICE)), r.pyobject(ARG_VALUES),
                                          /*copy_variables=*/false, /*copy_numpy=*/true,
                                          /*type_inference=*/type_inference);
 
-  Tensor crow_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_CROW_INDICES),
+  Tensor crow_indices = internal_new_from_data(maybe_add_device(values.options().dtype(kInt), r.deviceOptional(ARG_DEVICE)), r.pyobject(ARG_CROW_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/true);
 
-  Tensor col_indices = internal_new_from_data(values.options(), kInt, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_COL_INDICES),
+  Tensor col_indices = internal_new_from_data(maybe_add_device(values.options().dtype(kInt), r.deviceOptional(ARG_DEVICE)), r.pyobject(ARG_COL_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/true);
 
@@ -699,12 +673,6 @@ Tensor _sparse_csr_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
 // should accept even ordinary index sequences (and just make sure we write them
 // into the correct device).  values is the ONLY way we know that the index
 // tensor should go to CUDA, so we have to get the information in somehow.
-//
-// This code is kind of jank.  For one, the dtype in options is silently ignored
-// by internal_new_from_data.  Also, in classic janky code style, it used to
-// not work quite right: if values lives on "cuda:1", before all we said was
-// "this needs to be CUDA" and indices would be allocated on the wrong tensor.
-// Options is more right and gets this correct.
 
 Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   TORCH_INTERNAL_ASSERT(!isSparse(dispatchKeyToBackend(dispatch_key)));
@@ -723,11 +691,11 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_scalar_type = r.scalartypeWithDefault(2, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(3));
     // if no dtype provided, infer type based on value type.
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(3), r.pyobject(1),
+    Tensor values = internal_new_from_data(maybe_add_device(inferred_options.dtype(inferred_scalar_type), r.deviceOptional(3)), r.pyobject(1),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
     // See Note [Ensuring sparse values and indices match devices]
-    Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(3), r.pyobject(0),
+    Tensor indices = internal_new_from_data(maybe_add_device(values.options().dtype(kLong), r.deviceOptional(3)), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
@@ -736,11 +704,11 @@ Tensor sparse_coo_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_options = typeIdWithDefault(r, 4, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(4));
-    Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(4), r.pyobject(1),
+    Tensor values = internal_new_from_data(maybe_add_device(inferred_options.dtype(inferred_scalar_type), r.deviceOptional(4)), r.pyobject(1),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/type_inference);
     // See Note [Ensuring sparse values and indices match devices]
-    Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(4), r.pyobject(0),
+    Tensor indices = internal_new_from_data(maybe_add_device(values.options().dtype(kLong), r.deviceOptional(4)), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/false);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
@@ -775,11 +743,11 @@ Tensor _sparse_coo_tensor_unsafe_ctor(c10::DispatchKey dispatch_key, at::ScalarT
   const auto inferred_options = typeIdWithDefault(r, ARG_DEVICE, dispatch_key);
   const auto inferred_scalar_type = r.scalartypeWithDefault(ARG_TYPE, scalar_type);
   at::OptionalDeviceGuard device_guard(r.deviceOptional(ARG_DEVICE));
-  Tensor values = internal_new_from_data(inferred_options, inferred_scalar_type, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_VALUES),
+  Tensor values = internal_new_from_data(maybe_add_device(inferred_options.dtype(inferred_scalar_type), r.deviceOptional(ARG_DEVICE)), r.pyobject(ARG_VALUES),
                                          /*copy_variables=*/false, /*copy_numpy=*/true,
                                          /*type_inference=*/type_inference);
   // See Note [Ensuring sparse values and indices match devices]
-  Tensor indices = internal_new_from_data(values.options(), kLong, r.deviceOptional(ARG_DEVICE), r.pyobject(ARG_INDICES),
+  Tensor indices = internal_new_from_data(maybe_add_device(values.options().dtype(kLong), r.deviceOptional(ARG_DEVICE)), r.pyobject(ARG_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
                                           /*type_inference=*/false);
   return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
@@ -794,11 +762,11 @@ void _validate_sparse_coo_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   Tensor values = internal_new_from_data(
-      options, scalar_type, c10::nullopt, r.pyobject(1),
+      options.dtype(scalar_type), r.pyobject(1),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
   // See Note [Ensuring sparse values and indices match devices]
   Tensor indices = internal_new_from_data(
-      values.options(), kLong, c10::nullopt, r.pyobject(0),
+      values.options().dtype(kLong), r.pyobject(0),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/false);
   at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
@@ -813,14 +781,14 @@ void _validate_sparse_csr_tensor_args(c10::DispatchKey dispatch_key, at::ScalarT
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   Tensor values = internal_new_from_data(
-      options, scalar_type, c10::nullopt, r.pyobject(2),
+      options.dtype(scalar_type), r.pyobject(2),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
   // See Note [Ensuring sparse values and indices match devices]
   Tensor crow_indices = internal_new_from_data(
-      values.options(), kInt, c10::nullopt, r.pyobject(0),
+      values.options().dtype(kInt), r.pyobject(0),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
   Tensor col_indices = internal_new_from_data(
-      values.options(), kInt, c10::nullopt, r.pyobject(1),
+      values.options().dtype(kInt), r.pyobject(1),
       /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3));
@@ -847,9 +815,9 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
     bool pin_memory = r.toBool(3);
     bool args_requires_grad = r.toBool(4);
     auto new_tensor = internal_new_from_data(
-               typeIdWithDefault(r, 2, dispatch_key),
-               r.scalartypeWithDefault(1, scalar_type),
-               r.deviceOptional(2),
+               maybe_add_device(typeIdWithDefault(r, 2, dispatch_key).dtype(
+               r.scalartypeWithDefault(1, scalar_type)),
+               r.deviceOptional(2)),
                data,
                /*copy_variables=*/true,
                /*copy_numpy=*/true,
@@ -877,9 +845,8 @@ Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyOb
   if (r.idx == 0) {
     bool type_inference = r.isNone(1);
     return internal_new_from_data(
-        typeIdWithDefault(r, 2, dispatch_key),
-        r.scalartypeWithDefault(1, scalar_type),
-        r.deviceOptional(2),
+        maybe_add_device(typeIdWithDefault(r, 2, dispatch_key).dtype(r.scalartypeWithDefault(1, scalar_type)),
+          r.deviceOptional(2)),
         r.pyobject(0),
         /*copy_variables=*/false,
         /*copy_numpy=*/false,
@@ -906,9 +873,9 @@ Tensor new_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyO
 
     bool args_requires_grad = r.toBool(3);
     auto new_tensor = new_from_data_copy(
-               typeIdWithDefault(r, 2, dispatch_key),
-               r.scalartypeWithDefault(1, scalar_type),
-               r.deviceOptional(2),
+               maybe_add_device(
+                  typeIdWithDefault(r, 2, dispatch_key).dtype(r.scalartypeWithDefault(1, scalar_type)),
+                  r.deviceOptional(2)),
                data);
     new_tensor.detach_(); // ensure new_tensor a leaf node
     new_tensor.set_requires_grad(args_requires_grad);
@@ -1102,7 +1069,7 @@ Tensor asarray(
     // Type inference is activated only if the dtype has not been specified.
     // Otherwise, we force the unwrapped dtype.
     tensor = internal_new_from_data(
-        TensorOptions(), dtype_unwrapped, device, obj,
+        TensorOptions().dtype(dtype_unwrapped).device(device), obj,
         /* copy_variables = */ false, /* copy_numpy = */ false, /* type_inference = */ !dtype.has_value());
     tensor.set_requires_grad(requires_grad);
   }

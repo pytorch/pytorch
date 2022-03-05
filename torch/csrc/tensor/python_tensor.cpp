@@ -43,10 +43,6 @@ struct PyTensorType {
     return static_cast<Backend>(backend);
   }
 
-  DispatchKey get_dispatch_key() const {
-    return backendToDispatchKey(static_cast<Backend>(backend));
-  }
-
   ScalarType get_scalar_type() const {
     return static_cast<ScalarType>(scalar_type);
   }
@@ -68,7 +64,10 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (tensor_type.is_cuda && !torch::utils::cuda_enabled()) {
     throw unavailable_type(tensor_type);
   }
-  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(tensor_type.get_dispatch_key(), tensor_type.get_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(
+    args, kwargs,
+    c10::make_optional(std::make_pair(tensor_type.get_backend(), tensor_type.get_scalar_type()))
+  ));
   END_HANDLE_TH_ERRORS
 }
 
@@ -90,7 +89,7 @@ static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
     //
     // TODO: Stop using legacyExtractDispatchKey here (probably need to build
     // in instanceof checking to Tensor class itself)
-    if (legacyExtractDispatchKey(var.key_set()) == self->get_dispatch_key() &&
+    if (dispatchKeyToBackend(legacyExtractDispatchKey(var)) == self->get_backend() &&
         var.scalar_type() == static_cast<ScalarType>(self->scalar_type)) {
       Py_RETURN_TRUE;
     }
