@@ -751,6 +751,24 @@ struct PythonPrintImpl {
       if (version_entry != get_operator_version_map().end()) {
         const auto& entry = version_entry->second;
         // TODO (tugsuu) move this calculation into a seperate step.
+        uint64_t current_version = entry[entry.size() - 1].bumped_at_version;
+
+        // Make sure this behaviour matches with the historic version
+        // calculation
+        // TODO (tugsuu) this needs to be removed once we think it is safe.
+        uint64_t historic_version = get_min_version_for_kind(node->kind());
+
+        if (historic_version != 0) {
+          TORCH_INTERNAL_ASSERT(
+              current_version == historic_version,
+              "Detected upgrader design discrepancy for op ",
+              schema_name,
+              " New version was ",
+              current_version,
+              " While the old version was ",
+              historic_version);
+        }
+
         min_version_ = std::max(
             min_version_, uint64_t(entry[entry.size() - 1].bumped_at_version));
       }
