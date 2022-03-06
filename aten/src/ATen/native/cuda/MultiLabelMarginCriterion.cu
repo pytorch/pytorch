@@ -63,7 +63,7 @@ __global__ void multilabel_margin_loss_forward_kernel(
   int64_t* target_k = target + k * dim;
   scalar_t* output_k = output + k;
   scalar_t* is_target_k = is_target + k * dim;
- 
+
   // zero is_target
   for (int d = threadIdx.x; d < dim; d += blockDim.x) {
     is_target_k[d] = static_cast<scalar_t>(0);
