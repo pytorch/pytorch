@@ -1,12 +1,19 @@
 #pragma once
 
 #include <limits>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 
