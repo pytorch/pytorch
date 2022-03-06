@@ -2413,6 +2413,32 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+      - binary_linux_build:
+          build_environment: manywheel 3.7m cu102 devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+      - binary_linux_build:
+          build_environment: libtorch 3.7m cpu devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_build:
+          build_environment: libtorch 3.7m cpu gcc5.4_cxx11-abi
+          docker_image: pytorch/pytorch-binary-docker-image-ubuntu16.04:latest
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - binary_mac_build:
           build_environment: wheel 3.7 cpu
           filters:
@@ -2431,6 +2457,101 @@ workflows:
                 - /ci-all\/.*/
                 - /release\/.*/
           name: binary_macos_libtorch_3_7_cpu_build
+      - binary_windows_build:
+          build_environment: libtorch 3.7 cpu debug
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_windows_libtorch_3_7_cpu_debug_build
+      - binary_windows_build:
+          build_environment: libtorch 3.7 cpu release
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_windows_libtorch_3_7_cpu_release_build
+      - binary_windows_build:
+          build_environment: wheel 3.7 cu113
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_windows_wheel_3_7_cu113_build
+      - binary_windows_test:
+          build_environment: libtorch 3.7 cpu debug
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_windows_libtorch_3_7_cpu_debug_test
+          requires:
+            - binary_windows_libtorch_3_7_cpu_debug_build
+      - binary_windows_test:
+          build_environment: libtorch 3.7 cpu release
+          name: binary_windows_libtorch_3_7_cpu_release_test
+          requires:
+            - binary_windows_libtorch_3_7_cpu_release_build
+      - binary_windows_test:
+          build_environment: wheel 3.7 cu113
+          executor: windows-with-nvidia-gpu
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_windows_wheel_3_7_cu113_test
+          requires:
+            - binary_windows_wheel_3_7_cu113_build
+      - binary_linux_test:
+          build_environment: manywheel 3.7m cu102 devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
+          requires:
+            - binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+          resource_class: gpu.nvidia.small
+          use_cuda_docker_runtime: "1"
+      - binary_linux_test:
+          build_environment: libtorch 3.7m cpu devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test
+          requires:
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_test:
+          build_environment: libtorch 3.7m cpu gcc5.4_cxx11-abi
+          docker_image: pytorch/pytorch-binary-docker-image-ubuntu16.04:latest
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
+          requires:
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-x86_64-build
           context: org-member
@@ -2728,12 +2849,68 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
+      - binary_linux_build:
+          build_environment: manywheel 3.7m cu102 devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+      - binary_linux_build:
+          build_environment: libtorch 3.7m cpu devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_build:
+          build_environment: libtorch 3.7m cpu gcc5.4_cxx11-abi
+          docker_image: pytorch/pytorch-binary-docker-image-ubuntu16.04:latest
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - binary_mac_build:
           build_environment: wheel 3.7 cpu
           name: binary_macos_wheel_3_7_cpu_build
       - binary_mac_build:
           build_environment: libtorch 3.7 cpu
           name: binary_macos_libtorch_3_7_cpu_build
+      - binary_windows_build:
+          build_environment: libtorch 3.7 cpu debug
+          name: binary_windows_libtorch_3_7_cpu_debug_build
+      - binary_windows_build:
+          build_environment: libtorch 3.7 cpu release
+          name: binary_windows_libtorch_3_7_cpu_release_build
+      - binary_windows_build:
+          build_environment: wheel 3.7 cu113
+          name: binary_windows_wheel_3_7_cu113_build
+      - binary_windows_test:
+          build_environment: libtorch 3.7 cpu debug
+          name: binary_windows_libtorch_3_7_cpu_debug_test
+          requires:
+            - binary_windows_libtorch_3_7_cpu_debug_build
+      - binary_windows_test:
+          build_environment: wheel 3.7 cu113
+          executor: windows-with-nvidia-gpu
+          name: binary_windows_wheel_3_7_cu113_test
+          requires:
+            - binary_windows_wheel_3_7_cu113_build
+      - binary_linux_test:
+          build_environment: manywheel 3.7m cu102 devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          name: binary_linux_manywheel_3_7m_cu102_devtoolset7_test
+          requires:
+            - binary_linux_manywheel_3_7m_cu102_devtoolset7_build
+          resource_class: gpu.nvidia.small
+          use_cuda_docker_runtime: "1"
+      - binary_linux_test:
+          build_environment: libtorch 3.7m cpu devtoolset7
+          docker_image: pytorch/manylinux-cuda102
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test
+          requires:
+            - binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build
+      - binary_linux_test:
+          build_environment: libtorch 3.7m cpu gcc5.4_cxx11-abi
+          docker_image: pytorch/pytorch-binary-docker-image-ubuntu16.04:latest
+          libtorch_variant: shared-with-deps
+          name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test
+          requires:
+            - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
           image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
