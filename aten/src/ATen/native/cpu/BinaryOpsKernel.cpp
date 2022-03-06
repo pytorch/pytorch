@@ -1104,6 +1104,22 @@ void zeta_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void gammaincinv_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "gammaincinv_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t q) -> scalar_t {
+      return calc_gammaincinv(x, q);
+    });
+  });
+}
+
+void gammainccinv_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "gammainccinv_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t q) -> scalar_t {
+      return calc_gammainccinv(x, q);
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_clamp_stub, &add_clamp_kernel);
@@ -1145,6 +1161,8 @@ REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
 REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
 REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
 REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
+REGISTER_DISPATCH(gammaincinv_stub, &gammaincinv_kernel);
+REGISTER_DISPATCH(gammainccinv_stub, &gammainccinv_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);

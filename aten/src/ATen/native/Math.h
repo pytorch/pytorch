@@ -18,6 +18,15 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 #endif
 
+/// Forward declaration of calc_gammaincinv so that
+/// calc_gammainccinv can reference it.
+template <typename scalar_t>
+static inline scalar_t calc_gammaincinv(scalar_t a, scalar_t y);
+
+/// Forward declaration of calc_gammainccinv so that
+/// calc_gammaincinv can reference it.
+template <typename scalar_t>
+static inline scalar_t calc_gammainccinv(scalar_t a, scalar_t y);
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
 Output was modified to be inf or -inf when input is 1 or -1. */
@@ -1117,6 +1126,328 @@ static inline scalar_t calc_igamma(scalar_t a, scalar_t x) {
   return _igam_helper_series(a, x);
 }
 
+template <typename scalar_t>
+static scalar_t _find_inverse_s(scalar_t p, scalar_t q){
+  scalar_t s, t;
+  scalar_t a[4] = {0.213623493715853, 4.28342155967104,
+		   11.6616720288968, 3.31125922108741};
+  scalar_t b[5] = {0.3611708101884203e-1, 1.27364489782223,
+		   6.40691597760039, 6.61053765625462, 1};
+
+  if (p < 0.5) {
+      t = std::sqrt(-2 * log(p));
+  }
+  else {
+      t = std::sqrt(-2 * log(q));
+  }
+  s = t - polevl(t, a, 3) / polevl(t, b, 4);
+  if(p < 0.5)
+      s = -s;
+  return s;
+}
+
+template <typename scalar_t>
+static scalar_t _didonato_SN(scalar_t a, scalar_t x, unsigned int N, scalar_t tolerance) {
+    /*
+     * Computation of the Incomplete Gamma Function Ratios and their Inverse
+     * ARMIDO R. DIDONATO and ALFRED H. MORRIS, JR.
+     * ACM Transactions on Mathematical Software, Vol. 12, No. 4,
+     * December 1986, Pages 377-393.
+     *
+     * See equation 34.
+     */
+    double sum = 1.0;
+
+    if (N >= 1) {
+	unsigned i;
+        double partial = x / (a + 1);
+
+        sum += partial;
+        for(i = 2; i <= N; ++i) {
+            partial *= x / (a + i);
+            sum += partial;
+            if(partial < tolerance) {
+                break;
+            }
+        }
+    }
+    return sum;
+}
+
+template <typename scalar_t>
+static scalar_t _find_inverse_gamma(scalar_t a, scalar_t p, scalar_t q) {
+    /*
+     * In order to understand what's going on here, you will
+     * need to refer to:
+     *
+     * Computation of the Incomplete Gamma Function Ratios and their Inverse
+     * ARMIDO R. DIDONATO and ALFRED H. MORRIS, JR.
+     * ACM Transactions on Mathematical Software, Vol. 12, No. 4,
+     * December 1986, Pages 377-393.
+     */
+    scalar_t result;
+
+    if (a == 1) {
+        if (q > 0.9) {
+            result = -std::log1p(-p);
+        }
+        else {
+            result = -std::log1p(q);
+        }
+    }
+    else if (a < 1) {
+        scalar_t g = std::tgamma(a);
+        scalar_t b = q * g;
+
+        if ((b > 0.6) || ((b >= 0.45) && (a >= 0.3))) {
+            /* DiDonato & Morris Eq 21:
+             *
+             * There is a slight variation from DiDonato and Morris here:
+             * the first form given here is unstable when p is close to 1,
+             * making it impossible to compute the inverse of Q(a,x) for small
+             * q. Fortunately the second form works perfectly well in this case.
+             */
+            scalar_t u;
+            if((b * q > 1e-8) && (q > 1e-5)) {
+                u = std::pow(p * g * a, 1 / a);
+            }
+            else {
+                u = std::exp((-q / a) - 0.5772156649015329);
+            }
+            result = u / (1 - (u / (a + 1)));
+        }
+        else if ((a < 0.3) && (b >= 0.35)) {
+            /* DiDonato & Morris Eq 22: */
+            scalar_t t = std::exp(-0.5772156649015329 - b);
+            scalar_t u = t * std::exp(t);
+            result = t * std::exp(u);
+        }
+        else if ((b > 0.15) || (a >= 0.3)) {
+            /* DiDonato & Morris Eq 23: */
+            scalar_t y = -std::log(b);
+            scalar_t u = y - (1 - a) * std::log(y);
+            result = y - (1 - a) * std::log(u) - std::log(1 + (1 - a) / (1 + u));
+        }
+        else if (b > 0.1) {
+            /* DiDonato & Morris Eq 24: */
+            scalar_t y = -std::log(b);
+            scalar_t u = y - (1 - a) * std::log(y);
+            result = y - (1 - a) * std::log(u)
+                - std::log((u * u + 2 * (3 - a) * u + (2 - a) * (3 - a))
+                      / (u * u + (5 - a) * u + 2));
+        }
+        else {
+            /* DiDonato & Morris Eq 25: */
+            scalar_t y = -std::log(b);
+            scalar_t c1 = (a - 1) * std::log(y);
+            scalar_t c1_2 = c1 * c1;
+            scalar_t c1_3 = c1_2 * c1;
+            scalar_t c1_4 = c1_2 * c1_2;
+            scalar_t a_2 = a * a;
+            scalar_t a_3 = a_2 * a;
+
+            scalar_t c2 = (a - 1) * (1 + c1);
+            scalar_t c3 = (a - 1) * (-(c1_2 / 2)
+                                   + (a - 2) * c1
+                                   + (3 * a - 5) / 2);
+            scalar_t c4 = (a - 1) * ((c1_3 / 3) - (3 * a - 5) * c1_2 / 2
+                                   + (a_2 - 6 * a + 7) * c1
+                                   + (11 * a_2 - 46 * a + 47) / 6);
+            scalar_t c5 = (a - 1) * (-(c1_4 / 4)
+                                   + (11 * a - 17) * c1_3 / 6
+                                   + (-3 * a_2 + 13 * a -13) * c1_2
+                                   + (2 * a_3 - 25 * a_2 + 72 * a - 61) * c1 / 2
+                                   + (25 * a_3 - 195 * a_2 + 477 * a - 379) / 12);
+
+            scalar_t y_2 = y * y;
+            scalar_t y_3 = y_2 * y;
+            scalar_t y_4 = y_2 * y_2;
+            result = y + c1 + (c2 / y) + (c3 / y_2) + (c4 / y_3) + (c5 / y_4);
+        }
+    }
+    else {
+        /* DiDonato and Morris Eq 31: */
+        double s = _find_inverse_s(p, q);
+
+        scalar_t s_2 = s * s;
+        scalar_t s_3 = s_2 * s;
+        scalar_t s_4 = s_2 * s_2;
+        scalar_t s_5 = s_4 * s;
+        scalar_t ra = std::sqrt(a);
+
+        scalar_t w = a + s * ra + (s_2 - 1) / 3;
+        w += (s_3 - 7 * s) / (36 * ra);
+        w -= (3 * s_4 + 7 * s_2 - 16) / (810 * a);
+        w += (9 * s_5 + 256 * s_3 - 433 * s) / (38880 * a * ra);
+
+        if ((a >= 500) && (std::fabs(1 - w / a) < 1e-6)) {
+            result = w;
+        }
+        else if (p > 0.5) {
+            if (w < 3 * a) {
+                result = w;
+            }
+            else {
+                scalar_t D = std::fmax(2, a * (a - 1));
+                scalar_t lg = std::lgamma(a);
+                scalar_t lb = std::log(q) + lg;
+                if (lb < -D * 2.3) {
+                    /* DiDonato and Morris Eq 25: */
+                    scalar_t y = -lb;
+                    scalar_t c1 = (a - 1) * std::log(y);
+                    scalar_t c1_2 = c1 * c1;
+                    scalar_t c1_3 = c1_2 * c1;
+        	    scalar_t c1_4 = c1_2 * c1_2;
+		    scalar_t a_2 = a * a;
+		    scalar_t a_3 = a_2 * a;
+
+		    scalar_t c2 = (a - 1) * (1 + c1);
+		    scalar_t c3 = (a - 1) * (-(c1_2 / 2)
+					   + (a - 2) * c1
+					   + (3 * a - 5) / 2);
+		    scalar_t c4 = (a - 1) * ((c1_3 / 3)
+					   - (3 * a - 5) * c1_2 / 2
+					   + (a_2 - 6 * a + 7) * c1
+					   + (11 * a_2 - 46 * a + 47) / 6);
+		    scalar_t c5 = (a - 1) * (-(c1_4 / 4)
+					   + (11 * a - 17) * c1_3 / 6
+					   + (-3 * a_2 + 13 * a -13) * c1_2
+					   + (2 * a_3 - 25 * a_2 + 72 * a - 61) * c1 / 2
+					   + (25 * a_3 - 195 * a_2 + 477 * a - 379) / 12);
+
+		    scalar_t y_2 = y * y;
+		    scalar_t y_3 = y_2 * y;
+		    scalar_t y_4 = y_2 * y_2;
+		    result = y + c1 + (c2 / y) + (c3 / y_2) + (c4 / y_3) + (c5 / y_4);
+		}
+		else {
+		    /* DiDonato and Morris Eq 33: */
+		    scalar_t u = -lb + (a - 1) * std::log(w) - std::log(1 + (1 - a) / (1 + w));
+		    result = -lb + (a - 1) * std::log(u) - std::log(1 + (1 - a) / (1 + u));
+		}
+	    }
+	}
+	else {
+	    scalar_t z = w;
+	    scalar_t ap1 = a + 1;
+	    scalar_t ap2 = a + 2;
+	    if (w < 0.15 * ap1) {
+		/* DiDonato and Morris Eq 35: */
+		scalar_t v = std::log(p) + std::lgamma(ap1);
+		z = std::exp((v + w) / a);
+		s = std::log1p(z / ap1 * (1 + z / ap2));
+		z = std::exp((v + z - s) / a);
+		s = std::log1p(z / ap1 * (1 + z / ap2));
+		z = std::exp((v + z - s) / a);
+		s = std::log1p(z / ap1 * (1 + z / ap2 * (1 + z / (a + 3))));
+		z = std::exp((v + z - s) / a);
+	    }
+
+	    if ((z <= 0.01 * ap1) || (z > 0.7 * ap1)) {
+		result = z;
+	    }
+	    else {
+		/* DiDonato and Morris Eq 36: */
+		scalar_t ls = std::log(_didonato_SN((float) a, (float) z, 100, (float) 1E-4 ));
+		scalar_t v = std::log(p) + std::lgamma(ap1);
+		z = std::exp((v + z - ls) / a);
+		result = z * (1 - (a * std::log(z) - z - v + ls) / (a - z));
+	    }
+	}
+    }
+    return result;
+}
+
+template <typename scalar_t>
+static inline scalar_t calc_gammainccinv(scalar_t a, scalar_t y)
+{
+    int i;
+    scalar_t x, fac, f_fp, fpp_fp;
+
+    if (std::isnan(a) || std::isnan(y)) {
+	    return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+    else if ((a < 0.0) || (y < 0.0) || (y > 1.0)) {
+      return std::numeric_limits<scalar_t>::quiet_NaN();
+    }
+    else if (y == 0.0) {
+	    return std::numeric_limits<scalar_t>::infinity();
+    }
+    else if (y == 1.0) {
+	    return 0.0;
+    }
+    else if (y > 0.9) {
+	    return calc_gammaincinv(a, 1 - y);
+    }
+
+    x = _find_inverse_gamma(a, 1 - y, y);
+    for (i = 0; i < 3; i++) {
+	fac = _igam_helper_fac(a, x);
+	if (fac == 0.0) {
+	    return x;
+	}
+	f_fp = (calc_igammac(a, x) - y) * x / (-fac);
+	fpp_fp = -1.0 + (a - 1) / x;
+	if (std::isinf(fpp_fp)) {
+	    x = x - f_fp;
+	}
+	else {
+	    x = x - f_fp / (1.0 - 0.5 * f_fp * fpp_fp);
+	}
+    }
+
+    return x;
+}
+
+
+template <typename scalar_t>
+static inline scalar_t calc_gammaincinv(scalar_t a, scalar_t y) {
+  /* Add explanation of function
+   */
+  /*need to define static variables*/
+
+  int i = 0;
+  scalar_t x, fac, f_fp, fpp_fp;
+
+  if (std::isnan(a) || std::isnan(y)) {
+     return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  else if ((a < 0) || (y < 0) || (y > 1)) {
+    return std::numeric_limits<scalar_t>::quiet_NaN();
+  }
+  else if (y == 0.0) {
+    return 0.0;
+  }
+  else if (y == 1.0) {
+    return std::numeric_limits<scalar_t>::infinity();
+  }
+  else if (y > 0.9) {
+    return calc_gammainccinv(a, 1 - y);
+  }
+
+
+  x = _find_inverse_gamma(a, y, 1 - y);
+  /* Halley's method */
+  for (i = 0; i < 3; i++) {
+  fac = _igam_helper_fac(a, x);
+  if (fac == 0.0) {
+    return x;
+  }
+  f_fp = (calc_igamma(a, x) - y) * x / fac;
+  /* The ratio of the first and second derivatives simplifies */
+  fpp_fp = -1.0 + (a - 1) / x;
+  if (std::isinf(fpp_fp)) {
+      /* Resort to Newton's method in the case of overflow */
+      x = x - f_fp;
+  }
+  else {
+      x = x - f_fp / (1.0 - 0.5 * f_fp * fpp_fp);
+  }
+  }
+
+  return x;
+}
+
 template <>
 C10_UNUSED c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
@@ -1135,6 +1466,26 @@ C10_UNUSED c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloa
 template <>
 C10_UNUSED c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
+}
+
+template <>
+C10_UNUSED c10::BFloat16 calc_gammaincinv<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 y) {
+  return calc_gammaincinv<float>(float(a), float(y));
+}
+
+template <>
+C10_UNUSED c10::Half calc_gammaincinv<c10::Half>(c10::Half a, c10::Half y) {
+  return calc_gammaincinv<float>(float(a), float(y));
+}
+
+template <>
+C10_UNUSED c10::BFloat16 calc_gammainccinv<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 y) {
+  return calc_gammaincinv<float>(float(a), float(y));
+}
+
+template <>
+C10_UNUSED c10::Half calc_gammainccinv<c10::Half>(c10::Half a, c10::Half y) {
+  return calc_gammaincinv<float>(float(a), float(y));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }

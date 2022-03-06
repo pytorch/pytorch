@@ -173,6 +173,8 @@ CREATE_BINARY_META_FUNC(lcm);
 CREATE_BINARY_META_FUNC(hypot);
 CREATE_BINARY_META_FUNC(igamma);
 CREATE_BINARY_META_FUNC(igammac);
+CREATE_BINARY_META_FUNC(special_gammaincinv);
+CREATE_BINARY_META_FUNC(special_gammainccinv);
 CREATE_BINARY_META_FUNC(nextafter);
 
 TORCH_META_FUNC(maximum) (const Tensor& self, const Tensor& other) {
@@ -269,6 +271,8 @@ DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
 DEFINE_DISPATCH(igamma_stub);
 DEFINE_DISPATCH(igammac_stub);
+DEFINE_DISPATCH(gammaincinv_stub);
+DEFINE_DISPATCH(gammainccinv_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
@@ -323,6 +327,14 @@ TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, cons
 
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
   tanh_backward_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_gammaincinv_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  gammaincinv_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_gammainccinv_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  gammainccinv_stub(device_type(), *this);
 }
 
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
@@ -395,6 +407,22 @@ Tensor& special_gammaincc_out(const Tensor& self, const Tensor& other, Tensor& r
 
 Tensor special_gammaincc(const Tensor& self, const Tensor& other) {
   return at::igammac(self, other);
+}
+
+Tensor& special_gammaincinv_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::special_gammaincinv_out(result, self, other);
+}
+
+Tensor special_gammaincinv(const Tensor& self, const Tensor& other) {
+  return at::special_gammaincinv(self, other);
+}
+
+Tensor& special_gammainccinv_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::special_gammainccinv_out(result, self, other);
+}
+
+Tensor special_gammainccinv(const Tensor& self, const Tensor& other) {
+  return at::special_gammainccinv(self, other);
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {

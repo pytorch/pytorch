@@ -5,7 +5,7 @@ from torch._torch_docs import common_args, multi_dim_common
 __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
            'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
            'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
-           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
+           'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'gammaincinv', 'gammainccinv' 'softmax']
 
 Tensor = torch.Tensor
 
@@ -738,7 +738,7 @@ and float inputs.
 """ + r"""
 Args:
     input (Tensor): the first non-negative input tensor
-    other (Tensor): the second non-negative input tensor
+    other (Tensor): the second input tensor between 0 and 1, inclusive
 
 Keyword args:
     {out}
@@ -798,4 +798,56 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+gammaincinv = _add_docstr(_special.special_gammaincinv,
+                       r"""
+gammaincinv(input, other, *, out=None) -> Tensor
+
+Computes the inverse regularized lower incomplete gamma function of :attr:`input`:
+The function is defined as:
+
+.. math::
+    \mathrm{gammaincinv}(\mathrm{gammainc}}(x)) = x
+""" + r"""
+
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second input tensor between 0 and 1, inclusive
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([0.3528, 0.5665, 0.7350])
+    >>> torch.special.gammaincinv(a1, a2)
+    tensor([3.0001, 3.9998, 5.0002])
+""".format(**common_args))
+
+gammainccinv = _add_docstr(_special.special_gammainccinv,
+                       r"""
+gammainccinv(input, other, *, out=None) -> Tensor
+
+Computes the inverse regularized upper incomplete gamma function of :attr:`input`:
+The function is defined as:
+
+.. math::
+    \mathrm{gammainccinv}(\mathrm{gammaincc}}(x)) = x
+""" + r"""
+
+Args:
+    input (Tensor): the first non-negative input tensor
+    other (Tensor): the second input tensor between 0 and 1, inclusive
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a1 = torch.tensor([4.0])
+    >>> a2 = torch.tensor([0.6472, 0.4335, 0.2650)
+    >>> torch.special.gammaincinv(a1, a2)
+    tensor([3.0001, 3.9998, 5.0002])
 """.format(**common_args))

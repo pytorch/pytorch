@@ -1515,6 +1515,8 @@ class TestNormalizeOperators(JitTestCase):
             "histogramdd",
             "igamma",
             "igammac",
+            "special.gammaincinv",
+            "special.gammainccinv"
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",

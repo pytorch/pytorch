@@ -4424,6 +4424,18 @@ def sample_inputs_igamma_igammac(op_info, device, dtype, requires_grad, **kwargs
                           args=(make_arg(other_shape, requires_grad=False),),
                           broadcasts_input=broadcasts_input)
 
+def sample_inputs_inverse_igamma_igammac(op_info, device, dtype, requires_grad, **kwargs):
+    low, high = 0, 1 # domain for other
+    make_arg = partial(make_tensor, device=device, dtype=dtype, low=1e-3)
+    cases = (((S, S), (S, S), False),
+             ((S, S), (S, ), False),
+             ((S, ), (S, S), True),
+             ((), (), False))
+
+    for shape, other_shape, broadcasts_input in cases:
+        yield SampleInput(make_arg(shape, requires_grad=requires_grad),
+                          args=(make_arg(other_shape, requires_grad=False, low=low, high=high),),
+                          broadcasts_input=broadcasts_input)
 
 def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11869,6 +11881,90 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
                     ),
                     sample_inputs_func=sample_inputs_igamma_igammac),
+    BinaryUfuncInfo('special.gammaincinv',
+                    ref=scipy.special.gammaincinv if TEST_SCIPY else _NOTHING,
+                    aten_name='special_gammaincinv',
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfCUDA=floating_types(),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_inverse_igamma_igammac,
+                    skips=(
+                        # TypeError: gammaincinv(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('special.gammaincinv',
+                    variant_test_name='grad_other',
+                    aten_name='special_gammaincinv',
+                    # Since autograd formula is implemented only for other and
+                    # gradcheck test verifies the formula for input in SampleInput,
+                    # we permute the arguments.
+                    ref = scipy.special.gammaincinv if TEST_SCIPY else _NOTHING,
+                    op=lambda self, other, **kwargs: torch.special.gammaincinv(other, self, **kwargs),
+                    inplace_variant=None,
+                    method_variant=None,
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types(),
+                    backward_dtypesIfCUDA=floating_types(),
+                    supports_inplace_autograd=False,
+                    decorators=[
+                        # Derivative wrt first tensor not implemented
+                        DecorateInfo(unittest.expectedFailure, "TestCommon",
+                                     "test_floating_inputs_are_differentiable")
+                    ],
+                    skips=(
+                        # test does not work with passing lambda for op
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+                        # test fails are we permute the arguments function variant
+                        # but not for inplace or method.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        # TypeError: gammaincinv(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    ),
+                    sample_inputs_func=sample_inputs_inverse_igamma_igammac),
+    BinaryUfuncInfo('special.gammainccinv',
+                    ref = scipy.special.gammainccinv if TEST_SCIPY else _NOTHING,
+                    aten_name='special_gammainccinv',
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfCUDA=floating_types(),
+                    supports_autograd=False,
+                    sample_inputs_func=sample_inputs_inverse_igamma_igammac,
+                    skips=(
+                        # TypeError: gammainccinv(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    )),
+    BinaryUfuncInfo('special.gammainccinv',
+                    variant_test_name='grad_other',
+                    aten_name='special_gammainccinv',
+                    # Since autograd formula is implemented only for other and
+                    # gradcheck test verifies the formula for input in SampleInput,
+                    # we permute the arguments.
+                    ref = scipy.special.gammainccinv if TEST_SCIPY else _NOTHING,
+                    op=lambda self, other, **kwargs: torch.special.gammainccinv(other, self, **kwargs),
+                    inplace_variant=None,
+                    method_variant=None,
+                    dtypes=floating_types_and(torch.bfloat16, torch.float16),
+                    backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+                    dtypesIfCUDA=floating_types(),
+                    backward_dtypesIfCUDA=floating_types(),
+                    supports_inplace_autograd=False,
+                    decorators=[
+                        # Derivative wrt first tensor not implemented
+                        DecorateInfo(unittest.expectedFailure, "TestCommon",
+                                     "test_floating_inputs_are_differentiable")
+                    ],
+                    skips=(
+                        # test does not work with passing lambda for op
+                        # AssertionError: False is not true : Tensors failed to compare as equal!
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+                        # test fails are we permute the arguments function variant
+                        # but not for inplace or method.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        # TypeError: gammainccinv(): argument 'input' (position 1) must be Tensor, not float
+                        DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs'),
+                    ),
+                    sample_inputs_func=sample_inputs_inverse_igamma_igammac),
     OpInfo('nn.functional.softshrink',
            aten_name="softshrink",
            dtypes=floating_types(),

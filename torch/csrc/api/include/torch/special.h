@@ -55,6 +55,39 @@ inline Tensor& gammaincc_out(Tensor& result, const Tensor& self, const Tensor& o
   return torch::special_gammaincc_out(result, self, other);
 }
 
+
+/// Computes the inverse of the regularized lower incomplete gamma function
+/// See https://pytorch.org/docs/master/special.html#torch.special.gammaincinv.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// auto s = torch::randn(128, dtype=kDouble);
+/// torch::special::gammaincinv(s, t);
+/// ```
+inline Tensor gammaincinv(const Tensor& self, const Tensor& other) {
+  return torch::special_gammaincinv(self, other);
+}
+
+inline Tensor& gammaincinv_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_gammaincinv_out(result, self, other);
+}
+/// Computes the inverse of the regularized upper incomplete gamma function
+/// See https://pytorch.org/docs/master/special.html#torch.special.gammaincinv.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// auto s = torch::randn(128, dtype=kDouble);
+/// torch::special::gammainccinv(s, t);
+/// ```
+inline Tensor gammainccinv(const Tensor& self, const Tensor& other) {
+  return torch::special_gammainccinv(self, other);
+}
+
+inline Tensor& gammainccinv_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return torch::special_gammainccinv_out(result, self, other);
+}
 /// Computes the multivariate log-gamma function with dimension `p`, elementwise
 /// See https://pytorch.org/docs/master/special.html#torch.special.multigammaln.
 ///

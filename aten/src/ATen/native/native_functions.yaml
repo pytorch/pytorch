@@ -7477,6 +7477,40 @@
   structured_delegate: igammac.out
   variants: method
 
+- func: special_gammaincinv.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_gammaincinv_out
+
+- func: special_gammaincinv(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  structured_delegate: special_gammaincinv.out
+  variants: method, function
+
+- func: special_gammaincinv_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  python_module: special
+  structured_delegate: special_gammaincinv.out
+  variants: method
+
+- func: special_gammainccinv.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_gammainccinv_out
+
+- func: special_gammainccinv(Tensor self, Tensor other) -> Tensor
+  python_module: special
+  structured_delegate: special_gammainccinv.out
+  variants: method, function
+
+- func: special_gammainccinv_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  python_module: special
+  structured_delegate: special_gammainccinv.out
+  variants: method
+
 - func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   structured_inherits: TensorIteratorBase

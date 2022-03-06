@@ -1200,6 +1200,10 @@ class TestBinaryUfuncs(TestCase):
             ("igamma", True, True, 'cuda'),
             ("igammac", True, True, 'cpu'),
             ("igammac", True, True, 'cuda'),
+            ("gammaincinv", True, True, 'cpu'),
+            ("gammaincinv", True, True, 'cuda'),
+            ("gammainccinv", True, True, 'cpu'),
+            ("gammainccinv", True, True, 'cuda'),
             ("nextafter", True, True, 'cpu'),
             ("nextafter", True, True, 'cuda'),
             ("le", True, True, 'cpu'),
@@ -3707,6 +3711,84 @@ class TestBinaryUfuncs(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
+    def _helper_test_inverse_gamma(self, loglo, input0_loghi, input1_loghi, device, dtype, scipy_fn, torch_fn):
+        exp1 = 2.71828182846
+        vec1 = torch.logspace(loglo, input0_loghi, steps=500, base=exp1,
+                              dtype=torch.float64, device=device).unsqueeze(-1)
+        vec1 = vec1.to(dtype)
+        vec2 = torch.logspace(loglo, input1_loghi, steps=500, base=exp1,
+                              dtype=torch.float64, device=device).unsqueeze(-1)
+
+        vec2 = vec2.to(dtype)
+        inputs = [
+            (vec1, vec2.transpose(0, 1)),
+            (vec1, vec2),  # for large number, it should approach 0.5
+            (vec1, 0.5 * vec2),  # test for considerable ratio
+            (vec1, 2.0 * vec2),
+            (vec1[::2, :], vec2[::2, :]),  # contiguous/noncontiguous tests
+            (vec1[::2, :], vec2[:vec1.shape[0] // 2, :]),
+            (vec1[:vec1.shape[0] // 2, :], vec2[::2, :]),
+        ]
+        for input0, input1 in inputs:
+            expected_output = scipy_fn(input0.cpu().numpy(), input1.cpu().numpy())
+            actual_output = torch_fn(input0, input1)
+            self.assertEqual(torch.from_numpy(expected_output).to(device=device, dtype=dtype), actual_output)
+
+    @skipCUDAIfRocm  # see issue https://github.com/pytorch/pytorch/issues/46531
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64)
+    @onlyNativeDeviceTypes
+    def test_gammaincinv_common(self, device, dtype=torch.float64):
+        # test igamma for reasonable range of values
+        loglo = -4  # approx 0.018
+        input0_loghi = 4  # approx 54
+        input1_loghi = -0.01 # approx 1.0
+        self._helper_test_inverse_gamma(loglo, input0_loghi, input1_loghi, device, dtype, scipy.special.gammaincinv, torch.special.gammaincinv)
+
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64)
+    @onlyNativeDeviceTypes
+    def test_gammainccinv_common(self, device, dtype=torch.float64):
+        # test igammac for reasonable range of values
+        loglo = -4  # approx 0.018
+        input0_loghi = 4  # approx 54
+        input1_loghi = 0 # approx 1
+        self._helper_test_inverse_gamma(loglo, input0_loghi, input1_loghi, device, dtype, scipy.special.gammaincinv, torch.special.gammaincinv)
+
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64)
+    @onlyNativeDeviceTypes
+    def test_gammaincinv_edge_cases(self, device, dtype=torch.float64):
+        # write comment
+        inputs = [
+            (10, 2.5715803516000736e-20),
+            (50, 8.20754777388471303050299243573393e-18),
+            (50, [0, 0.1 ,0.5, 1]),
+            (50, [-1, 1, -1, 0]),
+            (-1, 0.5),
+        ]
+
+        for input0, input1 in inputs:
+            expected_output = scipy.special.gammaincinv(input0, input1)
+            actual_output = torch.special.gammaincinv(torch.tensor(input0,dtype=dtype, device=device), torch.tensor(input1,dtype=dtype, device=device))
+            self.assertEqual(torch.tensor(expected_output,dtype=dtype, device=device), actual_output)
+
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64)
+    @onlyNativeDeviceTypes
+    def test_gammainccinv_edge_cases(self, device, dtype=torch.float64):
+        inputs = [
+            (10, 2.5715803516000736e-20),
+            (50, 8.20754777388471303050299243573393e-18),
+            (50, [0, 0.1 ,0.5, 1]),
+            (50, [-1, 1, -1, 0]),
+            (-1, 0.5),
+        ]
+
+        for input0, input1 in inputs:
+            expected_output = scipy.special.gammainccinv(input0, input1)
+            actual_output = torch.special.gammainccinv(torch.tensor(input0,dtype=dtype, device=device), torch.tensor(input1,dtype=dtype, device=device))
+            self.assertEqual(torch.tensor(expected_output,dtype=dtype, device=device), actual_output)
 
 tensor_binary_ops = [
     '__lt__', '__le__',
