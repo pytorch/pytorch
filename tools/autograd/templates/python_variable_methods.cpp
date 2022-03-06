@@ -913,7 +913,7 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   }
   auto& self_ = THPVariable_Unpack(self);
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::legacy_tensor_new(args, kwargs, self_.options()));
+  return THPVariable_Wrap(torch::utils::legacy_tensor_new(self_.options(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -925,7 +925,7 @@ static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObjec
   }
   auto& self_ = THPVariable_Unpack(self);
   OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_tensor(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_tensor(self_.options(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 

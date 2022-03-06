@@ -85,7 +85,7 @@ static inline void invalid_index(PyObject* obj) {
 }
 
 static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
-  return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
+  return torch::utils::indexing_tensor_from_data(options, seq);
 }
 
 static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {

@@ -2150,10 +2150,6 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor(torch.Size([2, 3, 4]), device='cuda'))
         self.assertRaises(RuntimeError, lambda: torch.FloatTensor((2.0, 3.0), device='cuda'))
 
-        self.assertRaises(RuntimeError, lambda: torch.Tensor(device='cuda'))
-        self.assertRaises(RuntimeError, lambda: torch.Tensor(torch.Size([2, 3, 4]), device='cuda'))
-        self.assertRaises(RuntimeError, lambda: torch.Tensor((2.0, 3.0), device='cuda'))
-
         # Tensor constructor/new with Tensor argument shouldn't work with device specified
         i = torch.tensor([1], device='cpu')
         self.assertRaises(RuntimeError, lambda: torch.Tensor(i, device='cpu'))

@@ -360,7 +360,7 @@ static PyObject * THPVariable_as_tensor(PyObject* self, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.as_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::as_tensor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::as_tensor(args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -398,7 +398,7 @@ static PyObject * THPVariable_sparse_csr_tensor(PyObject* self, PyObject* args, 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.sparse_csr_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_csr_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_csr_tensor_ctor(args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -406,7 +406,7 @@ static PyObject * THPVariable__sparse_csr_tensor_unsafe(PyObject* self, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch._sparse_csr_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::_sparse_csr_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::_sparse_csr_tensor_unsafe_ctor(args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -414,7 +414,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.sparse_coo_tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -422,7 +422,7 @@ static PyObject * THPVariable__sparse_coo_tensor_unsafe(PyObject* self, PyObject
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch._sparse_coo_tensor_unsafe", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::_sparse_coo_tensor_unsafe_ctor(args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -432,7 +432,7 @@ static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* k
 {
   HANDLE_TH_ERRORS
   jit::tracer::warn("torch.tensor", jit::tracer::WARN_CONSTRUCTOR);
-  return THPVariable_Wrap(torch::utils::tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::tensor_ctor(args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 

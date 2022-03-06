@@ -65,8 +65,8 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
     throw unavailable_type(tensor_type);
   }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(
-    args, kwargs,
-    c10::make_optional(std::make_pair(tensor_type.get_backend(), tensor_type.get_scalar_type()))
+    c10::make_optional(std::make_pair(tensor_type.get_backend(), tensor_type.get_scalar_type())),
+    args, kwargs
   ));
   END_HANDLE_TH_ERRORS
 }
