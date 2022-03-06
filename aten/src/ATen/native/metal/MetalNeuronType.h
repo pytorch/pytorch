@@ -37,7 +37,7 @@ static inline NeuronType neuronType(
   }
 }
 
-static inline MPSCNNNeuron* neuronType(NeuronType type) {
+static inline MPSCNNNeuron* neuron(NeuronType type) {
   if (type == NeuronType::Relu) {
     return [MPSCNNNeuronOp relu];
   } else if (type == NeuronType::Sigmoid) {
@@ -48,6 +48,21 @@ static inline MPSCNNNeuron* neuronType(NeuronType type) {
     return [MPSCNNNeuronOp hardSigmoid];
   } else {
     return nil;
+  }
+}
+
+API_AVAILABLE(ios(11.3), macos(10.13), macCatalyst(13.0))
+static inline MPSNNNeuronDescriptor* neuronDescriptor(NeuronType type) {
+  if (type == NeuronType::Relu) {
+    return [MPSCNNNeuronOpDescriptor reluDescriptor];
+  } else if (type == NeuronType::Sigmoid) {
+    return [MPSCNNNeuronOpDescriptor sigmoidDescriptor];
+  } else if (type == NeuronType::Tanh) {
+    return [MPSCNNNeuronOpDescriptor tanhDescriptor];
+  } else if (type == NeuronType::HardSigmoid) {
+    return [MPSCNNNeuronOpDescriptor hardSigmoidDescriptor];
+  } else {
+    return [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeNone];
   }
 }
 
