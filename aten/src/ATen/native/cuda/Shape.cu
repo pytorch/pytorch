@@ -172,7 +172,7 @@ __global__ void CatArrayBatchedCopy(
 }
 
 template <typename scalar_t>
-void hip_parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
+void hip_parallel_cat(const Tensor &out, ITensorListRef inputs, int64_t dimension,
                       int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
@@ -293,7 +293,7 @@ void hip_parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
 }
 
 template <typename scalar_t, int batch_size, int stride_size>
-void parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
+void parallel_cat(const Tensor &out, ITensorListRef inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
@@ -404,7 +404,7 @@ void parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
 } // namespace
 
 TORCH_IMPL_FUNC(cat_out_cuda)
-(ITensorList tensors,
+(ITensorListRef tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
