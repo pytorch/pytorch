@@ -46,7 +46,7 @@ hypothesis==4.53.2
 #Pinned versions: 3.44.6, 4.53.2
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
 
-#junitparser
+junitparser==2.1.1
 #Description: unitparser handles JUnit/xUnit Result XML files
 #Pinned versions: 2.1.1
 #test that import:
