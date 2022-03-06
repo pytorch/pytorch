@@ -86,7 +86,7 @@ struct KeyValueCompDesc {
 static void sort_kernel(
     const TensorBase& self,
     const TensorBase& values,
-    const TensorBase& indices
+    const TensorBase& indices,
     int64_t dim,
     bool descending,
     bool stable) {
