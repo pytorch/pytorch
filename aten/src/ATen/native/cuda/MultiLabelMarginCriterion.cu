@@ -63,16 +63,9 @@ __global__ void multilabel_margin_loss_forward_kernel(
   int64_t* target_k = target + k * dim;
   scalar_t* output_k = output + k;
   scalar_t* is_target_k = is_target + k * dim;
-
+ 
   // zero is_target
   for (int d = threadIdx.x; d < dim; d += blockDim.x) {
-  //We are going to piggy back into this grid stride for error checking
-          if(target[d] >= dim){
-            CUDA_KERNEL_ASSERT(target[d] < dim);
-          }
-          if(target[d] < -1){
-            CUDA_KERNEL_ASSERT(target[d] >= -1);
-          }
     is_target_k[d] = static_cast<scalar_t>(0);
   }
   __syncthreads();
