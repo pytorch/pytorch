@@ -203,6 +203,7 @@ Tensor internal_new_from_data(
     // It is possible for type_inference to be true and dtype to be present
     // in options; in this case the inferred type will take precedence.
     bool type_inference,
+    bool device_inference = false,
     bool pin_memory = false) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
@@ -220,7 +221,7 @@ Tensor internal_new_from_data(
     // infer the scalar type and device type; it's not expected to infer the layout since these constructors
     // are defined per-layout-type (e.g. tensor vs sparse_coo_tensor).
     auto inferred_scalar_type = type_inference ? var.scalar_type() : scalar_type;
-    auto device = options.device_opt().value_or(var.device());
+    auto device = device_inference ? var.device() : options.device_opt().value_or(var.device());
     pybind11::gil_scoped_release no_gil;
     maybe_initialize_cuda(device);
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
@@ -607,12 +608,12 @@ Tensor sparse_csr_tensor_ctor(PyObject* args, PyObject* kwargs) {
     Tensor crow_indices =  internal_new_from_data(values.options().dtype(kInt),
       r.pyobject(CROW_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
+      /*type_inference=*/true, /*device_inference=*/true);
     // See Note [Ensuring sparse values and indices match devices]
     Tensor col_indices = internal_new_from_data(values.options().dtype(kInt),
       r.pyobject(COL_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
+      /*type_inference=*/true, /*device_inference=*/true);
 
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(SIZE_ARRAY_ARG),
                                  values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
@@ -629,12 +630,12 @@ Tensor sparse_csr_tensor_ctor(PyObject* args, PyObject* kwargs) {
     Tensor crow_indices = internal_new_from_data(values.options().dtype(kInt),
       r.pyobject(CROW_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
+      /*type_inference=*/true, /*device_inference=*/true);
     // See Note [Ensuring sparse values and indices match devices]
     Tensor col_indices = internal_new_from_data(values.options().dtype(kInt),
       r.pyobject(COL_INDICES_ARG),
       /*copy_variables=*/false, /*copy_numpy=*/true,
-      /*type_inference=*/true);
+      /*type_inference=*/true, /*device_inference=*/true);
     return at::sparse_csr_tensor(crow_indices, col_indices, values,
                                  values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(REQ_GRAD_ARG));
   }
@@ -668,12 +669,12 @@ Tensor _sparse_csr_tensor_unsafe_ctor(PyObject* args, PyObject* kwargs) {
   // See Note [Ensuring sparse values and indices match devices]
   Tensor crow_indices = internal_new_from_data(values.options().dtype(kInt), r.pyobject(ARG_CROW_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
-                                          /*type_inference=*/true);
+                                          /*type_inference=*/true, /*device_inference=*/true);
 
   // See Note [Ensuring sparse values and indices match devices]
   Tensor col_indices = internal_new_from_data(values.options().dtype(kInt), r.pyobject(ARG_COL_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
-                                          /*type_inference=*/true);
+                                          /*type_inference=*/true, /*device_inference=*/true);
 
   return at::_sparse_csr_tensor_unsafe(crow_indices, col_indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparseCsr)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
@@ -692,6 +693,12 @@ Tensor _sparse_csr_tensor_unsafe_ctor(PyObject* args, PyObject* kwargs) {
 // should accept even ordinary index sequences (and just make sure we write them
 // into the correct device).  values is the ONLY way we know that the index
 // tensor should go to CUDA, so we have to get the information in somehow.
+//
+// However, there is an inverse problem: if the input indices are a tensor,
+// we SHOULD NOT do a device-to-device copy to make them line up with values,
+// as this is a performance footgun; instead, we should return it as is and
+// let the final constructor error.  device_inference=true toggles this
+// behavior.
 
 Tensor sparse_coo_tensor_ctor(PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
@@ -713,7 +720,7 @@ Tensor sparse_coo_tensor_ctor(PyObject* args, PyObject* kwargs) {
     // See Note [Ensuring sparse values and indices match devices]
     Tensor indices = internal_new_from_data(values.options().dtype(kLong), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
-                                            /*type_inference=*/false);
+                                            /*type_inference=*/false, /*device_inference=*/true);
     return at::sparse_coo_tensor(indices, values, values.options().layout(at::kSparse)).set_requires_grad(r.toBool(4));
   } else if (r.idx == 1) {
     bool type_inference = r.isNone(3);
@@ -725,7 +732,7 @@ Tensor sparse_coo_tensor_ctor(PyObject* args, PyObject* kwargs) {
     // See Note [Ensuring sparse values and indices match devices]
     Tensor indices = internal_new_from_data(values.options().dtype(kLong), r.pyobject(0),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
-                                            /*type_inference=*/false);
+                                            /*type_inference=*/false, /*device_inference=*/true);
     return at::sparse_coo_tensor(indices, values, r.intlist(2), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(5));
   } else if (r.idx == 2) {
     auto options = parsed_options(r, 1, 2);
@@ -760,7 +767,7 @@ Tensor _sparse_coo_tensor_unsafe_ctor(PyObject* args, PyObject* kwargs) {
   // See Note [Ensuring sparse values and indices match devices]
   Tensor indices = internal_new_from_data(values.options().dtype(kLong), r.pyobject(ARG_INDICES),
                                           /*copy_variables=*/false, /*copy_numpy=*/true,
-                                          /*type_inference=*/false);
+                                          /*type_inference=*/false, /*device_inference=*/true);
   return at::_sparse_coo_tensor_unsafe(indices, values, r.intlist(ARG_SIZE), values.options().layout(at::kSparse)).set_requires_grad(r.toBool(ARG_REQUIRES_GRAD));
 }
 
@@ -780,7 +787,7 @@ void _validate_sparse_coo_tensor_args(PyObject* args, PyObject* kwargs) {
   // See Note [Ensuring sparse values and indices match devices]
   Tensor indices = internal_new_from_data(
       values.options().dtype(kLong), r.pyobject(0),
-      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/false);
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/false, /*device_inference=*/true);
   at::native::_validate_sparse_coo_tensor_args(indices, values, r.intlist(2));
 }
 
@@ -798,10 +805,10 @@ void _validate_sparse_csr_tensor_args(PyObject* args, PyObject* kwargs) {
   // See Note [Ensuring sparse values and indices match devices]
   Tensor crow_indices = internal_new_from_data(
       values.options().dtype(kInt), r.pyobject(0),
-      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true, /*device_inference=*/true);
   Tensor col_indices = internal_new_from_data(
       values.options().dtype(kInt), r.pyobject(1),
-      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true);
+      /*copy_variables=*/false, /*copy_numpy=*/true, /*type_inference=*/true, /*device_inference=*/true);
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, r.intlist(3));
 }
@@ -833,7 +840,8 @@ Tensor tensor_ctor(PyObject* args, PyObject* kwargs) {
                /*copy_variables=*/true,
                /*copy_numpy=*/true,
                /*type_inference=*/type_inference,
-               pin_memory);
+               /*device_inference=*/false,
+               /*pin_memory=*/pin_memory);
     auto names = r.toDimnameListOptional(5);
     if (names) {
       at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
