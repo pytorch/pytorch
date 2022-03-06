@@ -580,7 +580,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         model2 = model2.to(self.device)
         model3 = model3.to(self.device)
         inputs = [
-            torch.randn(BATCH_SIZE, 5).to(self.device)
+            torch.randn(BATCH_SIZE, INPUT_DIM).to(self.device)
             for _ in range(NUM_ITERS)
         ]
         # Construct `optim1` with both parameter groups upfront
