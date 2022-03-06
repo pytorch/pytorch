@@ -45,11 +45,7 @@ static inline MPSCNNNeuron* neuronType(NeuronType type) {
   } else if (type == NeuronType::Tanh) {
     return [MPSCNNNeuronOp tanh];
   } else if (type == NeuronType::HardSigmoid) {
-    if (@available(iOS 11.0, *)) {
-      return [MPSCNNNeuronOp hardSigmoid];
-    } else {
-      return nil;
-    }
+    return [MPSCNNNeuronOp hardSigmoid];
   } else {
     return nil;
   }
