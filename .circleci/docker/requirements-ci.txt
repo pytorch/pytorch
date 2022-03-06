@@ -56,14 +56,14 @@ librosa>=0.6.2
 #Pinned versions: >=0.6.2
 #test that import: test_spectral_ops.py
 
-mkl
+#mkl #this breaks linux-bionic-rocm4.5-py3.7
 #Description: Intel oneAPI Math Kernel Library
 #Pinned versions:
 #test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
 #test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
 #test_autograd.py
 
-mkl-devel
+#mkl-devel
 # see mkl
 
 #mock
