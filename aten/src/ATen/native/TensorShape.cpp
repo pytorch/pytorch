@@ -5,7 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
-#include <ATen/core/ITensorList.h>
+#include <ATen/core/ITensorListRef.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
@@ -30,7 +30,7 @@
 
 namespace at {
 namespace meta {
-static void cat_check_no_zero_dim(ITensorList tensors) {
+static void cat_check_no_zero_dim(ITensorListRef tensors) {
   for (const auto i : c10::irange(tensors.size())) {
     auto& t = tensors[i];
     TORCH_CHECK(
@@ -39,7 +39,7 @@ static void cat_check_no_zero_dim(ITensorList tensors) {
   }
 }
 
-static c10::MemoryFormat cat_compute_output_memory_format(ITensorList inputs) {
+static c10::MemoryFormat cat_compute_output_memory_format(ITensorListRef inputs) {
   c10::optional<c10::MemoryFormat> format = c10::nullopt;
   for (auto& t : inputs) {
     auto f = t.suggest_memory_format();
@@ -54,7 +54,7 @@ static c10::MemoryFormat cat_compute_output_memory_format(ITensorList inputs) {
   return format.value();
 }
 
-TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
+TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -303,7 +303,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 }
 
 TORCH_IMPL_FUNC(cat_out_cpu)
-(ITensorList tensors,
+(ITensorListRef tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,

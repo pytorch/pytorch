@@ -133,7 +133,7 @@ ScalarType result_type(const ResultTypeState& in_state) {
   return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
 }
 
-ScalarType result_type(ITensorList tensors) {
+ScalarType result_type(ITensorListRef tensors) {
   ResultTypeState state = {};
   for (const Tensor& tensor : tensors) {
     state = update_result_type_state(tensor, state);

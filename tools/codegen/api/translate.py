@@ -4,7 +4,7 @@ from tools.codegen.api.types import (tensorListT, BaseCType, Binding, ConstRefCT
                                      NamedCType, SpecialArgName, tensorT,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
                                      boolT, deviceT, layoutT, optionalTensorRefT,
-                                     iTensorListT, scalarT, optionalScalarRefT,
+                                     iTensorListRefT, scalarT, optionalScalarRefT,
                                      VectorCType, longT, intArrayRefT,
                                      scalar_t, opmath_t)
 
@@ -141,9 +141,9 @@ def translate(
         if t.type == BaseCType(scalar_t):
             ctx[NamedCType(t.name, BaseCType(opmath_t))] = f'static_cast<opmath_t>({b.expr})'
 
-        # [Note: ITensorList]
+        # [Note: ITensorListRef]
         if t.type == BaseCType(tensorListT):
-            ctx[NamedCType(t.name, BaseCType(iTensorListT))] = f"at::ITensorList({b.expr})"
+            ctx[NamedCType(t.name, BaseCType(iTensorListRefT))] = f"at::ITensorListRef({b.expr})"
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
