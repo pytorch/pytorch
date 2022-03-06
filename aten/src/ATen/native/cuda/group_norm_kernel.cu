@@ -573,7 +573,7 @@ void GroupNormKernelImplInternal(
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
-      ? C10_WARP_SIZE
+      ? at::cuda::warp_size()
       : cuda_utils::kCUDABlockReduceNumThreads;
   RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
       D * HxW, eps, X_data, mean_data, rstd_data);
@@ -694,7 +694,7 @@ void GroupNorm1dBackward(
     T_ACC* c2_data = c2.data_ptr<T_ACC>();
     T_ACC* c3_data = c3.data_ptr<T_ACC>();
     const int64_t num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
-        ? C10_WARP_SIZE
+        ? at::cuda::warp_size()
         : cuda_utils::kCUDABlockReduceNumThreads;
     Compute1dBackwardFusedParamsCUDAKernel<T>
         <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
@@ -841,8 +841,9 @@ void GroupNormBackwardKernelImplInternal(
     return;
   }
 
+  int warp_size = at::cuda::warp_size();
   int64_t num_threads = HxW < cuda_utils::kCUDABlockReduceNumThreads
-      ? C10_WARP_SIZE
+      ? warp_size
       : cuda_utils::kCUDABlockReduceNumThreads;
   ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
       HxW, dY_data, X_data, ds_data, db_data);
@@ -868,7 +869,7 @@ void GroupNormBackwardKernelImplInternal(
     }
 
     num_threads = (C / G) < cuda_utils::kCUDABlockReduceNumThreads
-        ? C10_WARP_SIZE
+        ? warp_size
         : cuda_utils::kCUDABlockReduceNumThreads;
     ComputeBackwardFusedParamsCUDAKernel<T>
         <<<dim3(N, G), num_threads, 0, cuda_stream>>>(
