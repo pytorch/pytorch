@@ -198,14 +198,16 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 // the parameter quantized_output is a quantized tensor
 template <int kSpatialDim>
 template <bool kReluFused>
-void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input,
-                                                           double bias_multiplier, double requantize_multiplier) {
+void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
   if (quantized_output.numel() == 0) {
     return;
   }
   at::Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   // TODO: combine empty & fill_ using full_like or full
   at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  auto act_scale = input.q_scale();
+  auto weight_scale = orig_weight.q_scale();
+  auto requantize_multiplier = act_scale * weight_scale / output_scale;
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> after_scales_bias;
@@ -223,6 +225,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
     broadcasted_bias.value() = broadcasted_bias.value().contiguous(c10::MemoryFormat::ChannelsLast);
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+    auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
     after_scales_bias = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     after_add = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
@@ -448,14 +451,8 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
       at::MemoryFormat::ChannelsLast);
   // requantization
   // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
-  // TODO:  note we will remove the int_repr() in a subsequent PR, so we can move the computations for
-  // the multipliers into the helper function
-  auto act_scale = act.q_scale();
-  auto weight_scale = orig_weight.q_scale();
-  auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  auto bias_multiplier = 1.0 / (act_scale * weight_scale);
   apply_impl_helper<kReluFused>(
-      quantized_output, act, bias_multiplier, requantize_multiplier);
+      quantized_output, act, output_scale);
   return quantized_output;
 }
 
