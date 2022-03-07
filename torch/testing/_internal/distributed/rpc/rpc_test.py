@@ -4870,7 +4870,9 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_tensorpipe_set_default_timeout(self):
-        timeout = 0.5
+        # Set a high timeout since it doesn't affect test runtime and ensures
+        # the test doesn't erroneously timeout due to slow machines.
+        timeout = 100
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
             num_worker_threads=self.rpc_backend_options.num_worker_threads,
