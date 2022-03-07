@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 from .conv_utils import conv_backward, conv_args_and_kwargs
-from .expanded_weights_impl import implements_per_sample_grads
+from .expanded_weights_impl import ExpandedWeight, implements_per_sample_grads
 from .expanded_weights_utils import forward_helper
 
 @implements_per_sample_grads(F.conv1d)
@@ -16,15 +16,17 @@ class ConvPerSampleGrad(torch.autograd.Function):
                                "Please file an issue to prioritize support")
         expanded_args, expanded_kwargs = conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs)
         output = forward_helper(conv_fn, expanded_args, expanded_kwargs)
-        ctx.conv_fn = conv_fn
         input, weight = expanded_args
 
+        ctx.conv_fn = conv_fn
+
         ctx.batch_size = input.shape[0]
-        ctx.weight_shape = weight.shape
+        ctx.input_required_grad = input.requires_grad
         ctx.stride, ctx.padding = expanded_kwargs['stride'], expanded_kwargs['padding']
         ctx.dilation, ctx.groups = expanded_kwargs['dilation'], expanded_kwargs['groups']
 
-        ctx.input = input
+        if isinstance(weight, ExpandedWeight):
+            ctx.input = input
         ctx.weight = weight
         ctx.bias = expanded_kwargs['bias']
 

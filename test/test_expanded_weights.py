@@ -197,7 +197,6 @@ class TestExpandedWeightFunctional(TestCase):
             normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result)
 
-
     def test_expanded_weight_error(self, device):
         batch_size = 3
         sample_input = make_tensor((batch_size, 4), dtype=torch.float32, device=device, requires_grad=True)
@@ -383,7 +382,6 @@ def run_op(op, input, *args, **kwargs):
     using the special ordering that Embedding's OpInfo expects for that case.
     """
     if op.name == "nn.functional.embedding":
-        assert len(args) == 1
         return op(args[0], input, **kwargs)
     else:
         return op(input, *args, **kwargs)
