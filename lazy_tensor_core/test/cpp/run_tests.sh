@@ -50,10 +50,21 @@ fi
 rm -rf "$BUILDDIR"
 mkdir "$BUILDDIR" 2>/dev/null
 pushd "$BUILDDIR"
+
+export GET_PYTHON_LIB_SCRIPT="
+import distutils.sysconfig as sysconfig
+import pathlib
+import sys
+
+path = sysconfig.get_config_var('LIBDIR') + '/' + sysconfig.get_config_var('LDLIBRARY')
+if not pathlib.Path(path).exists() and path[-2:] == '.a':
+  path = path[:-2] + '.so'
+print(path)
+"
 cmake "$RUNDIR" \
   -DCMAKE_BUILD_TYPE=$BUILDTYPE \
   -DPYTHON_INCLUDE_DIR=$(python -c "from distutils.sysconfig import get_python_inc; print(get_python_inc())") \
-  -DPYTHON_LIBRARY=$(python -c "import distutils.sysconfig as sysconfig; print(sysconfig.get_config_var('LIBDIR') + '/' + sysconfig.get_config_var('LDLIBRARY'))")
+  -DPYTHON_LIBRARY=$(python -c "$GET_PYTHON_LIB_SCRIPT")
 # Ninja needs a separate build invocation for googletest.
 cmake --build . --target googletest
 cmake --build . --target all
