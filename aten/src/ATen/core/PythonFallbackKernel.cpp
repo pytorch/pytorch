@@ -22,9 +22,7 @@ struct StashTLSStateGuard {
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.size() > 0);
-  auto top_tls = tls_on_entry.top();
-  top_tls.excluded_ = c10::DispatchKeySet();
-  c10::impl::ForceDispatchKeyGuard guard(top_tls);
+  c10::impl::ForceDispatchKeyGuard guard(tls_on_entry.top());
 
   // If Python Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
