@@ -46,8 +46,8 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   void replaceFallbackGraphWithFallbackFunction(Block* b);
   FusionBehavior getCurrentBehavior(size_t remaining_depth);
   void runNoGradOptimizations(
-    std::shared_ptr<Graph>& graph,
-    size_t remaining_bailout_depth);
+      std::shared_ptr<Graph>& graph,
+      size_t remaining_bailout_depth);
   void runFinalOptimizations(std::shared_ptr<Graph>& graph);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>

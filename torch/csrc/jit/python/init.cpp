@@ -1232,10 +1232,9 @@ void initJITBindings(PyObject* module) {
           auto operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func = py::cpp_function(
-                  [op, symbol](py::args args, py::kwargs kwargs) {
-                    _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, true);
+              auto func =
+                  py::cpp_function([op, symbol](py::args args, py::kwargs kwargs) {
+                    return _get_operation_for_overload_or_packet({op}, symbol, args, kwargs, true);
                   });
               return func;
             }
@@ -1266,8 +1265,7 @@ void initJITBindings(PyObject* module) {
 
           auto func = py::cpp_function(
               [operations, symbol](py::args args, py::kwargs kwargs) {
-                _get_operation_for_overload_or_packet(
-                    operations, symbol, args, kwargs, false);
+                return _get_operation_for_overload_or_packet(operations, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));
