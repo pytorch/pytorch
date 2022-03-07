@@ -15,9 +15,9 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
 
   // out variant of LinearPackedParamsBase::apply
   virtual at::Tensor& apply_out(
-      const at::Tensor& input,
-      double output_scale,
-      int64_t output_zero_point,
+      const at::Tensor& /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/,
       at::Tensor& output) {
     throw std::runtime_error(
         "apply_out is not implemented for this packed "
@@ -26,9 +26,9 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
   }
 
   virtual at::Tensor& apply_relu_out(
-      const at::Tensor& input,
-      double output_scale,
-      int64_t output_zero_point,
+      const at::Tensor& /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/,
       at::Tensor& output) {
     throw std::runtime_error(
         "apply_relu_out is not implemented for this packed "
@@ -66,7 +66,7 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
 
   virtual c10::optional<at::Tensor> bias() = 0;
 
-  virtual void set_bias(c10::optional<at::Tensor> bias) {
+  virtual void set_bias(c10::optional<at::Tensor> /*bias*/) {
     throw std::runtime_error(
         "set_bias is not implemented for this packed "
         "parameter type");
