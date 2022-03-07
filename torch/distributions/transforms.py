@@ -27,6 +27,7 @@ __all__ = [
     'PowerTransform',
     'ReshapeTransform',
     'SigmoidTransform',
+    'SoftplusTransform',
     'TanhTransform',
     'SoftmaxTransform',
     'StackTransform',
@@ -599,6 +600,29 @@ class SigmoidTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return -F.softplus(-x) - F.softplus(x)
+
+
+class SoftplusTransform(Transform):
+    r"""
+    Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
+    The implementation reverts to the linear function when :math:`x > 20`.
+    """
+    domain = constraints.real
+    codomain = constraints.positive
+    bijective = True
+    sign = +1
+
+    def __eq__(self, other):
+        return isinstance(other, SoftplusTransform)
+
+    def _call(self, x):
+        return softplus(x)
+
+    def _inverse(self, y):
+        return (-y).expm1().neg().log() + y
+
+    def log_abs_det_jacobian(self, x, y):
+        return -softplus(-x)
 
 
 class TanhTransform(Transform):

@@ -219,7 +219,7 @@ graph {
     name: "Expand_21"
     op_type: "Expand"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Reshape_0"
     type {
