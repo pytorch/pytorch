@@ -1687,7 +1687,7 @@ class FullyShardedDataParallel(nn.Module):
         max_norm = float(max_norm)
         norm_type = float(norm_type)
         # Computes the max norm for this shard's gradients and sync's across workers
-        local_norm = _calc_grad_norm(self.params, norm_type).cuda()
+        local_norm = _calc_grad_norm(self.params, norm_type).cuda()  # type: ignore[arg-type]
         if norm_type == inf:
             total_norm = local_norm
             dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group)
