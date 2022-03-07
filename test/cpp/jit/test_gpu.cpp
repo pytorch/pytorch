@@ -7316,8 +7316,8 @@ TEST_F(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const size_t dimx = 13;
-  const size_t dimy = 15;
+  const int64_t dimx = 13;
+  const int64_t dimy = 15;
 
   TensorView* tv0 = makeConcreteTensor({dimx, dimy});
   fusion.addInput(tv0);
@@ -8639,8 +8639,8 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
     tensor->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  const size_t dimx = 1024;
-  const size_t dimy = 4096;
+  const int64_t dimx = 1024;
+  const int64_t dimy = 4096;
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   auto aten_output = at::_softmax(aten_input.to(at::kDouble), -1, false);
@@ -8845,7 +8845,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormBackward_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
-  const size_t NORM_SIZE = 1024;
+  const int64_t NORM_SIZE = 1024;
   std::vector<int64_t> shape{8, 56, NORM_SIZE};
   std::vector<int64_t> norm_shape{NORM_SIZE};
 
@@ -8971,7 +8971,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerRMSNormalization_CUDA) {
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
 
-  size_t NORM_SIZE = 1024;
+  int64_t NORM_SIZE = 1024;
   const float kEps = 1e-6;
   Double* eps_ptr = IrBuilder::create<Double>(kEps);
 
@@ -9185,8 +9185,8 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
     }
   }
 
-  const size_t dimx = 1024;
-  const size_t dimy = 16384;
+  const int64_t dimx = 1024;
+  const int64_t dimy = 16384;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
