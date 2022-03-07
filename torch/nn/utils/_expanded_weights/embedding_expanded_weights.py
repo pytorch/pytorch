@@ -23,19 +23,6 @@ class EmbeddingPerSampleGrad(torch.autograd.Function):
         input, weight = ctx.input, ctx.weight
         padding_idx, scale_grad_by_freq, sparse = ctx.padding_idx, ctx.scale_grad_by_freq, ctx.sparse
 
-        def input_grad(padding_idx):
-            if padding_idx is not None:
-                if padding_idx >= weight.shape[0]:
-                    raise RuntimeError("Padding_idx must be within num_embeddings, "
-                                       f"was ${padding_idx} but expected less than ${weight.shape[0]}")
-                elif padding_idx < -weight.shape[0]:
-                    raise RuntimeError("Padding_idx must be within num_embeddings, "
-                                       f"was ${padding_idx} but expected more than -${weight.shape[0]}")
-                elif padding_idx < 0:
-                    padding_idx = weight.shape[0] + padding_idx
-            else:
-                padding_idx = -1
-
         def weight_per_sample_grad(weight):
             batch_size = input.shape[0]
             embedding_dim = weight.shape[1]
