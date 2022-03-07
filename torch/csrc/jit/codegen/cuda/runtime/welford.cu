@@ -8,8 +8,8 @@ __inline__ __device__ void welfordCombine(
     T& a_avg,
     T& a_M2,
     TN& a_N,
-    const T& b_avg,
-    const T& b_M2,
+    const T b_avg,
+    const T b_M2,
     TN b_N) {
   if (b_N == 0) {
     return;
@@ -183,9 +183,9 @@ __device__ void gridWelfordLastBlock(
     T& out_avg,
     T& out_M2,
     TN& out_N,
-    const T* in_avg,
-    const T* in_M2,
-    const TN* in_N,
+    const volatile T* in_avg,
+    const volatile T* in_M2,
+    const volatile TN* in_N,
     const nvfuser_index_t
         grid_reduction_segment_size, // Number of reductions across
                                      // grid reduce dimensions
@@ -345,9 +345,9 @@ __device__ void gridWelford(
         out_avg,
         out_M2,
         out_N,
-        (T*)work_buf_avg,
-        (T*)work_buf_M2,
-        (TN*)work_buf_N,
+        work_buf_avg,
+        work_buf_M2,
+        work_buf_N,
         grid_reduction_segment_size,
         block_reduction_segment_size,
         shared_buf_avg,

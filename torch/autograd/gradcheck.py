@@ -329,7 +329,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
 
-                inp = fwAD.make_dual(inp, torch.zeros_like(inp))
+                inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
                 # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
@@ -637,7 +637,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
 
 
 def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
-    if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
+    if not check_sparse_nnz and any(t.is_sparse or t.is_sparse_csr for t in tupled_inputs if isinstance(t, torch.Tensor)):
         raise GradcheckError('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
@@ -649,7 +649,12 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
                     'is not a double precision floating point or complex. '
                     'This check will likely fail if all the inputs are '
                     'not of double precision floating point or complex. ')
-            content = inp._values() if inp.is_sparse else inp
+            if inp.is_sparse:
+                content = inp._values()
+            elif inp.is_sparse_csr:
+                content = inp.values()
+            else:
+                content = inp
             # TODO: To cover more problematic cases, replace stride = 0 check with
             # "any overlap in memory" once we have a proper function to check it.
             if content.layout is not torch._mkldnn:  # type: ignore[attr-defined]
@@ -760,10 +765,14 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
     assert isinstance(inputs, tuple)
 
     for input_idx, current_input in enumerate(inputs):
+        if not (is_tensor_like(current_input) and current_input.requires_grad):
+            continue
+
         def jvp(tangent: torch.Tensor):
             with fwAD.dual_level():
-                dual = fwAD.make_dual(current_input, tangent)
-                inputs_with_dual = tuple(dual if idx == input_idx else inp for idx, inp in enumerate(inputs))
+                dual = fwAD.make_dual(current_input.detach(), tangent)
+                inputs_with_dual = tuple(dual if idx == input_idx else (inp.detach() if is_tensor_like(inp) else inp)
+                                         for idx, inp in enumerate(inputs))
                 dual_outputs = _as_tuple(func(*inputs_with_dual))
                 ret = []
                 for dual_output in dual_outputs:
@@ -888,7 +897,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError("MKLDNN inputs are not support for forward AD gradcheck.")
 
-                inp = fwAD.make_dual(inp, torch.zeros_like(inp))
+                inp = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
                 # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
@@ -904,12 +913,12 @@ def _test_undefined_forward_mode(func, outputs, inputs):
             dual_inp_obj = dual_inputs[idx]
 
             # case 1 (Materialized Zero Tensor Tangent)
-            dual_inputs[idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
+            dual_inputs[idx] = fwAD.make_dual(inp.detach(), torch.zeros_like(inp))
             raw_outputs = _as_tuple(func(*dual_inputs))
             dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
 
             # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
-            dual_inputs[idx] = inp
+            dual_inputs[idx] = inp.detach()
             raw_outputs = _as_tuple(func(*dual_inputs))
             dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
 
@@ -1517,28 +1526,38 @@ def gradgradcheck(
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
-        # If grad_outputs is not specified, create random Tensors of the same
-        # shape, type, and device as the outputs
-        def randn_like(x):
-            y = torch.randn_like(
-                x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
-            if gen_non_contig_grad_outputs:
-                y = torch.testing.make_non_contiguous(y)
-            return y.requires_grad_()
+        # If grad_outputs is not specified, create random Tensors of the same shape, type, and device as the outputs
+
         outputs = _as_tuple(func(*tupled_inputs))
-        tupled_grad_outputs = tuple(randn_like(x) for x in outputs)
+        tupled_grad_outputs = tuple(
+            torch.testing.make_tensor(
+                x.shape,
+                dtype=x.dtype if x.is_floating_point() or x.is_complex() else torch.double,
+                device=x.device,
+                low=-1,
+                high=1,
+                requires_grad=True,
+                noncontiguous=gen_non_contig_grad_outputs,
+            )
+            for x in outputs
+        )
     else:
         tupled_grad_outputs = _as_tuple(grad_outputs)
 
     num_outputs = len(tupled_grad_outputs)
 
+    # NB: We need to save the requires_grad information about the inputs here because gradcheck detaches inputs
+    #     before running forward mode AD
+    diff_input_args_indices = set(i for i, x in enumerate(tupled_inputs) if is_tensor_like(x) and x.requires_grad)
+    diff_grad_output_indices = set(i for i, x in enumerate(tupled_grad_outputs) if x.requires_grad)
+
     def new_func(*args):
-        input_args = args[:-num_outputs]
-        grad_outputs = args[-num_outputs:]
+        # Restore the requires_grad information
+        input_args = tuple(x.requires_grad_() if i in diff_input_args_indices else x for i, x in enumerate(args[:-num_outputs]))
         outputs = _differentiable_outputs(func(*input_args))
-        input_args = tuple(x for x in input_args
-                           if is_tensor_like(x) and x.requires_grad)
-        grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True,
+        grad_outputs = tuple(x.requires_grad_() if i in diff_grad_output_indices else x for i, x in enumerate(args[-num_outputs:]))
+        diff_input_args = tuple(x for i, x in enumerate(input_args) if i in diff_input_args_indices)
+        grad_inputs = torch.autograd.grad(outputs, diff_input_args, grad_outputs, create_graph=True,
                                           allow_unused=True)
         grad_inputs = tuple(g for g in grad_inputs if g is not None)
         return grad_inputs

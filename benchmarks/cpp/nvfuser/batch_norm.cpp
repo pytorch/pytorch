@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -44,8 +45,8 @@ static void setupBatchNorm(Fusion* fusion, DataType dtype) {
     bias = castOp(DataType::Float, bias);
   }
 
-  auto momentum_ptr = new Double(kMomentum);
-  auto eps_ptr = new Double(kEps);
+  auto momentum_ptr = IrBuilder::create<Double>(kMomentum);
+  auto eps_ptr = IrBuilder::create<Double>(kEps);
 
   auto result = batch_norm(
       input,

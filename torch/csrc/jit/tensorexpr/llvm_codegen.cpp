@@ -2063,8 +2063,15 @@ void LLVMCodeGenImpl::visit(AllocatePtr v) {
 }
 
 void LLVMCodeGenImpl::visit(PlacementAllocatePtr v) {
-  llvm::Value* ptr = varToVal_.at(v->buf_to_reuse()->base_handle());
-  varToVal_[v->buf()->base_handle()] = ptr;
+  auto buf_to_reuse = v->buf_to_reuse();
+  auto buf = v->buf();
+
+  llvm::Value* ptr = varToVal_.at(buf_to_reuse->base_handle());
+  if (buf_to_reuse->dtype().scalar_type() != buf->dtype().scalar_type()) {
+    ptr = irb_.CreatePointerCast(ptr, dtypeToLLVMPtr(buf->dtype()));
+  }
+
+  varToVal_[buf->base_handle()] = ptr;
 }
 
 void LLVMCodeGenImpl::visit(FreePtr v) {
