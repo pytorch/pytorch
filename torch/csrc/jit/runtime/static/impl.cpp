@@ -883,10 +883,6 @@ template <typename IValueList>
 void BlockRunner::set_inputs(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
-  const auto total_num_inputs =
-      args.size() + kwargs.size() + first_input_is_self_;
-  TORCH_CHECK(total_num_inputs == block_info_.num_inputs());
-
   const auto& schema = static_module_.schema();
   if (first_input_is_self_) {
     Input(0) = static_module_.module()._ivalue();
@@ -895,6 +891,10 @@ void BlockRunner::set_inputs(
   if (!is_root_block_ || C10_UNLIKELY(!schema)) {
     TORCH_CHECK(
         kwargs.empty(), "Schema is not available, but BlockRunner got kwargs.");
+
+    const auto total_num_inputs = args.size() + first_input_is_self_;
+    TORCH_CHECK(total_num_inputs == block_info_.num_inputs());
+
     for (size_t i = 0; i < args.size(); ++i) {
       set_arg(i, std::forward<IValueList>(args));
     }
@@ -904,7 +904,9 @@ void BlockRunner::set_inputs(
   const auto& schema_args = schema->arguments();
   size_t consumed_kwargs = 0;
   DCHECK(schema_args.size() > 0);
-
+  TORCH_CHECK(
+      args.size() < schema_args.size(),
+      "Static runtime got too many arguments");
   for (size_t i = 0; i < schema_args.size() - 1; ++i) {
     // Start at 1 since the schema always contains `self`.
     const auto& schema_arg = schema_args[i + 1];
@@ -932,9 +934,7 @@ void BlockRunner::set_inputs(
     TORCH_CHECK(
         false, "Static runtime is missing required kwarg ", schema_arg.name());
   }
-  TORCH_CHECK(
-      consumed_kwargs == kwargs.size() &&
-      args.size() + consumed_kwargs == schema_args.size() - 1);
+  TORCH_CHECK(consumed_kwargs == kwargs.size());
 }
 
 void BlockRunner::create_memory_planner() {
