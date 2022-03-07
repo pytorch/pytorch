@@ -255,7 +255,7 @@ jobs:
     name: test (distributed, 1, 1, linux.rocm.gpu)
     needs: build
     runs-on: linux.rocm.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
@@ -478,7 +478,7 @@ jobs:
     name: test (default, 1, 2, linux.rocm.gpu)
     needs: build
     runs-on: linux.rocm.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
@@ -701,7 +701,7 @@ jobs:
     name: test (default, 2, 2, linux.rocm.gpu)
     needs: build
     runs-on: linux.rocm.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
