@@ -138,7 +138,7 @@ jobs:
           rm -rf ./*
   test_force_on_cpu_1_1:
     name: test (force_on_cpu, 1, 1, windows.4xlarge)
-    timeout-minutes: 300
+    timeout-minutes: 270
     env:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-test
       SHARD_NUMBER: 1
@@ -287,7 +287,7 @@ jobs:
           rm -rf ./*
   test_default_1_2:
     name: test (default, 1, 2, windows.8xlarge.nvidia.gpu)
-    timeout-minutes: 300
+    timeout-minutes: 270
     env:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-test
       SHARD_NUMBER: 1
@@ -444,7 +444,7 @@ jobs:
           rm -rf ./*
   test_default_2_2:
     name: test (default, 2, 2, windows.8xlarge.nvidia.gpu)
-    timeout-minutes: 300
+    timeout-minutes: 270
     env:
       JOB_BASE_NAME: periodic-win-vs2019-cuda11.5-py3-test
       SHARD_NUMBER: 2
