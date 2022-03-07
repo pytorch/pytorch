@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <cstdint>
 
 namespace at {
 class TensorBase;
