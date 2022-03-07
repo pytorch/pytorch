@@ -288,10 +288,10 @@ TracerResult trace_run(const std::string& input_module_path) {
   at::globalContext().setQEngine(at::QEngine::FBGEMM);
   run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
 
-  {
-    std::lock_guard<std::mutex> guard(OperatorCallTracer::getMutex());
-    traced_operators = op_tracer.getCalledOperators();
-  }
+  op_tracer.getCalledOperators().withLock(
+      [&](std::set<std::string>& called_operators) {
+        traced_operators = called_operators;
+      });
 
   recordCustomClassesFromOpSchemas(root_ops, traced_operators, loaded_classes);
 

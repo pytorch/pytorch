@@ -165,10 +165,10 @@ class CIWorkflow:
     build_with_debug: bool = False
     is_scheduled: str = ''
     is_default: bool = False
+    on_pull_request: bool = False
     num_test_shards: int = 1
     timeout_after: int = 240
     xcode_version: str = ''
-    only_on_pr: bool = False
     ios_arch: str = ''
     ios_platform: str = ''
     test_jobs: Any = field(default_factory=list)
@@ -195,6 +195,9 @@ class CIWorkflow:
 
         if LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels:
             self.is_default = True
+
+        if self.is_default:
+            self.on_pull_request = True
 
         self.test_jobs = self._gen_test_jobs()
         self.assert_valid()
@@ -355,6 +358,7 @@ class BinaryBuildWorkflow:
     abi_version: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     is_scheduled: str = ''
+    branches: str = 'nightly'
     # Mainly for macos
     cross_compile_arm64: bool = False
     xcode_version: str = ''
@@ -366,7 +370,7 @@ class BinaryBuildWorkflow:
             self.build_environment = f"{self.os}-binary-{self.package_type}"
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
+        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}-{self.branches}.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
@@ -529,10 +533,22 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        build_generates_artifacts=False,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-py3.7-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         num_test_shards=3,
+        timeout_after=300,
         enable_distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
@@ -708,10 +724,10 @@ XLA_WORKFLOWS = [
         build_environment="pytorch-xla-linux-bionic-py3.7-clang8",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/xla_base",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
         enable_distributed_test=False,
         enable_xla_test=True,
         enable_default_test=False,
+        on_pull_request=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
@@ -946,6 +962,40 @@ LINUX_BINARY_BUILD_WORFKLOWS = [
     ),
 ]
 
+LINUX_BINARY_SMOKE_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="manywheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.LINUX,
+            arches=["10.2"],
+            python_versions=["3.7"]),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.LINUX,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.LINUX, generate_binary_build_matrix.CXX11_ABI,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
+    ),
+]
+
 WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
@@ -970,9 +1020,9 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
-        abi_version=generate_binary_build_matrix.CXX11_ABI,
+        abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.CXX11_ABI
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
@@ -982,14 +1032,47 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
+        abi_version=generate_binary_build_matrix.DEBUG,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS, generate_binary_build_matrix.PRE_CXX11_ABI
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
             isolated_workflow=True,
         ),
+    ),
+]
+WINDOWS_BINARY_SMOKE_WORKFLOWS = [
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="wheel",
+        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
+            OperatingSystem.WINDOWS,
+            arches=["11.3"],
+            python_versions=["3.7"]),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.RELEASE,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.DEBUG,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG,
+            arches=["cpu"],
+            libtorch_variants=["shared-with-deps"],
+        ),
+        branches="master",
     ),
 ]
 
@@ -1075,7 +1158,9 @@ def main() -> None:
         (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
+        (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("macos_binary_build_workflow.yml.j2"), MACOS_BINARY_BUILD_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.

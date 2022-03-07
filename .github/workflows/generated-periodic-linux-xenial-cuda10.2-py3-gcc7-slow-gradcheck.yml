@@ -254,7 +254,7 @@ jobs:
     name: test (default, 1, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 390
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-test
@@ -328,8 +328,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -508,7 +510,7 @@ jobs:
     name: test (default, 2, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 390
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-test
@@ -582,8 +584,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
