@@ -943,6 +943,19 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         m[0].qconfig = None
         mp = torch.ao.quantization.prepare(m)
 
+    @skipIfNoFBGEMM
+    def test_quantwrapper_attaches_qconfig_to_dequant(self):
+        qconfig = torch.ao.quantization.default_qconfig
+
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        for i in range(len(m)):
+            m[i].qconfig = qconfig
+            m[i] = torch.ao.quantization.QuantWrapper(m[i])
+
+        mp = torch.ao.quantization.prepare(m)
+        mq = torch.ao.quantization.convert(mp)
+        self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
+
 
 @skipIfNoFBGEMM
 class TestQuantizeEagerPTQDynamic(QuantizationTestCase):

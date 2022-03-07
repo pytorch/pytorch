@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
+#include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
@@ -267,6 +268,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
+      .def(
+          "_jit_pass_dbr_quant_remove_redundant_aliases",
+          [](Module& module) { return DBRQuantRemoveRedundantAliases(module); })
       .def(
           "_freeze_module",
           [](Module& module,
@@ -616,8 +620,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
-            bool oldState = getProfilingMode();
-            getProfilingMode() = profiling_flag;
+            TORCH_WARN("Set profiling mode is deprecated and will invoke getGraphExecutorOptimize now. Please use `_get_graph_executor_optimize`");
+            auto oldState = getGraphExecutorOptimize();
+            setGraphExecutorOptimize(profiling_flag);
             return oldState;
           })
       .def(

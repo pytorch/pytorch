@@ -69,6 +69,7 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(Tensor& tensor, bool sort_strides = false)
       : data_(tensor.data_ptr<T>()) {
+    (void)sort_strides; // Suppress unused variable warning
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
       std::memcpy(
@@ -152,7 +153,7 @@ inline int64_t _max_dim_tensors(ArrayRef<Tensor> tensors) {
   return dim;
 }
 
-inline void iterate(int64_t size){};
+inline void iterate(int64_t /*size*/){};
 
 template <typename Arg, typename... Args>
 inline void iterate(int64_t size, Arg& iter, Args&... iter_tail) {
@@ -199,7 +200,7 @@ inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
   iterate_overflow(iter_tail...);
 }
 
-inline void forward(int64_t offset){};
+inline void forward(int64_t /*offset*/){};
 
 template <typename Arg, typename... Args>
 inline void forward(int64_t offset, Arg& iter, Args&... iter_tail) {
