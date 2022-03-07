@@ -160,7 +160,7 @@ std::array<int64_t, kSpatialDim> MakeInputShape(
     int64_t W);
 
 template <>
-std::array<int64_t, 2> MakeInputShape(int64_t _, int64_t H, int64_t W) {
+std::array<int64_t, 2> MakeInputShape(int64_t /*D*/, int64_t H, int64_t W) {
   return {H, W};
 }
 template <>
@@ -929,10 +929,10 @@ class QConvInt8ForBC final {
   static Tensor run(
       Tensor act,
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
-      torch::List<int64_t> stride,
-      torch::List<int64_t> padding,
-      torch::List<int64_t> dilation,
-      int64_t groups,
+      torch::List<int64_t> /*stride*/,
+      torch::List<int64_t> /*padding*/,
+      torch::List<int64_t> /*dilation*/,
+      int64_t /*groups*/,
       double output_scale,
       int64_t output_zero_point) {
     if (kReluFused) {
