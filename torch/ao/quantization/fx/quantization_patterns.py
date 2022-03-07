@@ -14,6 +14,7 @@ from ..quantization_mappings import (
     get_dynamic_quant_module_class,
 )
 from ..utils import (
+    _parent_name,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
     activation_is_int8_quantized,
@@ -32,7 +33,6 @@ from .pattern_utils import (
     get_default_output_activation_post_process_map,
     Pattern,
 )
-from ..utils import _parent_name
 from .utils import (
     all_node_args_have_no_tensors,
     quantize_node,
@@ -688,7 +688,13 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     self.conv_node)
         else:  # call_function
             assert self.conv_node.op == "call_function"
-            if is_reference:
+            conv_functional_ops = {
+                torch.nn.functional.conv1d,
+                torch.nn.functional.conv2d,
+                torch.nn.functional.conv3d,
+            }
+            if is_reference or self.conv_node.target in conv_functional_ops and\
+                    dtypes in [(torch.quint8, torch.qint8, None)]:
                 # make sure the input and weight are quantized to torch.quint8, torch.qint8, respectively
                 load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
                 args = load_arg(quantized=torch.float)(self.conv_node.args)

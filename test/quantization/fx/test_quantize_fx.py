@@ -4173,10 +4173,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
             prepare_expected_node_occurrence = \
                 quant_type_to_prepare_expected_node_occurrence[quant_type]
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 model, data, quant_type, qconv_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
+            if quant_type != QuantType.DYNAMIC:
+                self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
+                # Ensure packed weights in lowered models are folded
+                self.assertIn("_packed_weight_0", result_dict["quantized"].state_dict().keys())
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):
