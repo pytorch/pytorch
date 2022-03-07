@@ -7941,7 +7941,7 @@ class TestAutogradForwardMode(TestCase):
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten.alias:
+                if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
                     with no_dispatch():
