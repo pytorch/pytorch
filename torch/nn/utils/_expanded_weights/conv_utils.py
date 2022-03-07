@@ -18,16 +18,15 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
         assert func == F.conv3d
         return conv3dOpt
 
-conv_kwarg_defaults = {'bias': None, 'stride': 1, 'padding': 0, 'dilation': 1, 'groups': 1}
 def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     args = expanded_args_and_kwargs[:len(expanded_args_and_kwargs) - len(kwarg_names)]
-    named_kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
-    unnamed_kwargs = args[2:]  # input and weight are the only two that can't be kwargs
+    kwargs = expanded_args_and_kwargs[len(expanded_args_and_kwargs) - len(kwarg_names):]
+    kwargs = {name: arg for (name, arg) in zip(kwarg_names, kwargs)}
 
-    conv_kwargs = tuple(conv_kwarg_defaults.keys())
-    kwargs = {key: value for (key, value) in zip(conv_kwargs[:len(unnamed_kwargs)] + kwarg_names, unnamed_kwargs + named_kwargs)}
-    kwargs = {key: kwargs.get(key, conv_kwarg_defaults[key]) for key in conv_kwarg_defaults}
-    return args[:2], kwargs
+    return conv_normalizer(*args, **kwargs)
+
+def conv_normalizer(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1):
+    return (input, weight), {'bias': bias, 'stride': stride, 'padding': padding, 'dilation': dilation, 'groups': groups}
 
 def conv_backward(func, ctx, grad_output):
 
@@ -44,7 +43,7 @@ def conv_backward(func, ctx, grad_output):
         else:
             return param
 
-    weight_shape = ctx.weight_shape
+    weight_shape = ctx.weight.shape
     stride, padding, dilation, groups = expand(ctx.stride), expand(ctx.padding), expand(ctx.dilation), ctx.groups
 
     kernel_size = []
@@ -56,7 +55,7 @@ def conv_backward(func, ctx, grad_output):
     results.append(None)  # for kwarg names
     results.append(None)  # for op reference
 
-    if ctx.input.requires_grad:
+    if ctx.input_required_grad:
         output_padding = []
         input_dims = conv_picker(func, 1, 2, 3)
         for i in range(input_dims):
