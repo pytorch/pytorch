@@ -328,22 +328,8 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
       *graph);
 
-  if (tensorExprFuserEnabled() || RegisterCudaFuseGraph::isRegistered()) {
-    // With TE fuser or nvfuser, we don't generate bailouts
-    LowerGradOf(*graph);
-    GRAPH_DEBUG("After LowerGradOf, before specializeAutogradZero\n", *graph);
-  } else {
-    InsertGuards(graph);
-    GRAPH_DEBUG("After InsertGuards, before LowerGradOf\n", *graph);
-    LowerGradOf(*graph);
-    GRAPH_DEBUG("After LowerGradOf, before EliminateRedundantGuards\n", *graph);
-    EliminateRedundantGuards(graph);
-    GRAPH_DEBUG(
-        "After EliminateRedundantGuards, before InsertBailOuts\n", *graph);
-    InsertBailOuts(graph);
-    GRAPH_DEBUG(
-        "After InsertBailOuts, before specializeAutogradZero\n", *graph);
-  }
+  LowerGradOf(*graph);
+  GRAPH_DEBUG("After LowerGradOf, before specializeAutogradZero\n", *graph);
 
   specializeAutogradZero(graph);
   GRAPH_DEBUG("After specializeAutogradZero\n", *graph);
