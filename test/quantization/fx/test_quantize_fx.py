@@ -2547,7 +2547,49 @@ class TestQuantizeFx(QuantizationTestCase):
             mp(torch.rand(4, 4, 4, 4))
             mc = convert_fx(mp)
 
+    def test_getattr_with_nontensor_result(self):
+        """
+        Verifies that binary ops get quantized correctly if some
+        of the args are nodes but not Tensors, such as an `x.ndim`
+        pattern.
+        """
 
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                dims = x.ndim
+                dims_sub = dims - 1
+                dims_sub2 = dims_sub - 1
+                x = torch.add(x, dims_sub2)
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                dims = x.ndim
+                dims_sub = dims - 2
+                mul = [1] * dims_sub
+                dims_list = [-1, x.size(1)] + mul
+                x = x.view(dims_list)
+                return x
+
+        class M3(torch.nn.Module):
+            def forward(self, x):
+                shape = x.shape
+                x = x.view(shape)
+                return x
+
+        for cls in (M1, M2, M3):
+            m = cls().eval()
+            m(torch.rand(4, 4, 4, 4))
+            qconfig_dict = {"": torch.ao.quantization.default_qconfig}
+            mp = prepare_fx(m, qconfig_dict)
+            mp(torch.rand(4, 4, 4, 4))
+            mc = convert_fx(mp)
 
     class _NonReferenceTestModel(nn.Module):
         def __init__(self, func, lin_in, lin_out):
@@ -2576,18 +2618,23 @@ class TestQuantizeFx(QuantizationTestCase):
         def _check_node_indices_not_observed(model, node, indices):
             for index in indices:
                 if hasattr(node, "args"):
-                    arg_node=node.args[index]
+                    arg_node = node.args[index]
                 else:
-                    arg_node=node[index]
+                    arg_node = node[index]
                 if isinstance(arg_node, tuple) or isinstance(arg_node, list):
-                    _check_node_indices_not_observed(model, arg_node, [i for i in range(len(arg_node))])
-                elif arg_node.op=="call_module":
-                    self.assertTrue(not is_activation_post_process(getattr(model, arg_node.target)),
-                        "Arg {0} of {1} is observed but is not a float tensor".format(index, node),
+                    _check_node_indices_not_observed(
+                        model, arg_node, list(range(len(arg_node)))
+                    )
+                elif arg_node.op == "call_module":
+                    self.assertTrue(
+                        not is_activation_post_process(getattr(model, arg_node.target)),
+                        "Arg {0} of {1} is observed but is not a float tensor".format(
+                            index, node
+                        ),
                     )
 
         for node in model.graph.nodes:
-            indices=node_info_to_non_tensor_args.get(
+            indices = node_info_to_non_tensor_args.get(
                 NodeInfo(node.op, node.target), []
             )
             _check_node_indices_not_observed(model, node, indices)
@@ -2663,7 +2710,9 @@ class TestQuantizeFx(QuantizationTestCase):
             return torch.transpose(x, 0, 1)
 
         model = self._NonReferenceTestModel(func, 5, 1)
-        node_info_to_non_tensor_args = {NodeInfo("call_method", torch.transpose): [1, 2]}
+        node_info_to_non_tensor_args = {
+            NodeInfo("call_method", torch.transpose): [1, 2]
+        }
         args = [torch.randn(5, 3, 32, 32), 0, 1]
         self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
 
