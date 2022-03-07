@@ -181,15 +181,18 @@ class InverseWishart(ExponentialFamily):
             warnings.warn(
                 "Mean of the Inverse Wishart distribution can be caculated only for df > ndim + 1."
             )
+
+        shifted_df = (nu - p - 1).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
+
         return torch.where(
-            nu.ge(p + 1),
-            self.covariance_matrix / (nu - p - 1).view(self._batch_shape + (1, 1)),
+            shifted_df.gt(0),
+            self.covariance_matrix / shifted_df,
             torch.full_like(
-                nu,
+                shifted_df,
                 fill_value=float("Inf"),
-                dtype=nu.dtype,
-                device=nu.device,
-            ).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
+                dtype=shifted_df.dtype,
+                device=shifted_df.device,
+            )
         )
 
     @property
@@ -214,7 +217,7 @@ class InverseWishart(ExponentialFamily):
         eff_df = (nu - p).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
 
         return torch.where(
-            eff_df.ge(3),
+            eff_df.gt(3),
             _clamp_with_eps(
                 (
                     torch.einsum("...ij,...ij->...ij", eff_df + 1, V.pow(2))
