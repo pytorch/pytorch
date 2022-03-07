@@ -252,6 +252,78 @@ C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
   fuse.runOnGraph(graph);
 }
 
+C10_UNUSED void EquallySplitToReorder(
+    std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%a, %b, %c, %d, %e):
+        %y0 : Tensor[] = fb::equally_split(%a, %b, %c)
+        %y1 : Tensor, %y2 : Tensor = prim::ListUnpack(%y0)
+        %y2 : Tensor = aten::to(%y1, %d, %e, %e)
+        %y3 : Tensor = aten::to(%y2, %d, %e, %e)
+        return (%y3, %y2))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %b, %c, %d, %e):
+        %y0 : Tensor = aten::to(%a, %d, %e, %e)
+        %y1 : Tensor[] = fb::equally_split(%y0, %b, %c)
+        %y2 : Tensor, %y3 : Tensor = prim::ListUnpack(%y1)
+        return (%y2, %y3))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %b, %c, %d, %e):
+        %y0 : Tensor[] = fb::equally_split(%a, %b, %c)
+        %y1 : Tensor, %y2 : Tensor = prim::ListUnpack(%y0)
+        %y2 : Tensor = aten::to(%y1, %d, %e, %e, %f)
+        %y3 : Tensor = aten::to(%y2, %d, %e, %e, %f)
+        return (%y3, %y2))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f):
+        %y0 : Tensor = aten::to(%a, %d, %e, %e, %f)
+        %y1 : Tensor[] = fb::equally_split(%y0, %b, %c)
+        %y2 : Tensor, %y3 : Tensor = prim::ListUnpack(%y1)
+        return (%y2, %y3))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+
+  std::string pattern3 = R"IR(
+    graph(%a, %b, %c, %d, %e):
+        %y0 : Tensor[] = fb::equally_split(%a, %b, %c)
+        %y1 : Tensor, %y2 : Tensor, %y3 : Tensor, %y4 : Tensor = prim::ListUnpack(%y0)
+        %y5 : Tensor = aten::to(%y1, %d, %e, %e)
+        %y6 : Tensor = aten::to(%y2, %d, %e, %e)
+        %y7 : Tensor = aten::to(%y3, %d, %e, %e)
+        %y8 : Tensor = aten::to(%y4, %d, %e, %e)
+        return (%y8, %y7, %y6, %y5))IR";
+  std::string fused_pattern3 = R"IR(
+    graph(%a, %b, %c, %d, %e):
+        %y0 : Tensor = aten::to(%a, %d, %e, %e)
+        %y1 : Tensor[] = fb::equally_split(%y0, %b, %c)
+        %y2 : Tensor, %y3 : Tensor, %y4 : Tensor, %y5 : Tensor = prim::ListUnpack(%y1)
+        return (%y5, %y4, %y3, %y2))IR";
+  fuse.RegisterRewritePattern(pattern3, fused_pattern3);
+  fuse.runOnGraph(graph);
+
+  std::string pattern4 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f):
+        %y0 : Tensor[] = fb::equally_split(%a, %b, %c)
+        %y1 : Tensor, %y2 : Tensor, %y3 : Tensor, %y4 : Tensor = prim::ListUnpack(%y0)
+        %y5 : Tensor = aten::to(%y1, %d, %e, %e, %f)
+        %y6 : Tensor = aten::to(%y2, %d, %e, %e, %f)
+        %y7 : Tensor = aten::to(%y3, %d, %e, %e, %f)
+        %y8 : Tensor = aten::to(%y4, %d, %e, %e, %f)
+        return (%y8, %y7, %y6, %y5))IR";
+  std::string fused_pattern4 = R"IR(
+    graph(%a, %b, %c, %d, %e, %f):
+        %y0 : Tensor = aten::to(%a, %d, %e, %e, %f)
+        %y1 : Tensor[] = fb::equally_split(%y0, %b, %c)
+        %y2 : Tensor, %y3 : Tensor, %y4 : Tensor, %y5 : Tensor = prim::ListUnpack(%y1)
+        return (%y5, %y4, %y3, %y2))IR";
+  fuse.RegisterRewritePattern(pattern4, fused_pattern4);
+  fuse.runOnGraph(graph);
+}
+
 C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
