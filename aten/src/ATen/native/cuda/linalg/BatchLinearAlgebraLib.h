@@ -39,6 +39,7 @@ void geqrf_batched_cublas(const Tensor& input, const Tensor& tau);
 void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
+void lu_factor_batched_cublas(const Tensor& A, const Tensor& pivots, const Tensor& infos, bool get_pivots);
 void lu_solve_batched_cublas(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose);
 
 #ifdef USE_CUSOLVER
