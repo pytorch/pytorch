@@ -544,8 +544,7 @@ class GRU(RNNBase):
     def _get_name(self):
         return 'DynamicQuantizedGRU'
 
-    def check_forward_args(self, input, hidden, batch_sizes):
-        # type: (Tensor, Tensor, Optional[Tensor])->None
+    def check_forward_args(self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]) -> None:
         self.check_input(input, batch_sizes)
         expected_hidden_size = self.get_expected_hidden_size(input, batch_sizes)
 

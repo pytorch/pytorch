@@ -119,8 +119,6 @@ static void upsample_linear1d_out_cuda_template(
 
   int output_width = output_size[0];
 
-  int nbatch = input.size(0);
-  int channels = input.size(1);
   int input_width = input.size(2);
 
   output.zero_();
@@ -164,8 +162,6 @@ static void upsample_linear1d_backward_out_cuda_template(
 
   int output_width = output_size[0];
 
-  int nbatch = input_size[0];
-  int channels = input_size[1];
   int input_width = input_size[2];
 
   Tensor grad_output = grad_output_.contiguous();

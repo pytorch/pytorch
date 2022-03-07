@@ -1,9 +1,19 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/ConvUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/conv_depthwise3d_native.h>
+#endif
 
 #include <algorithm>
 #include <tuple>
@@ -596,9 +606,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> _depthwise_3d_backward_cuda_out(
             TORCH_CHECK(padding[i] * 2 + input.size(i + 2) <= int_max,
                         "Padded input tensor is too large.");
           }
-          TORCH_CHECK(grad_output_.size(0) * grad_output_.size(2) < int_max - block / C10_WARP_SIZE &&
-                      grad_output_.size(3) <= int_max - C10_WARP_SIZE &&
-                      grad_output_.size(4) <= int_max - C10_WARP_SIZE,
+          int64_t warp_size = at::cuda::warp_size();
+          TORCH_CHECK(grad_output_.size(0) * grad_output_.size(2) < int_max - block / warp_size &&
+                      grad_output_.size(3) <= int_max - warp_size &&
+                      grad_output_.size(4) <= int_max - warp_size,
                       "Output size is too large.");
 
           DWCONV3D_BACKWARD_WEIGHT_DISPATCH_SPECIALIZATION(1, 1)

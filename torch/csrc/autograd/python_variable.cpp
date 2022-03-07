@@ -151,10 +151,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
   return (
     !THPVariable_CheckTypeExact(tp) &&
     // TODO: test if Python key is disabled
-    PyObject_FastGetAttrString(obj, "__torch_dispatch__").ptr() != nullptr
+    attr.ptr() != nullptr &&
+    attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -414,7 +416,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
   // key, which will immediately segfault because the data pointer is null.  By
   // forcing users to define __torch_dispatch__ we ensure this does not happen
-  TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
+  // TODO: This check is not complete; because the user can disable torch
+  // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
+  // to delete this function entirely
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_dispatch_impl()
+,
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
@@ -1061,9 +1068,13 @@ int THPVariable_set_real(THPVariable *self, THPVariable *real, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_real = at::real(self_);
-  self_real.copy_(THPVariable_Unpack(real));
-  return 0;
+  auto& real_ = THPVariable_Unpack(real);
+  {
+    pybind11::gil_scoped_release no_gil;
+    auto self_real = at::real(self_);
+    self_real.copy_(real_);
+    return 0;
+  }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -1071,9 +1082,13 @@ int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto self_imag = at::imag(self_);
-  self_imag.copy_(THPVariable_Unpack(imag));
-  return 0;
+  auto& imag_ = THPVariable_Unpack(imag);
+  {
+    pybind11::gil_scoped_release no_gil;
+    auto self_imag = at::imag(self_);
+    self_imag.copy_(imag_);
+    return 0;
+  }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -1787,7 +1802,7 @@ void concrete_dispatch_fn(
 
   if (num_returns == 0) {
     // Check that we got a None return from Python. Anything else is an error.
-    TORCH_CHECK(out == py::none(), "Expected __torch_dispatch__ for ", op.operator_name(),
+    TORCH_CHECK(out.is(py::none()), "Expected __torch_dispatch__ for ", op.operator_name(),
                 " to return None but it returned something else instead.");
   } else if (num_returns == 1) {
     torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
