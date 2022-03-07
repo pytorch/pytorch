@@ -225,6 +225,33 @@ C10_UNUSED void ClipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
+C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%a, %b, %to0_in0, %to0_in1, %to0_in2):
+        %y0 : Tensor = aten::to(%a, %to0_in0, %to0_in1, %to0_in1, %to0_in2)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %b)
+        return (%y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %b, %to0_in0, %to0_in1, %to0_in2):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %b, %to0_in0)
+        return (%y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %b, %to0_in0, %to0_in1):
+        %y0 : Tensor = aten::to(%a, %to0_in0, %to0_in1, %to0_in1)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %b)
+        return (%y1))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %b, %to0_in0, %to0_in1):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %b, %to0_in0)
+        return (%y0))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
 C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -334,6 +361,8 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 
     ClipRangesToGatherToOffsets(graph);
   }
+
+  ToLengthsToOffsets(graph);
 #endif
 }
 
