@@ -2314,6 +2314,9 @@ class TestDistributions(TestCase):
 
         # Double-check that batched versions behave the same as unbatched
         df = torch.rand(5, requires_grad=True) + ndim - 1
+        # SciPy allowed ndim -1 < df < ndim for Wishar distribution after version 1.7.0
+        if version.parse(scipy.__version__) < version.parse("1.7.0"):
+            df += 1.
         tmp = torch.randn(5, ndim, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
