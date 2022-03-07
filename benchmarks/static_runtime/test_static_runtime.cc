@@ -1212,6 +1212,32 @@ TEST(StaticRuntime, FullLike) {
   testStaticRuntime(full_like_script, args, args2);
 }
 
+TEST(StaticRuntime, Ones) {
+  const auto script = R"JIT(
+    def forward(self,
+                size: List[int],
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool]):
+        a = torch.ones(size,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       pin_memory=pin_memory)
+        return (a.clone())
+  )JIT";
+
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{2, 5};
+  std::vector<IValue> args{size0, dtype, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{size1, dtype, at::kStrided, cpu, false};
+  testStaticRuntime(script, args);
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, Linear) {
   const auto linear_script = R"JIT(
     def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
@@ -2159,21 +2185,30 @@ TEST(StaticRuntime, Where) {
         return torch.where(x > 0, x, y).clone()
   )JIT";
 
-  std::vector<IValue> args1_fallback = {at::randn({2, 2}), at::randn({2, 2})};
-  std::vector<IValue> args2_fallback = {at::randn({3, 6}), at::randn({3, 6})};
+  std::vector<IValue> args1 = {at::randn({2, 2}), at::randn({2, 2})};
+  std::vector<IValue> args2 = {at::randn({8, 10}), at::randn({8, 10})};
 
-  std::vector<IValue> args1_nnc = {
-      at::randint(-10, 10, {2, 2}, at::kLong),
-      at::randint(-10, 10, {2, 2}, at::kLong)};
-  std::vector<IValue> args2_nnc = {
-      at::randint(-10, 10, {3, 6}, at::kLong),
-      at::randint(-10, 10, {3, 6}, at::kLong)};
+  testStaticRuntime(where_script, args1);
+  testStaticRuntime(where_script, args1, args2);
+}
 
-  testStaticRuntime(where_script, args1_fallback);
-  testStaticRuntime(where_script, args1_fallback, args2_fallback);
+TEST(StaticRuntime, WhereBroadcast) {
+  const auto where_script = R"JIT(
+    def forward(self, cond_1d, x, y):
+        shape = [-1] + [1] * (x.dim() - 1)
+        cond = cond_1d.view(shape)
+        return torch.where(cond, x, y).clone()
+  )JIT";
 
-  testStaticRuntime(where_script, args1_nnc);
-  testStaticRuntime(where_script, args1_nnc, args2_nnc);
+  std::vector<IValue> args1 = {
+      at::tensor({0, 1}).to(at::kBool), at::randn({2, 2}), at::randn({2, 2})};
+  std::vector<IValue> args2 = {
+      at::tensor({1, 0, 0}).to(at::kBool),
+      at::randn({3, 6}),
+      at::randn({3, 6})};
+
+  testStaticRuntime(where_script, args1);
+  testStaticRuntime(where_script, args1, args2);
 }
 
 TEST(StaticRuntime, View) {
