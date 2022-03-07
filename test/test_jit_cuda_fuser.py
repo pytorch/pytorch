@@ -11,7 +11,7 @@ import operator
 import torch
 from torch.nn import functional
 
-from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM, IS_WINDOWS
+from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
@@ -27,7 +27,7 @@ from torch.autograd.gradcheck import gradcheck
 
 from typing import List
 
-RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM and not IS_WINDOWS
+RUN_NVFUSER = RUN_CUDA and not TEST_WITH_ROCM
 CUDA_MAJOR, CUDA_MINOR = 0, 0
 
 if RUN_NVFUSER and torch.version.cuda is not None:
