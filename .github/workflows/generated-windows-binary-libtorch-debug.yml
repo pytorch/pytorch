@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/windows_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-binary-libtorch-cxx11-abi
+name: windows-binary-libtorch-debug
 
 on:
   push:
@@ -22,7 +22,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: windows-binary-libtorch-cxx11-abi
+  BUILD_ENVIRONMENT: windows-binary-libtorch-debug
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   IN_CI: 1
   IS_GHA: 1
@@ -32,11 +32,11 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: windows-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: windows-binary-libtorch-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  libtorch-cpu-shared-with-deps-cxx11-abi-build:
+  libtorch-cpu-shared-with-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -48,8 +48,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -114,7 +114,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-cxx11-abi
+          name: libtorch-cpu-shared-with-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -131,9 +131,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
+    needs: libtorch-cpu-shared-with-deps-debug-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -145,8 +145,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -180,7 +180,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-with-deps-cxx11-abi
+          name: libtorch-cpu-shared-with-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -226,10 +226,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-cxx11-abi-test
+    needs: libtorch-cpu-shared-with-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -239,8 +239,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -293,7 +293,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-with-deps-cxx11-abi
+          name: libtorch-cpu-shared-with-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -346,7 +346,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-without-deps-cxx11-abi-build:
+  libtorch-cpu-shared-without-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -358,8 +358,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -424,7 +424,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-shared-without-deps-cxx11-abi
+          name: libtorch-cpu-shared-without-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -441,9 +441,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-shared-without-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-cxx11-abi-build
+    needs: libtorch-cpu-shared-without-deps-debug-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -455,8 +455,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -490,7 +490,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-without-deps-cxx11-abi
+          name: libtorch-cpu-shared-without-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -536,10 +536,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cpu-shared-without-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-cxx11-abi-test
+    needs: libtorch-cpu-shared-without-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -549,8 +549,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -603,7 +603,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-without-deps-cxx11-abi
+          name: libtorch-cpu-shared-without-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -656,7 +656,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-with-deps-cxx11-abi-build:
+  libtorch-cpu-static-with-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -668,8 +668,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -734,7 +734,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-static-with-deps-cxx11-abi
+          name: libtorch-cpu-static-with-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -751,9 +751,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-static-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-cxx11-abi-build
+    needs: libtorch-cpu-static-with-deps-debug-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -765,8 +765,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -800,7 +800,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-with-deps-cxx11-abi
+          name: libtorch-cpu-static-with-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -846,10 +846,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cpu-static-with-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-cxx11-abi-test
+    needs: libtorch-cpu-static-with-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -859,8 +859,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -913,7 +913,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-with-deps-cxx11-abi
+          name: libtorch-cpu-static-with-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -966,7 +966,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-without-deps-cxx11-abi-build:
+  libtorch-cpu-static-without-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -978,8 +978,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1044,7 +1044,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-static-without-deps-cxx11-abi
+          name: libtorch-cpu-static-without-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1061,9 +1061,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cpu-static-without-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-cxx11-abi-build
+    needs: libtorch-cpu-static-without-deps-debug-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1075,8 +1075,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1110,7 +1110,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-without-deps-cxx11-abi
+          name: libtorch-cpu-static-without-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1156,10 +1156,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cpu-static-without-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-cxx11-abi-test
+    needs: libtorch-cpu-static-without-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1169,8 +1169,8 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1223,7 +1223,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-without-deps-cxx11-abi
+          name: libtorch-cpu-static-without-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -1276,7 +1276,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-with-deps-cxx11-abi-build:
+  libtorch-cuda11_3-shared-with-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1289,8 +1289,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1355,7 +1355,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_3-shared-with-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1372,9 +1372,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-with-deps-cxx11-abi-build
+    needs: libtorch-cuda11_3-shared-with-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -1387,8 +1387,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1422,7 +1422,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_3-shared-with-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1468,10 +1468,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_3-shared-with-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-with-deps-cxx11-abi-test
+    needs: libtorch-cuda11_3-shared-with-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1482,8 +1482,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1536,7 +1536,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_3-shared-with-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -1589,7 +1589,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-without-deps-cxx11-abi-build:
+  libtorch-cuda11_3-shared-without-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1602,8 +1602,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1668,7 +1668,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_3-shared-without-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1685,9 +1685,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-shared-without-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-without-deps-cxx11-abi-build
+    needs: libtorch-cuda11_3-shared-without-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -1700,8 +1700,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1735,7 +1735,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_3-shared-without-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1781,10 +1781,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_3-shared-without-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-without-deps-cxx11-abi-test
+    needs: libtorch-cuda11_3-shared-without-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1795,8 +1795,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1849,7 +1849,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_3-shared-without-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -1902,7 +1902,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-with-deps-cxx11-abi-build:
+  libtorch-cuda11_3-static-with-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1915,8 +1915,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -1981,7 +1981,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_3-static-with-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1998,9 +1998,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-static-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-with-deps-cxx11-abi-build
+    needs: libtorch-cuda11_3-static-with-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2013,8 +2013,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2048,7 +2048,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_3-static-with-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2094,10 +2094,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_3-static-with-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-with-deps-cxx11-abi-test
+    needs: libtorch-cuda11_3-static-with-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2108,8 +2108,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2162,7 +2162,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_3-static-with-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -2215,7 +2215,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-without-deps-cxx11-abi-build:
+  libtorch-cuda11_3-static-without-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2228,8 +2228,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2294,7 +2294,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_3-static-without-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2311,9 +2311,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_3-static-without-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-without-deps-cxx11-abi-build
+    needs: libtorch-cuda11_3-static-without-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2326,8 +2326,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2361,7 +2361,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_3-static-without-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2407,10 +2407,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_3-static-without-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-without-deps-cxx11-abi-test
+    needs: libtorch-cuda11_3-static-without-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2421,8 +2421,8 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2475,7 +2475,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_3-static-without-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -2528,7 +2528,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-build:
+  libtorch-cuda11_5-shared-with-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2541,8 +2541,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2607,7 +2607,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_5-shared-with-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2624,9 +2624,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-shared-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-cxx11-abi-build
+    needs: libtorch-cuda11_5-shared-with-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2639,8 +2639,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2674,7 +2674,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_5-shared-with-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2720,10 +2720,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_5-shared-with-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-cxx11-abi-test
+    needs: libtorch-cuda11_5-shared-with-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2734,8 +2734,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2788,7 +2788,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-with-deps-cxx11-abi
+          name: libtorch-cuda11_5-shared-with-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -2841,7 +2841,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-build:
+  libtorch-cuda11_5-shared-without-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2854,8 +2854,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2920,7 +2920,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_5-shared-without-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2937,9 +2937,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-shared-without-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-cxx11-abi-build
+    needs: libtorch-cuda11_5-shared-without-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2952,8 +2952,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -2987,7 +2987,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_5-shared-without-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -3033,10 +3033,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_5-shared-without-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-cxx11-abi-test
+    needs: libtorch-cuda11_5-shared-without-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3047,8 +3047,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3101,7 +3101,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-without-deps-cxx11-abi
+          name: libtorch-cuda11_5-shared-without-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -3154,7 +3154,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-build:
+  libtorch-cuda11_5-static-with-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3167,8 +3167,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3233,7 +3233,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_5-static-with-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -3250,9 +3250,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-static-with-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-cxx11-abi-build
+    needs: libtorch-cuda11_5-static-with-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -3265,8 +3265,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3300,7 +3300,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_5-static-with-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -3346,10 +3346,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-with-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_5-static-with-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-cxx11-abi-test
+    needs: libtorch-cuda11_5-static-with-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3360,8 +3360,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3414,7 +3414,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-with-deps-cxx11-abi
+          name: libtorch-cuda11_5-static-with-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -3467,7 +3467,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-build:
+  libtorch-cuda11_5-static-without-deps-debug-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3480,8 +3480,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3546,7 +3546,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_5-static-without-deps-debug
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -3563,9 +3563,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-test:  # Testing
+  libtorch-cuda11_5-static-without-deps-debug-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-cxx11-abi-build
+    needs: libtorch-cuda11_5-static-without-deps-debug-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -3578,8 +3578,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3613,7 +3613,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_5-static-without-deps-debug
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -3659,10 +3659,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-without-deps-cxx11-abi-upload:  # Uploading
+  libtorch-cuda11_5-static-without-deps-debug-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-cxx11-abi-test
+    needs: libtorch-cuda11_5-static-without-deps-debug-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3673,8 +3673,8 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
+      LIBTORCH_CONFIG: debug
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -3727,7 +3727,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-without-deps-cxx11-abi
+          name: libtorch-cuda11_5-static-without-deps-debug
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
