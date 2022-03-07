@@ -517,7 +517,7 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     const auto& other = r.tensor(0);
     // BASE_CTOR (aka torch.Tensor) is now relaxed to accept any
     // dtype; previously it was "float" biased
-    if (ctor_or_new == CtorOrNew::CTOR) {
+    if (ctor_or_new != CtorOrNew::BASE_CTOR) {
       options = options.dtype(scalar_type);
       TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
                        options, " (got ", other.options(), ")");
