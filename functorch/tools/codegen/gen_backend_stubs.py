@@ -5,7 +5,7 @@ import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
-from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml, NamespaceHelper
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -223,10 +223,12 @@ def gen_dispatchkey_nativefunc_headers(
         dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
         grouped_native_functions))))
 
+    ns_helper = NamespaceHelper(cpp_namespace)
     fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.h', 'DispatchKeyNativeFunctions.h', lambda: {
         'generated_comment': generated_comment,
-        'cpp_namespace': cpp_namespace,
+        'namespace_prologue': ns_helper.prologue,
         'class_name': class_name,
+        'namespace_epilogue': ns_helper.epilogue,
         'dispatch_declarations': backend_declarations + autograd_declarations,
     })
 
