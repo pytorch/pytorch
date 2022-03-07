@@ -2123,6 +2123,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LinspaceModel(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_linspace_negative_start(self):
+        class LinspaceModel(torch.nn.Module):
+            def forward(self, start, end, steps):
+                return torch.linspace(start, end, steps)
+
+        x = torch.tensor(-1, dtype=torch.float)
+        y = torch.tensor(1, dtype=torch.float)
+        z = torch.tensor(6, dtype=torch.int)
+        self.run_test(LinspaceModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats_out(self):
         class ArangeModelEnd(torch.nn.Module):
             def forward(self, end):
