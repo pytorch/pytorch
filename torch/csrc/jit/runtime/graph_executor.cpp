@@ -42,6 +42,7 @@
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/logging.h>
 
 #include <cstdint>
@@ -51,7 +52,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 
 namespace torch {
 namespace jit {
