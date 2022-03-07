@@ -48,6 +48,7 @@ TORCH_API std::vector<Shape> compute_shape_nll_loss2d_backward(const at::Tensor 
 TORCH_API std::vector<Shape> compute_shape_nll_loss2d_forward(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction, int64_t ignore_index);
 TORCH_API std::vector<Shape> compute_shape_relu(const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_relu_(at::Tensor & self);
+TORCH_API std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef repeats);
 TORCH_API std::vector<Shape> compute_shape_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta);
 TORCH_API std::vector<Shape> compute_shape_sort(const at::Tensor & self, int64_t dim, bool descending);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, bool unbiased);
