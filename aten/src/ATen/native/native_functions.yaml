@@ -4803,15 +4803,17 @@
 - func: _weight_norm(Tensor v, Tensor g, int dim=0) -> Tensor
   variants: function
 
-- func: _weight_norm_cuda_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
+- func: _weight_norm_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
   variants: function
   dispatch:
+    CPU: weight_norm_cpu
     CUDA: weight_norm_cuda
 
-- func: _weight_norm_cuda_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
+- func: _weight_norm_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CUDA: weight_norm_cuda_backward
+    CPU: weight_norm_backward_cpu
+    CUDA: weight_norm_backward_cuda
 
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
   variants: function

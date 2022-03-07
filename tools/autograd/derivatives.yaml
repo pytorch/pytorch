@@ -1651,8 +1651,8 @@
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
 # to be running backward with create_graph=True, fall back to a backward function that uses
 # differentiable ops.
-- name: _weight_norm_cuda_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
-  v, g: "grad.defined() ? (GradMode::is_enabled() ? _weight_norm_differentiable_backward(grad.contiguous(), v, g, result1, dim) : _weight_norm_cuda_interface_backward(grad.contiguous(), v, g, result1, dim)) : std::tuple<Tensor, Tensor>()"
+- name: _weight_norm_interface(Tensor v, Tensor g, int dim=0) -> (Tensor, Tensor)
+  v, g: "grad.defined() ? (GradMode::is_enabled() ? _weight_norm_differentiable_backward(grad.contiguous(), v, g, result1, dim) : _weight_norm_interface_backward(grad.contiguous(), v, g, result1, dim)) : std::tuple<Tensor, Tensor>()"
 
 - name: zero_(Tensor(a!) self) -> Tensor(a!)
   self: zeros_like(grad)

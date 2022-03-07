@@ -4146,37 +4146,38 @@ class TestNN(NNTestCase):
 
 
     def test_weight_norm(self):
-        input = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        expected_output = m(input)
+        for dtype in [torch.float, torch.bfloat16]:
+            input = torch.randn(3, 40, dtype=dtype)
+            m = nn.Linear(40, 50).to(dtype=dtype)
+            expected_output = m(input)
 
-        # add weight normalization
-        m = torch.nn.utils.weight_norm(m)
-        self.assertEqual(m.weight_v.size(), m.weight.size())
-        self.assertEqual(m.weight_g.size(), (7, 1))
-        self.assertEqual(m(input), expected_output)
-
-        # remove weight norm
-        m = torch.nn.utils.remove_weight_norm(m)
-        self.assertFalse(hasattr(m, 'weight_g'))
-        self.assertFalse(hasattr(m, 'weight_v'))
-        self.assertEqual(m(input), expected_output)
-
-        # test with dim=1
-        m = torch.nn.utils.weight_norm(m, dim=1)
-        self.assertEqual(m.weight_v.size(), m.weight.size())
-        self.assertEqual(m.weight_g.size(), (1, 5))
-        self.assertEqual(m(input), expected_output)
-
-        # test with dim=None
-        m = nn.Linear(5, 7)
-        expected_output = m(input)
-        m = torch.nn.utils.weight_norm(m, dim=None)
-        self.assertEqual(m(input), expected_output)
-
-        with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+            # add weight normalization
             m = torch.nn.utils.weight_norm(m)
-            m = torch.nn.utils.weight_norm(m)
+            self.assertEqual(m.weight_v.size(), m.weight.size())
+            self.assertEqual(m.weight_g.size(), (50, 1))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # remove weight norm
+            m = torch.nn.utils.remove_weight_norm(m)
+            self.assertFalse(hasattr(m, 'weight_g'))
+            self.assertFalse(hasattr(m, 'weight_v'))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # test with dim=1
+            m = torch.nn.utils.weight_norm(m, dim=1)
+            self.assertEqual(m.weight_v.size(), m.weight.size())
+            self.assertEqual(m.weight_g.size(), (1, 40))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # test with dim=None
+            m = nn.Linear(40, 50).to(dtype=dtype)
+            expected_output = m(input)
+            m = torch.nn.utils.weight_norm(m, dim=None)
+            self.assertEqual(m(input), expected_output)
+
+            with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+                m = torch.nn.utils.weight_norm(m)
+                m = torch.nn.utils.weight_norm(m)
 
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
