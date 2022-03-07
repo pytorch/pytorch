@@ -542,7 +542,7 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     convert_custom_config_dict)
+                     is_reference, convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():
