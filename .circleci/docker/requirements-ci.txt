@@ -73,7 +73,7 @@ librosa>=0.6.2
 #test that import: test_module_init.py, test_modules.py, test_nn.py,
 #test_testing.py
 
-MonkeyType
+#MonkeyType # breaks pytorch-xla-linux-bionic-py3.7-clang8
 #Description: collects runtime types of function arguments and return
 #values, and can automatically generate stub files
 #Pinned versions:
