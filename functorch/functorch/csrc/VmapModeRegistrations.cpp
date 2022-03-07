@@ -34,15 +34,6 @@ TORCH_LIBRARY_IMPL(_, FuncTorchVmapMode, m) {
 
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
-  UNSUPPORTED_RANDOM(bernoulli);
-  UNSUPPORTED_RANDOM2(bernoulli, out);
-  UNSUPPORTED_RANDOM2(bernoulli, p);
-
-  UNSUPPORTED_RANDOM(multinomial);
-  UNSUPPORTED_RANDOM2(multinomial, out);
-
-  UNSUPPORTED_RANDOM(poisson);
-
   UNSUPPORTED_RANDOM(randint_like);
   UNSUPPORTED_RANDOM2(randint_like, low_dtype);
 }
