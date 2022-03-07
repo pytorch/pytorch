@@ -234,6 +234,6 @@ is under active development and this behavior may change in the future.
 ## Further Reading
 
 Additional documentation is available at the
-[PyTorch/LTC repo](https://github.com/pytorch/ltc/). More examples of running
+[PyTorch/LTC repo](https://github.com/pytorch/pytorch/tree/lazy_tensor_staging). More examples of running
 networks on TPUs are available
 [here](https://github.com/pytorch-tpu/examples).
