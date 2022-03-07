@@ -71,25 +71,31 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
 
 template <>
 struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::BFloat16> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<c10::Half> apply(
-      c10::BFloat16 src) {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::BFloat16 src) {
     return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
 struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Half> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<c10::Half> apply(
-      c10::Half src) {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::Half src) {
     return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::complex<double>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<c10::Half> apply(
-      c10::complex<double> src) {
-    return static_cast<c10::complex<c10::Half>>(static_cast<c10::complex<float>>(src));
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::complex<double>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::complex<double> src) {
+    return static_cast<c10::complex<c10::Half>>(
+        static_cast<c10::complex<float>>(src));
   }
 };
 
