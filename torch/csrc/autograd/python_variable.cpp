@@ -1,6 +1,3 @@
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/python_variable_indexing.h>
-
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
