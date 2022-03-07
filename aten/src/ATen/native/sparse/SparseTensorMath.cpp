@@ -1496,11 +1496,14 @@ scalar_t binary_search_strided_rightmost(scalar_t search_val, TensorAccessor<sca
 
   int64_t left_ind = 0;
   int64_t right_ind = length - 1;
-  int64_t mid_ind; // NOLINT(cppcoreguidelines-init-variables)
+  // This value should be overwritten in the loop so we use
+  // a destructive initial value to ensure disaster if that
+  // turns out not to be the case.
+  int64_t mid_ind = std::numeric_limits<int64_t>::max();
   bool done_searching = false;
 
   while (!done_searching) {
-    mid_ind = (left_ind+right_ind) >> 1;
+    mid_ind = left_ind + (right_ind - left_ind) / 2;
     scalar_t mid_val = sorted_arr_accessor[sorted_arr_begin_idx + mid_ind];
 
     if (mid_val > search_val) {
