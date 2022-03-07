@@ -1,7 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BatchLinearAlgebra.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
@@ -9,12 +11,30 @@
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
-#include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_inv_out_helper_native.h>
+#include <ATen/ops/_linalg_qr_helper_native.h>
+#include <ATen/ops/_solve_helper_native.h>
+#include <ATen/ops/_symeig_helper_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/linalg_eigh.h>
+#include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/lstsq_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #if AT_MAGMA_ENABLED()
 #include <magma_types.h>
@@ -26,8 +46,12 @@ const bool use_magma_ = true;
 namespace {
 struct MagmaInitializer {
   MagmaInitializer() {
+#if defined(BUILD_LAZY_CUDA_LINALG)
+    magma_init();
+#else
     ::at::cuda::detail::set_magma_init_fn([]{ magma_init(); });
-  };
+#endif
+  }
 } initializer;
 }  // namespace (anonymous)
 
@@ -38,6 +62,12 @@ const bool use_magma_ = false;
 
 namespace at {
 namespace native {
+#if defined(BUILD_LAZY_CUDA_LINALG)
+// All registrations with PyTorch runtime should be done dynamically
+// so if library is lazy loaded it must not export anything, otherwise
+// it can result in symbol clashes
+namespace lazy_linalg {
+#endif
 
 #if AT_MAGMA_ENABLED()
 template<class scalar_t>
@@ -3245,25 +3275,22 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 #endif  // AT_MAGMA_ENABLED()
 }
 
-std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
-    const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {
-  const auto dtype = A.scalar_type();
-  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
-              A.scalar_type(), " and ", B.scalar_type());
-  TORCH_CHECK(A_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", A_out.scalar_type());
-  TORCH_CHECK(B_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", B_out.scalar_type());
-  Tensor A_tmp, B_tmp;
-  std::tie(B_tmp, A_tmp) = native::legacy_lstsq_cuda(B, A);
-  resize_output(A_out, A_tmp.sizes());
-  A_out.copy_(A_tmp);
-  resize_output(B_out, B_tmp.sizes());
-  B_out.copy_(B_tmp);
-  return std::tuple<Tensor&, Tensor&>(B_out, A_out);
-}
 
+#if defined(BUILD_LAZY_CUDA_LINALG)
+struct DispatchInitializer {
+  DispatchInitializer() {
+    cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
+                                       _symeig_helper_cuda,
+                                       _linalg_qr_helper_cuda,
+                                       _cholesky_solve_helper_cuda,
+                                       legacy_lstsq_cuda,
+                                       _linalg_inv_out_helper_cuda};
+    cuda::detail::registerLinalgDispatch(disp);
+  };
+} initializer;
 
+}  // namespace lazy_linalg
+#endif
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY

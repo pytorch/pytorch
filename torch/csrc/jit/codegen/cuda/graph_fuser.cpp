@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -1708,6 +1709,13 @@ void guardFusionGroups(
     //         b. insert guard logic of profile_ivalue with if block
     //         c. restore conditional constant to non-constant for fallback
     guardFusionGroup(fusion, fusion_value_to_runtime_size);
+  }
+
+  if (GRAPH_DEBUG_ENABLED) {
+    GRAPH_DEBUG("Exporting all NVFuser fusions:");
+    for (Node* fusion : fusions) {
+      GRAPH_EXPORT("", fusion->g(attr::Subgraph));
+    }
   }
 }
 

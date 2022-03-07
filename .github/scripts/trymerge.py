@@ -60,9 +60,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
         totalCount
       }
       changedFiles
-      files(last: 100) {
+      files(first: 100) {
         nodes {
           path
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
         }
       }
       reviews(last: 100) {
@@ -84,6 +88,24 @@ query ($owner: String!, $name: String!, $number: Int!) {
           editor {
             login
           }
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_NEXT_FILES_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      files(first: 100, after: $cursor) {
+        nodes {
+          path
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
         }
       }
     }
@@ -172,6 +194,7 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
+        self.changed_files: Optional[List[str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -198,10 +221,24 @@ class GitHubPR:
         return int(self.info["changedFiles"])
 
     def get_changed_files(self) -> List[str]:
-        rc = [x["path"] for x in self.info["files"]["nodes"]]
-        if len(rc) != self.get_changed_files_count():
+        if self.changed_files is None:
+            info = self.info
+            self.changed_files = []
+            # Do not try to fetch more than 10K files
+            for _ in range(100):
+                self.changed_files += [x["path"] for x in info["files"]["nodes"]]
+                if not info["files"]["pageInfo"]["hasNextPage"]:
+                    break
+                rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
+                                name=self.project,
+                                owner=self.org,
+                                number=self.pr_num,
+                                cursor=info["files"]["pageInfo"]["endCursor"])
+                info = rc["data"]["repository"]["pullRequest"]
+
+        if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
-        return rc
+        return self.changed_files
 
     def _get_reviewers(self) -> List[Tuple[str, str]]:
         reviews_count = int(self.info["reviews"]["totalCount"])
@@ -226,7 +263,11 @@ class GitHubPR:
         return cast(str, self.info["author"]["login"])
 
     def get_committer_login(self, num: int = 0) -> str:
-        return cast(str, self.info["commits"]["nodes"][num]["commit"]["author"]["user"]["login"])
+        user = self.info["commits"]["nodes"][num]["commit"]["author"]["user"]
+        # If author is not github user, user node will be null
+        if user is None:
+            return ""
+        return cast(str, user["login"])
 
     def get_committer_author(self, num: int = 0) -> str:
         node = self.info["commits"]["nodes"][num]["commit"]["author"]
@@ -280,6 +321,7 @@ class GitHubPR:
 
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
+        approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
@@ -296,11 +338,16 @@ class GitHubPR:
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
+                approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo)
 
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
             repo.cherry_pick(rev)
-            repo.amend_commit_message(re.sub(RE_GHSTACK_SOURCE_ID, "", msg))
+            msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
+            msg += f"\nApproved by: {approved_by_urls}\n"
+            repo.amend_commit_message(msg)
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
@@ -308,8 +355,11 @@ class GitHubPR:
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
             msg = self.get_title() + "\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+            msg += f"Approved by: {approved_by_urls}\n"
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
@@ -404,11 +454,16 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of @{author_login}\n"
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}\n"
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     if not dry_run:
         gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
+
+
+def prefix_with_github_url(suffix_str: str) -> str:
+    return f"https://github.com/{suffix_str}"
+
 
 def main() -> None:
     args = parse_args()

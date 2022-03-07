@@ -4139,10 +4139,8 @@ class TestQuantizedConv(TestCase):
            W_zero_point=st.lists(st.integers(0, 0), min_size=1, max_size=2),
            Y_scale=st.floats(4.2, 5.6),
            Y_zero_point=st.sampled_from([0]),
-           # TODO: enable bias
-           use_bias=st.sampled_from([False]),
-           # TODO: enable relu
-           use_relu=st.sampled_from([False]),
+           use_bias=st.booleans(),
+           use_relu=st.booleans(),
            # TODO: enable channelwise
            use_channelwise=st.sampled_from([False]))
     @skipIfNoFBGEMM
@@ -4182,8 +4180,10 @@ class TestQuantizedConv(TestCase):
         pads = (pad_h, pad_w)
         dilations = (dilation, dilation)
 
-        qconv = torch.ops.quantized.conv2d_cudnn
-        assert not use_relu, "conv2d_relu_cudnn is not supported yet"
+        if use_relu:
+            qconv = torch.ops.quantized.conv2d_relu_cudnn
+        else:
+            qconv = torch.ops.quantized.conv2d_cudnn
         conv_op = torch.nn.Conv2d(
             input_channels,
             output_channels,
