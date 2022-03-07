@@ -22,6 +22,18 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     Args:
         datapipe: Source MapDataPipe
         fn: Function being applied to each item
+
+    Example:
+        >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
+        >>> def add_one(x):
+        ...     return x + 1
+        >>> dp = SequenceWrapper(range(10))
+        >>> map_dp_1 = dp.map(add_one)
+        >>> list(map_dp_1)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        >>> map_dp_2 = Mapper(dp, lambda x: x + 1)
+        >>> list(map_dp_2)
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     """
     datapipe: MapDataPipe
     fn: Callable
