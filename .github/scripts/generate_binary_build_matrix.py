@@ -47,6 +47,8 @@ CONDA_CONTAINER_IMAGES = {
 
 PRE_CXX11_ABI = "pre-cxx11"
 CXX11_ABI = "cxx11-abi"
+RELEASE = "release"
+DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
@@ -140,10 +142,11 @@ def generate_libtorch_matrix(os: str, abi_version: str) -> List[Dict[str, str]]:
                         gpu_arch_type, gpu_arch_version
                     ),
                     "libtorch_variant": libtorch_variant,
-                    "devtoolset": abi_version,
+                    "libtorch_config": abi_version if os == "windows" else "",
+                    "devtoolset": abi_version if os != "windows" else "",
                     "container_image": LIBTORCH_CONTAINER_IMAGES[
                         (arch_version, abi_version)
-                    ],
+                    ] if os != "windows" else "",
                     "package_type": "libtorch",
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"

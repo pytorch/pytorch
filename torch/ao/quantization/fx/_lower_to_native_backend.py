@@ -221,7 +221,10 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   1) The inner reference module class
 #   2) The replacement quantized module class for lowering
 LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
-    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU)
+    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
+    nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
+    nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
+    nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
 }
 
 # Mapping from a functional to lower to a 2-tuple of
