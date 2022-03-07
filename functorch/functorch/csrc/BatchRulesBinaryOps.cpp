@@ -262,10 +262,13 @@ std::tuple<Tensor,optional<int64_t>> cdist_backward_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
+  #define BINARY_RANDOM_POINTWISE(op) \
+  m.impl(#op, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN(op)));
 #define BINARY_RANDOM_POINTWISE2(op, overload) \
   m.impl(#op"."#overload, BINARY_RANDOM_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
 
   BINARY_RANDOM_POINTWISE2(normal, Tensor_Tensor);
+  BINARY_RANDOM_POINTWISE(binomial);
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {

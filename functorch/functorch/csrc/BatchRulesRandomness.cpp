@@ -123,7 +123,7 @@ Tensor randperm_batching_rule(int64_t n, ExtraArgs... extra_args) {
 }
 
 template <typename F, F Func, typename... ExtraArgs>
-Tensor normal_batching_rule(const Tensor& tensor, double scalar, ExtraArgs... extra_args) {
+Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   const auto cur_level = maybe_layer->layerId();
@@ -142,7 +142,7 @@ Tensor normal_batching_rule(const Tensor& tensor, double scalar, ExtraArgs... ex
   if (randomness == RandomnessType::Different && !tensor_bdim) {
     tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
   }
-  auto out = Func(tensor_value, scalar, std::forward<ExtraArgs>(extra_args)...);
+  auto out = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
   if (randomness == RandomnessType::Same && !tensor_bdim) {
     return out;
   }
@@ -249,10 +249,20 @@ struct RandpermBatchRuleHelper<F, Func, typelist<T1, T...>> {
 template <typename A, A a, typename C>
 struct UnaryPointwiseRandomBatchRule;
 
-template <typename F, F Func, typename A0, typename A1, typename... T>
-struct UnaryPointwiseRandomBatchRule<F, Func, typelist<A0, A1, T...>> {
-  static Tensor apply(const Tensor& tensor, double scalar, T... extra_args) {
-    return normal_batching_rule<F, Func, T...>(tensor, scalar, std::forward<T>(extra_args)...);
+template <typename F, F Func, typename A0, typename... T>
+struct UnaryPointwiseRandomBatchRule<F, Func, typelist<A0, T...>> {
+  static Tensor apply(const Tensor& tensor, T... extra_args) {
+    return unary_pointwise_random_batch_rule<F, Func, T...>(tensor, std::forward<T>(extra_args)...);
+  }
+};
+
+template <typename A, A a, typename C>
+struct NormalPointwiseBatchRule;
+
+template <typename F, F Func, typename A0, typename... T>
+struct NormalPointwiseBatchRule<F, Func, typelist<A0, T...>> {
+  static Tensor apply(const Tensor& tensor, T... extra_args) {
+    return unary_pointwise_random_batch_rule<F, Func, T...>(tensor, std::forward<T>(extra_args)...);
   }
 };
 
@@ -267,8 +277,8 @@ struct UnaryPointwiseRandomLeadingFloatBatchRule;
 template <typename F, F Func, typename A0, typename A1, typename... T>
 struct UnaryPointwiseRandomLeadingFloatBatchRule<F, Func, typelist<A0, A1, T...>> {
   static Tensor apply(double scalar, const Tensor& tensor, T... extra_args) {
-    return normal_batching_rule<decltype(&normal_wrapper<F, Func, T...>),
-                                         &normal_wrapper<F, Func, T...>,
+    return unary_pointwise_random_batch_rule<decltype(&normal_wrapper<F, Func, T...>),
+                                         &normal_wrapper<F, Func, T...>, double,
                                          T...>(tensor, scalar, std::forward<T>(extra_args)...);
   }
 };
@@ -329,7 +339,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
       RandpermBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                             c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
 
-  #define UNARY_POINTWISE_RANDOM(op, overload) \
+  #define UNARY_POINTWISE_RANDOM(op) \
+    m.impl(#op, SINGLE_ARG(\
+      UnaryPointwiseRandomBatchRule<decltype(&ATEN_FN(op)), &ATEN_FN(op), \
+                                    c10::guts::function_traits<decltype(ATEN_FN(op))>::parameter_types>::apply))
+
+  #define UNARY_POINTWISE_RANDOM2(op, overload) \
     m.impl(#op"."#overload, SINGLE_ARG(\
       UnaryPointwiseRandomBatchRule<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                                     c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
@@ -367,15 +382,22 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 
   m.impl("bernoulli_.Tensor", at::functorch::bernoulli_inplace_Tensor_batching_rule);
   RANDOM_INPLACE_BATCH_RULE2(bernoulli_, float);
+  UNARY_POINTWISE_RANDOM2(bernoulli, p);
 
   RANDPERM_BATCH_RULE(randperm);
   RANDPERM_BATCH_RULE2(randperm, generator);
 
   RAND_TWO_LEADING_SCALARS_BATCH_RULE(normal, float_float);
-  UNARY_POINTWISE_RANDOM(normal, Tensor_float);
+  UNARY_POINTWISE_RANDOM2(normal, Tensor_float);
   UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
 
   m.impl("native_dropout", native_dropout_batching_rule); // needs special casing because cuda version doesn't call bernoulli
+
+  UNARY_POINTWISE_RANDOM(_standard_gamma);
+  UNARY_POINTWISE_RANDOM(_sample_dirichlet);
+  UNARY_POINTWISE_RANDOM(multinomial);
+  UNARY_POINTWISE_RANDOM(poisson);
+  UNARY_POINTWISE_RANDOM(bernoulli);
 
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
@@ -387,6 +409,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef RANDPERM_BATCH_RULE
   #undef RANDPERM_BATCH_RULE2
   #undef UNARY_POINTWISE_RANDOM
+  #undef UNARY_POINTWISE_RANDOM2
   #undef UNARY_POINTWISE_RANDOM_LEADING_FLOAT
 }
 }} // namespace at::functorch
