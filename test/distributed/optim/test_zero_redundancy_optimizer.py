@@ -166,7 +166,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         # Check that the exposed `param_groups`` are on the proper device
         self.assertEqual(o.param_groups[0]["params"][0].device, x.device)
 
-    @common_distributed.skip_if_no_gpu
     def test_lr_scheduler(self):
         """Check that a normal PyTorch ``lr_scheduler`` is usable with
         ZeroRedundancyOptimizer."""
@@ -190,7 +189,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
             s2.step()
             self.assertEqual(x, x2)
 
-    @common_distributed.skip_if_no_gpu
     def test_step_with_kwargs(self):
         """Check that the ``step(**kwargs)`` interface is properly exposed."""
         self.dist_init(self.rank)
@@ -211,7 +209,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertEqual(kwarg, [5])
         self.assertEqual(x, torch.tensor([0.9], device=self.device))
 
-    @common_distributed.skip_if_no_gpu
     def test_step_with_extra_inner_key(self):
         """Check that ZeroRedundancyOptimizer wrapping an optimizer that adds
         extra keys to ``param_groups`` exposes those keys through ZeRO's own
@@ -232,7 +229,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertEqual(o.param_groups[0]["new_key"], 0.1)
         self.assertEqual(x, torch.tensor([0.9], device=self.device))
 
-    @common_distributed.skip_if_no_gpu
     def test_step_without_closure(self):
         """Check that the ``step()`` method (without closure) is handled as
         expected."""
@@ -457,6 +453,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 self.assertEqual(m.weight, torch.tensor([[1.1]]))
                 self.assertEqual(m.bias, torch.tensor([2.1]))
 
+    @common_distributed.skip_if_no_gpu
     def test_lr_scheduler(self):
         """Check that a normal PyTorch ``lr_scheduler`` is usable with
         ZeroRedundancyOptimizer."""
