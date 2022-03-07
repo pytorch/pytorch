@@ -1457,10 +1457,16 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
 class TestReferenceQuantizedModule(QuantizationTestCase):
     def _quant_dequant_weight(self, weight, weight_qparams):
+        qscheme = weight_qparams["qscheme"]
         scale = weight_qparams["scale"]
         zero_point = weight_qparams["zero_point"]
         dtype = weight_qparams["dtype"]
-        weight = torch.quantize_per_tensor(weight, scale, zero_point, dtype)
+        if qscheme == torch.per_tensor_affine:
+            weight = torch.quantize_per_tensor(weight, scale, zero_point, dtype)
+        else:
+            # per channel affine
+            axis = weight_qparams["axis"]
+            weight = torch.quantize_per_channel(weight, scale, zero_point, axis, dtype)
         weight = weight.dequantize()
         return weight
 
@@ -1590,4 +1596,67 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
 
             fp32_res = fp32_rnn(x, (h, c))
             ref_res = ref_rnn(x, (h, c))
+            self.assertEqual(fp32_res, ref_res)
+
+    def test_sparse(self):
+        """ Embedding and EmbeddingBag
+        """
+        num_embeddings = 10
+        embedding_dim = 3
+        # embedding input
+        ex = torch.LongTensor([[1, 2, 4, 5], [4, 3, 2, 9]])
+
+        # embedding bag input
+        ebx = torch.tensor([1, 2, 4, 5, 4, 3, 2, 9], dtype=torch.long)
+        offsets = torch.tensor([0, 4], dtype=torch.long)
+
+        fp_to_ref = {
+            nn.Embedding: (nnqr.Embedding, (ex,)),
+            nn.EmbeddingBag: (nnqr.EmbeddingBag, (ebx, offsets)),
+        }
+
+        per_tensor_weight_qparams = {
+            'qscheme': torch.per_tensor_affine,
+            'dtype': torch.quint8,
+            'scale': 2.0,
+            'zero_point': 5,
+        }
+
+        per_channel_weight_qparams = {
+            'qscheme': torch.per_channel_affine,
+            'dtype': torch.quint8,
+            'scale': torch.randn(10),
+            'zero_point': torch.randint(0, 255, (10,)),
+            'axis': 0,
+        }
+
+        per_channel_weight_qparams_quint4x2 = {
+            'qscheme': torch.per_channel_affine_float_qparams,
+            'dtype': torch.quint4x2,
+            'scale': torch.randn(10),
+            'zero_point': torch.randint(0, 255, (10,)),
+            'axis': 0,
+        }
+
+        weight_qparams_options = [
+            per_tensor_weight_qparams,
+            per_channel_weight_qparams,
+            per_channel_weight_qparams_quint4x2,
+        ]
+        for fp_cls, weight_qparams in itertools.product([nn.Embedding, nn.EmbeddingBag], weight_qparams_options):
+            # TODO: torch.quint4x2 not supported in quantize_per_channel, need to add support
+            if weight_qparams['dtype'] == torch.quint4x2:
+                continue
+            ref_cls, args = fp_to_ref[fp_cls]
+
+            fp32_embedding = fp_cls(num_embeddings, embedding_dim)
+
+            ref_embedding = ref_cls(num_embeddings, embedding_dim, weight_qparams=weight_qparams)
+            ref_embedding.weight = fp32_embedding.weight
+
+            # quantize and dequantize the weight for fp32 module
+            fp32_embedding.weight = torch.nn.Parameter(self._quant_dequant_weight(fp32_embedding.weight, weight_qparams))
+
+            fp32_res = fp32_embedding(*args)
+            ref_res = ref_embedding(*args)
             self.assertEqual(fp32_res, ref_res)
