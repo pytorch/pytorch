@@ -23,7 +23,6 @@
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
-#include "lazy_tensor_core/csrc/ops/svd.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
@@ -376,15 +375,6 @@ torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const at
       torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(alpha, input->shape(),
                                                     input->GetDevice());
   return torch::lazy::LazyTensor::Create(input->GetIrValue() - other_constant * alpha_constant, input->GetDevice());
-}
-
-std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> svd(const torch::lazy::LazyTensorPtr& input,
-                                                   bool some, bool compute_uv) {
-  torch::lazy::NodePtr node =
-      torch::lazy::MakeNode<ir::ops::SVD>(input->GetIrValue(), some, compute_uv);
-  return std::make_tuple(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), input->GetDevice()),
-                         torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), input->GetDevice()),
-                         torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input->GetDevice()));
 }
 
 torch::lazy::LazyTensorPtr transpose(const torch::lazy::LazyTensorPtr& input, int64_t dim0, int64_t dim1) {
