@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <torch/csrc/Exceptions.h>
@@ -25,13 +26,6 @@
 
 #include <set>
 #include <unordered_set>
-
-struct DisableTorchDispatch {
-  DisableTorchDispatch() : guard_(c10::DispatchKey::Python),
-                           guard_tls_snapshot_(c10::DispatchKey::PythonTLSSnapshot) {}
-  c10::impl::ExcludeDispatchKeyGuard guard_;
-  c10::impl::ExcludeDispatchKeyGuard guard_tls_snapshot_;
-};
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -319,7 +313,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
-  py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+  // TODO: line up this binding with DisableTorchFunction
+  py::class_<torch::DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
