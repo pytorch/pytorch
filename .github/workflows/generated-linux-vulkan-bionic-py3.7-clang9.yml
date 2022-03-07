@@ -256,7 +256,7 @@ jobs:
     name: test (default, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-vulkan-bionic-py3.7-clang9-test
