@@ -190,7 +190,7 @@ class TestExpandedWeightFunctional(TestCase):
             if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
                 sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
                 if 'max_norm' in sample_input.kwargs:  # in place update makes it difficult even with copying
-                    pass
+                    return
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
             expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
