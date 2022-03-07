@@ -641,6 +641,52 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertIsNone(t.grad)
         self.assertIsNotNone(t.elem.grad)
 
+    def test_dispatch_super_call(self):
+        called = []
+
+        class SubTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem)
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        x = torch.randn(2)
+        y = torch.randn(2)
+        self.assertEqual(SubTensor(x) + SubTensor(y), x + y)
+        self.assertEqual(called, [torch.ops.aten.add])
+
+    def test_dispatch_super_dont_autograd(self):
+        called = []
+
+        class SubTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                # This argument still requires grad because it was passed
+                # through directly...
+                self.assertTrue(args[0].requires_grad)
+                r = super().__torch_dispatch__(func, types, args, kwargs)
+                # But the output better not require grad, because that means
+                # you did autograd again in torch dispatch (oops)
+                self.assertFalse(r.requires_grad)
+                return r
+
+        x = SubTensor(torch.randn(2, requires_grad=True))
+        x.neg()
+        self.assertEqual(called, [torch.ops.aten.neg])
+
     def test_multiple_ops_subclass(self):
         # This is a Direct Subclass, don't do that!
         class MySubclass(torch.Tensor):

@@ -5,7 +5,7 @@ from torch.fx import GraphModule
 from torch.fx._symbolic_trace import Tracer
 from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
-from .fx import Fuser  # noqa: F401
+from .fx import fuse  # noqa: F401
 from .fx import prepare, convert  # noqa: F401
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule
@@ -57,8 +57,7 @@ def _fuse_fx(
         graph_module: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
     """
     _check_is_graph_module(graph_module)
-    fuser = Fuser()
-    return fuser.fuse(
+    return fuse(
         graph_module, is_qat, fuse_custom_config_dict, backend_config_dict)
 
 
