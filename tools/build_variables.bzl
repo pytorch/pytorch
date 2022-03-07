@@ -1159,7 +1159,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qconcat.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv_prepack.cpp",
-    "aten/src/ATen/native/quantized/cpu/qconv_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/qelu.cpp",
     "aten/src/ATen/native/quantized/cpu/qembeddingbag.cpp",
     "aten/src/ATen/native/quantized/cpu/qembeddingbag_prepack.cpp",
