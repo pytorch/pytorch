@@ -15,7 +15,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
@@ -70,7 +70,7 @@ Tensor max_pool2d(
   return output;
 }
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
   // averages across the width and height, and outputs a 1x1xC image.
   TORCH_CHECK(output_size[0] == 1 && output_size[1] == 1);
