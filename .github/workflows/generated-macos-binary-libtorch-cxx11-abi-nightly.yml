@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/macos_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: macos-binary-libtorch-pre-cxx11
+name: macos-binary-libtorch-cxx11-abi
 
 on:
 # TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
@@ -23,7 +23,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: macos-binary-libtorch-pre-cxx11
+  BUILD_ENVIRONMENT: macos-binary-libtorch-cxx11-abi
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   IN_CI: 1
   IS_GHA: 1
@@ -31,11 +31,11 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: macos-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  libtorch-cpu-shared-with-deps-pre-cxx11-build:
+  libtorch-cpu-shared-with-deps-cxx11-abi-build:
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -49,7 +49,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -118,24 +118,24 @@ jobs:
       - uses: actions/upload-artifact@v2
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-pre-cxx11
+          name: libtorch-cpu-shared-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  libtorch-cpu-shared-with-deps-pre-cxx11-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Display EC2 information
         shell: bash
@@ -185,7 +185,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-with-deps-pre-cxx11
+          name: libtorch-cpu-shared-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -203,8 +203,8 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -i \
@@ -238,7 +238,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-without-deps-pre-cxx11-build:
+  libtorch-cpu-shared-without-deps-cxx11-abi-build:
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -252,7 +252,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -321,24 +321,24 @@ jobs:
       - uses: actions/upload-artifact@v2
         if: always()
         with:
-          name: libtorch-cpu-shared-without-deps-pre-cxx11
+          name: libtorch-cpu-shared-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  libtorch-cpu-shared-without-deps-pre-cxx11-upload:  # Uploading
+  libtorch-cpu-shared-without-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-pre-cxx11-build
+    needs: libtorch-cpu-shared-without-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Display EC2 information
         shell: bash
@@ -388,7 +388,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-without-deps-pre-cxx11
+          name: libtorch-cpu-shared-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -406,8 +406,8 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -i \
@@ -441,7 +441,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-with-deps-pre-cxx11-build:
+  libtorch-cpu-static-with-deps-cxx11-abi-build:
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -455,7 +455,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -524,24 +524,24 @@ jobs:
       - uses: actions/upload-artifact@v2
         if: always()
         with:
-          name: libtorch-cpu-static-with-deps-pre-cxx11
+          name: libtorch-cpu-static-with-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  libtorch-cpu-static-with-deps-pre-cxx11-upload:  # Uploading
+  libtorch-cpu-static-with-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-pre-cxx11-build
+    needs: libtorch-cpu-static-with-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Display EC2 information
         shell: bash
@@ -591,7 +591,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-with-deps-pre-cxx11
+          name: libtorch-cpu-static-with-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -609,8 +609,8 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -i \
@@ -644,7 +644,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-without-deps-pre-cxx11-build:
+  libtorch-cpu-static-without-deps-cxx11-abi-build:
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -658,7 +658,7 @@ jobs:
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
@@ -727,24 +727,24 @@ jobs:
       - uses: actions/upload-artifact@v2
         if: always()
         with:
-          name: libtorch-cpu-static-without-deps-pre-cxx11
+          name: libtorch-cpu-static-without-deps-cxx11-abi
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-  libtorch-cpu-static-without-deps-pre-cxx11-upload:  # Uploading
+  libtorch-cpu-static-without-deps-cxx11-abi-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-pre-cxx11-build
+    needs: libtorch-cpu-static-without-deps-cxx11-abi-build
     env:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
       SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
-      DESIRED_DEVTOOLSET: pre-cxx11
+      DESIRED_DEVTOOLSET: cxx11-abi
     steps:
       - name: Display EC2 information
         shell: bash
@@ -794,7 +794,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-without-deps-pre-cxx11
+          name: libtorch-cpu-static-without-deps-cxx11-abi
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -812,8 +812,8 @@ jobs:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_SECRET_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
           ANACONDA_API_TOKEN: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
         run: |
           docker run --rm -i \
