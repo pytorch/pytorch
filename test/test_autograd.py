@@ -41,7 +41,6 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         deviceCountAtLeast, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.logging_tensor import no_dispatch
-from torch.utils._pytree import tree_map
 
 import pickle
 
@@ -6614,36 +6613,6 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
             self.assertEqual(counter[0], 2)
-
-    def test_make_dual_preserves_tangent_of_wrapped_tensor(self):
-        class WrapperTensor(torch.Tensor):
-            @staticmethod
-            def __new__(cls, e):
-                r = torch.Tensor._make_wrapper_subclass(cls, e.shape, dtype=e.dtype, requires_grad=False)
-                r.elem = e
-                return r
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore
-                def unwrap(e):
-                    return e.elem if isinstance(e, WrapperTensor) else e
-
-                def wrap(e):
-                    return WrapperTensor(e) if isinstance(e, torch.Tensor) else e
-
-                return tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-
-        primal = torch.tensor(1)
-        t1 = torch.tensor(2)
-        t2 = torch.tensor(3)
-
-        with fwAD.dual_level():
-            x = fwAD.make_dual(primal, t1)
-            y = fwAD.make_dual(WrapperTensor(x), t2)
-            self.assertTrue(fwAD.unpack_dual(y).tangent is t2)
-            self.assertTrue(fwAD.unpack_dual(y.elem).tangent is t1)
 
     def test_print(self):
         with fwAD.dual_level() as level:
