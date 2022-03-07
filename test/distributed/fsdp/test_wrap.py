@@ -266,7 +266,7 @@ class TestAutoWrap(TestCase):
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
 
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not torch.cuda.is_available(), "Test Requires CUDA")
     def test_always_wrap(self):
         """
         Test to ensure that if `always_wrap_policy` is
