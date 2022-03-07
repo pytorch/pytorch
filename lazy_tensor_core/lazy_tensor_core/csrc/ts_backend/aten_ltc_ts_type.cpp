@@ -215,9 +215,17 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
     }
 
     auto options = self.options();
-    options = options.dtype(dtype.value_or(options.dtype_opt()));
-    options = options.layout(layout.value_or(options.layout_opt()));
-    options = options.memory_format(memory_format.value_or(options.memory_format_opt()));
+    if (dtype) {
+      // I put each of these setters in a conditional instead of doing `self.options().dtype(dtype).layout(layout)...
+      // because calling .dtype(nullopt) on an options() that already has dtype appears to wipe it
+      options = options.dtype(dtype);
+    }
+    if (layout) {
+      options = options.layout(layout);
+    }
+    if (memory_format) {
+      options = options.memory_format(memory_format);
+    }
     if (pin_memory) {
       // TODO(whc) can we honor 'pin_memory' in some/all cases?
       options = options.pinned_memory(pin_memory);
