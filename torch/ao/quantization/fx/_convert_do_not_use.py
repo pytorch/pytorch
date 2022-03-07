@@ -1,5 +1,6 @@
-from typing import Any, Dict, List, Optional, Set, Callable
+from typing import Any, Dict, List, Optional, Set, Callable, Tuple
 import torch
+import copy
 from torch.fx import (
     GraphModule,
 )
@@ -7,15 +8,30 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
-from ..qconfig import QConfigAny
 from ..utils import (
     activation_is_int8_quantized,
+    activation_is_statically_quantized,
+    activation_is_dynamically_quantized,
     weight_is_statically_quantized,
     get_qparam_dict,
     _parent_name,
+    get_swapped_custom_module_class,
 )
+from ..qconfig import (
+    QConfigAny,
+    qconfig_equals
+)
+from ..qconfig_dict_utils import (
+    convert_dict_to_ordered_dict,
+    update_qconfig_for_qat,
+)
+from .qconfig_utils import (
+    generate_qconfig_map,
+    compare_prepare_convert_qconfig_dict,
+    update_qconfig_for_fusion,
+)
+from ..quantization_mappings import DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS
 from .backend_config.utils import get_quantized_reference_module_mapping
-
 from .graph_module import (
     QuantizedGraphModule,
     is_observed_standalone_module,
@@ -31,7 +47,7 @@ from torch.ao.quantization.quantize import (
     _remove_qconfig,
     is_activation_post_process,
 )
-
+from .lower_to_fbgemm import lower_to_fbgemm
 from .convert import restore_state
 
 # these are tuples so that they can work with isinstance(module, tuple_of_classes)
@@ -55,6 +71,92 @@ QAT_MODULE_CLASSES = (
     torch.nn.intrinsic.qat.ConvReLU3d
 )
 
+def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    If a dequantize node has multiple uses, duplicate it and create one dequantize node for each use.
+    This is to enable the pattern matching to map from individual quant - dequant - ref_module to
+    final quantized module.
+    """
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if (node.op == "call_method" and node.target == "dequantize" or
+           (node.op == "call_function" and node.target == torch.dequantize)):
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node("call_method", "dequantize", node.args, {})
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    Removes duplicate dequant nodes in the graph, for an operator that has multiple dequant nodes as a user,
+    replace them with a single dequant node that can be shared across all the uses.
+    """
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        users = list(node.users)
+        dequant_users = [user for user in node.users if user.op == "call_method" and user.target == "dequantize" or
+                         (user.op == "call_function" and user.target == torch.dequantize)]
+
+        if len(dequant_users) > 1:
+            with quantized.graph.inserting_after(node):
+                unique_dq = quantized.graph.create_node("call_method", "dequantize", users[0].args, {})
+            for dequant in dequant_users:
+                dequant.replace_all_uses_with(unique_dq)
+                quantized.graph.erase_node(dequant)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if node.op == "call_function" and node.target in [torch.quantize_per_tensor, torch.quantize_per_channel]:
+            users = list(node.users)
+            user = users[0] if users else None
+            if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
+                user.replace_all_uses_with(node.args[0])
+                quantized.graph.erase_node(user)
+                orig_args = list(node.args)
+                quantized.graph.erase_node(node)
+                for arg in orig_args:
+                    if isinstance(arg, Node) and len(list(arg.users)) == 0:
+                        quantized.graph.erase_node(arg)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
+def get_module_path_and_prefix(
+        obs_node: Node,
+        node_name_to_scope: Dict[str, Tuple[str, type]]):
+    # we'll find the first user of the observer_node
+    # to get the path. If a linear call_function is in the user list, we return the first instance
+    # of linear node to get the FQN.
+    users = list(obs_node.users)
+    first_linear_use_or_first_use = users[0] if users else None
+    linear_node = None
+    for n in users:
+        if n.op == "call_function" and n.target == torch.nn.functional.linear:
+            linear_node = n
+            break
+    if linear_node:
+        first_linear_use_or_first_use = linear_node
+    prefix = "_input"
+
+    if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
+        module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
+    else:
+        # TODO: it's not used, so actually we can skip quantization
+        # but this requires changing return type of quantize_node
+        # we can fix it later if needed
+        module_path = ""
+    return module_path, prefix
+
 def insert_dequantize_node(
         node: Node,
         graph: Graph):
@@ -66,6 +168,33 @@ def insert_dequantize_node(
             if user_node is not dequantize_node:
                 user_node.replace_input_with(node, dequantize_node)
 
+def remove_observer_for_node(
+        node: Node,
+        graph: Graph,
+        modules: Dict[str, torch.nn.Module]
+):
+    for maybe_obs_node, _ in node.users.items():
+        if maybe_obs_node.op == 'call_module':
+            maybe_obs = modules[str(maybe_obs_node.target)]
+            if is_activation_post_process(maybe_obs):
+                maybe_obs_node.replace_all_uses_with(maybe_obs_node.args[0])
+                graph.erase_node(maybe_obs_node)
+                return
+
+def maybe_get_observer_for_node(
+        node: Node,
+        modules: Dict[str, torch.nn.Module]
+) -> Optional[torch.nn.Module]:
+    """
+    If the node is observed, return the observer
+    instance. Otherwise, return None.
+    """
+    for maybe_obs_node, _ in node.users.items():
+        if maybe_obs_node.op == 'call_module':
+            maybe_obs = modules[str(maybe_obs_node.target)]
+            if is_activation_post_process(maybe_obs):
+                return maybe_obs
+    return None
 
 def convert_standalone_module(
         node: Node,
@@ -73,7 +202,20 @@ def convert_standalone_module(
         model: torch.fx.GraphModule,
         is_reference: bool,
         backend_config_dict: Dict[str, Any]):
-    convert = torch.ao.quantization._quantize_fx_do_not_use._convert_do_not_use  # type: ignore[attr-defined]
+    """ Converts a observed standalone module to a quantized standalone module by calling
+    the fx convert api, currently using the same `is_reference` flag as parent, but we may
+    changing this behavior in the future (e.g. separating quantization and lowering for
+    standalone module as well)
+
+    Args:
+      - node: The call_module node of the observed standalone module
+      - modules: named_module of original model
+      - model: original model
+      - is_reference: a flag from parent provided by user to decide if we want to
+        produce a reference model or a fbgemm/qnnpack model
+      - backend_config_dict: backend configuration of the target backend of quantization
+    """
+    convert = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
     # it's produced by us
     observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
@@ -106,9 +248,10 @@ def convert_standalone_module(
 
     # TODO: allow convert_custom_config_dict to override backend_config_dict
     # for standalone module
+    # TODO: think about how to handle `is_reference` here
     quantized_standalone_module = convert(
         observed_standalone_module,
-        is_reference=True,
+        is_reference=is_reference,
         backend_config_dict=backend_config_dict)
     parent_name, name = _parent_name(node.target)
     # update the modules dict
@@ -120,17 +263,32 @@ def convert_weighted_module(
         modules: Dict[str, torch.nn.Module],
         observed_node_names: Set[str],
         quantized_reference_module_mapping: Dict[Callable, Any]):
+    """ Convert a weighted module to reference quantized module in the model
+
+    Args:
+      - node: The call_module node of the observed standalone module
+      - modules: named_module of original model
+      - observed_node_names: names for the set of observed fx node, we can skip
+        this conversion if the node is not observed
+      - quantized_reference_module_mapping: module mapping from floating point module class
+        to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
+    """
     original_module = modules[str(node.target)]
     qconfig = original_module.qconfig
 
     is_observed = node.name in observed_node_names
-    is_activation_quantized = activation_is_int8_quantized(qconfig)
-    is_weight_quantized = weight_is_statically_quantized(qconfig)
-    # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
     if qconfig is None or \
-       not is_observed or \
-       not is_weight_quantized or \
-       not is_activation_quantized:
+       not is_observed:
+        return
+    is_activation_statically_quantized = activation_is_statically_quantized(qconfig)
+    is_activation_dynamically_quantized = activation_is_dynamically_quantized(qconfig)
+    is_weight_quantized = weight_is_statically_quantized(qconfig)
+    # the condition for swapping the module to reference quantized module is:
+    # activation needs to be statically or dynamically quantized, weights
+    # need to be quantized
+    # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
+    if not ((is_activation_statically_quantized or \
+             is_activation_dynamically_quantized) and is_weight_quantized):
         return
 
     float_module = original_module
@@ -174,11 +332,49 @@ def convert_weighted_module(
         parent_name, name = _parent_name(node.target)
         setattr(modules[parent_name], name, ref_qmodule)
 
+def convert_custom_module(
+        node: Node,
+        graph: Graph,
+        modules: Dict[str, torch.nn.Module],
+        custom_module_class_mapping: Dict[Callable, Callable],
+        statically_quantized_custom_module_nodes: Set[Node]):
+    observed_custom_module = modules[str(node.target)]
+    maybe_obs = maybe_get_observer_for_node(node, modules)
+    qconfig = observed_custom_module.qconfig
+    if activation_is_statically_quantized(qconfig):
+        statically_quantized_custom_module_nodes.add(node)
+        # remove the previous dequant node
+        prev_node = node.args[0]
+        if prev_node.op == "call_method" and prev_node.target == "dequantize":
+            assert len(prev_node.users) == 1, "dequantize node before custom module is used "
+            "multiple times, this is currently not supported yet, but it can be "
+            "supported by duplicating the dequantize nodes in these cases"
+            prev_node.replace_all_uses_with(prev_node.args[0])
+            graph.erase_node(prev_node)
+
+        # absorb the following observer into the module conversion
+        activation_post_process = maybe_get_observer_for_node(node, modules)
+        assert activation_post_process is not None
+        observed_custom_module.activation_post_process = activation_post_process
+
+        # remove the following observer node and insert a dequantize node
+        # remove_observer_for_node(node, graph, modules)
+        # insert_dequantize_node(node, graph)
+
+    # swap the observed custom module to quantized custom module
+    quantized_custom_module_class = get_swapped_custom_module_class(
+        observed_custom_module, custom_module_class_mapping, qconfig)
+    quantized_custom_module = \
+        quantized_custom_module_class.from_observed(observed_custom_module)
+    parent_name, name = _parent_name(node.target)
+    setattr(modules[parent_name], name, quantized_custom_module)
+
 def _convert_do_not_use(
         model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
         _remove_qconfig_flag: bool = True,
+        convert_qconfig_dict: Dict[str, Any] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None) -> torch.nn.Module:
     """
     We will convert an observed model (a module with observer calls) to a reference
@@ -204,8 +400,6 @@ def _convert_do_not_use(
     patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
 
-    assert is_reference, "_convert_do_not_use only supports reference option"
-
     # mapping from fully qualified module name to module instance
     # for example,
     # {
@@ -217,9 +411,33 @@ def _convert_do_not_use(
     # the same activation_post_process module instance but different names
     modules = dict(model.named_modules(remove_duplicate=False))
 
+    # TODO refactor this code once we update the prepare logic to have additional information on
+    # which graph nodes have been observed and share that with convert to decide which observers to ignore.
+    if convert_qconfig_dict:
+        prepare_qconfig_dict: Dict[str, Dict[Any, Any]] = model._qconfig_dict  # type: ignore[assignment]
+        modules_copy = copy.deepcopy(modules)
+        convert_dict_to_ordered_dict(convert_qconfig_dict)
+        if model._is_qat:
+            additional_qat_module_mapping = prepare_custom_config_dict.get(
+                "additional_qat_module_mapping", {})
+            convert_qconfig_dict = update_qconfig_for_qat(convert_qconfig_dict, additional_qat_module_mapping)
+        convert_qconfig_dict = update_qconfig_for_fusion(model, convert_qconfig_dict)
+
+        compare_prepare_convert_qconfig_dict(prepare_qconfig_dict, convert_qconfig_dict)  # type: ignore[arg-type]
+        convert_qconfig_map = generate_qconfig_map(model, modules_copy, model.graph, convert_qconfig_dict, node_name_to_scope)
+        # check the convert_qconfig_map generated and ensure that all the values either match what was set in prepare qconfig_map
+        # or are set to None in the convert_qconfig_map.
+        for k, v in qconfig_map.items():
+            assert k in convert_qconfig_map, 'Expected key {} in convert qconfig_map'.format(k)
+            if convert_qconfig_map[k] is not None:
+                assert qconfig_equals(v, convert_qconfig_map[k]), 'Expected k {} to have the same value in prepare qconfig_dict \
+                and convert qconfig_dict, found {} updated to {}.'.format(k, v, convert_qconfig_map[k])
+        qconfig_map = convert_qconfig_map
+
     custom_module_classes = get_custom_module_class_keys(
         convert_custom_config_dict,
         "observed_to_quantized_custom_module_class")
+    custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
 
     if model._equalization_qconfig_map is not None:
         # If we want to do equalization then do the following:
@@ -233,7 +451,13 @@ def _convert_do_not_use(
         if node.op == 'placeholder':
             graph_inputs.append(node.name)
 
-    def replace_observer_with_quantize_dequantize_node(graph: Graph, node: Node, modules: Dict[str, torch.nn.Module]) -> None:
+    # TODO: move this outside of this function
+    def replace_observer_with_quantize_dequantize_node(
+            model: torch.nn.Module,
+            graph: Graph,
+            node: Node,
+            modules: Dict[str, torch.nn.Module],
+            node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
         """ Replace activation_post_process module call node with quantize and
         dequantize node
 
@@ -244,25 +468,29 @@ def _convert_do_not_use(
         """
         assert modules is not None
         assert isinstance(node.target, str)
+        module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope)
         observer_module = modules[node.target]
-        root_module = modules[""]
-        if observer_module.dtype == torch.float32:
-            # remove the node for now
-            # TODO: support dynamic quant
+        maybe_quantize_node_info = get_quantize_node_info(observer_module)
+        if maybe_quantize_node_info is None:
+            # didn't find correponding quantize op and info for the observer_module
+            # so we just remove the observer
             with graph.inserting_before(node):
                 node.replace_all_uses_with(node.args[0])
                 graph.erase_node(node)
-        elif observer_module.dtype in [torch.quint8, torch.qint8, torch.float16]:
-            node_type, quantize_op, qparams = get_quantize_node_info(observer_module)
+        else:
+            # otherwise, we can convert the observer moduel call to quantize/dequantize node
+            node_type, quantize_op, qparams = maybe_quantize_node_info
             # replace observer node with quant - dequant node
             with graph.inserting_before(node):
                 input_node = node.args[0]
                 inputs = [input_node]
                 for key, value in qparams.items():
+                    # TODO: we can add the information of whether a value needs to
+                    # be registered as an attribute in qparams dict itself
                     if key in ['_scale_', '_zero_point_']:
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here
-                        qparam_node = create_getattr_from_value(root_module, graph, key, value)
+                        qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
                         inputs.append(qparam_node)
                     else:
                         # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
@@ -273,6 +501,13 @@ def _convert_do_not_use(
                 node.replace_all_uses_with(dequantized_node)
                 graph.erase_node(node)
 
+    # this is a temporary hack for custom module, we may want to implement
+    # this properly after the custom module class design is finalized
+    def replace_observer_with_dequantize_node(node: Node, graph: Graph):
+        call_custom_module_node = node.args[0]
+        node.replace_all_uses_with(call_custom_module_node)
+        graph.erase_node(node)
+        insert_dequantize_node(call_custom_module_node, graph)
 
     # additional state to override inputs to be quantized, if specified
     # by the user
@@ -284,10 +519,12 @@ def _convert_do_not_use(
         "output_quantized_idxs", [])
 
     if backend_config_dict is None:
-        backend_config_dict = {}
-    quantized_reference_module_mapping = get_quantized_reference_module_mapping(backend_config_dict)
+        quantized_reference_module_mapping = copy.deepcopy(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS)
+    else:
+        quantized_reference_module_mapping = get_quantized_reference_module_mapping(backend_config_dict)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     weighted_module_classes = tuple(quantized_reference_module_mapping.keys())
+    statically_quantized_custom_module_nodes: Set[Node] = set()
 
     for node in list(model.graph.nodes):
         if node.op == 'placeholder':
@@ -315,18 +552,28 @@ def _convert_do_not_use(
                     model.graph.erase_node(maybe_dequantize_node)
         elif node.op == "call_module":
             if is_activation_post_process(modules[node.target]):
-                replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
+                observed_node = node.args[0]
+                if observed_node in statically_quantized_custom_module_nodes:
+                    replace_observer_with_dequantize_node(node, model.graph)
+                else:
+                    replace_observer_with_quantize_dequantize_node(model, model.graph, node, modules, node_name_to_scope)
             elif is_observed_standalone_module(modules[node.target]):
-                # TODO: move this to a separate function
                 convert_standalone_module(node, modules, model, is_reference, backend_config_dict)
-
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
                 convert_weighted_module(node, modules, observed_node_names, quantized_reference_module_mapping)
+            elif type(modules[node.target]) in custom_module_classes:
+                convert_custom_module(node, model.graph, modules, custom_module_class_mapping, statically_quantized_custom_module_nodes)
 
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
         _remove_qconfig(model)
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
     model = QuantizedGraphModule(model, model.graph, preserved_attributes)
+    # TODO: maybe move this to quantize_fx.py
+    if not is_reference:
+        model = duplicate_dequantize_node(model)
+        model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
+        model = remove_quant_dequant_pairs(model)
+        model = remove_extra_dequantize(model)
     return model

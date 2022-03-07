@@ -13,6 +13,7 @@ from torch.fx.graph import (
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 import operator
+import warnings
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -140,11 +141,13 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
     elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
         reduce_range = torch.backends.quantized.engine == "fbgemm"
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
-        raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
-    assert quantize_op is not None
+        warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
+        return None, None, None
     return node_type, quantize_op, qparams
 
 def quantize_node(

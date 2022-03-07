@@ -184,6 +184,16 @@ def activation_is_statically_quantized(qconfig):
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
 
+def activation_is_dynamically_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    dynamically quantized or not, this includes dynamically quantizing to
+    quint8, qint8 and float16
+    """
+    activation_dtype, _, activation_compute_dtype = \
+        get_qconfig_dtypes(qconfig)
+    return activation_dtype == torch.float and \
+        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int8 or not, this includes quantizing to quint8, qint8

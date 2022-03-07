@@ -6,7 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.quantized as nnq
+import torch.nn.quantized.dynamic as nnqd
 import torch.nn.quantized._reference as nnqr
 from torch.nn.quantized.modules.utils import WeightedQuantizedModule
 from . import subgraph_rewriter_FORKED_DO_NOT_USE
@@ -192,16 +194,21 @@ def should_skip_lowering(op: torch.fx.node.Node, qconfig_map: Dict[str, QConfigA
     """
     return op.name in qconfig_map and qconfig_map[op.name] is None
 
-# Mapping from reference module class to the replacement quantized module class for lowering
-LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
+# Mapping from reference module class to the replacement static quantized module class for lowering
+STATIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
     nnqr.Linear: nnq.Linear,
     nnqr.Conv1d: nnq.Conv1d,
     nnqr.Conv2d: nnq.Conv2d,
     nnqr.Conv3d: nnq.Conv3d,
 }
 
-# TODO: merge with LOWER_MODULE_MAP after we merge
-# _lower_weighted_ref_module and special_pattern_replacement
+# Mapping from reference module class to the replacement dynamic quantized module class for lowering
+DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
+    nnqr.Linear: nnqd.Linear,
+}
+
+# TODO: merge with STATIC_LOWER_MODULE_MAP after we merge
+# _lower_static_weighted_ref_module and special_pattern_replacement
 SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
@@ -219,12 +226,19 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
-#   2) The replacement quantized module class for lowering
-LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
+#   2) The replacement static quantized module class for lowering
+STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
     nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
     nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
     nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
     nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
+}
+
+# Mapping from fused module class to a 2-tuple of:
+#   1) The inner reference module class
+#   2) The replacement dynamic quantized module class for lowering
+DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
+    nni.LinearReLU: (nnqr.Linear, nniqd.LinearReLU),
 }
 
 # Mapping from a functional to lower to a 2-tuple of
@@ -298,12 +312,12 @@ def fold_weight(
     quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
     return quantized
 
-def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_static_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
     and replace them with the quantized version of the ref module.
     """
-    for ref_class in list(LOWER_MODULE_MAP.keys()) + list(LOWER_FUSED_MODULE_MAP.keys()):
+    for ref_class in list(STATIC_LOWER_MODULE_MAP.keys()) + list(STATIC_LOWER_FUSED_MODULE_MAP.keys()):
         pattern = (torch.quantize_per_tensor,
                    (ref_class, "dequantize"),
                    MatchAllNode, MatchAllNode, MatchAllNode)
@@ -339,12 +353,12 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
             output_zero_point = getattr(model, zero_point_node.target)
             # For fused modules, we also check whether the inner module is a reference module
             # If so, we replace the entire fused module with the corresponding quantized module
-            if ref_class in LOWER_FUSED_MODULE_MAP:
-                inner_ref_class, q_class = LOWER_FUSED_MODULE_MAP[ref_class]
+            if ref_class in STATIC_LOWER_FUSED_MODULE_MAP:
+                inner_ref_class, q_class = STATIC_LOWER_FUSED_MODULE_MAP[ref_class]
                 if type(ref_module[0]) != inner_ref_class:
                     continue
             else:
-                q_class = LOWER_MODULE_MAP[type(ref_module)]
+                q_class = STATIC_LOWER_MODULE_MAP[type(ref_module)]
             assert issubclass(q_class, WeightedQuantizedModule)  # suppress mypy warnings
             q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
 
@@ -362,6 +376,62 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphMod
             model.graph.erase_node(q_node)
             model.graph.erase_node(scale_node)
             model.graph.erase_node(zero_point_node)
+    return model
+
+def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    Traverse the graph and find quantize_per_tensor_dynamic - dequantize - ref_module patterns
+    and replace them with the dynamically quantized version of the ref module.
+    """
+    named_modules = dict(model.named_modules())
+    for n in model.graph.nodes:
+        if n.op != "call_module" or \
+           type(named_modules[str(n.target)]) not in \
+           set(DYNAMIC_LOWER_MODULE_MAP.keys()).union(
+               set(DYNAMIC_LOWER_FUSED_MODULE_MAP.keys())):
+            continue
+        ref_node = n
+        dq_node = ref_node.args[0]
+        if dq_node.op != "call_method" or dq_node.target != "dequantize":
+            continue
+        # don't support lowering the pattern when the result of dequantize is used by
+        # multiple nodes
+        if len(dq_node.users) > 1:
+            continue
+
+        q_node = dq_node.args[0]
+        if q_node.op != "call_function" or q_node.target != torch.quantize_per_tensor_dynamic:
+            continue
+        # don't support lowering the pattern when the result of quantize is used by
+        # multiple nodes
+        if len(q_node.users) > 1:
+            continue
+
+        compute_dtype = q_node.args[1]
+        if compute_dtype not in [torch.quint8, torch.qint8]:
+            continue
+        ref_module = named_modules[str(ref_node.target)]
+        ref_class = type(ref_module)
+        # TODO: this part of code can be shared with static lowering code
+        if ref_class in DYNAMIC_LOWER_FUSED_MODULE_MAP:
+            inner_ref_class, q_class = DYNAMIC_LOWER_FUSED_MODULE_MAP[ref_class]
+            if type(ref_module[0]) != inner_ref_class:
+                continue
+        else:
+            q_class = DYNAMIC_LOWER_MODULE_MAP.get(ref_class)
+        assert issubclass(q_class, WeightedQuantizedModule)  # suppress mypy warnings
+        q_module = q_class.from_reference(ref_module)
+
+        # replace reference moduel with dynamically quantized module
+        parent_name, module_name = _parent_name(ref_node.target)
+        setattr(named_modules[parent_name], module_name, q_module)
+
+        # remove q - dq node
+        dq_node.replace_all_uses_with(q_node)
+        model.graph.erase_node(dq_node)
+        q_node.replace_all_uses_with(q_node.args[0])
+        model.graph.erase_node(q_node)
+
     return model
 
 def _lower_weighted_ref_functional(
@@ -686,7 +756,8 @@ def _lower_to_native_backend(
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
     """
-    model = _lower_weighted_ref_module(model)
+    model = _lower_static_weighted_ref_module(model)
+    model = _lower_dynamic_weighted_ref_module(model)
     model = _lower_weighted_ref_functional(model, qconfig_map)
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)

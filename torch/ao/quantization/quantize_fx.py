@@ -6,7 +6,8 @@ from torch.fx._symbolic_trace import Tracer
 from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
 from .fx import fuse  # noqa: F401
-from .fx import prepare, convert  # noqa: F401
+from .fx import prepare  # noqa: F401
+from .fx._convert_do_not_use import _convert_do_not_use as convert
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule
 from .fx.qconfig_utils import (
@@ -577,6 +578,7 @@ def _convert_fx(
     is_standalone_module: bool = False,
     _remove_qconfig: bool = True,
     qconfig_dict: Dict[str, Any] = None,
+    backend_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
     """ `is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`
     """
@@ -593,6 +595,7 @@ def _convert_fx(
         is_standalone_module,
         _remove_qconfig_flag=_remove_qconfig,
         convert_qconfig_dict=qconfig_dict,
+        backend_config_dict=backend_config_dict,
     )
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
@@ -607,6 +610,7 @@ def convert_fx(
     convert_custom_config_dict: Optional[Dict[str, Any]] = None,
     _remove_qconfig: bool = True,
     qconfig_dict: Dict[str, Any] = None,
+    backend_config_dict: Dict[str, Any] = None,
 ) -> torch.nn.Module:
     r""" Convert a calibrated or trained model to a quantized model
 
@@ -676,7 +680,11 @@ def convert_fx(
                 ...,
               ],
             }
-
+         * `backend_config_dict`: A configuration for the backend which describes how
+            operators should be quantized in the backend, this includes quantization
+            mode support (static/dynamic/weight_only), dtype support (quint8/qint8 etc.),
+            observer placement for each operators and fused operators. Detailed
+            documentation can be found in torch/ao/quantization/fx/backend_config/README.md
 
     Return:
         A quantized model (GraphModule)
@@ -694,6 +702,7 @@ def convert_fx(
         convert_custom_config_dict,
         _remove_qconfig=_remove_qconfig,
         qconfig_dict=qconfig_dict,
+        backend_config_dict=backend_config_dict,
     )
 
 
