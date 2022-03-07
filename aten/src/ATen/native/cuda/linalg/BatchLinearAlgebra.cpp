@@ -1956,74 +1956,59 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   auto batch_size = batchCount(input);
-  // MAGMA does not work with batch_size == 0.
-  // CuSolver does not work when the matrices have no elements
-  if (input.numel() == 0) {
-    // zero out the infos as it will have one element if the input is a matrix of size (0, 0)
-    infos.zero_();
-    return;
-  }
+  auto m = input.size(-2);
+  auto n = input.size(-1);
 
 #if AT_MAGMA_ENABLED()
-  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
-    if (batch_size == 1) {
-        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+  // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
+  // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+  std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
+  magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
+  const bool magma_batched_buggy = version < std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2);
+
+  const auto lu_factor_magma = [batch_size, magma_batched_buggy](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
+    if (batch_size == 1 || magma_batched_buggy) {
+      lu_factor_looped_magma(input, pivots, infos, compute_pivots);
     } else {
-      // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
-      // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-      std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
-      magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
-      if (version >= std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2)) {
-        lu_factor_batched_magma(input, pivots, infos, compute_pivots);
-      } else {
-        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
-      }
+      lu_factor_batched_magma(input, pivots, infos, compute_pivots);
     }
   };
 #endif
 
+  const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_CUSOLVER
-  auto preferred_backend = at::globalContext().linalgPreferredBackend();
-  switch (preferred_backend) {
-    case at::LinalgBackend::Cusolver:
-      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
-      break;
-    case at::LinalgBackend::Magma:
+  const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+    if (batch_size == 1 || m != n) {
+      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
+    } else {
+      lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
+    }
+  };
+
+  if (preferred_backend == at::LinalgBackend::Cusolver) {
+    lu_factor_cusolver(input, pivots, infos, compute_pivots);
+  } else
+#endif // ifdef USE_CUSOLVER
+  if (preferred_backend == at::LinalgBackend::Magma) {
+    lu_factor_magma(input, pivots, infos, compute_pivots);
+  } else {  // preferred backend == default
+#ifdef USE_CUSOLVER
 #if AT_MAGMA_ENABLED()
-      lu_factor_magma(input, pivots, infos, compute_pivots);
-      break;
-#endif
-    default:
-#if AT_MAGMA_ENABLED()
-      // We do not use cuSOLVER for complex inputs if !get_pivots since nan_to_num_ does not work with it.
-      // See https://github.com/pytorch/pytorch/issues/59247 for more info
-      // Provided the above, use a heuristic to determine that cusolver is faster than MAGMA
-      const auto m = input.size(-2);
-      const auto use_cusolver = ((batch_size == 1 || (batch_size <= 8 && m <= 16))
-                                 && (!input.is_complex() || compute_pivots));
-      if (use_cusolver) {
-        lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
-      } else {
-        lu_factor_magma(input, pivots, infos, compute_pivots);
-      }
+    // If magma batched is buggy, we use cusolver
+    // otherwise, lu_factor just works for square matrices, for non-square matrices magma batched is the fastest
+    // otherwise (i.e. for square matrices), we choose between cusolver and magma using a heuristic
+    if (magma_batched_buggy || (m == n && (m <= 16 || (m <= 128 && batch_size <= 16)))) {
+      lu_factor_cusolver(input, pivots, infos, compute_pivots);
+    } else {
+      lu_factor_batched_magma(input, pivots, infos, compute_pivots);
+    }
 #else // USE_CUSOLVER && !AT_MAGMA_ENABLED
-      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
+    lu_factor_cusolver(input, pivots, infos, compute_pivots);
+#endif
+#else // !USE_CUSOLVER
+    lu_factor_magma(input, pivots, infos, compute_pivots);
 #endif
   }
-#else // !USE_CUSOLVER
-#if AT_MAGMA_ENABLED()
-    if (batch_size == 1) {
-      lu_factor_looped_magma(input, pivots, infos, compute_pivots);
-    } else {
-      lu_factor_magma(input, pivots, infos, compute_pivots);
-    }
-#else
-  TORCH_CHECK(
-      false,
-      "Calling linalg.lu_factor on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA or cuSolver. Please rebuild with MAGMA.");
-#endif // AT_MAGMA_ENABLED
-#endif // USE_CUSOLVER
 
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
   if (!compute_pivots) {
