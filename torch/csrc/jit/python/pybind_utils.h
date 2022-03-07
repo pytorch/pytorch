@@ -1168,8 +1168,7 @@ inline py::object _get_operation_for_overload_or_packet(
   std::vector<py::handle> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
-    is_tensor_and_append_overloaded(
-        args[i].ptr(), &overloaded_args);
+    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
         args[i].ptr(),
         &overloaded_args,
@@ -1183,8 +1182,7 @@ inline py::object _get_operation_for_overload_or_packet(
   // match the operator in `operations` first, then the order will
   // be guaranteed.
   for (auto item : kwargs) {
-    is_tensor_and_append_overloaded(
-        item.second.ptr(), &overloaded_args);
+    is_tensor_and_append_overloaded(item.second.ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
         item.second.ptr(),
         &overloaded_args,
@@ -1196,17 +1194,16 @@ inline py::object _get_operation_for_overload_or_packet(
     overloaded_types.reserve(overloaded_args.size());
     for (auto& oarg : overloaded_args) {
       overloaded_types.push_back(
-          py::reinterpret_borrow<py::object>(
-              (PyObject*)Py_TYPE(oarg.ptr())));
+          py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(oarg.ptr())));
     }
     py::tuple py_types = py::cast(overloaded_types);
     py::object ret;
     std::string ns = symbol.ns().toUnqualString();
     std::string method_name = symbol.toUnqualString();
     auto self_func = py::module::import("torch")
-                          .attr("ops")
-                          .attr(ns.c_str())
-                          .attr(method_name.c_str());
+                         .attr("ops")
+                         .attr(ns.c_str())
+                         .attr(method_name.c_str());
     if (is_overload) {
       auto overload_name = operations[0]->schema().overload_name();
       if (overload_name == "") {
