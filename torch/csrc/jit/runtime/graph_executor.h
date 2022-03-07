@@ -50,7 +50,7 @@ struct TORCH_API EnableProfilingGuard {
 
  private:
   bool old_executor_mode = false;
-  bool old_profiling_mode = false;
+  bool old_get_optimize = false;
 };
 
 struct GraphExecutorImplBase;
