@@ -2,6 +2,8 @@
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/jit_utils.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
@@ -10,15 +12,45 @@
 
 namespace at { namespace native {
 
+const char acos_name[] = "acos_kernel";
 void acos_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  auto common_dtype = iter.common_dtype();
+  if (at::isComplexType(common_dtype)) {
+    #if AT_USE_JITERATOR()
+      static const auto acos_string = jiterator_stringify(
+        template <typename T>
+        T acos_kernel(T x) {
+          return std::acos(x);
+        }
+      );
+      AT_DISPATCH_COMPLEX_TYPES(
+        common_dtype, "acos_cuda",
+        [&]() {
+          jitted_gpu_kernel<
+              /*name=*/acos_name,
+              /*return_dtype=*/scalar_t,
+              /*common_dtype=*/scalar_t,
+              /*arity=*/1>(iter, acos_string);
+        });
+    #else
+      AT_DISPATCH_COMPLEX_TYPES(
+        common_dtype, "acos_cuda",
+        [&]() {
+          gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return ::acos(a);
+          });
+        });
+    #endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "acos_cuda",
+      common_dtype, "acos_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::acos(a);
         });
       });
+  }
 }
 
 void asin_kernel_cuda(TensorIteratorBase& iter) {

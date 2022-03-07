@@ -989,6 +989,53 @@ asin(const complex<_Tp>& __x)
 
 // acos
 
+template <typename T>
+complex<T> compute_csqrt(const complex<T>& z) {
+  constexpr auto half = T(.5);
+
+  // Trust standard library to correctly handle infs and NaNs
+  if (std::isinf(z.real()) || std::isinf(z.imag()) || std::isnan(z.real()) ||
+      std::isnan(z.imag())) {
+    return static_cast<complex<T>>(
+        std::sqrt(static_cast<std::complex<T>>(z)));
+  }
+
+  // Special case for square root of pure imaginary values
+  if (z.real() == T(0)) {
+    if (z.imag() == T(0)) {
+      return complex<T>(T(0), z.imag());
+    }
+    auto v = std::sqrt(half * std::abs(z.imag()));
+    return complex<T>(v, std::copysign(v, z.imag()));
+  }
+
+  // At this point, z is non-zero and finite
+  if (z.real() >= 0.0) {
+    auto t = std::sqrt((z.real() + std::abs(z)) * half);
+    return complex<T>(t, half * (z.imag() / t));
+  }
+
+  auto t = std::sqrt((-z.real() + std::abs(z)) * half);
+  return complex<T>(
+      half * std::abs(z.imag() / t), std::copysign(t, z.imag()));
+}
+
+// Compute complex arccosine using formula from W. Kahan
+// "Branch Cuts for Complex Elementary Functions" 1986 paper:
+// cacos(z).re = 2*atan2(sqrt(1-z).re(), sqrt(1+z).re())
+// cacos(z).im = asinh((sqrt(conj(1+z))*sqrt(1-z)).im())
+template <typename T>
+complex<T> compute_cacos(const complex<T>& z) {
+  auto constexpr one = T(1);
+  auto a = compute_csqrt(complex<T>(one - z.real(), -z.imag()));
+  auto b = compute_csqrt(complex<T>(one + z.real(), z.imag()));
+  auto c = compute_csqrt(complex<T>(one + z.real(), -z.imag()));
+  auto r = T(2) * std::atan2(a.real(), b.real());
+  // Explicitly unroll (a*c).imag()
+  auto i = std::asinh(a.real() * c.imag() + a.imag() * c.real());
+  return complex<T>(r, i);
+}
+
 template<class _Tp>
 complex<_Tp>
 acos(const complex<_Tp>& __x)
@@ -1018,10 +1065,7 @@ acos(const complex<_Tp>& __x)
         return complex<_Tp>(__pi/_Tp(2), -__x.imag());
     if (__x.real() == 0 && (__x.imag() == 0 || isnan(__x.imag())))
         return complex<_Tp>(__pi/_Tp(2), -__x.imag());
-    complex<_Tp> __z = log(__x + sqrt(__sqr(__x) - _Tp(1)));
-    if (signbit(__x.imag()))
-        return complex<_Tp>(abs(__z.imag()), abs(__z.real()));
-    return complex<_Tp>(abs(__z.imag()), -abs(__z.real()));
+    return compute_cacos(__x);
 }
 
 // atan
