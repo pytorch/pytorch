@@ -237,7 +237,7 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       // Case 2: lazy->eager (forces a graph break since we are materializing a tensor)
 
       TORCH_INTERNAL_ASSERT(lazy_self);
-      auto eager_tensor = lazy_self.ToTensor(/*detached=*/true);
+      auto eager_tensor = lazy_self->ToTensor(/*detached=*/true);
       options = options.device(device);
       auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
       return moved_eager_tensor;
@@ -255,7 +255,7 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
       //     - but: we may have other assumptions that there is just one device per executor? so don't take this lightly
 
       TORCH_INTERNAL_ASSERT(lazy_self);
-      auto eager_tensor = lazy_self.ToTensor(/*detached=*/true);
+      auto eager_tensor = lazy_self->ToTensor(/*detached=*/true);
       // we move the eager tensor to the 'eager' equivalent of our lazy device
       // e.g. if our device is lazy:1, the backend maps that to cuda:1, which is what we use
       auto eager_device = c10::Device(torch::lazy::getBackend()->EagerFallbackDeviceType(), device->index());
@@ -276,7 +276,7 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
 
       auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
       TORCH_INTERNAL_ASSERT(shapes.size() == 1);
-      auto node = torch::lazy::MakeNode<ir::ops::ToCopy>(lazy_self.GetIrValue(),
+      auto node = torch::lazy::MakeNode<ir::ops::ToCopy>(lazy_self->GetIrValue(),
                             dtype,
                             layout,
                             device,
@@ -286,7 +286,7 @@ at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
                             std::move(shapes));
 
       auto result = torch::lazy::CreateAtenFromLtcTensor(
-              torch::lazy::LazyTensor::Create(std::move(node), lazy_self.GetDevice()));
+              torch::lazy::LazyTensor::Create(std::move(node), lazy_self->GetDevice()));
       return result;
     }
 };

@@ -23,41 +23,37 @@ class ToCopy : public torch::lazy::TsNode {
         device(device),
         pin_memory(pin_memory),
         non_blocking(non_blocking),
-        memory_format(memory_format)
-
-  {
-    
-  }
+        memory_format(memory_format) {}
 
   std::string ToString() const override {
     std::stringstream ss;
     ss << torch::lazy::TsNode::ToString();
     if (dtype.has_value()) {
-    ss << ", dtype=" << dtype.value();
-} else {
-    ss << ", dtype=null";
-}
+        ss << ", dtype=" << dtype.value();
+    } else {
+        ss << ", dtype=null";
+    }
     if (layout.has_value()) {
-    ss << ", layout=" << layout.value();
-} else {
-    ss << ", layout=null";
-}
+        ss << ", layout=" << layout.value();
+    } else {
+        ss << ", layout=null";
+    }
     if (device.has_value()) {
-    ss << ", device=" << device.value();
-} else {
-    ss << ", device=null";
-}
+        ss << ", device=" << device.value();
+    } else {
+        ss << ", device=null";
+    }
     if (pin_memory.has_value()) {
-    ss << ", pin_memory=" << pin_memory.value();
-} else {
-    ss << ", pin_memory=null";
-}
+        ss << ", pin_memory=" << pin_memory.value();
+    } else {
+        ss << ", pin_memory=null";
+    }
     ss << ", non_blocking=" << non_blocking;
     if (memory_format.has_value()) {
-    ss << ", memory_format=" << memory_format.value();
-} else {
-    ss << ", memory_format=null";
-}
+        ss << ", memory_format=" << memory_format.value();
+    } else {
+        ss << ", memory_format=null";
+    }
     return ss.str();
   }
 
@@ -88,8 +84,6 @@ class ToCopy : public torch::lazy::TsNode {
   c10::optional<bool> pin_memory;
   bool non_blocking;
   c10::optional<at::MemoryFormat> memory_format;
-  
-
 };
 
 } // namespace ops
