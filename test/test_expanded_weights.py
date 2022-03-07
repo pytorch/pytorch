@@ -189,11 +189,14 @@ class TestExpandedWeightFunctional(TestCase):
         for sample_input in supported_inputs(op, sample_inputs):
             if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
                 sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
+                if 'max_norm' in sample_input.kwargs:  # in place update makes it difficult even with copying
+                    pass
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
             expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
             normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result)
+
 
     def test_expanded_weight_error(self, device):
         batch_size = 3
@@ -376,6 +379,7 @@ def run_op(op, input, *args, **kwargs):
     using the special ordering that Embedding's OpInfo expects for that case.
     """
     if op.name == "nn.functional.embedding":
+        assert len(args) == 1
         return op(args[0], input, **kwargs)
     else:
         return op(input, *args, **kwargs)
