@@ -684,7 +684,7 @@ def maybe_insert_output_observer_for_node(
 
 def maybe_insert_observers_before_graph_output(
     graph_output_node: Node,
-    output_quantized_idxs: List[int],
+    output_quantized_idxs: Dict[int, torch.dtype],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     qconfig_map: Dict[str, QConfigAny],
     model: torch.nn.Module,
