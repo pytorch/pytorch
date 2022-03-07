@@ -1,7 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/BatchLinearAlgebra.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
@@ -14,6 +16,25 @@
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cholesky_solve_helper_native.h>
+#include <ATen/ops/_linalg_inv_out_helper_native.h>
+#include <ATen/ops/_linalg_qr_helper_native.h>
+#include <ATen/ops/_solve_helper_native.h>
+#include <ATen/ops/_symeig_helper_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/linalg_eigh.h>
+#include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/lstsq_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #if AT_MAGMA_ENABLED()
 #include <magma_types.h>
@@ -41,6 +62,12 @@ const bool use_magma_ = false;
 
 namespace at {
 namespace native {
+#if defined(BUILD_LAZY_CUDA_LINALG)
+// All registrations with PyTorch runtime should be done dynamically
+// so if library is lazy loaded it must not export anything, otherwise
+// it can result in symbol clashes
+namespace lazy_linalg {
+#endif
 
 #if AT_MAGMA_ENABLED()
 template<class scalar_t>
@@ -3250,7 +3277,6 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 
 
 #if defined(BUILD_LAZY_CUDA_LINALG)
-namespace {
 struct DispatchInitializer {
   DispatchInitializer() {
     cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
@@ -3262,7 +3288,8 @@ struct DispatchInitializer {
     cuda::detail::registerLinalgDispatch(disp);
   };
 } initializer;
-}  // namespace (anonymous)
+
+}  // namespace lazy_linalg
 #endif
 }}  // namespace at::native
 
