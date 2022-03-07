@@ -1341,7 +1341,7 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(jvp, torch.mm(jac, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vjp, torch.mm(v.unsqueeze(0), jac).squeeze(0))
 
-    @FIXME_base_and_xfail_logging_tensor
+    @base_and_logging_tensor
     def test_hessian_match_vhp_hvp(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
