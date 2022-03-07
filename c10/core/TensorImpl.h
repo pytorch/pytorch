@@ -2286,7 +2286,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Compute the number of elements based on the sizes of a tensor.
    */
   int64_t compute_numel() const {
-#if C10_HAS_BUILTIN_OVERFLOW()
+#if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
 #else

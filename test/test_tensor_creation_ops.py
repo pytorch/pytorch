@@ -2677,11 +2677,11 @@ class TestTensorCreation(TestCase):
     @onlyNativeDeviceTypes
     def test_empty_overflow(self, device):
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty([2, 4, 536870912, 536870912], dtype=torch.float64)
+            torch.empty([2, 4, 2**29, 2**29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty([8, 8, 536870912, 536870912], dtype=torch.float64)
+            torch.empty([8, 8, 2**29, 2**29], dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            torch.empty_strided([8, 8], [8 * 536870912**2, 1], dtype=torch.float64)
+            torch.empty_strided([8, 8], [2**61, 1], dtype=torch.float64)
 
     def test_eye(self, device):
         for dtype in get_all_dtypes():

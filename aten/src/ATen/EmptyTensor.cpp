@@ -33,8 +33,8 @@ size_t computeStorageNbytesContiguous(
     size_t itemsize_bytes,
     size_t storage_offset
   ) {
-  // size of the underlying storage is 1 bigger than the offset
-  // of the last element according to stride
+  // Ignore overflow checks on mobile
+#ifndef C10_MOBILE
   uint64_t size = 1;
   bool overflowed = false;
   for (const auto s : sizes) {
@@ -46,6 +46,10 @@ size_t computeStorageNbytesContiguous(
   TORCH_CHECK(!overflowed,
               "Storage size calculation overflowed with sizes=", sizes);
   return static_cast<size_t>(size);
+#else
+  const auto numel = c10::multiply_integers(sizes.begin(), sizes.end());
+  return itemsize_bytes * (storage_offset + numel);
+#endif
 }
 
 size_t computeStorageNbytes(
@@ -54,6 +58,8 @@ size_t computeStorageNbytes(
     size_t itemsize_bytes,
     size_t storage_offset
   ) {
+  // Ignore overflow checks on mobile
+#ifndef C10_MOBILE
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   uint64_t size = storage_offset + 1;
@@ -73,6 +79,19 @@ size_t computeStorageNbytes(
               "Storage size calculation overflowed with sizes=",
               sizes, " and strides=", strides);
   return static_cast<size_t>(size);
+#else
+  // size of the underlying storage is 1 bigger than the offset
+  // of the last element according to stride
+  uint64_t size = 1;
+  for (const auto i : c10::irange(sizes.size())) {
+    if (sizes[i] == 0) {
+      return 0;
+    }
+
+    size += strides[i] * (sizes[i] - 1);
+  }
+  return itemsize_bytes * (storage_offset + size);
+#endif
 }
 
 TensorBase empty_generic(

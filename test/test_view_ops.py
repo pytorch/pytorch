@@ -1800,9 +1800,9 @@ class TestOldViewOps(TestCase):
     def test_resize_overflow(self, device):
         x = torch.empty((), dtype=torch.float64)
         with self.assertRaisesRegex(RuntimeError, 'Storage size calculation overflowed'):
-            x.resize_([2, 4, 536870912, 536870912])
+            x.resize_([2, 4, 2**29, 2**29])
         with self.assertRaisesRegex(RuntimeError, 'overflow'):
-            x.resize_([8, 8, 536870912, 536870912])
+            x.resize_([8, 8, 2**29, 2**29])
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in get_all_dtypes():
