@@ -1265,8 +1265,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_standalone_module_float_interface(self):
         float_interface_config = {
-            "input_quantized_idxs": [],  # float input
-            "output_quantized_idxs": [],  # float output
+            "input_quantized_idxs": {},  # float input
+            "output_quantized_idxs": {},  # float output
         }
         interface_config = float_interface_config
         # input and output of first conv, observer for standalone module
@@ -1299,8 +1299,8 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_standalone_module_quantized_interface(self):
         quantized_interface_config = {
-            "input_quantized_idxs": [0],  # quantized input
-            "output_quantized_idxs": [0],  # quantized output
+            "input_quantized_idxs": {0: torch.quint8},  # quantized input
+            "output_quantized_idxs": {0: torch.quint8},  # quantized output
         }
         interface_config = quantized_interface_config
         # observer for input and output of first conv

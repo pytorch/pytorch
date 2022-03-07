@@ -1430,6 +1430,6 @@ def prepare(
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]
         model._standalone_module_input_quantized_idxs = \
-            torch.tensor(input_quantized_idxs)
-        model._standalone_module_output_quantized_idxs = torch.tensor(output_quantized_idxs)
+            torch.tensor(list(input_quantized_idxs.keys()))
+        model._standalone_module_output_quantized_idxs = torch.tensor(list(output_quantized_idxs.keys()))
     return model
