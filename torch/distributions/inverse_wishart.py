@@ -211,21 +211,22 @@ class InverseWishart(ExponentialFamily):
 
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        eff_df = (nu - p).view(self._batch_shape + (1, 1))
+        eff_df = (nu - p).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
 
         return torch.where(
-            nu.ge(p + 3),
+            eff_df.ge(3),
             _clamp_with_eps(
                 (
-                    (eff_df + 1) * V.pow(2) + (eff_df - 1) * torch.einsum("...i,...j->...ij", diag_V, diag_V)
+                    torch.einsum("...ij,...ij->...ij", eff_df + 1, V.pow(2))
+                    + torch.einsum("...ij,...i,...j->...ij", eff_df - 1, diag_V, diag_V)
                 ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
             ),
             torch.full_like(
-                nu,
+                eff_df,
                 fill_value=float("Inf"),
-                dtype=nu.dtype,
-                device=nu.device,
-            ).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
+                dtype=eff_df.dtype,
+                device=eff_df.device,
+            )
         )
 
     def _bartlett_sampling(self, sample_shape=torch.Size()):
