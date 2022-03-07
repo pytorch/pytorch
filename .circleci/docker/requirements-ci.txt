@@ -66,14 +66,14 @@ librosa>=0.6.2
 #mkl-devel
 # see mkl
 
-mock
+#mock # breaks ci/circleci: docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
 #test that import: test_module_init.py, test_modules.py, test_nn.py,
 #test_testing.py
 
-#MonkeyType
+MonkeyType
 #Description: collects runtime types of function arguments and return
 #values, and can automatically generate stub files
 #Pinned versions:
