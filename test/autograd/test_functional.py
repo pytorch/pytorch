@@ -43,10 +43,10 @@ FIXME_base_and_xfail_logging_tensor = parametrize("ctors", [subtest(base_ctors, 
 #     actually expected to succeed
 FIXME_xfail_vectorized_logging_tensor = (
     parametrize("vectorize,ctors", [subtest((True, base_ctors), name="vectorized_base_tensor"),
-                                     subtest((False, base_ctors), name="base_tensor"),
-                                     subtest((True, logging_tensor_ctors), name="vectorized_logging_tensor",
-                                             decorators=[unittest.expectedFailure]),
-                                     subtest((False, logging_tensor_ctors), name="logging_tensor")]))
+                                    subtest((False, base_ctors), name="base_tensor"),
+                                    subtest((True, logging_tensor_ctors), name="vectorized_logging_tensor",
+                                            decorators=[unittest.expectedFailure]),
+                                    subtest((False, logging_tensor_ctors), name="logging_tensor")]))
 
 
 class TestAutogradFunctional(TestCase):
