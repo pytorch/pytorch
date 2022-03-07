@@ -22,15 +22,10 @@ std::vector<at::Tensor> getTensorShapes(
   std::vector<at::Tensor> shapeTensors;
   shapeTensors.reserve(tensors.size());
   for (const auto& tensor : tensors) {
-    auto shapesVec = tensor.sizes().vec();
-    int64_t shapes_size = shapesVec.size();
-    // Need to clone here otherwise the shapesVec.data() memory is not copied
-    // and can be released under the hood.
-    at::Tensor shapesTensor = at::from_blob(
-                                  shapesVec.data(),
-                                  {shapes_size},
-                                  at::TensorOptions().dtype(at::kLong))
-                                  .clone();
+    // Use `at::tensor()` to copy the data underlying `sizes()` since it may be
+    // released elsewhere.
+    at::Tensor shapesTensor =
+        at::tensor(tensor.sizes(), at::TensorOptions().dtype(at::kLong));
     shapeTensors.emplace_back(std::move(shapesTensor));
   }
   return shapeTensors;
