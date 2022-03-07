@@ -6,7 +6,11 @@
 #include <ATen/native/TransposeType.h>
 
 
-namespace at { namespace native {
+namespace at {
+
+struct TensorIterator;
+
+namespace native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
@@ -229,8 +233,7 @@ DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
 using unpack_pivots_fn = void(*)(
   TensorIterator& iter,
-  const int64_t dim_size
-);
+  const int64_t dim_size);
 DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
 
 using lu_solve_fn = void (*)(
