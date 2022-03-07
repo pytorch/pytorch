@@ -4566,7 +4566,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = M(0.5)
         mp = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             m, {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')},
-            prepare_custom_config_dict={"input_quantized_idxs": [0]})
+            prepare_custom_config_dict={'input_quantized_idxs': {0: torch.quint8}})
         expected_node_occurrence = {
             ns.call_module(torch.ao.quantization.FusedMovingAvgObsFakeQuantize): 0,
         }
