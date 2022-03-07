@@ -106,8 +106,8 @@ static C10_UNUSED TensorIterator _make_unfold_backward_iter_over_grad_in(
   Tensor& grad_out,
   const Tensor& grad_in,
   int64_t dim,
-  int64_t size,
-  int64_t step
+  int64_t /*size*/,
+  int64_t /*step*/
 ) {
   dim = maybe_wrap_dim(dim, grad_out.dim());
   // last dim stores the folds
