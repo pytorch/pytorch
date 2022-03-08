@@ -1,15 +1,19 @@
 Install functorch
 =================
 
-There are two ways to install functorch:
+pip
+---
 
-#. `functorch main  <https://github.com/pytorch/functorch#installing-functorch-main>`_
-#. `functorch preview with PyTorch 1.10 <https://github.com/pytorch/functorch#installing-functorch-preview-with-pytorch-110>`_
+(Coming soon)
 
-We recommend installing the functorch main development branch for the latest and
-greatest. This requires an installation of the latest PyTorch nightly.
+Colab
+-----
 
-If you're looking for an older version of functorch that works with a stable
-version of PyTorch (1.10), please install the functorch preview.
+(Coming soon)
 
-Check out `the instructions at our GitHub <https://github.com/pytorch/functorch/blob/main/README.md#install>`_.
+Building from source
+--------------------
+
+See our `README <https://github.com/pytorch/functorch#installing-functorch-main>`_
+for instructions on how to build the functorch main development branch for the
+latest and greatest. This requires an installation of the latest PyTorch nightly.
