@@ -200,7 +200,7 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
     recomputable_ops = set(
         pointwise_ops
         + misc_ops
-        # + reduction_ops
+        + reduction_ops
         # + norm_ops
         # + view_ops
     )
