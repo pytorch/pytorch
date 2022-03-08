@@ -10,7 +10,6 @@
 
 #include "ATen/MetaFunctions.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
-#include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
 #include "lazy_tensor_core/csrc/ops/to_copy.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
@@ -417,55 +416,6 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   return torch::lazy::CreateAtenFromLtcTensor(lazy_tensor_aten_ops::permute(
       self_tensor, torch::lazy::ToI64Vector(dims)));
-}
-
-at::Tensor& LazyNativeFunctions::random_(
-    at::Tensor& self, int64_t from, c10::optional<int64_t> to,
-    c10::optional<at::Generator> generator) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-
-  if (generator && generator->defined()) {
-    return at::native::call_fallback_fn<
-        &ltc_eager_fallback, ATEN_OP2(random_, from)>::call(self, from, to,
-                                                            generator);
-  }
-
-  auto selfTensor = torch::lazy::TryGetLtcTensor(self);
-  selfTensor->SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(
-      selfTensor->GetIrValue(), from, to));
-  return self;
-}
-
-at::Tensor& LazyNativeFunctions::random_(
-    at::Tensor& self, int64_t to, c10::optional<at::Generator> generator) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-
-  if (generator && generator->defined()) {
-    return at::native::call_fallback_fn<&ltc_eager_fallback,
-                                        ATEN_OP2(random_, to)>::call(self, to,
-                                                                     generator);
-  }
-
-  auto selfTensor = torch::lazy::TryGetLtcTensor(self);
-  selfTensor->SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(
-      selfTensor->GetIrValue(), c10::nullopt, to));
-  return self;
-}
-
-at::Tensor& LazyNativeFunctions::random_(
-    at::Tensor& self, c10::optional<at::Generator> generator) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-
-  if (generator && generator->defined()) {
-    return at::native::call_fallback_fn<&ltc_eager_fallback,
-                                        ATEN_OP(random_)>::call(self,
-                                                                generator);
-  }
-
-  auto selfTensor = torch::lazy::TryGetLtcTensor(self);
-  selfTensor->SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Random>(
-      selfTensor->GetIrValue(), c10::nullopt, c10::nullopt));
-  return self;
 }
 
 at::Tensor LazyNativeFunctions::select(const at::Tensor& self, int64_t dim,

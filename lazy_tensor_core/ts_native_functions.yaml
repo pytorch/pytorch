@@ -99,6 +99,9 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
+  - random_
+  - random_.from
+  - random_.to
   - reciprocal
   - relu
   - relu_
@@ -153,9 +156,6 @@ supported:
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
-  - random_
-  - random_.from
-  - random_.to
   - select.int
   - slice.Tensor
   - squeeze
