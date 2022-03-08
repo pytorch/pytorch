@@ -327,7 +327,8 @@ class AutocastCPUTestLists(object):
         self.nn_fp32 = [
             ("avg_pool2d", dummy_bf16[2], {"kernel_size": (3, 2), "stride": (1, 1)}),
             ("avg_pool3d", dummy_bf16[3], {"kernel_size": (3, 3, 3), "stride": (1, 1, 1)}),
-            ("gelu", dummy_bf16[3]),
+            ("gelu", dummy_bf16[3], {"approximate": 'none'}),
+            ("gelu", dummy_bf16[3], {"approximate": 'tanh'}),
             ("upsample_nearest1d", dummy_bf16[2], {"output_size": (n)}),
             ("upsample_nearest2d", dummy_bf16[3], {"output_size": (n, n)}),
             ("upsample_nearest3d", dummy_bf16[4], {"output_size": (n, n, n)}),

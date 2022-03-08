@@ -1,11 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 
 namespace torch {
 namespace jit {
@@ -41,14 +40,10 @@ IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
   // reduction. All we care about are the transformations, and trying to make
   // sure we track correctly a replaying with consistent reduction/broadcast
   // domains is challenging and unnecessary.
-  auto copied_id =
-      new IterDomain(id->start(), id->extent(), id->getParallelType());
+  auto copied_id = IrBuilder::create<IterDomain>(
+      id->container(), id->start(), id->extent(), id->getParallelType());
   replayed_ids_.emplace_back(copied_id);
   return copied_id;
-}
-
-IterDomain* IndexReferenceReplay::toFusionID(kir::IterDomain* kir_id) {
-  return ca_map_.toFusion(kir_id);
 }
 
 IterDomain* IndexReferenceReplay::toConcrete(IterDomain* id) {
@@ -70,7 +65,8 @@ void IndexReferenceReplay::handle(Split* split) {
   }
 
   // Replay the provided split operation and add it to the reference DAG
-  new Split(
+  IrBuilder::create<Split>(
+      split->container(),
       ref_outer,
       ref_inner,
       ref_in,
@@ -101,7 +97,7 @@ void IndexReferenceReplay::handle(Merge* merge) {
   }
 
   // Replay the provided merge operation and add it to the reference DAG
-  new Merge(ref_out, ref_outer, ref_inner);
+  IrBuilder::create<Merge>(merge->container(), ref_out, ref_outer, ref_inner);
 
   // Mark producers and consumers
   ref_id_consumed_.emplace(ref_outer);
@@ -149,7 +145,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
       loop_structure_.begin(),
       loop_structure_.end(),
       std::back_inserter(domain_ids),
-      [this](kir::ForLoop* fl) { return toFusionID(fl->iter_domain()); });
+      [](kir::ForLoop* fl) { return fl->iter_domain(); });
 
   // IterVisitor based traversals don't work because we don't have all outputs.
   // backward traversal's traverseFrom(domain_ids) will throw "Invalid backward
@@ -194,7 +190,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
   // Construct a tensor that's representitive of the replayed loop structure.
   std::vector<IterDomain*> loops_replayed_domain;
   for (auto loop : loop_structure_) {
-    auto loop_id = toFusionID(loop->iter_domain());
+    auto loop_id = loop->iter_domain();
     // Map to loops with the loop map, but make sure the replayed id is actually
     // a leaf in the replay.
     auto ref_id_it = std::find_if(
@@ -222,7 +218,7 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
           loops_replayed_domain.begin(),
           loops_replayed_domain.end(),
           [](IterDomain* id) { return id->definition() != nullptr; })) {
-    auto domain = new TensorDomain(
+    auto domain = IrBuilder::create<TensorDomain>(
         // If there was no replay only return a domain with a root domain.
         loops_replayed_domain);
     return domain;
@@ -257,8 +253,9 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
 
     // Create and return the reference.
-    auto domain = new TensorDomain(
-        {root_domain_ids.begin(), root_domain_ids.end()},
+    auto domain = IrBuilder::create<TensorDomain>(
+        std::vector<IterDomain*>(
+            root_domain_ids.begin(), root_domain_ids.end()),
         loops_replayed_domain);
     return domain;
   }
@@ -266,26 +263,30 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
 
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
-    TensorDomain* reference_tensor) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
+    TensorDomain* reference_tensor,
+    kir::ForLoop* double_buffer_loop) {
   // Create a simple index mapping from loop iter domains to their local index.
   // This is only applicable to global memory buffers.
-  std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map;
+  std::unordered_map<IterDomain*, Val*> initial_index_map;
 
   TORCH_INTERNAL_ASSERT(loop_structure.size() <= reference_tensor->nDims());
   int magic_zero_loop = -1;
   for (const auto loop_i : c10::irange(loop_structure.size())) {
     auto ref_axis = reference_tensor->axis(loop_i);
-    auto kir_ref_axis = gpu_lower->lowerValue(ref_axis)->as<kir::IterDomain>();
     auto loop = loop_structure[loop_i];
     auto ind = loop->index();
-    ;
 
-    initial_index_map[kir_ref_axis] = ind;
+    initial_index_map[ref_axis] = ind;
     if (loop->vectorize()) {
-      initial_index_map[kir_ref_axis] = ir_builder.create<kir::Int>(0);
+      initial_index_map[ref_axis] = GpuLower::current()->kernel()->zeroVal();
+    } else if (double_buffer_loop == loop) {
+      // This version of getReferenceIndexing is only used for
+      // indexing global tensors. When indexing global producers, the
+      // index for a double buffered loop needs to be incremented. The
+      // parameter double_buffer_loop should be nullptr when indexing
+      // global consumers tensors.
+      initial_index_map[ref_axis] =
+          IrBuilder::addExpr(ind, GpuLower::current()->kernel()->oneVal());
     }
 
     if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
@@ -295,10 +296,9 @@ IndexCompute getReferenceIndexing(
 
   // Add magic zero to a fairly inner most index
   if (magic_zero_loop >= 0) {
-    auto ref_id = gpu_lower->lowerValue(reference_tensor->axis(magic_zero_loop))
-                      ->as<kir::IterDomain>();
-    initial_index_map[ref_id] = ir_builder.addExpr(
-        initial_index_map[ref_id], ir_builder.magicZeroVal());
+    auto ref_id = reference_tensor->axis(magic_zero_loop);
+    initial_index_map[ref_id] = IrBuilder::addExpr(
+        initial_index_map[ref_id], FusionGuard::getCurFusion()->magicZeroVal());
   }
 
   // Send to the other version of reference indexing that directly takes the
@@ -310,19 +310,17 @@ IndexCompute getReferenceIndexing(
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_tensor,
-    std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
-    std::unordered_set<kir::IterDomain*> zero_domains,
+    std::unordered_map<IterDomain*, Val*> index_map,
+    std::unordered_set<IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_paths,
-    std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map) {
-  auto gpu_lower = GpuLower::current();
-
+    std::unordered_map<IterDomain*, Val*> halo_extent_map) {
   // I thought this might be necesasry, but turns out it's not. I think it's
   // because of the root ordering above, however leaving it in case we find
   // out it is necessary in some cases. At the time of commiting, cuda-memcheck
   // passed without this.
   //
-  // std::unordered_map<kir::IterDomain*,
-  // kir::Val*> reference_extent_map; for (auto loop : loop_structure) {
+  // std::unordered_map<IterDomain*,
+  // Val*> reference_extent_map; for (auto loop : loop_structure) {
   //   // If there's a broadcast merged in the for loop ID we want to track its
   //   // extent
   //   auto inputs = InputsOf::outputs(
@@ -342,16 +340,6 @@ IndexCompute getReferenceIndexing(
   //   }
   // }
 
-  // Convert to preferred_path to kir::IterDomain for IndexCompute
-  std::unordered_set<kir::IterDomain*> kir_preferred_path;
-  std::transform(
-      preferred_paths.begin(),
-      preferred_paths.end(),
-      std::inserter(kir_preferred_path, kir_preferred_path.begin()),
-      [&gpu_lower](IterDomain* id) {
-        return gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-      });
-
   IndexCompute compute(
       reference_tensor,
       index_map, // NOLINT
@@ -359,9 +347,9 @@ IndexCompute getReferenceIndexing(
       // in this function
       {},
       zero_domains,
-      std::unordered_set<kir::IterDomain*>(),
+      std::unordered_set<IterDomain*>(),
       reference_tensor->contiguity(),
-      kir_preferred_path,
+      preferred_paths,
       halo_extent_map);
 
   compute.run();

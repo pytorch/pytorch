@@ -24,8 +24,8 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import ops, onlyCPU, instantiate_device_type_tests
 import torch.utils._pytree as pytree
 import torch.fx._pytree as fx_pytree
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH
-from torch.fx.node import Target, Argument
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap, PH, CodeGen
+from torch.fx.node import Target, Argument, _format_arg
 from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
@@ -101,6 +101,11 @@ wrap('len')
 
 wrap('getattr')
 
+def wrapped_named_tup(p1, *, p2):
+    return p1.x + p2.y
+
+wrap(wrapped_named_tup)
+
 @wrap
 def wrapped_via_decorator(a):
     return a + 1
@@ -124,6 +129,9 @@ def wrapper_fn(x):
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
+
+    def _custom_fx_repr_fn(self) -> str:
+        return f"Pair(x={_format_arg(self.x)}, y={_format_arg(self.y)})"
 
 # for testing pytrees
 class Foo(object):  # noqa: B209
@@ -677,6 +685,38 @@ class TestFX(JitTestCase):
         m_g.graph.lint()
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
+
+    def test_trace_buffer_slice(self):
+        bs, d_hid = 10, 23
+
+        class ExampleCode(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.lin = torch.nn.Linear(d_hid, d_hid)
+                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
+
+            def forward(self, x):
+                x = torch.mm(x, self.mm_param)
+                skip_connection = x
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param) + self.buffer[:x.shape[0]]
+                x = self.lin(x)
+                x = torch.relu(x)
+                x = x + skip_connection
+                x = torch.mm(x, self.mm_param2)
+                x = self.lin(x)
+                return x
+
+
+        ec = ExampleCode()
+
+        traced = torch.fx.symbolic_trace(ec)
+
+        x = torch.randn(bs, d_hid)
+        torch.testing.assert_allclose(ec(x), traced(x))
+
 
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
@@ -1237,6 +1277,18 @@ class TestFX(JitTestCase):
         g.erase_node(neg)
 
         self.assertTrue(neg not in relu.users)
+
+    def test_remove_uses_with_custom_filter(self):
+        g : torch.fx.Graph = Graph()
+        x : torch.fx.Node = g.placeholder('x')
+        relu : torch.fx.Node = g.call_function(torch.relu, (x,))
+        neg : torch.fx.Node = g.call_function(torch.neg, (relu,))
+        g.output(neg)
+
+        neg.replace_all_uses_with(relu, lambda x: x != neg)
+
+        self.assertTrue(neg in relu.users)
+
 
     def test_nonetype_annotation(self):
         eb = torch.nn.EmbeddingBag(3, 4)
@@ -1925,6 +1977,28 @@ class TestFX(JitTestCase):
         new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
 
+    def test_immutable_list_pytree_ops(self):
+        rand_tensor = torch.randn(5, 3)
+        l = immutable_list([3, [rand_tensor, 42]])
+
+        flattened, spec = pytree.tree_flatten(l)
+        assert flattened == [3, rand_tensor, 42]
+
+        unflattened = pytree.tree_unflatten(flattened, spec)
+        assert unflattened == l
+        assert isinstance(unflattened, immutable_list)
+
+    def test_immutable_dict_pytree_ops(self):
+        rand_tensor = torch.randn(5, 3)
+        d = immutable_dict({'a': 3, 'b': [rand_tensor, 42]})
+
+        flattened, spec = pytree.tree_flatten(d)
+        assert flattened == [3, rand_tensor, 42]
+
+        unflattened = pytree.tree_unflatten(flattened, spec)
+        assert unflattened == d
+        assert isinstance(unflattened, immutable_dict)
+
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         x : torch.fx.Node = graph.create_node('placeholder', 'x')
@@ -2260,6 +2334,40 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(NamedTupReturn())
         input = torch.rand(3, 4)
         self.assertEqual(traced(input), Pair(input, input))
+
+    def test_named_tuple_inlined(self):
+        class NamedTupMod(torch.nn.Module):
+            def forward(self, inp):
+                return wrapped_named_tup(Pair(inp, 1.2), p2=Pair(3.4, inp))
+
+        m = NamedTupMod()
+        input = torch.rand(3, 4)
+        ref = m(input)
+        traced = symbolic_trace(m)
+
+        res = traced(input)
+        self.assertEqual(ref, res)
+
+        # Check Pair NamedTuple works when inlined into the function call.
+        ph = call_func = None
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                ph = node
+            elif node.op == "call_function" and node.target == wrapped_named_tup:
+                node.update_arg(0, Pair(ph, 1.2))
+                node.update_kwarg("p2", Pair(3.4, ph))
+                call_func = node
+                break
+        self.assertTrue(call_func is not None)
+        self.assertTrue(isinstance(call_func.args[0], Pair))
+        self.assertTrue(isinstance(call_func.kwargs["p2"], Pair))
+        self.assertEqual(_format_arg(call_func.args[0]), "Pair(x=%inp, y=1.2)")
+        self.assertEqual(_format_arg(call_func.kwargs["p2"]), "Pair(x=3.4, y=%inp)")
+
+        traced.graph.eliminate_dead_code()
+        traced.recompile()
+        res = traced(input)
+        self.assertEqual(ref, res)
 
     def test_return_type_exists(self):
         class ReturnTypeModule(torch.nn.Module):
@@ -3126,6 +3234,12 @@ class TestFX(JitTestCase):
             orig_out = f(val)
             nf = symbolic_trace(f, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
+
+            bare_fx = GraphModule({}, copy.deepcopy(nf.graph))
+            bare_fx.graph.set_codegen(CodeGen())
+            bare_fx.recompile()
+            self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(val))), orig_out)
+
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
             assert(sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args)
 
@@ -3160,6 +3274,42 @@ class TestFX(JitTestCase):
 
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
+
+    def test_custom_codegen(self):
+        class ListCodeGen(CodeGen):
+            def gen_fn_def(self, free_vars, maybe_return_annotation):
+                lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list"""
+                return lst_unpack
+
+            def additional_globals(self):
+                return [('List', typing.List)]
+
+            def process_inputs(self, *inputs):
+                assert(len(inputs) == 1)
+                return inputs[0]
+
+        def f(a, b):
+            return a + b
+
+        nf = symbolic_trace(f)
+        vals = [torch.randn(3), torch.randn(3)]
+        self.assertEqual(nf(*vals), f(*vals))
+
+        nf.graph.set_codegen(ListCodeGen())
+        nf.recompile()
+
+        bare_fx = GraphModule({}, copy.deepcopy(nf.graph))
+        bare_fx.graph.set_codegen(CodeGen())
+        bare_fx.recompile()
+
+        self.assertEqual(nf(vals), f(*vals))
+        self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(vals))), f(*vals))
+
+        ts_f = torch.jit.script(nf)
+        self.assertEqual(nf(vals), ts_f(vals))
+
 
     def test_imul_code_print(self):
         graph = torch.fx.Graph()
@@ -3496,6 +3646,7 @@ class TestFunctionalTracing(JitTestCase):
         "bilinear": BUILT_IN_FUNC,
         "celu_": BUILT_IN_FUNC,
         "channel_shuffle": BUILT_IN_FUNC,
+        "native_channel_shuffle": BUILT_IN_FUNC,
         "conv1d": BUILT_IN_FUNC,
         "conv2d": BUILT_IN_FUNC,
         "conv3d": BUILT_IN_FUNC,
@@ -3584,9 +3735,9 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
-        "max_pool1d_with_indices": CONTROL_FLOW,
-        "max_pool2d_with_indices": CONTROL_FLOW,
-        "max_pool3d_with_indices": CONTROL_FLOW,
+        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,

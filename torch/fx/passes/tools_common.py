@@ -23,7 +23,7 @@ def get_acc_ops_name(k):
         return f"acc_ops.{k.__name__}"
     else:
         module = k.__module__
-        return f"{module if module else ''}.{k.__name__}".replace('_', '')
+        return f"{module if module else ''}.{k.__name__}"
 
 
 @compatibility(is_backward_compatible=False)
