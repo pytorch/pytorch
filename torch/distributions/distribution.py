@@ -211,7 +211,7 @@ class Distribution(object):
         Returns:
             Tensor iterating over dimension 0.
         """
-        raise NotImplementedError(f"enumerate_support is defined only for discrete distributions" 
+        raise NotImplementedError(f"enumerate_support is defined only for discrete distributions"
                                   f" and \"{self.__class__.__name__}\" is a continuous distribution.")
 
     def entropy(self):
