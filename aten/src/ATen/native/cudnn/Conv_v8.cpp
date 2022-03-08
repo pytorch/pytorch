@@ -485,9 +485,6 @@ void try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::CUDAOutOfMemoryError &e) {
         cudaGetLastError(); // clear CUDA error
-    } catch (c10::CUDAError &e) {
-        TORCH_WARN("suspicious CUDAError encountered while trying cuDNN config, skipping to next config...");
-	cudaGetLastError(); // TODO: should this be cleared?
     }
   }
   TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
