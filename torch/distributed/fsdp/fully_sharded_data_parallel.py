@@ -1157,8 +1157,8 @@ class FullyShardedDataParallel(nn.Module):
                 non-zero ranks, the `writeback` argument is ignored and
         """
         def _free_full_params_and_use_local_shard(params_to_free):
-                self._free_full_params(params_to_free)
-                self._use_param_local_shard()
+            self._free_full_params(params_to_free)
+            self._use_param_local_shard()
 
         if recurse:
             with contextlib.ExitStack() as stack:
@@ -1194,11 +1194,11 @@ class FullyShardedDataParallel(nn.Module):
 
             my_rank = dist.get_rank(self.process_group)
             if rank0_only and my_rank != 0:
-               _free_full_params_and_use_local_shard(currently_local_params)
-               try:
-                   yield
-               finally:
-                   self.training_state = TrainingState_.IDLE
+                _free_full_params_and_use_local_shard(currently_local_params)
+                try:
+                    yield
+                finally:
+                    self.training_state = TrainingState_.IDLE
             else:
                 # FSDP now has the full flattened parameter. Unflatten it to get the
                 # full parameters.
