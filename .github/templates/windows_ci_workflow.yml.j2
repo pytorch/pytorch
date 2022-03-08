@@ -139,7 +139,7 @@ jobs:
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
     name: !{{ test_job.name }}
-    timeout-minutes: !{{ common.win_test_timeout_minutes }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
       SHARD_NUMBER: !{{ test_job.shard }}
