@@ -3567,34 +3567,40 @@ class TestVmapOperatorsOpInfo(TestCase):
                 assert torch.allclose(vmap_result[i], expected)
 
     @parametrize('randomness', ['error', 'same', 'different'])
-    def test_feature_dropout(self, device, randomness):
+    @parametrize('batched_input', [True, False])
+    def test_feature_dropout(self, device, randomness, batched_input):
         # special case because functional feature dropout expects a batch dimension, so it doesn't match the
         # pattern for other randomness
 
         seed = 1234567
         supported_ops = [
-            lambda t: torch.nn.functional.dropout(torch.ones_like(t), training=True),
-            lambda t: torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True),
-            lambda t: torch.nn.functional.feature_alpha_dropout(t, training=True),
-            lambda t: torch.nn.functional.dropout2d(t, training=True),
-            lambda t: torch.nn.functional.dropout3d(t.unsqueeze(-1), training=True),
+            lambda t, _: torch.nn.functional.dropout(torch.ones_like(t), training=True),
+            lambda t, _: torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True),
+            lambda t, _: torch.nn.functional.feature_alpha_dropout(t, training=True),
+            lambda t, _: torch.nn.functional.dropout2d(t, training=True),
+            lambda t, _: torch.nn.functional.dropout3d(t.unsqueeze(-1), training=True),
         ]
+        B0 = 4
 
         for op in supported_ops:
-            passed = torch.ones([4, 3, 3, 3, 3])
+            always_batched = torch.randn((B0,))
+            passed = torch.ones([B0, 3, 3, 3, 3], device=device) if batched_input else torch.ones([3, 3, 3, 3])
+            in_dims = 0 if batched_input else (None, 0)
             if randomness == 'error':
                 with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
-                    vmap(op, randomness=randomness)(passed)
+                    vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
                 return
             torch.manual_seed(seed)
-            vmap_result = vmap(op, randomness=randomness)(passed)
+            vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
             torch.manual_seed(seed)
+            if not batched_input:
+                passed = passed.unsqueeze(0).expand(B0, 3, 3, 3, 3)
             if randomness == 'different':
-                expected = op(passed.flatten(0, 1))
+                expected = op(passed.flatten(0, 1), always_batched)  # (B0, B, ...) -> (B0 * B, ...)
                 expected = expected.reshape(passed.shape[0], passed.shape[1], *expected.shape[1:])
                 assert torch.allclose(vmap_result, expected)
             else:
-                expected = op(passed[0])
+                expected = op(passed[0], always_batched)
                 for i in range(4):
                     assert torch.allclose(vmap_result[i], expected)
 
