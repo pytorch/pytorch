@@ -970,45 +970,15 @@ def requantize_bias_helper(g, bias, input_scale, weight_scale):
                   to_i=torch.onnx.TensorProtoDataType.INT32)
     return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
 
-# ---------------------------------------------------------------------
-# ONNX operator version
-# ---------------------------------------------------------------------
-
-# READ ME BEFORE EDITING _default_onnx_opset_version:
-#
-# The variable below controls which ONNX operator set version we are
-# targeting. THIS VARIABLE HAS SEMANTIC EFFECT! Say a breaking
-# change occurred in version 8. As long as this variable < 8, you can
-# export models targeting the old behavior. However, if you bump
-# this variable to 8 or later, the breaking change will take into effect:
-# you MUST adjust any symbolic affected by breaking changes. The ONNX
-# spec publishes a *comprehensive* list of BC-breaking changes for every
-# operator revision at:
-#
-#   https://github.com/onnx/onnx/blob/master/docs/Changelog.md
-#
-# Please be sure to go through and check all of our implementations here before
-# increasing this number. This includes symbolic definitions NOT in this
-# file, so grep for "OpName" (with quotes)
-#
-# Besides, opset_version can be specified in the invocation of export()
-# and export_to_pretty_string(), and _export_onnx_opset_version will be set
-# and the symbolic functions should check it to determine the behavior
-# of the exporter.
-
-
-_default_onnx_opset_version = 9
+_default_onnx_opset_version = 13
 _onnx_main_opset = 15
-_onnx_stable_opsets = [7, 8, 9, 10, 11, 12, 13, 14]
+_onnx_stable_opsets = list(range(7, _onnx_main_opset))
 _export_onnx_opset_version = _default_onnx_opset_version
 _constant_folding_opset_versions = list(range(9, _onnx_main_opset + 1))
 
 
 def _set_opset_version(opset_version):
     global _export_onnx_opset_version
-    if opset_version == _default_onnx_opset_version:
-        _export_onnx_opset_version = opset_version
-        return
     if opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
         _export_onnx_opset_version = opset_version
         return
