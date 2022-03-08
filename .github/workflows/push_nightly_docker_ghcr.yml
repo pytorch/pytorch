@@ -17,6 +17,11 @@ jobs:
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: master
-      - name: Build and upload nightly docker
-        run: |
-          bash .github/scripts/build_publish_nightly_docker.sh
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Build and upload nightly docker
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/build_publish_nightly_docker.sh

@@ -14,12 +14,6 @@ struct NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  int64_t dim() const override {
-    TORCH_CHECK(
-        false, "dim is disabled. These methods are not virtual in fbcode.");
-  }
-#endif
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   int64_t numel() const override {
     TORCH_CHECK(
         false, "numel is disabled. These methods are not virtual in fbcode.");
@@ -32,6 +26,9 @@ struct NestedTensorImpl : public c10::TensorImpl {
         "is_contiguous is disabled. These methods are not virtual in fbcode.");
   }
 #endif
+  // TODO: don't expose private implementation details like this; in
+  // particular, resizing this tensor will mess up our dim() and
+  // callers cannot fix it.
   const Tensor& get_nested_size_tensor() {
     return nested_size_tensor_;
   }
@@ -57,6 +54,10 @@ struct NestedTensorImpl : public c10::TensorImpl {
   }
 
  private:
+  // Must be called after any changes to our dim() to sync the state
+  // to TensorImpl.
+  void refresh_dim();
+
   at::Tensor buffer_;
   const at::Tensor nested_size_tensor_;
 };
