@@ -7,7 +7,8 @@ import torch
 import torch.autograd.functional as autogradF
 
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, run_tests, gradcheck, gradgradcheck
+from torch.testing._internal.common_utils import (
+    TestCase, run_tests, gradcheck, gradgradcheck, parametrize, instantiate_parametrized_tests)
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
@@ -467,7 +468,8 @@ class TestAutogradFunctional(TestCase):
     def test_hessian_vectorize_raises_no_warnings(self):
         return self._test_vectorize_raises_no_warnings(autogradF.hessian)
 
-    def _test_jacobian_err_check(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_jacobian_err_check(self, vectorize):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
 
@@ -491,12 +493,6 @@ class TestAutogradFunctional(TestCase):
 
         res = autogradF.jacobian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, foo(*inp), inp)
-
-    def test_jacobian_err_check(self):
-        return self._test_jacobian_err_check(vectorize=False)
-
-    def test_jacobian_err_check_vectorize(self):
-        return self._test_jacobian_err_check(vectorize=True)
 
     def test_jacobian_err_check_strict(self):
         def foo(a):
@@ -553,7 +549,8 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res.grad_fn)
         self.assertNotEqual(res, torch.zeros(4, 4))
 
-    def _test_jacobian_output(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_jacobian_output(self, vectorize):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
@@ -580,13 +577,8 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
 
-    def test_jacobian_output(self):
-        self._test_jacobian_output(vectorize=False)
-
-    def test_jacobian_output_vectorize(self):
-        self._test_jacobian_output(vectorize=True)
-
-    def _test_jacobian_scalar(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_jacobian_scalar(self, vectorize):
         def reducer(x):
             return x.sum()
         inputs = torch.rand(4, 4)
@@ -599,13 +591,8 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.jacobian(expander, inputs, vectorize=vectorize)
         self._assert_same_struct(res, torch.zeros(4))
 
-    def test_jacobian_scalar(self):
-        self._test_jacobian_scalar(vectorize=False)
-
-    def test_jacobian_scalar_vectorize(self):
-        self._test_jacobian_scalar(vectorize=True)
-
-    def _test_jacobian_create_graph(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_jacobian_create_graph(self, vectorize):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
@@ -640,12 +627,6 @@ class TestAutogradFunctional(TestCase):
 
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
-
-    def test_jacobian_create_graph(self):
-        self._test_jacobian_create_graph(vectorize=False)
-
-    def test_jacobian_create_graph_vectorize(self):
-        self._test_jacobian_create_graph(vectorize=True)
 
     def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
         expected = autogradF.jacobian(f, inputs, vectorize=False)
@@ -771,7 +752,8 @@ class TestAutogradFunctional(TestCase):
         y = torch.randn(3)
         self._check_hessian_vectorize_correctness(f, (x, y))
 
-    def _test_hessian_err_check(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_hessian_err_check(self, vectorize):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
@@ -808,12 +790,6 @@ class TestAutogradFunctional(TestCase):
 
         res = autogradF.hessian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, inp, inp)
-
-    def test_hessian_err_check(self):
-        self._test_hessian_err_check(vectorize=False)
-
-    def test_hessian_err_check_vectorize(self):
-        self._test_hessian_err_check(vectorize=True)
 
     def test_hessian_err_check_strict(self):
         def foo(a):
@@ -875,8 +851,8 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[1][1].grad_fn)
         self.assertNotEqual(res, torch.zeros(2, 2, 2))
 
-
-    def _test_hessian_output(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_hessian_output(self, vectorize):
         def pow_reducer(x):
             return x.pow(3).sum()
 
@@ -896,13 +872,8 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(res[1][0].grad_fn)
         self.assertIsNone(res[1][1].grad_fn)
 
-    def test_hessian_output(self):
-        self._test_hessian_output(vectorize=False)
-
-    def test_hessian_output_vectorize(self):
-        self._test_hessian_output(vectorize=True)
-
-    def _test_hessian_scalar(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_hessian_scalar(self, vectorize):
         def reducer(x):
             return x.sum()
         inputs = torch.rand(4, 4)
@@ -919,13 +890,8 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.hessian(bad_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
 
-    def test_hessian_scalar(self):
-        return self._test_hessian_scalar(vectorize=False)
-
-    def test_hessian_scalar_vectorize(self):
-        return self._test_hessian_scalar(vectorize=True)
-
-    def _test_hessian_create_graph(self, vectorize):
+    @parametrize("vectorize", [True, False])
+    def test_hessian_create_graph(self, vectorize):
         def pow_reducer(x):
             return x.pow(3).sum()
 
@@ -965,12 +931,6 @@ class TestAutogradFunctional(TestCase):
 
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
-
-    def test_hessian_create_graph(self):
-        self._test_hessian_create_graph(vectorize=False)
-
-    def test_hessian_create_graph_vectorize(self):
-        self._test_hessian_create_graph(vectorize=True)
 
     def test_vhp_err_check(self):
         def foo(a):
@@ -1352,6 +1312,8 @@ class TestAutogradFunctional(TestCase):
 
         self.assertEqual(hvp, torch.mm(hes, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
+
+instantiate_parametrized_tests(TestAutogradFunctional)
 
 if __name__ == '__main__':
     run_tests()
