@@ -12,7 +12,7 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
 
     emplace_arguments = []
     for arg in schema.positional_args:
-        if arg.is_value_type:
+        if arg.is_lazy_value:
             if isinstance(arg.lazy_type, OptionalCType):
                 emplace_arguments.append(f"has_{arg.name} ? loctx->GetOutputOp(operand(i++)) : nullptr")
                 continue
