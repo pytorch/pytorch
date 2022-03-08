@@ -47,12 +47,6 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
     const torch::lazy::LazyTensorPtr& save_invstd, bool training, double eps,
     c10::ArrayRef<bool> output_mask);
 
-std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> nms(const torch::lazy::LazyTensorPtr& boxes,
-                                      const torch::lazy::LazyTensorPtr& scores,
-                                      const torch::lazy::LazyTensorPtr& score_threshold,
-                                      const torch::lazy::LazyTensorPtr& iou_threshold,
-                                      int64_t output_size);
-
 // Permute the dimensions of this tensor according to the given permutation.
 torch::lazy::LazyTensorPtr permute(const torch::lazy::LazyTensorPtr& input, c10::ArrayRef<int64_t> dims);
 

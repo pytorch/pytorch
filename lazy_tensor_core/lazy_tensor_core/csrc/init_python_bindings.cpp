@@ -361,28 +361,6 @@ py::object GetRevisions() {
   return py_dict;
 }
 
-py::object LtcNms(const at::Tensor& boxes, const at::Tensor& scores,
-                  const at::Tensor& score_threshold,
-                  const at::Tensor& iou_threshold, int64_t output_size) {
-  at::Tensor selected_indices;
-  at::Tensor num_valid;
-  {
-    NoGilSection nogil;
-    auto nms_result = lazy_tensor_aten_ops::nms(
-        torch::lazy::TryGetLtcTensor(boxes), torch::lazy::TryGetLtcTensor(scores),
-        torch::lazy::TryGetLtcTensor(score_threshold),
-        torch::lazy::TryGetLtcTensor(iou_threshold), output_size);
-    selected_indices = torch::lazy::CreateAtenFromLtcTensor(std::move(nms_result.first));
-    num_valid = torch::lazy::CreateAtenFromLtcTensor(std::move(nms_result.second));
-  }
-  auto result_tuple = py::tuple(2);
-  result_tuple[0] =
-      torch::autograd::make_variable(selected_indices, /*requires_grad=*/false);
-  result_tuple[1] =
-      torch::autograd::make_variable(num_valid, /*requires_grad=*/false);
-  return result_tuple;
-}
-
 std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
   std::vector<at::Tensor> aten_ltc_tensors(tensors.size());
   std::vector<torch::lazy::LazyTensorPtr> ltc_tensors;
@@ -432,11 +410,6 @@ using namespace torch::lazy;
 void InitLtcModuleBindings(py::module m) {
   m.def("_prepare_to_exit", []() { PrepareToExit(); });
   m.def("_get_git_revs", []() { return GetRevisions(); });
-  m.def("_ltc_nms", [](const at::Tensor& boxes, const at::Tensor& scores,
-                       const at::Tensor& score_threshold,
-                       const at::Tensor& iou_threshold, int64_t output_size) {
-    return LtcNms(boxes, scores, score_threshold, iou_threshold, output_size);
-  });
   m.def("_get_ltc_tensors_dot",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {

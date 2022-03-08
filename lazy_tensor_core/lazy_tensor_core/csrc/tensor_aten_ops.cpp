@@ -19,7 +19,6 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
-#include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -240,19 +239,6 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
   torch::lazy::LazyTensorPtr grad_bias = torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 2), input->GetDevice());
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
-}
-
-std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> nms(const torch::lazy::LazyTensorPtr& boxes,
-                                      const torch::lazy::LazyTensorPtr& scores,
-                                      const torch::lazy::LazyTensorPtr& score_threshold,
-                                      const torch::lazy::LazyTensorPtr& iou_threshold,
-                                      int64_t output_size) {
-  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::Nms>(
-      boxes->GetIrValue(), scores->GetIrValue(), score_threshold->GetIrValue(),
-      iou_threshold->GetIrValue(), output_size);
-  return std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr>(
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), boxes->GetDevice()),
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 1), boxes->GetDevice()));
 }
 
 torch::lazy::LazyTensorPtr permute(const torch::lazy::LazyTensorPtr& input, c10::ArrayRef<int64_t> dims) {
