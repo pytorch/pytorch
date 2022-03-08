@@ -1,4 +1,4 @@
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Optional
 from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
                                  ListType, OperatorName, FunctionSchema,
                                  Return, TensorOptionsArguments, Argument)
@@ -79,8 +79,7 @@ def isValueType(typ: CType) -> bool:
         return typ.type == valueT or typ.type == scalarT
     elif isinstance(typ, (OptionalCType, ListCType, VectorCType)):
         return isValueType(typ.elem)
-    else:
-        return False
+    return False
 
 def isWrappedScalarType(typ: Type) -> bool:
     """
@@ -94,15 +93,21 @@ def isWrappedScalarType(typ: Type) -> bool:
         return typ.name == BaseTy.Scalar
     elif isinstance(typ, (OptionalType, ListType)):
         return isWrappedScalarType(typ.elem)
-    else:
-        return False
+    return False
 
+def isGeneratorType(typ: Type) -> bool:
+    if isinstance(typ, BaseType):
+        return typ.name == BaseTy.Generator
+    elif isinstance(typ, (OptionalType)):
+        return isGeneratorType(typ.elem)
+    return False
 
 class LazyArgument:
     name: str
     orig_type: Type
     lazy_type: CType
     is_wrapped_scalar: bool
+    is_generator: bool
 
     # true if this argument is or contains a lazy IR value
     is_lazy_value: bool
@@ -110,7 +115,11 @@ class LazyArgument:
     def __init__(self, arg: Argument):
         self.name = arg.name
         self.orig_type = arg.type
-        self.lazy_type = process_ir_type(arg.type)
+        self.is_generator = isGeneratorType(arg.type)
+        if self.is_generator:
+            self.lazy_type = None
+        else:
+            self.lazy_type = process_ir_type(arg.type)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
 
         self.is_lazy_value = isValueType(self.lazy_type)
@@ -128,6 +137,10 @@ class LazyIrSchema:
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple['Return', ...]
+
+    # if this schema has a Generator arg, list its orig ctype/name but don't
+    # build a LazyArgument since lazy IR doesn't support it
+    generator_arg: Optional[NamedCType] = None
 
     def __init__(self, func: FunctionSchema):
 
@@ -152,6 +165,9 @@ class LazyIrSchema:
             if curr_args is not None:
                 if isinstance(curr_args, TensorOptionsArguments):
                     curr_args = curr_args.all()
+                for arg in curr_args:
+                    if isGeneratorType(arg.type):
+                        self.generator_arg = NamedCType(arg.name, arg.type)
                 keyword_args.extend([LazyArgument(arg) for arg in curr_args])
         self.keyword_args = tuple(keyword_args)
         self.name = func.name
@@ -178,20 +194,21 @@ class LazyIrSchema:
         return f"{self.name.name.base}"
 
     def filtered_args(self, positional: bool = True, keyword: bool = True,
-                      values: bool = True, scalars: bool = True) -> List[LazyArgument]:
+                      values: bool = True, scalars: bool = True, generator: bool = False) -> List[LazyArgument]:
         args: List[LazyArgument] = []
         if positional:
             args.extend(self.positional_args)
         if keyword:
             args.extend(self.keyword_args)
 
-        if values and scalars:
+        if values and scalars and generator:
             return args
-
-        if values:
+        elif values and scalars:
+            return [a for a in args if not a.is_generator ]
+        elif values:
             return [a for a in args if a.is_lazy_value]
         elif scalars:
-            return [a for a in args if not a.is_lazy_value]
+            return [a for a in args if not a.is_lazy_value and (generator or not a.is_generator)]
 
         return []
 

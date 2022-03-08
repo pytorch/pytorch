@@ -18,6 +18,8 @@ full_codegen:
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm
+  - bernoulli
+  - bernoulli_.float
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
@@ -138,8 +140,6 @@ full_codegen:
 supported:
   - as_strided
   - as_strided_
-  - bernoulli
-  - bernoulli_.float
   - clone
   - _copy_from
   - _copy_from_and_resize

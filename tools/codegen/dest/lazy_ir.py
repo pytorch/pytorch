@@ -59,13 +59,17 @@ def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
     """
     Generate code that falls back to eager conditioned on a predicate
     """
-    fallback_args = ",\n                ".join([str(arg.name) for arg in schema.filtered_args()])
+    fallback_args = ",\n                ".join([str(arg.name) for arg in schema.filtered_args(generator=True)])
     if len(overload_name):
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
+    or_has_generator = ""
+    if schema.generator_arg:
+        # TODO(whc) generators are? always optional and there is never more than one
+        or_has_generator = " || (generator.has_value() && generator->defined())"
     return f"""
-        if (force_eager_fallback({aten_symbol(schema)})) {{
+        if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
             return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
@@ -293,7 +297,7 @@ class ComputeShapeSignature:
     def __init__(self, kernel_name: str, f: NativeFunction):
         self.__schema = LazyIrSchema(f.func)
         self.__dispatch_args = ', '.join([a.decl() for a in dispatcher.arguments(f.func)])
-        self.__call_args = ", ".join([f"{arg.name}" for arg in self.__schema.filtered_args()])
+        self.__call_args = ", ".join([f"{arg.name}" for arg in self.__schema.filtered_args(generator=True)])
         self.__kernel_name = kernel_name
 
     def __decl_suffix(self) -> str:
