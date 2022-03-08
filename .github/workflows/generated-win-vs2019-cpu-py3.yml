@@ -132,7 +132,7 @@ jobs:
           rm -rf ./*
   test_default_1_2:
     name: test (default, 1, 2, windows.4xlarge)
-    timeout-minutes: 300
+    timeout-minutes: 270
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
       SHARD_NUMBER: 1
@@ -281,7 +281,7 @@ jobs:
           rm -rf ./*
   test_default_2_2:
     name: test (default, 2, 2, windows.4xlarge)
-    timeout-minutes: 300
+    timeout-minutes: 270
     env:
       JOB_BASE_NAME: win-vs2019-cpu-py3-test
       SHARD_NUMBER: 2

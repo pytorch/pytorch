@@ -22,6 +22,7 @@
 #include <ATen/ops/_coalesce.h>
 #include <ATen/ops/_coalesce_native.h>
 #include <ATen/ops/_coalesced_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_dimI_native.h>
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
@@ -541,6 +542,29 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
   return sparse._coalesced_(true);
+}
+
+SparseTensor sparse_csr_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
+  TORCH_CHECK(sparse_dim <= 2,
+              "sparse_dim must be less than or equal to 2");
+  if (sparse_dim == 2) {
+    auto sizes = self.sizes();
+    Tensor crow_indices = self.crow_indices();
+    Tensor col_indices = self.col_indices();
+    Tensor values = self.values();
+    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
+    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
+  } else {
+    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
+    // TODO: implement coo.to_sparse(sparse_dim) and then use
+    // return self.to_sparse().to_sparse(sparse_dim);
+  }
+}
+
+SparseTensor sparse_csr_to_sparse(const Tensor& self) {
+  return sparse_csr_to_sparse(self, 2);
 }
 
 // NB: Dropped the resizeNd variants
