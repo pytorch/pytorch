@@ -14,9 +14,10 @@ if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
 fi
 
+export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
+
 echo "Free Space for CUDA DEBUG BUILD"
 if [[ "${CIRCLECI:-}" == 'true' ]]; then
-    export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
     if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
         rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
     fi
