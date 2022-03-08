@@ -42,6 +42,7 @@ flatbuffers==2.0
 #test that import:
 
 hypothesis==4.53.2
+# Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
 #Pinned versions: 3.44.6, 4.53.2
 #test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
@@ -80,6 +81,7 @@ librosa>=0.6.2
 #test that import:
 
 mypy==0.812
+# Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 0.812
 #test that import: test_typing.py, test_type_hints.py
@@ -175,6 +177,7 @@ scikit-image
 #test that import:
 
 scipy==1.6.3
+# Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.6.3
 #test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
