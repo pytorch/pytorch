@@ -1,7 +1,7 @@
 from typing import List, Union, Tuple
 from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
                                  ListType, OperatorName, FunctionSchema,
-                                 Return, TensorOptionsArguments)
+                                 Return, TensorOptionsArguments, Argument)
 from tools.codegen.api.types import (CType, BaseCppType, BaseCType, OptionalCType,
                                      NamedCType, deviceT, layoutT,
                                      VectorCType, boolT, longT, doubleT, ListCType, stringT,
@@ -98,17 +98,30 @@ def isWrappedScalarType(typ: Type) -> bool:
         return False
 
 
+class LazyArgument:
+    name: str
+    orig_ctype: NamedCType
+    lazy_ctype: NamedCType
+    is_wrapped_scalar: bool
+    is_value_type: bool
+
+    def __init__(self, arg: Argument):
+        self.name = arg.name
+        self.orig_type = arg.type
+        self.lazy_type = process_ir_type(arg.type)
+        self.is_wrapped_scalar = isWrappedScalarType(arg.type)
+        self.is_value_type = isValueType(arg.type)
+
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
 # but carries type information from a native FunctionSchema modified for use with IR nodes,
 # and preserving original argument names.
-
-
 class LazyIrSchema:
     # The name of the operator this function schema describes.
     name: 'OperatorName'
 
     positional_arg_types: Tuple[NamedCType, ...]
+    positional_args: Tuple[LazyArgument, ...]
     keyword_arg_types: Tuple[NamedCType, ...]
 
     # TODO: Need to handle collisions with argument names at some point
@@ -119,20 +132,26 @@ class LazyIrSchema:
     def __init__(self, func: FunctionSchema):
 
         positional_arg_types = []
+        positional_args = []
         for arg_field in ["pre_self_positional",
                           "self_arg",
                           "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
                 arg = getattr(func.arguments, "self_arg").argument
                 positional_arg_types.append(NamedCType(arg.name, process_ir_type(arg.type)))
+                positional_args.append(LazyArgument(arg))
             elif getattr(func.arguments, arg_field) is not None:
                 positional_arg_types.extend([
                     NamedCType(
                         arg.name,
                         process_ir_type(arg.type)) for arg in getattr(func.arguments, arg_field)])
+                positional_args.extend([
+                    LazyArgument(arg) for arg in getattr(func.arguments, arg_field)])
         self.positional_arg_types = tuple(positional_arg_types)
+        self.positional_args = tuple(positional_args)
 
         keyword_arg_types = []
+        keyword_args = []
         for arg_field in ["pre_tensor_options_kwarg_only",
                           "tensor_options",
                           "post_tensor_options_kwarg_only",
@@ -142,7 +161,9 @@ class LazyIrSchema:
                 if isinstance(curr_args, TensorOptionsArguments):
                     curr_args = curr_args.all()
                 keyword_arg_types.extend([NamedCType(arg.name, process_ir_type(arg.type)) for arg in curr_args])
+                keyword_args.extend([LazyArgument(arg) for arg in curr_args])
         self.keyword_arg_types = tuple(keyword_arg_types)
+        self.keyword_args = tuple(keyword_args)
         self.name = func.name
         self.returns = func.returns
         self.wrapped_scalar_names = [arg.name for arg in func.schema_order_arguments() if isWrappedScalarType(arg.type)]
@@ -182,6 +203,24 @@ class LazyIrSchema:
             return [t for t in types if isValueType(t.type)]
         elif scalars:
             return [t for t in types if not isValueType(t.type)]
+
+        return []
+
+    def filtered_args(self, positional: bool = True, keyword: bool = True,
+                      values: bool = True, scalars: bool = True) -> List[NamedCType]:
+        types: List[LazyArgument] = []
+        if positional:
+            types.extend(self.positional_args)
+        if keyword:
+            types.extend(self.keyword_args)
+
+        if values and scalars:
+            return types
+
+        if values:
+            return [t for t in types if t.is_value_type]
+        elif scalars:
+            return [t for t in types if not t.is_value_type]
 
         return []
 
