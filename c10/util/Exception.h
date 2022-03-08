@@ -375,7 +375,7 @@ C10_API std::string GetExceptionString(const std::exception& e);
 namespace c10 {
 namespace detail {
 template <typename... Args>
-decltype(auto) torchCheckMsgImpl(const char* msg, const Args&... args) {
+decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
 }
 inline C10_API const char* torchCheckMsgImpl(const char* msg) {
@@ -383,7 +383,7 @@ inline C10_API const char* torchCheckMsgImpl(const char* msg) {
 }
 // If there is just 1 user-provided C-string argument, use it.
 inline C10_API const char* torchCheckMsgImpl(
-    const char* msg,
+    const char* /*msg*/,
     const char* args) {
   return args;
 }
@@ -433,7 +433,7 @@ namespace detail {
     const char* file,
     uint32_t line,
     const char* condMsg,
-    ::c10::detail::CompileTimeEmptyString userMsg) {
+    ::c10::detail::CompileTimeEmptyString /*userMsg*/) {
   torchCheckFail(func, file, line, condMsg);
 }
 [[noreturn]] C10_API void torchInternalAssertFail(
