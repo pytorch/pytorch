@@ -201,6 +201,7 @@ TEST(LiteInterpreterTest, MultipleOps) {
   //               super(Model, self).__init__()
   //               self.ops = torch.nn.Sequential(
   //                   torch.nn.ReLU(),
+  //                   torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)),
   //                   torch.nn.Flatten(),
   //               )
   //           def forward(self, x):
