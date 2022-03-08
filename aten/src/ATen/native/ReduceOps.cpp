@@ -280,6 +280,15 @@ TORCH_META_FUNC(amax)
     self.numel() > 0,
     "amax", ": Expected reduction dim to be specified for input.numel() == 0. ",
       "Specify the reduction dim with the 'dim' argument.");
+    //at::native::zero_numel_check_dims(self, dims, "amax()");
+  }
+  /*if (dims.has_value()) {
+    at::native::zero_numel_check_dims(self, dims, "amax");
+  } else {
+    TORCH_CHECK_INDEX(
+     self.numel() != 0,
+        "amax", ": Expected reduction dim to be specified for input.numel() == 0.");
+  }*/
   const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
   resize_reduction(*this, self, dims, keepdim, out_dtype);
 }
