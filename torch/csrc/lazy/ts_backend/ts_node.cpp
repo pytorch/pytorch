@@ -157,5 +157,25 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
   return {};
 }
 
+TensorList::TensorList(OpList values)
+  : TsNode(/*op=*/tensor_list_opkind,
+           /*operands=*/values,
+           /*shapes=*/std::vector<Shape>(),
+         /*num_outputs=*/1,
+         /*hash_seed=*/OperandHashes(values, /*seed=*/kHashSeed, enableDynamicShape())) {}
+
+TSOpVector TensorList::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                             TSLoweringContext* loctx) const {
+
+  std::vector<torch::jit::Value*> tensor_list;
+  CHECK(!operands().empty());
+  for (const torch::lazy::Output& operand : operands()) {
+    tensor_list.emplace_back(loctx->GetOutputOp(operand));
+  }
+  auto graph = function->graph();
+  auto listnode = graph->insertNode(graph->createList(tensor_list[0]->type(), tensor_list));
+  return {listnode->output()};
+}
+
 }  // namespace lazy
 }  // namespace torch

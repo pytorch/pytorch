@@ -459,6 +459,18 @@ int64_t LazyTensor::GetNextTensorId() {
   return id_generator->fetch_add(1);
 }
 
+torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
+  std::vector<Value> values;
+  for (const auto& t: tensors) {
+    auto* impl = dynamic_cast<LTCTensorImpl*>(t.unsafeGetTensorImpl());
+    TORCH_INTERNAL_ASSERT(impl,
+      "GetTensorList only supports lists of valid tensors, but optional support could be added");
+    values.push_back(impl->tensor()->GetIrValue());
+  }
+
+  return torch::lazy::Value(torch::lazy::MakeNode<TensorList>(std::move(values)));
+}
+
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
   auto* impl = dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
   if (impl == nullptr) {
