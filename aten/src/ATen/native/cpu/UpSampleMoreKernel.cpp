@@ -1,12 +1,11 @@
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <math.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <vector>
-#include <ATen/ATen.h>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <c10/util/irange.h>
 
 namespace at {
