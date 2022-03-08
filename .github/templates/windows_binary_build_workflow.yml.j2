@@ -20,8 +20,13 @@ name: !{{ build_environment }}
       GPU_ARCH_TYPE: !{{ config["gpu_arch_type"] }}
       SKIP_ALL_TESTS: 1
 {%- if config["package_type"] == "libtorch" %}
+{%- if config["libtorch_config"] %}
+      LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}
+{%- endif %}
       LIBTORCH_VARIANT: !{{ config["libtorch_variant"] }}
+{%- if config["devtoolset"] %}
       DESIRED_DEVTOOLSET: !{{ config["devtoolset"] }}
+{%- endif %}
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
