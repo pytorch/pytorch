@@ -389,8 +389,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             "Fwd thread id", std::to_string(kineto_event.fwdThreadId()));
         activity.addMetadata(
             "Sequence number", std::to_string(kineto_event.sequenceNr()));
-        generateForwardBackwardLink(
-            kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
+
+        // From the time being, we need disable the forward/backward correlation feature to
+        // workaround the crash bug.
+        // TODO: by Mike Guo
+        // reenable the forward/backward correlation when kineto fix the following raw pointer
+        //    GenericTraceActivity.flow.linkedActivity
+        // generateForwardBackwardLink(
+        //     kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
       }
     }
 
@@ -472,7 +478,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       op_py_map.insert({t, py_stack.size() ? py_stack.back() : nullptr});
     }
 
-    auto activities = std::move(cpu_trace->activities);
+    std::vector<libkineto::GenericTraceActivity> py_activities;
     auto py_events_it = py_events.begin();
     auto py_device = libkineto::processId();
     auto main_thread = libkineto::systemThreadId();
@@ -493,13 +499,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         op.addMetadata("Python module id", module_id_map_.at(e->module_id_));
       }
 
-      cpu_trace->activities.push_back(op);
+      py_activities.push_back(op);
       py_events_it++;
     };
 
-    TORCH_INTERNAL_ASSERT(activities.size() == kineto_events_.size());
-    for (const auto idx : c10::irange(activities.size())) {
-      auto& activity = activities[idx];
+    TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
+    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+      auto& activity = cpu_trace->activities[idx];
 
       // Add any python events that occurred between this Kineto event and the
       // previous Kineto event.
@@ -520,14 +526,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         kineto_events_[idx].stack(py_names);
         activity.addMetadata("Call stack", torch::profiler::impl::stacksToStr(py_names, ";"));
       }
-
-      cpu_trace->activities.push_back(activity);
     }
 
     // Add any Python events which finish after the last Kineto event.
     while (py_events_it != py_events.end()) {
       push_py_event();
     }
+
+    cpu_trace->activities.insert(cpu_trace->activities.end(), py_activities.begin(), py_activities.end());
   }
 
   void generateForwardBackwardLink(

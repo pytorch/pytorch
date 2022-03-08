@@ -255,7 +255,7 @@ jobs:
     name: test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -329,8 +329,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -509,7 +511,7 @@ jobs:
     name: test (multigpu, 1, 1, linux.16xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.16xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -583,8 +585,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -763,7 +767,7 @@ jobs:
     name: test (nogpu_NO_AVX, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -1010,7 +1014,7 @@ jobs:
     name: test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -1257,7 +1261,7 @@ jobs:
     name: test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.8xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -1331,8 +1335,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1511,7 +1517,7 @@ jobs:
     name: test (slow, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -1585,8 +1591,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -1765,7 +1773,7 @@ jobs:
     name: test (default, 1, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -1839,8 +1847,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -2019,7 +2029,7 @@ jobs:
     name: test (default, 2, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
@@ -2093,8 +2103,10 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: >-
-            bash .github/scripts/install_nvidia_utils_linux.sh && echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"

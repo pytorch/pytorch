@@ -796,7 +796,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 
   // TODO(@pietern): Make this work for both CPU/CUDA tensors.
   // When using CPU tensors we don't need to do this.
-  // // Record event so that we can wait for all of them.
+  // Record event so that we can wait for all of them.
   // auto& event = bucket.events[bucket_index.intra_bucket_index];
   // event.record();
 
@@ -819,10 +819,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      // pushing unused parameters at the end of buckets for better performance.
-      // This code will be hit only for cases when static_graph_after_1st_iteration()
-      // is True or static_graph = False.
-      if (should_rebuild_buckets()) {
+      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
@@ -2042,7 +2039,7 @@ compute_bucket_assignment_by_size(
   bucket_indices.reserve(result.size());
   std::vector<size_t> per_bucket_size_limits;
   per_bucket_size_limits.reserve(result.size());
-  for (const auto & bucket_indices_with_size : result) {
+  for (const auto& bucket_indices_with_size : result) {
     bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
     per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
   }
