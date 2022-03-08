@@ -2245,6 +2245,43 @@ class TestFX(JitTestCase):
         self.checkGraphModule(m, (2,))
         self.checkGraphModule(m, (2, 3))
 
+
+    def test_single_default_arg_signature(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y=1):
+                return y
+
+        m = M()
+        gm = symbolic_trace(m)
+        self.assertEqual(str(gm.signature), "(y=1)")
+
+    def test_multiple_default_args_signature(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, y=1, z=2):
+                return y + z
+
+        m = M()
+        gm = symbolic_trace(m)
+        self.assertEqual(str(gm.signature), "(y=1, z=2)")
+
+    def test_regular_and_default_args_signature(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y=1):
+                return x + y
+
+        m = M()
+        gm = symbolic_trace(m)
+        self.assertEqual(str(gm.signature), "(x, y=1)")
+
     def test_string_literal_return(self):
         class M(torch.nn.Module):
             def __init__(self):

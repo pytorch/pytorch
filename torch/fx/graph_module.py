@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 import os
 import warnings
+from inspect import Parameter, Signature
 
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
@@ -633,6 +634,20 @@ class {module_name}(torch.nn.Module):
 
         return python_code
 
+    @property
+    @compatibility(is_backward_compatible=True)
+    def signature(self) -> Signature:
+        """
+        Return ``Signature`` defined as by placeholders of ``graph``
+        """
+        parameters = []
+        for node in self.graph.nodes:
+            if node.op != 'placeholder':
+                continue
+            default = next(iter(node.args)) if node.args else Parameter.empty
+            parameters.append(Parameter(node.name, Parameter.POSITIONAL_OR_KEYWORD, default=default))
+        return Signature(parameters)
+
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
     def __reduce_deploy__(self, importer: Importer):
@@ -689,6 +704,7 @@ class {module_name}(torch.nn.Module):
         new_gm = self.__copy__()
         new_gm._is_replica = True
         return new_gm
+
 
 # workarounds for issues in __torch_function__
 
