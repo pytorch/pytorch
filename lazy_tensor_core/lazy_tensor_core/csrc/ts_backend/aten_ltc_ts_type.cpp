@@ -10,7 +10,6 @@
 
 #include "ATen/MetaFunctions.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
-#include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
 #include "lazy_tensor_core/csrc/ops/to_copy.h"
@@ -105,23 +104,6 @@ at::Tensor& LazyNativeFunctions::bernoulli_(
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   lazy_tensor_aten_ops::bernoulli_(self_tensor, p);
   return self;
-}
-
-at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto lazy_tensors = torch::lazy::GetLtcTensors(tensors);
-  std::vector<torch::lazy::Value> values;
-  values.reserve(lazy_tensors.size());
-  for (auto& tensor : lazy_tensors) {
-    values.emplace_back(tensor->GetIrValue());
-  }
-
-  auto shapes = torch::lazy::compute_shape_cat(tensors, dim);
-  auto node =
-      torch::lazy::MakeNode<ir::ops::Cat>(values, dim, std::move(shapes));
-  auto result = torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), lazy_tensors[0]->GetDevice()));
-  return result;
 }
 
 at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {

@@ -23,6 +23,7 @@ full_codegen:
   - bitwise_and.Tensor
   - bitwise_or.Tensor
   - bmm
+  - cat
   - clamp
   - clamp_min
   - constant_pad_nd
@@ -138,7 +139,6 @@ supported:
   - as_strided_
   - bernoulli
   - bernoulli_.float
-  - cat
   - clone
   - _copy_from
   - _copy_from_and_resize
