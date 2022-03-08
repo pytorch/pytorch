@@ -23,6 +23,8 @@
 
 #include <torch/csrc/cuda/nccl.h>
 
+#include <lazy_tensor_core/lazy_tensor_core/csrc/ts_backend/backend_impl.h>
+#include <torch/csrc/lazy/core/tensor.h>
 
 namespace c10d {
 
@@ -1598,20 +1600,16 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   return work;
 }
 
-std::vector<at::Tensor> copyCuda(const std::vector<at::Tensor>& inputs) {
+// Experimental features, don't merge back to master.
+std::vector<at::Tensor> extractCudaTensors(const std::vector<at::Tensor>& inputs) {
   std::vector<at::Tensor> cudaInputs;
   cudaInputs.reserve(inputs.size());
   for (auto& input : inputs) {
-    cudaInputs.push_back(input.to(c10::Device(c10::kCUDA, input.device().index())));
+    cudaInputs.push_back(
+        dynamic_cast<torch_lazy_tensors::compiler::TSData*>(torch::lazy::GetLtcTensor(input).GetDataHandle().get())->data());
   }
 
   return cudaInputs;
-}
-
-void copyLazy(const std::vector<at::Tensor>& lazyInputs, const std::vector<at::Tensor>& cudaInputs) {
-  for (ssize_t i = 0; i < lazyInputs.size(); i++) {
-    lazyInputs[i].copy_(cudaInputs[i]);
-  }
 }
 
 template <typename Fn>
@@ -1621,15 +1619,14 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     OpType opType,
     const char* profilingTitle) {
-  // A hack to copy lazy to cuda to bypass following checks.
+  // A hack to extract cuda tensors from the lazy tensor.
   if (inputs.front().device().type() == at::kLazy) {
     // We currently oly support broadcast and allReduce, where
     // the python API is unary.
     TORCH_INTERNAL_ASSERT(inputs.data() == outputs.data());
 
-    auto cudaInputs = copyCuda(inputs);
-
-    auto work = collective(
+    auto cudaInputs = extractCudaTensors(inputs);
+    return collective(
         cudaInputs,
         cudaInputs,
         fn,
@@ -1637,16 +1634,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
         [](std::vector<at::cuda::CUDAStream>&) {},
         opType,
         profilingTitle);
-    // FIXME: No async works or whatever.
-    work->wait();
-
-    // Ops like broadcast is unary in NCCL, and output doesn't matter.
-    // Since inputs == outputs, we just copy back to inputs.
-    copyLazy(inputs, cudaInputs);
-
-    // Right now, we never use async features so work doesn't matter.
-    // Otherwise we might want to update work as well.
-    return work;
   }
 
   return collective(
