@@ -15,7 +15,7 @@ namespace cuda {
 namespace CUDACachingAllocator {
 namespace CudaMallocAsync {
 
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
 

@@ -1660,7 +1660,7 @@ void parseArgs() {
           m_allocator_backend = kv[1];
           used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
           if (used_cudaMallocAsync) {
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
             int version;
             C10_CUDA_CHECK(cudaDriverGetVersion(&version));
             TORCH_CHECK(version >= 11040,

@@ -39,7 +39,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
               dev_to_access, " is not a device");
   TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
 
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
   static bool using_cudaMallocAsync = std::strcmp(CUDACachingAllocator::allocatorBackend(),
                                                   "cudaMallocAsync") == 0;
 #endif
@@ -55,7 +55,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
   int access = 0;
   C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
   if (access) {
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
     if (using_cudaMallocAsync) {
       // cudaMallocAsync pools are unaffected by cudaDeviceEnablePeerAccess.
       // We need pool-specific enablement. See
@@ -78,7 +78,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
       } else {
         C10_CUDA_CHECK(err);
       }
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
     }
 #endif
     cache = 1;

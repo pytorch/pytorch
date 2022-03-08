@@ -93,7 +93,7 @@ void copy_device_to_device(TensorIterator& iter,
     void *src = iter.data_ptr(1);
     size_t size = numel * iter.element_size(0);
     if (src != dst || src_device != dst_device) {
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
       // Due to bizarre cuda driver intricacies, copies of
       // cudaMallocAsynced memory between devices that aren't
       // peer-to-peer-capable need "cudaMemcpyPeerAsync".
@@ -113,7 +113,7 @@ void copy_device_to_device(TensorIterator& iter,
             dst, src, size,
             cudaMemcpyDeviceToDevice,
             copy_stream));
-#if CUDA_VERSION > 11040
+#if CUDA_VERSION >= 11040
       }
 #endif
     }
