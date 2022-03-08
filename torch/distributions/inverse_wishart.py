@@ -218,12 +218,10 @@ class InverseWishart(ExponentialFamily):
 
         return torch.where(
             eff_df.gt(3),
-            _clamp_with_eps(
-                (
-                    torch.einsum("...ij,...ij->...ij", eff_df + 1, V.pow(2))
-                    + torch.einsum("...ij,...i,...j->...ij", eff_df - 1, diag_V, diag_V)
-                ) / (eff_df * (eff_df - 1).pow(2) * (eff_df - 3))
-            ),
+            (
+                torch.einsum("...ij,...ij->...ij", eff_df + 1, V.pow(2))
+                + torch.einsum("...ij,...i,...j->...ij", eff_df - 1, diag_V, diag_V)
+            ) / _clamp_with_eps(eff_df * (eff_df - 1).pow(2) * (eff_df - 3)),
             torch.full_like(
                 eff_df,
                 fill_value=float("Inf"),
