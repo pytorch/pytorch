@@ -317,7 +317,6 @@ bool plan_errata_exception(const cudnnHandle_t handle, const std::string & execu
 }
 
 void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, at::DataPtr& workspace_ptr, unsigned int max_plans = 0) {
-  int i = 0;
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return plan_errata_exception(handle, plan.getTag());
   };
