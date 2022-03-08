@@ -193,7 +193,7 @@ TEST(LiteInterpreterTest, DivideTensor) {
 }
 
 TEST(LiteInterpreterTest, MultipleOps) {
-  // Load check in model: basic.ptl
+  // Load check in model: multiple_ops.ptl
   auto testModelFile = "multiple_ops.ptl";
 
   // class Model(torch.nn.Module):
@@ -201,7 +201,6 @@ TEST(LiteInterpreterTest, MultipleOps) {
   //               super(Model, self).__init__()
   //               self.ops = torch.nn.Sequential(
   //                   torch.nn.ReLU(),
-  //                   torch.nn.AdaptiveAvgPool2d(output_size=(1, 1)),
   //                   torch.nn.Flatten(),
   //               )
   //           def forward(self, x):
