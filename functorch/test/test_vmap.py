@@ -38,7 +38,7 @@ import types
 from collections import namedtuple
 
 import functorch
-from functorch import vmap, grad, grad_and_value, jvp, vjp, jacrev, jacfwd
+from functorch import vmap, grad, grad_and_value, jvp, vjp
 from functorch._C import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
@@ -3694,7 +3694,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
 
 class TestTransformFailure(TestCase):
-    @parametrize('transform', [vmap, grad, grad_and_value, vjp, jvp, jacrev, jacfwd])
+    @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
         class Test(torch.autograd.Function):
             @staticmethod
@@ -3704,6 +3704,8 @@ class TestTransformFailure(TestCase):
             @staticmethod
             def backward(_, grad_input):
                 return grad_input
+
+        transform = getattr(functorch, transform)
 
         def f(x):
             return Test.apply(x)
