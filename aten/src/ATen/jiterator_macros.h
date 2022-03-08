@@ -7,7 +7,8 @@
 // NVRTC on Windows errors if __host__ attribute is
 // present on kernel.
 // error: attribute "__host__" does not apply here
-#define JITERATOR_HOST_DEVICE __device__
+// error: attribute "__device__" does not apply here
+#define JITERATOR_HOST_DEVICE
 #endif
 
 // jiterator_code_stringify macro is used to define code (for CPU/ROCm)
