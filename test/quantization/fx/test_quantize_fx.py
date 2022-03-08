@@ -2613,31 +2613,32 @@ class TestQuantizeFx(QuantizationTestCase):
     # individual elements of the tuple/list recursively.
     def _check_not_observed(self, model, node_info_to_non_tensor_args):
 
-        # this is a helper function (for easier recursion) that looks at specific
-        # indices of nodes and checks whether they are observed
-        def _check_node_indices_not_observed(model, node, indices):
-            for index in indices:
-                if hasattr(node, "args"):
-                    arg_node = node.args[index]
-                else:
-                    arg_node = node[index]
-                if isinstance(arg_node, tuple) or isinstance(arg_node, list):
+        # this is a helper function (for easier recursion) that checks whether
+        # arg_node is observed
+        def _check_node_indices_not_observed(model, arg_node, node):
+            if isinstance(arg_node, tuple) or isinstance(arg_node, list):
+                for new_node in arg_node:
                     _check_node_indices_not_observed(
-                        model, arg_node, list(range(len(arg_node)))
-                    )
-                elif arg_node.op == "call_module":
-                    self.assertTrue(
-                        not is_activation_post_process(getattr(model, arg_node.target)),
-                        "Arg {0} of {1} is observed but is not a float tensor".format(
-                            index, node
-                        ),
-                    )
+                        model, new_node, node)
+            elif arg_node.op == "call_module":
+                self.assertTrue(
+                    not is_activation_post_process(getattr(model, arg_node.target)),
+                    "Arg: {0} of node: {1} is observed but is not a float tensor".format(
+                        arg_node, node
+                    ),
+                )
+
+
 
         for node in model.graph.nodes:
             indices = node_info_to_non_tensor_args.get(
                 NodeInfo(node.op, node.target), []
             )
-            _check_node_indices_not_observed(model, node, indices)
+            for index in indices:
+                if index < len(node.args):
+                    arg_node = node.args[index]
+                    _check_node_indices_not_observed(model, arg_node, node)
+
 
     # This test checks that the model gets prepared correct, doesn't have observers
     # on specific ops (see _check_not_observed) and that the prepared model runs
