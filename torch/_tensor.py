@@ -1176,7 +1176,10 @@ class Tensor(torch._C._TensorBase):
 
         with _C.DisableTorchFunction():
             ret = func(*args, **kwargs)
-            if func in get_default_nowrap_functions():
+            # Don't wrap outputs if a custom __torch_dispatch__ is defined;
+            # it is almost never the right thing to do (if you did want this,
+            # implement __torch_function__ from scratch yourself)
+            if func in get_default_nowrap_functions() or cls.__torch_dispatch__ is not _C._disabled_torch_dispatch_impl:
                 return ret
             else:
                 return _convert(ret, cls)
