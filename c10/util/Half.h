@@ -442,7 +442,7 @@ struct alignas(4) complex<Half> {
 // for `f > limit::max()` below
 template <typename To, typename From>
 typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
-    From f) {
+    From /*f*/) {
   return false;
 }
 
