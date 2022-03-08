@@ -85,22 +85,21 @@ def main():
     )
 
     # Create a vanilla PyTorch neural network.
-    # TODO (samdow): fix batch norm support
     inplace_relu = True
     net = nn.Sequential(
         nn.Conv2d(1, 64, 3),
-        nn.GroupNorm(32, 64, affine=True),
+        nn.BatchNorm2d(64, affine=True, track_running_stats=False),
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
         nn.Conv2d(64, 64, 3),
-        nn.GroupNorm(32, 64, affine=True),
+        nn.BatchNorm2d(64, affine=True, track_running_stats=False),
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
         nn.Conv2d(64, 64, 3),
-        nn.GroupNorm(32, 64, affine=True),
+        nn.BatchNorm2d(64, affine=True, track_running_stats=False),
         nn.ReLU(inplace=inplace_relu),
         nn.MaxPool2d(2, 2),
-        Flatten(),
+        nn.Flatten(),
         nn.Linear(64, args.n_way)).to(device)
 
     net.train()
@@ -258,13 +257,6 @@ def plot(log):
     print(f'--- Plotting accuracy to {fname}')
     fig.savefig(fname)
     plt.close(fig)
-
-
-# Won't need this after this PR is merged in:
-# https://github.com/pytorch/pytorch/pull/22245
-class Flatten(nn.Module):
-    def forward(self, input):
-        return input.view(input.size(0), -1)
 
 
 if __name__ == '__main__':
