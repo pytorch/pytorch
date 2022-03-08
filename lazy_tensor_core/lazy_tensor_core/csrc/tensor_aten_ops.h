@@ -54,9 +54,6 @@ torch::lazy::LazyTensorPtr permute(const torch::lazy::LazyTensorPtr& input, c10:
 // repeats.
 torch::lazy::LazyTensorPtr repeat(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> repeats);
 
-torch::lazy::LazyTensorPtr rsub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
-                const at::Scalar& alpha);
-
 void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src);
 
 torch::lazy::LazyTensorPtr select(const torch::lazy::LazyTensorPtr& input, int64_t dim, int64_t index);
@@ -76,11 +73,6 @@ void squeeze_(torch::lazy::LazyTensorPtr& input);
 void squeeze_(torch::lazy::LazyTensorPtr& input, int64_t dim);
 
 torch::lazy::LazyTensorPtr stack(c10::ArrayRef<torch::lazy::LazyTensorPtr> tensors, int64_t dim);
-
-torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& other,
-               const at::Scalar& alpha);
-torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
-               const at::Scalar& alpha);
 
 std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> svd(
     const torch::lazy::LazyTensorPtr& input,

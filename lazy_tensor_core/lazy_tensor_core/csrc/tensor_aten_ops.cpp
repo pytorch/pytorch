@@ -254,15 +254,6 @@ torch::lazy::LazyTensorPtr repeat(const torch::lazy::LazyTensorPtr& input, std::
       input->GetIrValue(), std::move(repeats)), input->GetDevice());
 }
 
-torch::lazy::LazyTensorPtr rsub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
-                const at::Scalar& alpha) {
-  torch::lazy::Value alpha_ir = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      alpha, input->shape(), input->GetDevice());
-  torch::lazy::Value other_ir = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      other, input->shape(), input->GetDevice());
-  return torch::lazy::LazyTensor::Create(other_ir - alpha_ir * input->GetIrValue(), input->GetDevice());
-}
-
 void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {
   if (input->GetDevice() == src->GetDevice()) {
     torch::lazy::Value copy_value;
@@ -343,24 +334,6 @@ torch::lazy::LazyTensorPtr stack(c10::ArrayRef<torch::lazy::LazyTensorPtr> tenso
       dim, tensors.front()->shape().Get().dim() + 1);
   return torch::lazy::LazyTensor::Create(
       torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim), tensors[0]->GetDevice());
-}
-
-torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& other,
-               const at::Scalar& alpha) {
-  torch::lazy::Value constant = torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-      alpha, other->shape(), other->GetDevice());
-  return torch::lazy::LazyTensor::Create(input->GetIrValue() - other->GetIrValue() * constant, input->GetDevice());
-}
-
-torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
-               const at::Scalar& alpha) {
-  torch::lazy::Value other_constant =
-      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(other, input->shape(),
-                                                    input->GetDevice());
-  torch::lazy::Value alpha_constant =
-      torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(alpha, input->shape(),
-                                                    input->GetDevice());
-  return torch::lazy::LazyTensor::Create(input->GetIrValue() - other_constant * alpha_constant, input->GetDevice());
 }
 
 torch::lazy::LazyTensorPtr transpose(const torch::lazy::LazyTensorPtr& input, int64_t dim0, int64_t dim1) {
