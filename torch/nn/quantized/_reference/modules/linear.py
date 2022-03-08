@@ -12,6 +12,8 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
     and dequantize the weight before running the floating point functional
     linear operator.
     """
+    _IS_REFERENCE = True
+
     def __init__(
             self,
             in_features: int,
