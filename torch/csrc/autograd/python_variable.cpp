@@ -1682,6 +1682,7 @@ void concrete_dispatch_fn(
   // Parse the name into namespace and name (no overload_name)
   // TODO: put this into the library
   const auto& qualified_name = op.operator_name().name;
+  const auto& overload_name = schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
   // Make me some null terminated strings
@@ -1702,6 +1703,12 @@ void concrete_dispatch_fn(
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+  py::handle torch_api_function_overload;
+  if (overload_name == "") {
+    torch_api_function_overload = torch_api_function.attr("default");
+  } else {
+    torch_api_function_overload = torch_api_function.attr(overload_name.c_str());
+  }
   std::string module_name_str = "torch.ops." + ns_str;
 
   // About all the pointers:
@@ -1793,7 +1800,7 @@ void concrete_dispatch_fn(
     args.ptr(),
     kwargs.ptr(),
     func_name,
-    torch_api_function.ptr(),
+    torch_api_function_overload.ptr(),
     module_name_str.c_str(),
     "__torch_dispatch__"
   ));
@@ -1833,7 +1840,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
     args.ptr(),
     kwargs.ptr(),
     "detach",
-    py::module::import("torch").attr("ops").attr("aten").attr("detach").ptr(),
+    py::module::import("torch").attr("ops").attr("aten").attr("detach").attr("default").ptr(),
     "torch.ops.aten",
     "__torch_dispatch__"
   ));
