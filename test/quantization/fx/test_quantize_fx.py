@@ -2411,7 +2411,7 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         convert_count_check = {
             ns.call_function(torch.quantize_per_tensor): 0,
-            ns.call_method('dequantize'): 2,
+            ns.call_method('dequantize'): 1,
         }
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
         self._test_quantized_multiple_inputs_outputs(
