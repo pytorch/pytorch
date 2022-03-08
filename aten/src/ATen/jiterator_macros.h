@@ -16,18 +16,14 @@
 // These `,`s confuse the preprocessor into thinking we are passing
 // multiple arguments to the macro.
 #define jiterator_code(...) __VA_ARGS__
-#if defined(__HIPCC__)
-    // CPU and ROCm case
-    // Needs the function with __host__ __device__ attribute
-    #define jiterator_code_stringify(code, str_name) C10_HOST_DEVICE code
-#elif defined(__CUDACC__)
+#if defined(__CUDACC__)
     // CPU and CUDA case
     #define stringify_code(...) #__VA_ARGS__
     #define jiterator_code_stringify(code, str_name)                    \
         code /* define the function */                                  \
         const std::string str_name = std::string(stringify_code(code));
 #else
-    // CPU only case
+    // CPU only or CPU and ROCm case
     // Only needs the function
     #define jiterator_code_stringify(code, str_name) code
 #endif

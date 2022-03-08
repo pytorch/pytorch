@@ -84,7 +84,7 @@ namespace {
 jiterator_code_stringify(
     jiterator_code(
         template <typename T>
-        T chbevl(T x, const T array[], const int len) {
+        C10_HOST_DEVICE T chbevl(T x, const T array[], const int len) {
           T b0, b1, b2;
 
           b0 = array[0];
@@ -100,7 +100,7 @@ jiterator_code_stringify(
         }
 
         template <typename T>
-        T calc_i0e(T _x) {
+        C10_HOST_DEVICE T calc_i0e(T _x) {
           T x = fabs(_x);
 
           if (x <= T{8.0}) {
@@ -146,7 +146,7 @@ jiterator_code_stringify(
     i0e_string); // i0e_string
 
   // Upcast bfloat16 input to float for numerical accuracy purposes
-  static inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
+  C10_HOST_DEVICE static inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
 }
 
 #define CENTRAL_RANGE 0.7
