@@ -345,8 +345,8 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
             with override_quantized_engine(qengine):
                 # Dynamic QAT without memoryless observers should fail
                 with self.assertRaisesRegex(ValueError,
-                                            """Dynamic QAT requires a memoryless observer.
-                    This means a MovingAverage observer with averaging constant equal to 1"""
+                                            "Dynamic QAT requires a memoryless observer." +
+                                            "This means a MovingAverage observer with averaging constant equal to 1"
                                             ):
                     model = ManualLinearDynamicQATModel(default_qat_qconfig)
                     model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
