@@ -2,16 +2,17 @@
    {
       "name": "ONNX exporter",
       "patterns": [
-         "torch/onnx/**",
-         "torch/csrc/jit/passes/onnx/**",
-         "torch/csrc/jit/passes/onnx.*",
-         "test/onnx/**",
+         ".jenkins/caffe2/*",
          "docs/source/onnx.rst",
+         "test/onnx/**",
+         "tools/onnx/**",
+         "torch/_C/__init__.pyi.in",
+         "torch/csrc/jit/passes/onnx.*",
+         "torch/csrc/jit/passes/onnx/**",
          "torch/csrc/jit/serialization/export.*",
          "torch/csrc/jit/serialization/onnx.*",
-         "torch/_C/__init__.pyi.in",
          "torch/csrc/onnx/**",
-         ".jenkins/caffe2/*"
+         "torch/onnx/**"
       ],
       "approved_by": ["BowenBao", "garymm"],
       "mandatory_app_id": 12274
