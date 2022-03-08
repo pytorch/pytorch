@@ -11,9 +11,13 @@ It aims to provide composable vmap and grad transforms that work with PyTorch mo
 and PyTorch autograd with good eager-mode performance.
 
 .. note::
-   This library is currently under heavy development - if you have suggestions on the API or
-   use-cases you'd like to be covered, please open an github issue or reach out.
-   We'd love to hear about how you're using the library.
+   This library is currently in [beta](https://pytorch.org/blog/pytorch-feature-classification-changes/#beta).
+   What this means is that the features generally work (unless otherwise documented)
+   and we (the PyTorch team) are committed to bringing this library forward. However, the APIs
+   may change under user feedback and we don't have full coverage over PyTorch operations.
+
+   If you have suggestions on the API or use-cases you'd like to be covered, please
+   open an github issue or reach out. We'd love to hear about how you're using the library.
 
 Why composable function transforms?
 -----------------------------------
@@ -37,9 +41,16 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
 
 .. toctree::
    :maxdepth: 2
-   :caption: Content
+   :caption: Getting Started
 
    install
+   notebooks/whirlwind_tour.ipynb
+   ux_limitations
+
+.. toctree::
+   :maxdepth: 2
+   :caption: API Reference and Notes
+
    functorch
 
 .. toctree::
