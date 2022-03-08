@@ -17,4 +17,5 @@ class Linear(torch.nn.qat.Linear):
                  qconfig=None, device=None, dtype=None) -> None:
         super().__init__(in_features, out_features, bias, qconfig, device, dtype)
         if not activation_is_memoryless(qconfig):
-            raise ValueError("Dynamic QAT requires a memoryless observer")
+            raise ValueError(
+                "Dynamic QAT requires a memoryless observer. This means a MovingAverage observer with averaging constant equal to 1")
