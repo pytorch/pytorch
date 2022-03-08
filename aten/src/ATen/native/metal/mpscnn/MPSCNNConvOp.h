@@ -3,7 +3,7 @@
 #import <ATen/native/metal/mpscnn/MPSCNNOp.h>
 #import <Foundation/Foundation.h>
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNConvDataSource : NSObject<MPSCNNConvolutionDataSource>
 @property(nonatomic, assign) void* weights;
 @property(nonatomic, assign) float* bias;
@@ -15,7 +15,7 @@ API_AVAILABLE(ios(10.0), macos(10.13))
 @end
 
 using namespace at::native::metal;
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 @interface MPSCNNConvOp : NSObject<MPSCNNOp>
 + (MPSCNNConvOp*)conv2d:(const Conv2DParams&)params
                 weights:(float*)w
