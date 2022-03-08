@@ -21,7 +21,7 @@ bool available(
     const float output_min,
     const float output_max) {
          // XNNPACK
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
           // Weight
           (2 == weight.ndimension()) &&
           (weight.device().is_cpu()) &&
