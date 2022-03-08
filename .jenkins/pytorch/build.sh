@@ -194,17 +194,15 @@ fi
 lsb_release -a
 echo $PATH
 ls /opt/cache/bin
-vi /opt/cache/bin/gcc
 echo "----print more------"
-vi /opt/cache/lib/nvcc
 echo "env ---------------------------"
 env
 which g++
 which c++
 sccache nvcc --version
 which nvcc
-ls /opt/cache/lib
-
+sccache --version
+#ls /opt/cache/lib
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
