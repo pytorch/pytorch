@@ -114,17 +114,21 @@ class StateDictType(Enum):
     """
     This enum indicates that which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
-    The default value should be FULL_STATE_DICT to comply the PyTorch convention.
+    The default value is FULL_STATE_DICT to comply the PyTorch convention.
     ..note::
-        FSDP currently supports three types of ``state_dict``:
+        FSDP currently supports two types of ``state_dict``:
             1. ``state_dict/load_state_dict`: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the
                same as using DDP.
-            2. ``local_state_dict/load_local_state``: this pair of APIs return
+            2. ``_local_state_dict/_load_local_state_dict``: this pair of APIs return
                and load local sharded, flattened parameters. The values returned
-               by ``local_state_dict`` can be directly used by FSDP and is only
-               meaningful to FSDP (because parameters are flattened).
-            3. ``sharded_state_dict/load_sharded_state_dict``: this pair of APIs
+               by ``_local_state_dict`` can be directly used by FSDP and is only
+               meaningful to FSDP (because parameters are flattened). Note that
+               these APIs are meant for use via the :func:`state_dict_type`
+               context manager as follows:
+                   >>> with fsdp.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+                   >>>     state = fsdp.state_dict()  # loads local state dict
+            3. [Planned for future support] ``sharded_state_dict/load_sharded_state_dict``: this pair of APIs
                return and load sharded, unflattened parameters. The ``state_dict``
                return by ``sharded_state_dict`` can be used by all other parallel
                schemes (resharding may be required).
@@ -747,7 +751,15 @@ class FullyShardedDataParallel(nn.Module):
         its descendant FSDP modules.
         .. note:: This API should be called for only the root FSDP module.
         .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
-
+        .. note:: This API enables users to transparently use the conventional
+        ``state_dict`` API to take model checkpoints in cases where the root
+        FSDP module is wrapped by another ``nn.Module``. For example, the
+        following will ensure `state_dict`  is called on all non-FSDP instances,
+        while dispatching into `local_state_dict` implementation for FSDP:
+        >>> model = DDP(FSDP(...))
+        >> fsdp_root = model.module
+        >>> with fsdp_root.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>>     checkpoint = model.state_dict()
         Args:
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
@@ -835,7 +847,7 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: "OrderedDict[str, torch.Tensor]",
         prefix: str,
     ) -> "OrderedDict[str, torch.Tensor]":
-        raise NotImplementedError("Will be implemented in the next PRs.")
+        raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518")
 
     @staticmethod
     def _post_state_dict_hook(
@@ -907,11 +919,11 @@ class FullyShardedDataParallel(nn.Module):
             assert isinstance(self.module.flat_param, FlatParameter)
             return super().state_dict(*args, **kwargs)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            raise NotImplementedError("Will be implemented in the next PRs.")
+            raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
-    def local_state_dict(self, *args: Any, **kwargs: Any) -> Any:
+    def _local_state_dict(self, *args: Any, **kwargs: Any) -> Any:
         """
         Returns the local state of the module. Parameters are flattened and
         sharded, so the resulting state_dict can only be loaded after the module
@@ -966,7 +978,7 @@ class FullyShardedDataParallel(nn.Module):
         state_dict: Union[Dict[str, torch.Tensor], "OrderedDict[str, torch.Tensor]"],
         prefix: str,
     ) -> None:
-        raise NotImplementedError("Will be implemented in the next PRs.")
+        raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
 
     @staticmethod
     def _pre_load_state_dict_hook(
@@ -1036,11 +1048,11 @@ class FullyShardedDataParallel(nn.Module):
         elif self._state_dict_type == StateDictType.LOCAL_STATE_DICT:
             return super().load_state_dict(state_dict, *args)
         elif self._state_dict_type == StateDictType.SHARDED_STATE_DICT:
-            raise NotImplementedError("Will be implemented in the next PRs.")
+            raise NotImplementedError("Will be implemented as part of https://github.com/pytorch/pytorch/issues/73518.")
         else:
             raise ValueError(f"Unknown StateDictType {self._state_dict_type}.")
 
-    def load_local_state_dict(
+    def _load_local_state_dict(
         self,
         state_dict: "OrderedDict[str, torch.Tensor]",
         *args,
