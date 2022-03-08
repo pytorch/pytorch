@@ -147,7 +147,7 @@ struct SchemaParser {
     return result;
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+  Argument parseArgument(size_t /*idx*/, bool is_return, bool kwarg_only) {
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -282,7 +282,7 @@ struct SchemaParser {
     return convertToList(type, kind, tok.range, vs);
   }
 
-  IValue parseTensorDefault(const SourceRange& range) {
+  IValue parseTensorDefault(const SourceRange& /*range*/) {
     L.expect(TK_NONE);
     return IValue();
   }
