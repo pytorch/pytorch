@@ -67,6 +67,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -160,6 +165,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -366,6 +376,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -460,6 +475,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -667,6 +687,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -761,6 +786,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -967,6 +997,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1060,6 +1095,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1266,6 +1306,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1360,6 +1405,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1567,6 +1617,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1661,6 +1716,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1867,6 +1927,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1960,6 +2025,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2166,6 +2236,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2260,6 +2335,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2467,6 +2547,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2561,6 +2646,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2767,6 +2857,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2860,6 +2955,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3066,6 +3166,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3160,6 +3265,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3367,6 +3477,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3461,6 +3576,11 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
