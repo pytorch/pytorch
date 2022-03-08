@@ -38,18 +38,17 @@ inline int64_t current_time_in_nanos() {
 class Logger;
 
 class TORCH_API Timer {
- private:
-  // The timestamp of forward call start time in each iteration.
-  int64_t forward_start_time = kUnsetTime;
-  // The timestamp of backward computation start and end time in each
-  // iteration.
-  int64_t backward_compute_start_time = kUnsetTime;
-  int64_t backward_compute_end_time = kUnsetTime;
-  // The timestamp of first communication call start time in each iteration.
-  int64_t backward_comm_start_time = kUnsetTime;
-  // The timestamp of last communication call end time in each iteration.
+  private:
+    // The timestamp of forward call start time in each iteration.
+    int64_t forward_start_time = kUnsetTime;
+    // The timestamp of backward computation start and end time in each
+    // iteration.
+    int64_t backward_compute_start_time = kUnsetTime;
+    int64_t backward_compute_end_time = kUnsetTime;
+    // The timestamp of first communication call start time in each iteration.
+    int64_t backward_comm_start_time = kUnsetTime;
+    // The timestamp of last communication call end time in each iteration.
   int64_t backward_comm_end_time = kUnsetTime;
-
  public:
   enum class Event {
     kForwardStart,
@@ -107,12 +106,7 @@ struct BucketAccumulator {
   size_t size_limit = 0;
 };
 
-C10_DECLARE_TYPED_REGISTRY(
-    TimerRegistry,
-    c10::DeviceType,
-    Timer,
-    std::unique_ptr,
-    c10::Device);
+C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class TORCH_API Reducer {
  public:
@@ -183,34 +177,27 @@ class TORCH_API Reducer {
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.
-  // Returns true if the buckets were rebuilt.
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible. Returns true if the buckets were
+  // rebuilt.
   bool rebuild_buckets();
 
   // Install futures that should be awaited at end of backwards. Currently these
-  // are only used by user-defined custom buffer reduction hooks, but can be
-  // generalized to any user-originating futures that need to be awaited.
+  // are only used by user-defined custom buffer reduction hooks, but can be generalized
+  // to any user-originating futures that need to be awaited.
   void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
-  // buckets once after the first iteration.
-  // We always rebuild bucket when find_unused_parameters=False, as graph is
-  // static when find_unused_parameters=False.
-  // There are two major cases when find_unused_parameters=True:
-  // 1. grad ready order does not change over iterations, in this case,
-  // enable rebuilt bucket after first iteration can potentially improve
-  // performance.
-  // 2. grad ready order changes over iterations, in this case,
-  // use static bucket order or dynamic bucket order in the first iteration
-  // does not matter much, as order changes per iteration. It will be expensive
-  // to rebuild bucket every iteration for this case though, as rebuilt bucket
-  // requires a broadcast collective call.
-  // So in default buckets are rebuilt when find_unused_parameters=True, but
-  // it could be disabled by setting os.environ["DISABLE_REBUILT_BUCKET"] = "1"
-  // if users want to disable this feature for debugging purpose.
+  // buckets once after the first iteration and never rebuild them if
+  // find_unused_parameters_.
   inline bool should_rebuild_buckets() const {
-    return (static_graph_ || !find_unused_parameters_ ||
-            parse_env("DISABLE_REBUILT_BUCKET").compare("1") != 0) &&
-        !has_rebuilt_bucket_;
+    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
@@ -309,10 +296,9 @@ class TORCH_API Reducer {
 
   // Weak pointer to associated DDP logger.
   std::weak_ptr<c10d::Logger> logger_;
-  // List of futures installed by Reducer::install_futures that should be
-  // awaited at the end of backwards pass.
-  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>>
-      installed_futures_{c10::nullopt};
+  // List of futures installed by Reducer::install_futures that should be awaited
+  // at the end of backwards pass.
+  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
 
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
@@ -335,8 +321,7 @@ class TORCH_API Reducer {
   // bucket_index is a key to cache after buckets are rebuilt, after which this
   // mapping never changes.
   std::vector<at::Tensor> get_variables_for_bucket(
-      size_t bucket_index,
-      const Bucket& bucket) const;
+      size_t bucket_index, const Bucket& bucket) const;
 
   // Asserts that the reduction for the previous iteration has finished before
   // rebuilding buckets or kicking off the next one.
@@ -600,8 +585,7 @@ class TORCH_API Reducer {
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.
-  mutable std::unordered_map<size_t, std::vector<at::Tensor>>
-      cached_variables_for_bucket_;
+  mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
   friend class Logger;
 };

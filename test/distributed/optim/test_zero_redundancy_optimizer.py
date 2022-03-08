@@ -10,7 +10,7 @@ import os
 import sys
 import unittest
 from contextlib import suppress
-from typing import Any, List, Type, cast
+from typing import Any, List, cast
 
 import numpy as np
 
@@ -773,8 +773,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     @common_distributed.skip_if_no_gpu
     @parametrize(
-        "optimizer_class",
-        [torch.optim.Adam, torch.optim.AdamW, torch.optim.SGD],
+        "optimizer_class_str",
+        ["Adam", "AdamW", "SGD"],
+        # Use string to appease the internal test name parser
     )
     @parametrize(
         "maximize",
@@ -782,7 +783,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     )
     def test_local_optimizer_parity(
         self,
-        optimizer_class: Type[torch.optim.Optimizer],
+        optimizer_class_str: str,
         maximize: bool,
     ):
         """When combined with DDP, check that a local optimizer gives the same
@@ -796,6 +797,14 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         OUTPUT_DIM = 3
         torch.manual_seed(self.rank)
         np.random.seed(self.rank)
+        if optimizer_class_str == "Adam":
+            optimizer_class = torch.optim.Adam
+        elif optimizer_class_str == "AdamW":
+            optimizer_class = torch.optim.AdamW
+        elif optimizer_class_str == "SGD":
+            optimizer_class = torch.optim.SGD
+        else:
+            assert 0, f"Unsupported optimizer class: {optimizer_class_str}"
 
         with self.context:
             # Define a base model with a different buffer for each rank
