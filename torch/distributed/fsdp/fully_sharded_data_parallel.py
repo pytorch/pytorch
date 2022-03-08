@@ -1123,7 +1123,10 @@ class FullyShardedDataParallel(nn.Module):
 
     @contextlib.contextmanager
     def summon_full_params(
-        self, recurse: bool = True, writeback: bool = True
+        self,
+        recurse: bool = True,
+        writeback: bool = True,
+        rank0_only: bool = False,
     ) -> Generator:
         r""" A context manager to expose full params for the current FSDP
         instance. Can be useful *after* forward/backward for a model to get
@@ -1147,7 +1150,16 @@ class FullyShardedDataParallel(nn.Module):
             writeback (bool, Optional): if ``False``, modifications to params are
                 discarded after the context manager exists;
                 disabling this can be slightly more efficient (default: True)
+            rank0_only (bool, Optional): if ``True``, full parameters are
+                materialized on only global rank 0. This means that within the
+                context, only rank 0 will have full parameters and the other
+                ranks will have sharded parameters. This further means that for
+                non-zero ranks, the `writeback` argument is ignored and
         """
+        def _free_full_params_and_use_local_shard(params_to_free):
+                self._free_full_params(params_to_free)
+                self._use_param_local_shard()
+
         if recurse:
             with contextlib.ExitStack() as stack:
                 # Summon all params for any nested FSDP instances.
@@ -1155,7 +1167,9 @@ class FullyShardedDataParallel(nn.Module):
                     if isinstance(module, FullyShardedDataParallel):
                         stack.enter_context(
                             module.summon_full_params(
-                                recurse=False, writeback=writeback
+                                recurse=False,
+                                writeback=writeback,
+                                rank0_only=rank0_only,
                             )
                         )
                 # Yield to the caller, with full params in all nested instances.
@@ -1170,24 +1184,35 @@ class FullyShardedDataParallel(nn.Module):
             # forward/backward.
             self.training_state = TrainingState_.SUMMON_FULL_PARAMS
 
+            # Even if rank0_only = True, we need to materialize all params here
+            # (and free them right after) as full param materialization requires
+            # collective comm.
             currently_local_params = self._collect_local_params()
             self._rebuild_full_params()
             # Wait for all_gather to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            # FSDP now has the full flattened parameter. Unflatten it to get the
-            # full parameters.
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(self.module.unflatten_params())
-                try:
-                    yield
-                finally:
-                    if writeback:
-                        self._write_back_current_shard()
-                    stack.close()
-                    self._free_full_params(currently_local_params)
-                    self._use_param_local_shard()
-                    self.training_state = TrainingState_.IDLE
+            my_rank = dist.get_rank(self.process_group)
+            if rank0_only and my_rank != 0:
+               _free_full_params_and_use_local_shard(currently_local_params)
+               try:
+                   yield
+               finally:
+                   self.training_state = TrainingState_.IDLE
+            else:
+                # FSDP now has the full flattened parameter. Unflatten it to get the
+                # full parameters.
+                with contextlib.ExitStack() as stack:
+                    # Invariant: rank == 0 or !rank0_only
+                    stack.enter_context(self.module.unflatten_params())
+                    try:
+                        yield
+                    finally:
+                        if writeback:
+                            self._write_back_current_shard()
+                        stack.close()
+                        _free_full_params_and_use_local_shard(currently_local_params)
+                        self.training_state = TrainingState_.IDLE
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's
