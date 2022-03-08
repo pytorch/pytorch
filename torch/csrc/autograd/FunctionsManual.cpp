@@ -12,6 +12,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Activation.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Utils.h>
@@ -513,6 +514,7 @@ Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tenso
 }
 
 Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_self = solve_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
     return -at::mm(grad_self, solution.mH());
@@ -907,7 +909,7 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, const Scalar& p
         self, p, reduce_dims, /*keepdim=*/true);
   }
 
-  const auto real_acc_type = c10::toValueType(acc_type);
+  const auto real_acc_type = c10::toRealValueType(acc_type);
   auto grad_output = (self.conj() * grad);
   // vector_norm output is real, so grad_output must also be real
   if (real_acc_type != acc_type) {
@@ -1132,6 +1134,7 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
 }
 
 Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
+  at::NoTF32Guard disable_tf32;
   // Differentiation of the Cholesky decomposition, Iain Murray
   // https://arxiv.org/abs/1602.07527
   // equation 8
@@ -1146,6 +1149,7 @@ Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
 }
 
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
+  at::NoTF32Guard disable_tf32;
   // cf. Iain Murray (2016); arXiv 1602.07527
   // This gradient is symmetric, and not triangular.
   // Cholesky additionally assumes that the input is symmetric, which is a subspace of
@@ -1169,6 +1173,7 @@ Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
 }
 
 Tensor cholesky_inverse_backward(Tensor grad, Tensor L, bool upper, Tensor inverse) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_L;
   if (grad.defined()) {
     Tensor common_term = grad + grad.mT();
@@ -2338,6 +2343,47 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor gelu_double_backward(
+                const Tensor & ggI,
+                const Tensor & gO,
+                const Tensor & input,
+                c10::string_view approximate) {
+  //if (at::native::get_gelutype_enum(approximate) == at::native::GeluType::Tanh) {
+  if (approximate == "tanh") {
+    constexpr auto kBeta = M_SQRT2 * M_2_SQRTPI * 0.5;
+    constexpr auto kKappa = 0.044715;
+
+    auto inner = kBeta * (input + kKappa * pow(input, 3));
+    auto tanh_inner = tanh(inner);
+    auto sech_inner = 1 / cosh(inner);
+
+    auto f = 0.5 * input;
+    auto g = 1 - tanh_inner * tanh_inner;
+    auto h = kBeta * (1 + 3 * kKappa * input * input);
+
+    auto f_prime_gh = 0.5 * g * h;
+
+    auto g_prime = (2 * sech_inner) * (-sech_inner * tanh_inner) * h;
+    auto g_prime_fh = f * h * g_prime;
+
+    auto h_prime = 6 * kKappa * input * kBeta;
+    auto h_prime_fg = f * g * h_prime;
+
+    // left_derivative = f_prime_gh
+    // right_derivative = f_prime_gh + g_prime_fh + h_prime_fg
+    // dgrad_dX = left_derivative + right_derivative
+    auto gI = ggI * gO * (2 * f_prime_gh + g_prime_fh + h_prime_fg);
+    return gI;
+  } else {
+    constexpr auto kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
+    auto input_sq = input * input;
+    auto pdf = kBeta * at::exp(-0.5 * input_sq);
+    auto dgrad_dInput = 2 * pdf - input_sq * pdf;
+    auto gI = ggI * gO * dgrad_dInput;
+    return gI;
+  }
+}
+
 Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -2372,6 +2418,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(const Tensor& dA,
                                                   const Tensor& S,
                                                   const Tensor& Vh_,
                                                   const bool full_matrices) {
+  at::NoTF32Guard disable_tf32;
   // See svd_backward for the derivation
   // With sym(X) = X + X^H, we implement
   // dU = U (sym(dX S) / E + i Im(diag(dX)) / (2S))
@@ -2475,6 +2522,7 @@ Tensor svd_backward(const Tensor& gU,
                     const Tensor& U,
                     const Tensor& S,
                     const Tensor& Vh) {
+  at::NoTF32Guard disable_tf32;
   // Throughout both the real and complex case we assume A has distinct singular values.
   // Furthermore, if A is rectangular or complex, we assume it's full-rank.
   //
@@ -2684,6 +2732,7 @@ Tensor svd_backward(const Tensor& gU,
 // See the details below.
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool is_eigvec_tensor_nonempty, const Tensor& eigenvalues, const Tensor& eigenvectors) {
+  at::NoTF32Guard disable_tf32;
   TORCH_CHECK(is_eigvec_tensor_nonempty,
            "eig_backward: torch.eig(eigenvalues=False) is not differentiable. ",
            "Please use torch.linalg.eigvals");
@@ -2823,6 +2872,7 @@ Tensor linalg_eig_backward(const Tensor& gL,
                            const Tensor& V,
                            const bool is_hermitian,
                            const bool symeig_eigenvectors) {
+  at::NoTF32Guard disable_tf32;
   // https://arxiv.org/pdf/1701.00392.pdf Eq 4.77
   // For A = VLV^{-1}, denoting the gradients gA, gV and gL, we have
   // gA = V^{-H}(diag_embed(gL) + (V^H gV -V^HV diag(real(V^H gV))) / E*)V^H
@@ -2905,6 +2955,7 @@ std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
                                           const Tensor& L,
                                           const Tensor& V,
                                           const bool is_hermitian) {
+  at::NoTF32Guard disable_tf32;
   // https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf
   // see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
   // Note that neither of the formulas in these pdfs are correct, as they do not assume that
@@ -2952,6 +3003,7 @@ Tensor linalg_lstsq_jvp(
   const Tensor& dA,
   const Tensor& dB
 ) {
+  at::NoTF32Guard disable_tf32;
   auto pinvA = at::linalg_pinv(A);
   auto dpinvA = pinv_jvp(A, pinvA, dA);
   auto dX = dpinvA.matmul(B) + pinvA.matmul(dB);
@@ -2966,6 +3018,7 @@ std::tuple<Tensor, Tensor> linalg_lstsq_backward(
   const c10::optional<c10::string_view> driver,
   const std::array<bool, 2>& grad_input_mask
 ) {
+  at::NoTF32Guard disable_tf32;
   Tensor A_grad, B_grad;
   if (!grad.defined()) {
     return std::make_tuple(A_grad, B_grad);
@@ -2999,6 +3052,7 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
   const Tensor& Q,
   const Tensor& R
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = dA.size(-2);
   auto n = dA.size(-1);
   auto k = std::min(m, n);
@@ -3050,6 +3104,7 @@ Tensor linalg_qr_jvp_R(
 
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                           c10::string_view mode, const Tensor& q, const Tensor& r){
+  at::NoTF32Guard disable_tf32;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
@@ -3239,7 +3294,7 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
     return svd_backward(u_grad, s_grad, vh_grad, u, s, vh);
   };
 
-  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
   auto singular_det_cutoff = eps * at::linalg_matrix_norm(self);
 
   if (self.dim() == 2) {
@@ -3440,6 +3495,7 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor & b, const Tensor & a, const Tensor & x,
     const bool upper, const bool transpose, const bool unitriangular,
     std::array<bool, 2> output_mask) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_b, grad_a;
   if (grad_x.defined() || grad_m.defined()) {
     if (grad_x.defined()) {
@@ -3489,6 +3545,7 @@ Tensor linalg_solve_triangular_forward_AD(
     const bool upper,
     const bool left,
     const bool unitriangular) {
+  at::NoTF32Guard disable_tf32;
   // The forward AD formula (for left = true) is A^{-1}(B_t - A_tX)
   // For the derivation see:
   // [Note: Forward / Backward AD solve_triangular]
@@ -3506,6 +3563,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
     const bool left,
     const bool unitriangular,
     std::array<bool, 2> output_mask) {
+  at::NoTF32Guard disable_tf32;
   const bool A_requires_grad = output_mask[0];
   const bool B_requires_grad = output_mask[1];
   // [Note: Forward / Backward AD solve_triangular]
@@ -3556,6 +3614,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x, const Tensor& self,
     const Tensor& input2, const Tensor& result, const bool upper) {
+  at::NoTF32Guard disable_tf32;
   Tensor grad_self, grad_input2;
   if (grad_x.defined()) {
     grad_self = grad_x.cholesky_solve(input2, /*upper=*/upper);
@@ -3579,6 +3638,7 @@ Tensor cholesky_solve_jvp(
   const Tensor& dB,
   const bool upper
 ) {
+  at::NoTF32Guard disable_tf32;
   auto dK = upper ? dU.mH().matmul(U)
                   : dU.matmul(U.mH());
   auto dA = dK + dK.mH();
@@ -4505,6 +4565,7 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& LU_data,
   const Tensor& LU_pivots,
   const std::array<bool, 2>& grad_input_mask) {
+  at::NoTF32Guard disable_tf32;
   const bool B_requires_grad = grad_input_mask[0];
   const bool LU_data_requires_grad = grad_input_mask[1];
   if (!grad.defined() || (!B_requires_grad && !LU_data_requires_grad)) {
@@ -4572,6 +4633,7 @@ Tensor lu_solve_jvp(
   const Tensor& dB,
   const Tensor& LU_pivots
 ) {
+  at::NoTF32Guard disable_tf32;
   Tensor L, U, dL, dU;
   std::tie(std::ignore, L, U) = at::lu_unpack(LU_data, LU_pivots, /*unpack_data=*/true, /*unpack_pivots=*/false);
   dL = dLU_data.tril(-1);
@@ -4799,6 +4861,9 @@ Tensor batch_norm_jvp(
     TORCH_INTERNAL_ASSERT(
         running_mean.has_value() && running_var.has_value(),
         "Expect running_mean and running_var to have value when train=false");
+    TORCH_CHECK(
+        !running_mean.value()._fw_grad(/*level=*/0).defined() && !running_var.value()._fw_grad(/*level=*/0).defined(),
+        "batch_norm is not differentiable wrt running_mean and running_var, they cannot have forward grad defined");
     mean_p = running_mean.value().view(view_size);
     invstd_p = (1 / at::sqrt(running_var.value() + at::Scalar(eps))).view(view_size);
     result_t = input_t * invstd_p;
@@ -4988,6 +5053,7 @@ Tensor plu_backward_base(
   const Tensor& P,
   const Tensor& L,
   const Tensor& U) {
+  at::NoTF32Guard disable_tf32;
   auto L_grad = grads[0];
   auto U_grad = grads[1];
 
@@ -5076,6 +5142,7 @@ Tensor lu_factor_ex_jvp(
   const Tensor& LU,
   const Tensor& pivs
 ) {
+  at::NoTF32Guard disable_tf32;
   // This function is based on the forward AD derivations outlined
   // in the description to the plu_backward_base function.
 
@@ -5130,6 +5197,25 @@ Tensor lu_factor_ex_jvp(
       auto dLU2 = at::linalg_solve_triangular(U1, PdA2, /*upper=*/true, /*left=*/false) - L2.matmul(dK.triu());
       return at::cat({dLU1, dLU2}, /*dim=*/-2);
     }
+  }
+}
+
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  // NB: for simplicitly, we recompute some values that can be reused from forward
+  auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  // NB: it's OK for logsumexp_jvp to be reused for formulas like softmax/log_softmax
+  //     that only have one differentiable input, because that means self_t are never zerotensors
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).sum(dim, keepdim);
+    result /= sumexp_p;
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
   }
 }
 
