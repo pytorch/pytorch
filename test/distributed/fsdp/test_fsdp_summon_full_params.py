@@ -264,7 +264,8 @@ class TestSummonFullParams(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
-    def test_summon_full_params_equivalence(self, rank0_only):
+    @parametrize("offload_to_cpu", [True, False])
+    def test_summon_full_params_equivalence(self, rank0_only, offload_to_cpu):
         offload = CPUOffload(offload_params=True)
         model = FSDP(
             DeterministicModel(wrap_fsdp=True, cpu_offload=offload),
@@ -272,12 +273,14 @@ class TestSummonFullParams(FSDPTest):
         )
         local_model = DeterministicModel(wrap_fsdp=False)
 
+        dev = torch.device("cpu") if offload_to_cpu else torch.device("cuda", torch.cuda.current_device())
+
         params_to_compare = (
             [p.clone() for p in model.parameters()] if rank0_only and self.rank != 0
             else list(local_model.parameters())
         )
 
-        with model.summon_full_params(recurse=True, rank0_only=rank0_only):
+        with model.summon_full_params(recurse=True, rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
             # Below sleep causes failures without stream synchronization in
             # summon_full_params fix.
             torch.cuda._sleep(1000000)
@@ -288,7 +291,8 @@ class TestSummonFullParams(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
-    def test_reshard_outside_forward_backward_iteration(self, rank0_only):
+    @parametrize("offload_to_cpu", [True, False])
+    def test_reshard_outside_forward_backward_iteration(self, rank0_only, offload_to_cpu):
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 1, bias=False)
@@ -318,7 +322,7 @@ class TestSummonFullParams(FSDPTest):
         # now lets repeat it with summon done in between
 
         output = model(torch.zeros(5).cuda(self.rank))
-        with model.summon_full_params(rank0_only=rank0_only):
+        with model.summon_full_params(rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(
             outer_full_param_size, outer_param._full_param_padded.storage().size()
@@ -326,14 +330,15 @@ class TestSummonFullParams(FSDPTest):
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         output.backward()
-        with model.summon_full_params(rank0_only=rank0_only):
+        with model.summon_full_params(rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(0, outer_param._full_param_padded.storage().size())
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
-    def test_params_are_unflattenned(self, rank0_only):
+    @parametrize("offload_to_cpu", [True, False])
+    def test_params_are_unflattenned(self, rank0_only, offload_to_cpu):
         layer_shape = (10, 12)
         model = nn.Linear(*layer_shape, bias=False).cuda(self.rank)
         fsdp_model = FSDP(deepcopy(model)).cuda(self.rank)
@@ -344,17 +349,27 @@ class TestSummonFullParams(FSDPTest):
         flattened_param = _get_flat_param()
         self.assertEqual(layer_shape[0] * layer_shape[1] / 2, flattened_param.numel())
 
-        with fsdp_model.summon_full_params(rank0_only=rank0_only):
+        with fsdp_model.summon_full_params(rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
             if self.rank == 0 or not rank0_only:
                 self.assertEqual(fsdp_model.weight.shape, model.weight.shape)
+                expected_device = (
+                    torch.device("cpu") if offload_to_cpu else torch.device("cuda", torch.cuda.current_device())
+                )
+                self.assertTrue(expected_device == fsdp_model.weight.device)
             else:
                 # Nonzero rank with rank0_only maintains original params.
                 flat_within_ctx = _get_flat_param()
                 self.assertEqual(flat_within_ctx, flattened_param)
+                self.assertEqual(flat_within_ctx.device, torch.device(torch.cuda.current_device()))
+
+        # CPU offload should restore the param device
+        param = next(fsdp_model.parameters())
+        self.assertTrue(param.device == torch.device("cuda", torch.cuda.current_device()))
 
     @skip_if_lt_x_gpu(2)
     @parametrize("rank0_only", [True, False])
-    def test_params_count_and_value(self, rank0_only):
+    @parametrize("offload_to_cpu", [True, False])
+    def test_params_count_and_value(self, rank0_only, offload_to_cpu):
         fsdp_model = FSDP(
             NestedWrappedModule(
                 group=dist.distributed_c10d._get_default_group(),
@@ -368,8 +383,14 @@ class TestSummonFullParams(FSDPTest):
             fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
         )
 
+        dev = (
+            torch.device("cpu") if offload_to_cpu
+            else torch.device("cuda", torch.cuda.current_device())
+        )
+
         params_to_compare = (
-            model.module.parameters() if not rank0_only or self.rank == 0 else
+            [p.to(dev) for p in model.module.parameters()]
+            if not rank0_only or self.rank == 0 else
             list(p.clone() for p in fsdp_model.parameters())
         )
         with fsdp_model.summon_full_params(rank0_only=rank0_only):
@@ -377,6 +398,12 @@ class TestSummonFullParams(FSDPTest):
                 fsdp_model.parameters(), params_to_compare
             ):
                 self.assertEqual(p1, p2)
+
+        # CPU offload should restore the param device
+        param = next(fsdp_model.parameters())
+        self.assertTrue(
+            param.device == torch.device("cuda", torch.cuda.current_device())
+        )
 
 
 instantiate_parametrized_tests(TestSummonFullParams)

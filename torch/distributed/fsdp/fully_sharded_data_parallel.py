@@ -1092,7 +1092,10 @@ class FullyShardedDataParallel(nn.Module):
         # the code, i.e., ``p.data == p._local_shard`` after each function. This
         # also ensures that after the first forward, the optimizer state will be
         # initialized with the correct dtype and (sharded) size, since optimizer
-        # state is typically initialized lazily in ``optim.step()``.
+        # state is typically initialized lazily in ``optim.step()``. Note that
+        # when CPU offload is enabled, _use_param_local_shard implicitly
+        # offloads the local shard to CPU by making p.data point to
+        # p._local_shard, which would reside on CPU.
         self._use_param_local_shard()
 
         # Register pre-backward hooks to all-gather the params for the backward
@@ -1127,6 +1130,7 @@ class FullyShardedDataParallel(nn.Module):
         recurse: bool = True,
         writeback: bool = True,
         rank0_only: bool = False,
+        offload_to_cpu: bool = False,
     ) -> Generator:
         r""" A context manager to expose full params for the current FSDP
         instance. Can be useful *after* forward/backward for a model to get
@@ -1155,9 +1159,16 @@ class FullyShardedDataParallel(nn.Module):
                 context, only rank 0 will have full parameters and the other
                 ranks will have sharded parameters. This further means that for
                 non-zero ranks, the `writeback` argument is ignored and
+            offload_to_cpu (bool, optional): If ``True``, full parameters are
+                offloaded to CPU. Note that this offloading currently only
+                occurs if the parameter is sharded (which is only not the case
+                for world_size = 1).
         """
         def _free_full_params_and_use_local_shard(params_to_free):
                 self._free_full_params(params_to_free)
+                # when CPU offload is enabled, _use_param_local_shard implicitly
+                # offloads the local shard to CPU by making p.data point to
+                # p._local_shard, which would reside on CPU.
                 self._use_param_local_shard()
 
         if recurse:
@@ -1170,6 +1181,7 @@ class FullyShardedDataParallel(nn.Module):
                                 recurse=False,
                                 writeback=writeback,
                                 rank0_only=rank0_only,
+                                offload_to_cpu=offload_to_cpu,
                             )
                         )
                 # Yield to the caller, with full params in all nested instances.
@@ -1193,6 +1205,15 @@ class FullyShardedDataParallel(nn.Module):
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
             my_rank = dist.get_rank(self.process_group)
+            if offload_to_cpu and (not rank0_only or my_rank == 0):
+                for p in self.params:
+                    if p._is_sharded:
+                        with torch.no_grad():
+                            # Note that we offload the full param padded because
+                            # we have rebuilt full params.
+                            p._full_param_padded = p._full_param_padded.to(torch.device("cpu"))
+                            self._update_p_data(p, output_tensor=p._full_param_padded)
+
             if rank0_only and my_rank != 0:
                _free_full_params_and_use_local_shard(currently_local_params)
                try:
@@ -1208,6 +1229,17 @@ class FullyShardedDataParallel(nn.Module):
                     try:
                         yield
                     finally:
+                        if offload_to_cpu:
+                            for p in self.params:
+                                if p._is_sharded:
+                                    with torch.no_grad():
+                                        p._full_param_padded = (
+                                            p._full_param_padded.to(self.compute_device)
+                                        )
+                                        self._update_p_data(
+                                            p, output_tensor=p._full_param_padded,
+                                        )
+
                         if writeback:
                             self._write_back_current_shard()
                         stack.close()
@@ -1364,7 +1396,10 @@ class FullyShardedDataParallel(nn.Module):
 
         self._free_full_params(cast(List[FlatParameter], [param]))
 
-        # Switch to local shard after backward.
+        # Switch to local shard after backward. Note that
+        # when CPU offload is enabled, _use_param_local_shard implicitly
+        # offloads the local shard to CPU by making p.data point to
+        # p._local_shard, which would reside on CPU.
         self._use_param_local_shard(cast(List[FlatParameter], [param]))
 
         # Prefetch previous layer's full params in backward pass post backward hook,
@@ -1517,22 +1552,22 @@ class FullyShardedDataParallel(nn.Module):
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
 
+    def _update_p_data(self, p, output_tensor: torch.Tensor) -> None:
+        """
+        Helper function to update p.data pointer.
+        Args:
+            output_tensor (torch.Tensor): this tensor contains the data we just gathered.
+        """
+        p.data = output_tensor
+        # Trim any padding and reshape to match original size.
+        p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
+
     @torch.no_grad()
     def _rebuild_full_params(self) -> None:
         """
         Gather all shards of params.
         """
         self._lazy_init()
-
-        def update_p_data(output_tensor: torch.Tensor) -> None:
-            """
-            Helper function to update p.data pointer.
-            Args:
-                output_tensor (torch.Tensor): this tensor contains the data we just gathered.
-            """
-            p.data = output_tensor
-            # Trim any padding and reshape to match original size.
-            p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
 
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
@@ -1551,7 +1586,7 @@ class FullyShardedDataParallel(nn.Module):
                     p._full_param_padded.storage().size()  # type: ignore[attr-defined]
                     == p._full_param_padded.size().numel()  # type: ignore[attr-defined]
                 ):
-                    update_p_data(p._full_param_padded)  # type: ignore[attr-defined]
+                    self._update_p_data(p, output_tensor=p._full_param_padded)  # type: ignore[attr-defined]
                     continue
                 else:
                     # If full param has not been rebuilt or has been freed, call all gather
@@ -1573,7 +1608,7 @@ class FullyShardedDataParallel(nn.Module):
                     )
 
                     # Set p.data = output_tensor (with padding trimmed)
-                    update_p_data(output_tensor)
+                    self._update_p_data(p, output_tensor=output_tensor)
 
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
