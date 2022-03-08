@@ -598,7 +598,7 @@ if __name__ == "__main__" :
                         help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
     parser.add_argument("--run_in_subprocess", "-s", type=str,
                         help="which model run in subprocess. This will ignore filter and exclude")
-    parser.add_argument("--allclose_atol", type=float, default=1e-8,
+    parser.add_argument("--allclose_atol", type=float, default=1e-4,
                         help="Absolute tolerance to check lazy result again the correct result")
     args = parser.parse_args()
     results = []
