@@ -290,8 +290,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_new_ones(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -300,8 +298,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_like(self) -> None:
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return MyTensor(3)
@@ -421,7 +417,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         called_funcs = []
 
         class MyTensor(torch.Tensor):
-            __torch_function__ = torch._C._disabled_torch_function_impl
             elem: torch.Tensor
             __slots__ = ['elem']
 
@@ -649,8 +644,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 called.append(func)
@@ -668,8 +661,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -700,8 +691,6 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
             def __new__(cls, elem):
                 r = torch.Tensor._make_subclass(cls, elem)
                 return r
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
