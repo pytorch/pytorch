@@ -32,6 +32,7 @@
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
+#include <ATen/ops/linalg_solve_triangular.h>
 #include <ATen/ops/lstsq_native.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -1956,8 +1957,10 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
 
 static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   auto batch_size = batchCount(input);
+  (void) batch_size; // Silence unused warning in some builds
   auto m = input.size(-2);
   auto n = input.size(-1);
+
 
 #if AT_MAGMA_ENABLED()
   // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
@@ -2988,7 +2991,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
   // magma implementation of LU solve cannot handle a b tensor with last dim > 1024
   // See https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for
   bool over_batched_magma_dim_limit = nrhs > 1024;
-  // heuristics determined from tests dicussed in TODO [where]
+  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/72935
 
   auto lu_solve_triangular = [m](const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
     // Not implemented as this approach is just more efficient in the transpose / conj transpose case
