@@ -2571,9 +2571,9 @@ class TestDistributions(TestCase):
         d = InverseWishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((ndim * ndim * 100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=5, rtol=0)
+        self.assertEqual(d.mean, empirical_mean, atol=0.5, rtol=0)
         empirical_var = samples.var(0)
-        self.assertEqual(d.variance, empirical_var, atol=5, rtol=0)
+        self.assertEqual(d.variance, empirical_var, atol=0.5, rtol=0)
 
     def test_exponential(self):
         rate = torch.randn(5, 5).abs().requires_grad_()
