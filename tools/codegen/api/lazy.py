@@ -100,8 +100,8 @@ def isWrappedScalarType(typ: Type) -> bool:
 
 class LazyArgument:
     name: str
-    orig_ctype: NamedCType
-    lazy_ctype: NamedCType
+    orig_type: Type
+    lazy_type: CType
     is_wrapped_scalar: bool
     is_value_type: bool
 
@@ -110,7 +110,9 @@ class LazyArgument:
         self.orig_type = arg.type
         self.lazy_type = process_ir_type(arg.type)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
-        self.is_value_type = isValueType(arg.type)
+
+        # TODO(whc) make isValueType less hacky now that it can see orig/lazy type
+        self.is_value_type = isValueType(self.lazy_type)
 
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
@@ -207,20 +209,20 @@ class LazyIrSchema:
         return []
 
     def filtered_args(self, positional: bool = True, keyword: bool = True,
-                      values: bool = True, scalars: bool = True) -> List[NamedCType]:
-        types: List[LazyArgument] = []
+                      values: bool = True, scalars: bool = True) -> List[LazyArgument]:
+        args: List[LazyArgument] = []
         if positional:
-            types.extend(self.positional_args)
+            args.extend(self.positional_args)
         if keyword:
-            types.extend(self.keyword_args)
+            args.extend(self.keyword_args)
 
         if values and scalars:
-            return types
+            return args
 
         if values:
-            return [t for t in types if t.is_value_type]
+            return [a for a in args if a.is_value_type]
         elif scalars:
-            return [t for t in types if not t.is_value_type]
+            return [a for a in args if not a.is_value_type]
 
         return []
 
