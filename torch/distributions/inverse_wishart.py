@@ -214,19 +214,19 @@ class InverseWishart(ExponentialFamily):
 
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        eff_df = (nu - p).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
+        shifted_df = (nu - p - 3).view(self._batch_shape + (1, 1)).expand(self._batch_shape + self._event_shape)
 
         return torch.where(
-            eff_df.gt(3),
+            shifted_df.gt(0),
             (
-                torch.einsum("...ij,...ij->...ij", eff_df + 1, V.pow(2))
-                + torch.einsum("...ij,...i,...j->...ij", eff_df - 1, diag_V, diag_V)
-            ) / _clamp_with_eps(eff_df * (eff_df - 1).pow(2) * (eff_df - 3)),
+                torch.einsum("...ij,...ij->...ij", shifted_df + 4, V.pow(2))
+                + torch.einsum("...ij,...i,...j->...ij", shifted_df + 2, diag_V, diag_V)
+            ) / ((shifted_df + 3) * (shifted_df + 2).pow(2) * _clamp_with_eps(shifted_df)),
             torch.full_like(
-                eff_df,
+                shifted_df,
                 fill_value=float("Inf"),
-                dtype=eff_df.dtype,
-                device=eff_df.device,
+                dtype=shifted_df.dtype,
+                device=shifted_df.device,
             )
         )
 
