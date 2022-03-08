@@ -1096,6 +1096,24 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_torch_op_overloads(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.add.Tensor(a, a)
+                return b
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        gm.graph.lint()
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
+        for node in gm.graph.nodes:
+            if node.op == 'call_function':
+                assert isinstance(node.target, torch._ops.OpOverload)
+                assert node.target.__name__ == 'add.Tensor'
+
     def test_pickle_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
