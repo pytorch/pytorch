@@ -1296,6 +1296,7 @@ class TestSparseCSR(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"Expected mat2 to have strided layout"):
             torch.sparse.sampled_addmm(a_sparse, a, a_sparse)
 
+    @skipMeta
     @dtypes(*get_all_dtypes())
     def test_coo_csr_conversion(self, device, dtype):
         for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
@@ -1305,6 +1306,17 @@ class TestSparseCSR(TestCase):
             csr_sparse = coo_sparse.to_sparse_csr()
 
             self.assertEqual(csr_sparse.to_dense(), dense)
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
+    def test_csr_coo_conversion(self, device, dtype):
+        for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
+            size = (m, n)
+            dense = make_tensor(size, dtype=dtype, device=device)
+            csr_sparse = dense.to_sparse_csr()
+            coo_sparse = csr_sparse.to_sparse()
+
+            self.assertEqual(coo_sparse.to_dense(), dense)
 
     @ops(_sparse_csr_ops)
     def test_sparse_csr_consistency(self, device, dtype, op):
