@@ -140,7 +140,7 @@ void IRVisitor::visit(ExternalCallPtr v) {
   }
 }
 
-void IRVisitor::visit(ExternalCall2Ptr v) {
+void IRVisitor::visit(ExternalCallWithAllocPtr v) {
   for (const auto& buf_out_arg : v->buf_out_args()) {
     buf_out_arg->accept(this);
   }

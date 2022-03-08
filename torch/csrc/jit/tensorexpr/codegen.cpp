@@ -265,7 +265,7 @@ StmtPtr ExtCallMemoryReuse::mutate(ExternalCallPtr v) {
   if (extCallFuncNameMap_.count(v->func_name()) &&
       bufferArgs_.count(v->buf()) == 0) {
     std::vector<BufPtr> buf_out_args = {v->buf()};
-    return alloc<ExternalCall2>(
+    return alloc<ExternalCallWithAlloc>(
         extCallFuncNameMap_.at(v->func_name()),
         buf_out_args,
         v->buf_args(),

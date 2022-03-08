@@ -198,7 +198,7 @@ class StmtsReadingBuf : public IRVisitor {
 
 class ExternalAllocBufFinder : public IRVisitor {
  public:
-  void visit(ExternalCall2Ptr v) override {
+  void visit(ExternalCallWithAllocPtr v) override {
     const auto& bufs_out = v->buf_out_args();
     bufs_.insert(bufs_out.begin(), bufs_out.end());
     IRVisitor::visit(v);
@@ -315,7 +315,7 @@ class BufLiveRange : public IRVisitor {
         }
       }
     }
-    auto loads3 = NodeFinder<ExternalCall2>::find(s);
+    auto loads3 = NodeFinder<ExternalCallWithAlloc>::find(s);
     for (auto l : loads3) {
       for (auto lb : l->buf_args()) {
         if (lb == buf_) {
@@ -339,7 +339,7 @@ class BufLiveRange : public IRVisitor {
         return true;
       }
     }
-    auto writes3 = NodeFinder<ExternalCall2>::find(s);
+    auto writes3 = NodeFinder<ExternalCallWithAlloc>::find(s);
     for (auto w : writes3) {
       for (auto wb : w->buf_out_args()) {
         if (wb == buf_) {

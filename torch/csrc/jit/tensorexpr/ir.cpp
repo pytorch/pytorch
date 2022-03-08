@@ -192,7 +192,7 @@ ExternalCallPtr ExternalCall::make(
       buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
-ExternalCall2Ptr ExternalCall2::make(
+ExternalCallWithAllocPtr ExternalCallWithAlloc::make(
     const std::string& func_name,
     const std::vector<BufHandle>& buf_out_args,
     const std::vector<BufHandle>& buf_args,
@@ -208,7 +208,7 @@ ExternalCall2Ptr ExternalCall2::make(
   for (const BufHandle& buf_arg : buf_args) {
     buf_arg_nodes.push_back(buf_arg.node());
   }
-  return alloc<ExternalCall2>(
+  return alloc<ExternalCallWithAlloc>(
       func_name,
       buf_out_arg_nodes,
       buf_arg_nodes,

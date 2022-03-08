@@ -958,9 +958,9 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
   std::vector<ExprPtr> args_;
 };
 
-class TORCH_API ExternalCall2 : public StmtNode<ExternalCall2> {
+class TORCH_API ExternalCallWithAlloc : public StmtNode<ExternalCallWithAlloc> {
  public:
-  static ExternalCall2Ptr make(
+  static ExternalCallWithAllocPtr make(
       const std::string& func_name,
       const std::vector<BufHandle>& buf_out_args,
       const std::vector<BufHandle>& buf_args,
@@ -995,7 +995,7 @@ class TORCH_API ExternalCall2 : public StmtNode<ExternalCall2> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ExternalCall2(
+  ExternalCallWithAlloc(
       std::string func_name,
       std::vector<BufPtr> buf_out_args,
       std::vector<BufPtr> buf_args,

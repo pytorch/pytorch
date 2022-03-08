@@ -56,7 +56,7 @@ class TORCH_API IRVisitor {
   virtual void visit(AtomicAddPtr v);
   virtual void visit(SyncThreadsPtr v);
   virtual void visit(ExternalCallPtr v);
-  virtual void visit(ExternalCall2Ptr v);
+  virtual void visit(ExternalCallWithAllocPtr v);
 };
 
 } // namespace tensorexpr

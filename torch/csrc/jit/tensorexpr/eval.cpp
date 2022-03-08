@@ -898,7 +898,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         extra_args.data());
   }
 
-  void visit(ExternalCall2Ptr v) override {
+  void visit(ExternalCallWithAllocPtr v) override {
     auto& func_registry = getNNCFunctionRegistry();
     if (!func_registry.count(v->func_name())) {
       throw unimplemented_lowering(v);

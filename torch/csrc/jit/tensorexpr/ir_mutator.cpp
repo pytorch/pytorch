@@ -475,7 +475,7 @@ StmtPtr IRMutator::mutate(ExternalCallPtr v) {
   return v;
 }
 
-StmtPtr IRMutator::mutate(ExternalCall2Ptr v) {
+StmtPtr IRMutator::mutate(ExternalCallWithAllocPtr v) {
   bool buf_out_args_changed = false;
   std::vector<BufPtr> buf_out_args_new;
   buf_out_args_new.reserve(v->buf_out_args().size());

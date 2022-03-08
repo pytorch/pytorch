@@ -565,7 +565,7 @@ void IRPrinter::visit(ExternalCallPtr v) {
   os() << "})";
 }
 
-void IRPrinter::visit(ExternalCall2Ptr v) {
+void IRPrinter::visit(ExternalCallWithAllocPtr v) {
   int i = 0;
   for (const auto& buf_out_arg : v->buf_out_args()) {
     if (i++ > 0) {

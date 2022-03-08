@@ -301,7 +301,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(LetPtr v) override;
   void visit(CondPtr v) override;
   void visit(ExternalCallPtr v) override;
-  void visit(ExternalCall2Ptr v) override;
+  void visit(ExternalCallWithAllocPtr v) override;
 
   void emitIsNan(IntrinsicsPtr v);
 
@@ -2045,7 +2045,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
-void LLVMCodeGenImpl::visit(ExternalCall2Ptr v) {
+void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
   auto& func_registry = getNNCFunctionRegistry();
   if (!func_registry.count(v->func_name())) {
     throw unimplemented_lowering(v);
