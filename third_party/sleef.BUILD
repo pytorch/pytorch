@@ -20,8 +20,11 @@ SLEEF_COPTS = [
 
 SLEEF_COMMON_TARGET_COPTS = [
     "-DSLEEF_STATIC_LIBS=1",
-    "-DENABLE_ALIAS=1",
-]
+] + select({
+    "@platforms//os:linux": ["-DENABLE_ALIAS=1"],
+    # On macOS we see the error "alias are not supported on darwin".
+    "@platforms//os:macos": [],
+})
 
 SLEEF_PRIVATE_HEADERS = glob([
     "build/include/*.h",
@@ -202,15 +205,24 @@ cc_library(
         "src/libm/rempitab.c",
         "src/libm/sleefdp.c",
         "src/libm/sleefld.c",
-        "src/libm/sleefqp.c",
         "src/libm/sleefsp.c",
-    ],
+    ] + select({
+        "@platforms//os:linux": ["src/libm/sleefqp.c"],
+        # Sleef_quad is defined as a struct without operators with
+        # macOS Clang, and the sleefqp.c file is not compilable.
+        "@platforms//os:macos": [],
+    }),
     hdrs = SLEEF_PUBLIC_HEADERS,
     copts = SLEEF_PRIVATE_INCLUDES + SLEEF_COPTS + SLEEF_COMMON_TARGET_COPTS + [
         "-DDORENAME=1",
-        "-DENABLEFLOAT128=1",
         "-Wno-unused-result",
-    ],
+    ] + select({
+        "@platforms//os:linux": ["-DENABLEFLOAT128=1"],
+        # Clang, the default compiler on macOS, does not support
+        # __float128. We select based on OS, but we really ought to
+        # select based on the toolchain.
+        "@platforms//os:macos": [],
+    }),
     includes = SLEEF_PUBLIC_INCLUDES,
     # -lgcc resolves
     # U __addtf3
