@@ -5,7 +5,7 @@ from tools.codegen.model import (Type, BaseTy, BaseType, OptionalType,
 from tools.codegen.api.types import (CType, BaseCppType, BaseCType, OptionalCType,
                                      NamedCType, deviceT, layoutT,
                                      VectorCType, boolT, longT, doubleT, ListCType, stringT,
-                                     scalarT, scalarTypeT)
+                                     scalarT, scalarTypeT, memoryFormatT)
 
 valueT = BaseCppType('torch::lazy', 'Value')
 
@@ -49,6 +49,8 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(deviceT)
         elif typ.name == BaseTy.Layout:
             return BaseCType(layoutT)
+        elif typ.name == BaseTy.MemoryFormat:
+            return BaseCType(memoryFormatT)
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):
