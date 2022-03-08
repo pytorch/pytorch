@@ -968,7 +968,6 @@ class LowerCholeskyTransform(Transform):
 
 
 class CatTransform(Transform):
-    tseq: List[numbers.Number]
     """
     Transform functor that applies a sequence of transforms `tseq`
     component-wise to each submatrix at `dim`, of length `lengths[dim]`,
@@ -981,6 +980,8 @@ class CatTransform(Transform):
        t = CatTransform([t0, t0], dim=0, lengths=[20, 20])
        y = t(x)
     """
+    transforms: List[Transform]
+
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
@@ -1004,7 +1005,7 @@ class CatTransform(Transform):
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
             return self
-        return CatTransform(self.tseq, self.dim, self.lengths, cache_size)
+        return CatTransform(self.transforms, self.dim, self.lengths, cache_size)
 
     def _call(self, x):
         assert -x.dim() <= self.dim < x.dim()
@@ -1079,6 +1080,8 @@ class StackTransform(Transform):
        t = StackTransform([ExpTransform(), identity_transform], dim=1)
        y = t(x)
     """
+    transforms: List[Transform]
+
     def __init__(self, tseq, dim=0, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
