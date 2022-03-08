@@ -154,7 +154,6 @@ void SourceRange::highlight(std::ostream& out) const {
   print_with_context(out, CONTEXT, true, "");
 }
 
-// TODO(dberard) - is it safe to change this to TORCH_API?
 void format_stack_trace(
     std::ostream& out,
     const std::vector<StackEntry>& entries) {
