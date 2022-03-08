@@ -287,6 +287,15 @@ class PersistentBufferResolution : public IterVisitor {
     }
 
     if (tv->hasReduction()) {
+      if (std::any_of(
+              resolution_points_.begin(),
+              resolution_points_.end(),
+              [&tv](TensorView* resolution_point) {
+                return DependencyCheck::isDependencyOf(resolution_point, tv);
+              })) {
+        // If already resolved, don't start a new reduction path.
+        return;
+      }
       on_reduction_path_.emplace(tv);
     }
   }
@@ -587,7 +596,7 @@ void computeAtBetween(
               return mapped_to_trivial_reduction.count(id);
             });
 
-        pos = pos_it == consumer->domain()->domain().end()
+        auto consumer_pos = pos_it == consumer->domain()->domain().end()
             ? pos
             : std::min(
                   (int)std::distance(
@@ -596,7 +605,7 @@ void computeAtBetween(
                   (pos < 0 ? pos + (int)consumer->nDims() : pos));
         // Assume we don't want to reset computeAt on tensors that have already
         // performed it.
-        producer->computeAt(consumer, pos, mode);
+        producer->computeAt(consumer, consumer_pos, mode);
       }
     }
   }
@@ -1038,15 +1047,22 @@ std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
 }
 
 namespace {
+// If this is an rfactored reduction domain, actually check the root domain,
+// this is because the rfactored reduction tensorview has the vectorized
+// dimension, but that means the rfactor domain could have reordered what we
+// consider the "inner most" allocated position on it if we consider the rfactor
+// dimension.
 IterDomain* innerMostRootDim(TensorView* tv) {
   if (tv->nDims() == 0) {
     return nullptr;
   }
 
   IterDomain* inner_most_id = nullptr;
-  for (auto it = tv->getMaybeRFactorDomain().rbegin();
-       it != tv->getMaybeRFactorDomain().rend();
-       it++) {
+  auto root_domain = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
+  for (auto it = root_domain.rbegin(); it != root_domain.rend(); it++) {
     if ((*it)->isReduction() && tv->isFusionInput()) {
       continue;
     }
@@ -1084,7 +1100,7 @@ IterDomain* projectIdToRoot(
     return reference_id;
   }
 
-  auto replay_exprs = ExprSort::getExprs(tv->fusion(), {reference_id});
+  auto replay_exprs = StmtSort::getExprs(tv->fusion(), {reference_id}, false);
   if (replay_exprs.empty()) {
     return reference_id;
   }
@@ -1193,12 +1209,16 @@ std::unordered_set<IterDomain*> FindAllMappedDims::from(
     TensorView* tv,
     IterDomain* id,
     bool vectorize_pass) {
+  auto root_domain = tv->hasReduction() && tv->hasRFactor()
+      ? tv->getRootDomain()
+      : tv->getMaybeRFactorDomain();
+
   TORCH_INTERNAL_ASSERT(
       std::find_if(
-          tv->getMaybeRFactorDomain().begin(),
-          tv->getMaybeRFactorDomain().end(),
+          root_domain.begin(),
+          root_domain.end(),
           [&id](IterDomain* root_id) { return root_id == id; }) !=
-          tv->getMaybeRFactorDomain().end(),
+          root_domain.end(),
       "Tried to map out ",
       id,
       " from TV ",
