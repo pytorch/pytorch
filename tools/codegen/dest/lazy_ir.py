@@ -227,7 +227,6 @@ class GenLazyNativeFuncDefinition:
 
         fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
         
-        #TODO(whc) simplify this one step further
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
         assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
         get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});
