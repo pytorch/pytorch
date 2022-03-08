@@ -41,3 +41,49 @@ TEST(Ops, Sum) {
     ASSERT_TRUE(at::allclose(bt, ref));
   }
 }
+
+TEST(Ops, Stack) {
+  constexpr int N = 2;
+  std::vector<IntList> testDims = {{0}, {1}, {0, 1}, {1, 0}, {2, 3}, {3, 2, 2}};
+  std::vector<std::vector<ExprHandle>> outputShapes = {
+      {N, ExprHandle(0)},
+      {N, ExprHandle(1)},
+      {N, ExprHandle(0), ExprHandle(1)}};
+  for (int idx = 0; idx < testDims.size(); idx++) {
+    // Construct the input buffer list
+    const auto& dims = testDims[idx];
+    std::vector<ExprHandle> inShape;
+    for (auto d : dims) {
+      inShape.push_back(ExprHandle(d));
+    }
+
+    BufHandle a("a", inShape, kFloat);
+    BufHandle b("b", inShape, kFloat);
+    std::vector<BufHandle> buflist;
+    buflist.push_back(a);
+    buflist.push_back(b);
+
+    auto at = at::rand(dims, at::kFloat);
+    auto bt = at::rand(dims, at::kFloat);
+
+    // Vary the stack dim arg from 0 to 1
+    for (int stackIdx = 0; stackIdx < 2; stackIdx++) {
+      // Compute the output shape
+      std::vector<ExprHandle> outShape(inShape.begin(), inShape.end());
+      outShape.insert(outShape.begin() + stackIdx, ExprHandle(2));
+
+      int64_t argDim = stackIdx;
+      Tensor c =
+          computeStack({buflist, argDim}, outShape, c10::kFloat, at::kCPU);
+      auto cg = compile({a, b}, {c});
+
+      auto ref = at::stack({at, bt}, argDim);
+      auto ct = at::empty_like(ref);
+
+      cg->call(
+          {at.data_ptr<float>(), bt.data_ptr<float>(), ct.data_ptr<float>()});
+
+      ASSERT_TRUE(at::allclose(ct, ref));
+    }
+  }
+}

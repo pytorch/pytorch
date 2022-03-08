@@ -642,6 +642,43 @@ Tensor computeCat(
       });
 }
 
+static bool checkStackInputShape(const std::vector<BufHandle>& bufList) {
+  if (bufList.size() == 0) {
+    throw std::runtime_error("Empty input list is passed to aten::stack");
+  }
+
+  auto buf0 = bufList.at(0);
+  TORCH_INTERNAL_ASSERT(
+      buf0.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
+  // Check if any of the dims is 0
+  bool hasEmptyDims = false;
+  std::vector<ExprHandle> dims;
+  for (const auto& dim : buf0.dims()) {
+    if (dim.AsNode<LongImm>() && immediateAs<int64_t>(dim) == 0ll) {
+      hasEmptyDims = true;
+    }
+    dims.push_back(IRSimplifier::simplify(dim));
+  }
+
+  // Check if all input bufs have the same size
+  for (int i = 1; i < bufList.size(); i++) {
+    auto buf = bufList.at(i);
+    TORCH_INTERNAL_ASSERT(
+        buf.node()->dims().size() == dims.size(),
+        buildErrorMessage("aten::stack inputs have different sizes"));
+    auto dims_to_cmp = buf.dims();
+    for (int k = 0; k < dims.size(); k++) {
+      auto diff = IRSimplifier::simplify(
+          alloc<Sub>(dims_to_cmp.at(k).node(), dims.at(k).node()));
+      TORCH_INTERNAL_ASSERT(
+          diff->isConstant() && immediateAs<int>(diff) == 0,
+          buildErrorMessage("different aten::stack inputs dims"));
+    }
+  }
+
+  return hasEmptyDims;
+}
+
 Tensor computeStack(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
@@ -650,43 +687,44 @@ Tensor computeStack(
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto inputList = c10::get<BufList>(inputs[0]);
   auto argDim = inputs[1];
-  auto catInfo = processCatList(inputList);
-  ScalarType highType = catInfo.first;
-  std::vector<BufHandle> nonEmptyInputs = catInfo.second;
+  auto hasEmptyInputs = checkStackInputShape(inputList);
+  ScalarType highType = inputList[0].dtype().scalar_type();
+  for (const auto& input : inputList) {
+    auto maybe_dtype = input.dtype().scalar_type();
+    highType = promoteTypes(highType, maybe_dtype);
+  }
+
   return Compute(
       "aten_stack", outputShape, [&](const std::vector<VarHandle>& axes) {
-        if (nonEmptyInputs.size() == 0) {
+        if (hasEmptyInputs) {
           return ExprHandle(0);
         }
 
         int64_t dim_ = c10::get<int64_t>(argDim);
         auto dim = normalizeAndCheckIndex(dim_, axes.size());
-        auto inputBuf = nonEmptyInputs[0];
-        std::vector<ExprHandle> newAxes(axes.begin(), axes.begin()+dim);
-        newAxes.insert(newAxes.end(), axes.begin()+dim+1, axes.end());
-        // Promote input types.
-        // Note that we need to consider all inputs, including empty - they
-        // also affect the resultant dtype.
-
-        // Now we know the final dtype, we know what inputs are non-empty,
-        // and we know that there is at least one such an input. With all
-        // that we construct a tensor expression performing the
-        // concatenation.
-        // The expression we build here is a cascading if-then-else that
+        auto inputBuf = inputList[0];
+        std::vector<ExprHandle> newAxes(axes.begin(), axes.begin() + dim);
+        newAxes.insert(newAxes.end(), axes.begin() + dim + 1, axes.end());
+        // We construct a tensor expression performing the stacking.
+        // The expression we build here is a cascading compare-select that
         // essentially represents:
         //
-        //              inp1[i, j, k]         if 0   < i < l1,
-        // out[i,j,k] = inp2[i, j-l1, k]      if l1 =< i < l1 + l2,
+        //              inp1[i, j]         if k=0,
+        // out[i,k,j] = inp2[i, j]         if k=1,
         //              ...
-        //              inpN[i, j-l_N_1, k]   if l1+l2+...l_N_1  < i
-        // where l_i is the corresponding size of the i-th input.
-        ExprHandle load = promoteToDtype(
-            tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
+        //              inpN[i, j]         if k=N-1
+        // where k corresponds to the index of the stacking dimension, and N is
+        // the number of inputs.
+        ExprHandle load =
+            promoteToDtype(tensorOrConstant(inputList[0], newAxes), highType);
 
-        for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
-          auto input = nonEmptyInputs[ii];
+        for (size_t ii = 1; ii < inputList.size(); ++ii) {
+          auto input = inputList[ii];
           load = ifThenElse(
-              CompareSelect::make(axes[dim], LongImm::make(ii), kEQ),
+              CompareSelect::make(
+                  axes.at(dim),
+                  Cast::make(axes.at(dim).dtype(), int64_t(ii)),
+                  kEQ),
               promoteToDtype(tensorOrConstant(input, newAxes), highType),
               load);
         }
@@ -694,7 +732,6 @@ Tensor computeStack(
         return load;
       });
 }
-
 
 Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
