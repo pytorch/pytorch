@@ -2,6 +2,14 @@
 #include <c10/macros/Macros.h>
 #include <string>
 
+#define JITERATOR_HOST_DEVICE C10_HOST_DEVICE
+#if defined(_MSC_VER) && defined(__CUDACC__)
+// NVRTC on Windows errors if __host__ attribute is
+// present on kernel.
+// error: attribute "__host__" does not apply here
+#define JITERATOR_HOST_DEVICE __device__
+#endif
+
 // jiterator_code_stringify macro is used to define code (for CPU/ROCm)
 // and generate code string for `jiterator` (only when compiling for CUDA).
 // Usage :

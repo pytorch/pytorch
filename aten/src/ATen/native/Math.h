@@ -84,7 +84,7 @@ namespace {
 jiterator_code_stringify(
     jiterator_code(
         template <typename T>
-        C10_HOST_DEVICE T chbevl(T x, const T array[], const int len) {
+        JITERATOR_HOST_DEVICE T chbevl(T x, const T array[], const int len) {
           T b0, b1, b2;
 
           b0 = array[0];
@@ -100,7 +100,7 @@ jiterator_code_stringify(
         }
 
         template <typename T>
-        C10_HOST_DEVICE T calc_i0e(T _x) {
+        JITERATOR_HOST_DEVICE T calc_i0e(T _x) {
           T x = fabs(_x);
 
           if (x <= T{8.0}) {
