@@ -1,40 +1,43 @@
-ir_version: 4
+ir_version: 7
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    output: "onnx::Pad_1"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 8
+        data_type: 7
+        raw_data: "\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
     input: "onnx::Pad_0"
-    output: "onnx::AveragePool_1"
-    name: "Pad_0"
+    input: "onnx::Pad_1"
+    output: "onnx::AveragePool_2"
+    name: "Pad_1"
     op_type: "Pad"
     attribute {
       name: "mode"
       s: "constant"
       type: STRING
     }
-    attribute {
-      name: "pads"
-      ints: 0
-      ints: 0
-      ints: 0
-      ints: 0
-      ints: 0
-      ints: 0
-      ints: 0
-      ints: 0
-      type: INTS
-    }
-    attribute {
-      name: "value"
-      f: 0
-      type: FLOAT
-    }
   }
   node {
-    input: "onnx::AveragePool_1"
-    output: "2"
-    name: "AveragePool_1"
+    input: "onnx::AveragePool_2"
+    output: "3"
+    name: "AveragePool_2"
     op_type: "AveragePool"
+    attribute {
+      name: "ceil_mode"
+      i: 0
+      type: INT
+    }
     attribute {
       name: "kernel_shape"
       ints: 3
@@ -80,7 +83,7 @@ graph {
     }
   }
   output {
-    name: "2"
+    name: "3"
     type {
       tensor_type {
         elem_type: 1
@@ -103,5 +106,5 @@ graph {
   }
 }
 opset_import {
-  version: 9
+  version: 13
 }

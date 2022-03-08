@@ -31,15 +31,15 @@ _onnx_test = False  # flag to produce onnx test cases.
 _onnx_dep = True  # flag to import onnx package.
 
 
-def export_to_pbtxt(model, inputs, *args, opset_version=9, **kwargs):
+def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, google_printer=True, *args, opset_version=opset_version, **kwargs)
+        model, inputs, google_printer=True, *args, **kwargs)
 
 
-def export_to_pb(model, inputs, *args, opset_version=9, **kwargs):
+def export_to_pb(model, inputs, *args, **kwargs):
     f = io.BytesIO()
     with torch.no_grad():
-        torch.onnx.export(model, inputs, f, *args, opset_version=opset_version, **kwargs)
+        torch.onnx.export(model, inputs, f, *args, **kwargs)
     return f.getvalue()
 
 
