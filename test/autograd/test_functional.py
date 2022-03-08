@@ -1,5 +1,6 @@
 # Owner(s): ["module: autograd"]
 
+import types
 import unittest
 import warnings
 
@@ -8,7 +9,45 @@ import torch.autograd.functional as autogradF
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, gradcheck, gradgradcheck, parametrize, instantiate_parametrized_tests)
+    TestCase, run_tests, subtest, gradcheck, gradgradcheck, parametrize, instantiate_parametrized_tests)
+from torch.testing._internal.logging_tensor import LoggingTensor
+
+# Utilities for parametrizing the tensor constructors used in autograd tests
+base_ctors_dict = {
+    "ones": torch.ones,
+    "zeros": torch.zeros,
+    "randn": torch.randn,
+    "rand": torch.rand,
+    "tensor": torch.tensor,
+    # TODO: maybe move somewhere so other tests can also use
+    # TODO: according to https://pytorch.org/cppdocs/notes/tensor_creation.html
+    #       there are more factory functions: logspace, linspace, full, eye, empty, arange, randint and randperm
+}
+base_ctors = types.SimpleNamespace(**base_ctors_dict)
+
+def wrap_with_logging_tensor(ctor):
+    return lambda *args, **kwargs: LoggingTensor(ctor(*args, **kwargs))
+
+logging_tensor_ctors_dict = {k: wrap_with_logging_tensor(ctor) for (k, ctor) in base_ctors_dict.items()}
+logging_tensor_ctors = types.SimpleNamespace(**logging_tensor_ctors_dict)
+
+base_and_logging_tensor = parametrize("ctors", [subtest(base_ctors, name="base_tensor"),
+                                                subtest(logging_tensor_ctors, name="logging_tensor")])
+
+FIXME_base_and_xfail_logging_tensor = parametrize("ctors", [subtest(base_ctors, name="base_tensor"),
+                                                            subtest(logging_tensor_ctors, name="logging_tensor",
+                                                                    decorators=[unittest.expectedFailure])])
+
+# NB: This is equivalent to having both @parmetrize("vectorized", [True, False]) and
+#     FIXME_base_and_xfail_logging_tensor, except the non-vectorized logging_tensor case is
+#     actually expected to succeed
+FIXME_xfail_vectorized_logging_tensor = (
+    parametrize("vectorize,ctors", [subtest((True, base_ctors), name="vectorized_base_tensor"),
+                                    subtest((False, base_ctors), name="base_tensor"),
+                                    subtest((True, logging_tensor_ctors), name="vectorized_logging_tensor",
+                                            decorators=[unittest.expectedFailure]),
+                                    subtest((False, logging_tensor_ctors), name="logging_tensor")]))
+
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
@@ -68,15 +107,16 @@ class TestAutogradFunctional(TestCase):
             raise RuntimeError("The bases given to `_assert_interleaved_struct` don't have"
                                " the right structure.")
 
-    def test_vjp_err_check(self):
+    @base_and_logging_tensor
+    def test_vjp_err_check(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
 
         def bar(a):
             return 3 * a.narrow(0, 0, 3), "bar"
 
-        inp = torch.rand(4)
-        v = torch.ones(3)
+        inp = ctors.rand(4)
+        v = ctors.ones(3)
         with self.assertRaisesRegex(TypeError, "The inputs given to vjp must be either a Tensor"):
             res = autogradF.vjp(foo, (inp, 2), v)
 
@@ -95,7 +135,8 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.vjp(foo, inp, v)[1]
         self._assert_same_struct(res, inp)
 
-    def test_vjp_err_check_strict(self):
+    @base_and_logging_tensor
+    def test_vjp_err_check_strict(self, ctors):
         def foo(a):
             return a.detach()
 
@@ -103,8 +144,8 @@ class TestAutogradFunctional(TestCase):
             # Make a non-leaf Tensor that requires_grad but that is not connected to the input
             return a.long().float().requires_grad_().clone()
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.vjp(foo, inp, v, strict=True)
         res = autogradF.vjp(foo, inp, v, strict=False)
@@ -577,26 +618,27 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
 
-    @parametrize("vectorize", [True, False])
-    def test_jacobian_scalar(self, vectorize):
+    @FIXME_xfail_vectorized_logging_tensor
+    def test_jacobian_scalar(self, vectorize, ctors):
         def reducer(x):
             return x.sum()
-        inputs = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
         res = autogradF.jacobian(reducer, inputs, vectorize=vectorize)
         self._assert_same_struct(res, inputs)
 
         def expander(x):
             return x.unsqueeze(0).repeat(4)
-        inputs = torch.rand([])
+        inputs = ctors.rand([])
         res = autogradF.jacobian(expander, inputs, vectorize=vectorize)
         self._assert_same_struct(res, torch.zeros(4))
 
     @parametrize("vectorize", [True, False])
-    def test_jacobian_create_graph(self, vectorize):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_create_graph(self, vectorize, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
-        inputs = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
+        inputs = ctors.rand(4, 4, dtype=torch.double, requires_grad=True)
         res = autogradF.jacobian(exp_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, exp_reducer(inputs), inputs)
         self.assertIsNotNone(res.grad_fn)
@@ -607,8 +649,8 @@ class TestAutogradFunctional(TestCase):
         def add_exp_reducer(x, y):
             return (x + y).exp().sum(dim=1)
 
-        inputs = (torch.rand(4, 4, dtype=torch.double, requires_grad=True),
-                  torch.rand(4, 4, dtype=torch.double, requires_grad=True))
+        inputs = (ctors.rand(4, 4, dtype=torch.double, requires_grad=True),
+                  ctors.rand(4, 4, dtype=torch.double, requires_grad=True))
         res = autogradF.jacobian(add_exp_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
         self.assertIsNotNone(res[0].grad_fn)
@@ -1299,12 +1341,13 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(jvp, torch.mm(jac, v.unsqueeze(1)).squeeze(1))
         self.assertEqual(vjp, torch.mm(v.unsqueeze(0), jac).squeeze(0))
 
-    def test_hessian_match_vhp_hvp(self):
+    @base_and_logging_tensor
+    def test_hessian_match_vhp_hvp(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
-        inputs = torch.rand(4)
-        v = torch.rand(4)
+        inputs = ctors.rand(4)
+        v = ctors.rand(4)
 
         hes = autogradF.hessian(foo, inputs)
         hvp = autogradF.hvp(foo, inputs, v)[1]
