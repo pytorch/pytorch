@@ -1,5 +1,3 @@
-#include <torch/csrc/autograd/python_variable.h>
-
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -1064,28 +1062,28 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_real(THPVariable *self, THPVariable *real, void *unused)
+int THPVariable_set_real(PyObject* self, PyObject* real, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto& real_ = THPVariable_Unpack(real);
+  auto self_real = at::real(self_);
+  auto real_ = valueToTensor(self_real.options(), real, self_real.device());
   {
     pybind11::gil_scoped_release no_gil;
-    auto self_real = at::real(self_);
     self_real.copy_(real_);
     return 0;
   }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
+int THPVariable_set_imag(PyObject* self, PyObject* imag, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto& imag_ = THPVariable_Unpack(imag);
+  auto self_imag = at::imag(self_);
+  auto imag_ = valueToTensor(self_imag.options(), imag, self_imag.device());
   {
     pybind11::gil_scoped_release no_gil;
-    auto self_imag = at::imag(self_);
     self_imag.copy_(imag_);
     return 0;
   }
