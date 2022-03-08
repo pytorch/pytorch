@@ -1165,11 +1165,11 @@ class FullyShardedDataParallel(nn.Module):
                 for world_size = 1).
         """
         def _free_full_params_and_use_local_shard(params_to_free):
-                self._free_full_params(params_to_free)
-                # when CPU offload is enabled, _use_param_local_shard implicitly
-                # offloads the local shard to CPU by making p.data point to
-                # p._local_shard, which would reside on CPU.
-                self._use_param_local_shard()
+            self._free_full_params(params_to_free)
+            # when CPU offload is enabled, _use_param_local_shard implicitly
+            # offloads the local shard to CPU by making p.data point to
+            # p._local_shard, which would reside on CPU.
+            self._use_param_local_shard()
 
         if recurse:
             with contextlib.ExitStack() as stack:
@@ -1211,15 +1211,19 @@ class FullyShardedDataParallel(nn.Module):
                         with torch.no_grad():
                             # Note that we offload the full param padded because
                             # we have rebuilt full params.
-                            p._full_param_padded = p._full_param_padded.to(torch.device("cpu"))
-                            self._update_p_data(p, output_tensor=p._full_param_padded)
+                            p._full_param_padded = (  # type: ignore[attr-defined]
+                                p._full_param_padded.to(torch.device("cpu"))  # type: ignore[attr-defined]
+                            )
+                            self._update_p_data(
+                                p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
+                            )
 
             if rank0_only and my_rank != 0:
-               _free_full_params_and_use_local_shard(currently_local_params)
-               try:
-                   yield
-               finally:
-                   self.training_state = TrainingState_.IDLE
+                _free_full_params_and_use_local_shard(currently_local_params)
+                try:
+                    yield
+                finally:
+                    self.training_state = TrainingState_.IDLE
             else:
                 # FSDP now has the full flattened parameter. Unflatten it to get the
                 # full parameters.
@@ -1233,11 +1237,11 @@ class FullyShardedDataParallel(nn.Module):
                             for p in self.params:
                                 if p._is_sharded:
                                     with torch.no_grad():
-                                        p._full_param_padded = (
-                                            p._full_param_padded.to(self.compute_device)
+                                        p._full_param_padded = (  # type: ignore[attr-defined]
+                                            p._full_param_padded.to(self.compute_device)  # type: ignore[attr-defined]
                                         )
                                         self._update_p_data(
-                                            p, output_tensor=p._full_param_padded,
+                                            p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
                                         )
 
                         if writeback:
