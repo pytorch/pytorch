@@ -42,7 +42,7 @@ new_default = None
 
 subprocess.check_call(("git", "checkout", f"v{version_str}"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
-    from onnx import helper  # type: ignore
+    from onnx import helper  # type: ignore[import]
     for version in helper.VERSION_TABLE:
         if version[0] == version_str:
             new_default = version[2]
