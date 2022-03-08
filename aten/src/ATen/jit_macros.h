@@ -1,6 +1,5 @@
 #pragma once
 #include <ATen/cuda/CUDAConfig.h>
-#include <c10/macros/Macros.h>
 #include <string>
 
 // AT_USE_JITERATOR(), controls whether we jit some elementwise kernels
