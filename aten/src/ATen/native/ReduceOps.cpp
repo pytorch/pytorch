@@ -1439,7 +1439,7 @@ Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
   if (self.numel() == 0) {
     TORCH_CHECK(
       dim.empty() == 0,
-      "amax", ": Expected reduction dim to be specified for input.numel() == 0. ",
+      "amin", ": Expected reduction dim to be specified for input.numel() == 0. ",
         "Specify the reduction dim with the 'dim' argument.");
     zero_numel_check_dims(self, dim, "amin()");
   }
