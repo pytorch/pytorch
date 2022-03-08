@@ -6,11 +6,9 @@ during QAT.
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
-    MinMaxObserver,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
-    PerChannelMinMaxObserver,
     FixedQParamsObserver,
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,

@@ -350,7 +350,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
                     model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
 
                 model = ManualLinearDynamicQATModel()
-                model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
+                model = prepare_qat(model,mapping={torch.nn.Linear: nnqatd.Linear})
                 self.assertEqual(type(model.fc1), nnqatd.Linear)
                 self.assertEqual(type(model.fc2), nnqatd.Linear)
                 self.checkObservers(model)
