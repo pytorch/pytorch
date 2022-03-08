@@ -8,7 +8,7 @@ namespace tensorexpr {
 extern "C" {
 #endif
 
-typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
+using ParallelCallee = void (*)(int64_t, int8_t*);
 void DispatchParallel(
     int8_t* func,
     int64_t start,

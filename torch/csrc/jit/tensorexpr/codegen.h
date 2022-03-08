@@ -112,7 +112,8 @@ class TORCH_API ExtCallMemoryReuse : public IRMutator {
   static const std::unordered_map<std::string, std::string> extCallFuncNameMap_;
 
  public:
-  ExtCallMemoryReuse(const std::vector<CodeGen::BufferArg>& bufferArgs);
+  explicit ExtCallMemoryReuse(
+      const std::vector<CodeGen::BufferArg>& bufferArgs);
   ~ExtCallMemoryReuse() override = default;
   StmtPtr mutate(ExternalCallPtr v) override;
 

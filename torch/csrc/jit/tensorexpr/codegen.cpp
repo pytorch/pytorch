@@ -182,7 +182,7 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
         auto m = *it;
         if (bufSize(m) >= bufSize(buf)) {
           buf_mem_map[buf] = m;
-          buf_allocs.emplace_back(std::make_pair(buf, m));
+          buf_allocs.emplace_back(buf, m);
           allocated = true;
           mem_up_for_grabs.erase(it);
           break;

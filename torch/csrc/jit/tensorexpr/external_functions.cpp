@@ -208,6 +208,7 @@ std::vector<at::Tensor> constructTensors2(
   std::vector<at::Tensor> tensors;
   at::Tensor und;
   for (const auto i : c10::irange(bufs_out_num)) {
+    (void)i;
     tensors.emplace_back(und);
   }
   if (!qdataArg.has_value()) {
@@ -1341,13 +1342,14 @@ void nnc_aten_max_red_out(
     int64_t* buf_dims,
     int64_t* buf_strides,
     int8_t* buf_dtypes,
-    int64_t args_num,
+    int64_t,
     int64_t* extra_args) {
   size_t bufs_out_num = 1u;
   auto tensors = constructTensors2(
       bufs_in_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
 
   at::Tensor r;
+  // @lint-ignore CLANGTIDY
   const at::Tensor& x = tensors[1];
   int64_t max_dim = extra_args[0];
   bool keep_dim = extra_args[1];

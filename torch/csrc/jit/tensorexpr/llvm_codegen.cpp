@@ -2060,8 +2060,8 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
 
   // Count the size of dims array - it consists of dimension of all bufs
   // concatenated together.
-  int64_t dims_num = 0;
-  for (BufPtr b : bufs_in) {
+  size_t dims_num = 0;
+  for (const auto& b : bufs_in) {
     dims_num += b->dims().size();
   }
 
@@ -2072,6 +2072,7 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
   llvm::Value* buf_ptrs = irb_.CreateAlloca(
       Int8PtrTy_,
       llvm::ConstantInt::getSigned(IntTy_, bufs_in_size + 2 * bufs_out_size));
+  // @lint-ignore CLANGTIDY
   llvm::Value* buf_ranks = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_in_size));
   llvm::Value* buf_dims = irb_.CreateAlloca(
@@ -2080,18 +2081,19 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
   llvm::Value* buf_dtypes = irb_.CreateAlloca(
       ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_in_size));
+  // @lint-ignore CLANGTIDY
   llvm::Value* extra_args = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, args_num));
 
   int i = 0;
   int dim_idx = 0;
   int stride_idx = 0;
-  for (BufPtr b : bufs_in) {
-    llvm::Value* gep;
+  for (const auto& b : bufs_in) {
     // Store value for buf pointer
-    gep = irb_.CreateInBoundsGEP(
+    llvm::Value* gep = irb_.CreateInBoundsGEP(
         Int8PtrTy_,
         buf_ptrs,
+        // @lint-ignore CLANGTIDY
         llvm::ConstantInt::getSigned(IntTy_, bufs_out_size + i));
     b->base_handle()->accept(this);
     auto buf_ptr = this->value_;
@@ -2106,6 +2108,7 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
         gep);
 
     // Store rank of the buf
+    // @lint-ignore CLANGTIDY
     gep = irb_.CreateInBoundsGEP(
         LongTy_, buf_ranks, llvm::ConstantInt::getSigned(IntTy_, i));
     irb_.CreateStore(
@@ -2137,7 +2140,7 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
   }
 
   i = 0;
-  for (ExprPtr arg : v->args()) {
+  for (const ExprPtr& arg : v->args()) {
     auto gep = irb_.CreateInBoundsGEP(
         LongTy_, extra_args, llvm::ConstantInt::getSigned(IntTy_, i));
     arg->accept(this);
@@ -2168,15 +2171,18 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
   irb_.CreateCall(
       call_ty,
       call_fn,
+      // @lint-ignore CLANGTIDY
       {llvm::ConstantInt::getSigned(LongTy_, bufs_in_size),
        buf_ptrs,
        buf_ranks,
        buf_dims,
        buf_strides,
        buf_dtypes,
+       // @lint-ignore CLANGTIDY
        llvm::ConstantInt::getSigned(LongTy_, args_num),
        extra_args});
 
+  // @lint-ignore CLANGTIDY
   for (const auto i : c10::irange(bufs_out_size)) {
     const auto& buf_out = bufs_out[i];
     auto gep = irb_.CreateInBoundsGEP(
@@ -2196,6 +2202,7 @@ void LLVMCodeGenImpl::visit(ExternalCallWithAllocPtr v) {
     gep = irb_.CreateInBoundsGEP(
         Int8PtrTy_,
         buf_ptrs,
+        // @lint-ignore CLANGTIDY
         llvm::ConstantInt::getSigned(IntTy_, bufs_out_size + bufs_in_size + i));
     bufsExtToFreeVal_[buf_out->base_handle()] =
         irb_.CreateLoad(Int8PtrTy_, gep);
@@ -2263,7 +2270,7 @@ void LLVMCodeGenImpl::visit(FreePtr v) {
 void LLVMCodeGenImpl::visit(FreeExtPtr v) {
   value_ = llvm::ConstantInt::get(IntTy_, 0);
   const auto& bufs = v->bufs();
-  const int64_t bufs_num = bufs.size();
+  const auto bufs_num = bufs.size();
 
   llvm::Value* ptrs = irb_.CreateAlloca(
       Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));

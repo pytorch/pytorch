@@ -909,7 +909,6 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     const auto& bufs_in = v->buf_args();
     const auto bufs_in_size = bufs_in.size();
     const auto bufs_out_size = bufs_out.size();
-    const auto args_num = v->args().size();
 
     std::vector<void*> buf_ptrs(bufs_in_size + 2 * bufs_out_size);
     std::vector<int64_t> buf_ranks;
@@ -925,6 +924,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         throw malformed_input("could not find buf", v);
       }
       buf_ptrs[bufs_out_size + i] = iter->second;
+      // @lint-ignore CLANGTIDY
       buf_ranks.push_back(b->dims().size());
       buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
       for (const auto& dim_expr : b->dims()) {
@@ -960,16 +960,18 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     auto fn_ptr = func_registry.at(v->func_name());
     (*fn_ptr)(
+        // @lint-ignore CLANGTIDY
         bufs_in_size,
         buf_ptrs.data(),
         buf_ranks.data(),
         buf_dims.data(),
         buf_strides.data(),
         buf_dtypes.data(),
+        // @lint-ignore CLANGTIDY
         extra_args.size(),
         extra_args.data());
 
-    for (size_t i = 0; i < bufs_out_size; ++i) {
+    for (i = 0; i < bufs_out_size; ++i) {
       const auto& buf_out = bufs_out[i];
       buffer_mapping_[buf_out] = buf_ptrs[i];
       ext_bufs_free_ptr_[buf_out] = buf_ptrs[bufs_in_size + bufs_out_size + i];
@@ -1079,11 +1081,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   void visit(FreeExtPtr v) override {
     const auto& bufs = v->bufs();
-    const int64_t bufs_num = bufs.size();
+    const auto bufs_num = bufs.size();
     std::vector<void*> buf_ptrs;
     for (const auto& buf : bufs) {
-      int count = ext_bufs_free_ptr_.count(buf);
-      if (count == 0) {
+      if (!ext_bufs_free_ptr_.count(buf)) {
         throw std::runtime_error(
             "Free an external allocated buffer that does not have corresponding pointer for freeing: " +
             buf->base_handle()->name_hint());
