@@ -93,13 +93,9 @@ void decompose_functional(const c10::OperatorHandle& op, torch::jit::Stack* stac
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
 
 TORCH_LIBRARY_IMPL(aten, FT_VMAP_MODE_KEY, m) {
-  OP_DECOMPOSE(alpha_dropout);
   OP_DECOMPOSE(alpha_dropout_);
-  OP_DECOMPOSE(dropout);
   OP_DECOMPOSE(dropout_);
-  OP_DECOMPOSE(feature_alpha_dropout);
   OP_DECOMPOSE(feature_alpha_dropout_);
-  OP_DECOMPOSE(feature_dropout);
   OP_DECOMPOSE(feature_dropout_);
 }
 
