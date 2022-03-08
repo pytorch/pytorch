@@ -1,15 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
 #include <cmath>
 #include <tuple>
 
-#include <ATen/ATen.h>
-#include <ATen/CPUApplyUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/moments_utils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 namespace at {
 namespace native {
@@ -41,6 +47,8 @@ void LayerNormKernelImplInternal(
 
   const bool gamma_null = gamma_data == nullptr;
   const bool beta_null = beta_data == nullptr;
+  const bool mean_null = mean_data == nullptr;
+  const bool rstd_null = rstd_data == nullptr;
   at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * N;
@@ -68,10 +76,10 @@ void LayerNormKernelImplInternal(
             beta_data,
             N);
       }
-      if (mean_data) {
+      if (!mean_null) {
         mean_data[i] = mean_val;
       }
-      if (rstd_data) {
+      if (!rstd_null) {
         rstd_data[i] = rstd_val;
       }
     }

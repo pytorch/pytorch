@@ -53,7 +53,6 @@ void layer_norm_with_mean_rstd_out(
 void layer_norm_cpu_out(
     at::Tensor& out,
     const at::Tensor& input,
-    IntArrayRef normalized_shape,
     const Tensor& gamma,
     const Tensor& beta,
     double eps,
@@ -62,7 +61,7 @@ void layer_norm_cpu_out(
   if (M <= 0) {
     return;
   }
-  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, /*mean=*/ nullptr, /*rstd=*/ nullptr);
+  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, /*mean=*/nullptr, /*rstd=*/nullptr);
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(

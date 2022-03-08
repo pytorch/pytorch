@@ -7,7 +7,7 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-{%- if is_default %}
+{%- if on_pull_request %}
   pull_request:
 {%- endif %}
   push:
@@ -25,13 +25,13 @@ on:
       - '!{{ label }}/*'
   {%- endif %}
 {%- endfor %}
-{%- if not is_scheduled and not only_on_pr %}
+{%- if not is_scheduled %}
     branches:
       - master
       - main
       - release/*
 {%- endif %}
-{%- if is_scheduled and not only_on_pr %}
+{%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
 {%- endif %}
@@ -182,7 +182,7 @@ jobs:
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
-    timeout-minutes: !{{ common.timeout_minutes }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test

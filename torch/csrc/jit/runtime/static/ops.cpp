@@ -1943,8 +1943,7 @@ void layerNormImpl(ProcessedNode* p_node) {
     at::native::resize_(p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
   }
   at::Tensor& output = p_node->Output(0).toTensor();
-  at::native::layer_norm_cpu_out(
-      output, input, normalized_shape, *gamma, *beta, eps, M, N);
+  at::native::layer_norm_cpu_out(output, input, *gamma, *beta, eps, M, N);
 }
 
 } // namespace
@@ -1960,7 +1959,7 @@ void layerNormImpl(ProcessedNode* p_node) {
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::layer_norm,
     static_runtime_layer_norm,
-    [](Node* n) -> SROperator {
+    [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         // Note that these outputs were designed to be unused, so it's
         // safe to just write empty tensors to these slots.
@@ -1973,7 +1972,7 @@ REGISTER_OPERATOR_FUNCTOR(
 REGISTER_OPERATOR_FUNCTOR(
     aten::layer_norm,
     aten_layer_norm,
-    [](Node* n) -> SROperator { return layerNormImpl; });
+    [](Node*) -> SROperator { return layerNormImpl; });
 
 REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -2284,6 +2283,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
     auto& out_t = p_node->Output(0).toTensor();
     at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::fill_out(out_t, in1_s);
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto size = p_node->Input(0).toDimVector();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+      const auto device = p_node->Input(3).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(4).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::ones(size, dtype, layout, device, pin_memory);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::ones_out(size, out_t);
   };
 });
 
