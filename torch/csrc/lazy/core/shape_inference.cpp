@@ -140,11 +140,6 @@ std::vector<Shape> compute_shape_abs(const at::Tensor & self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape__amp_foreach_non_finite_check_and_unscale_(at::TensorList self, at::Tensor & found_inf, const at::Tensor & inv_scale) {
-  // TODO(whc)
-  return {};
-}
-
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
   if(reduction == at::Reduction::None) {
     return {Shape(self.scalar_type(), self.sizes().vec())};

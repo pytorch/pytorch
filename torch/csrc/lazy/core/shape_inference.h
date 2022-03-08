@@ -13,7 +13,6 @@ namespace lazy {
 
 TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d(const at::Tensor & self, at::IntArrayRef output_size);
 TORCH_API std::vector<Shape> compute_shape__adaptive_avg_pool2d_backward(const at::Tensor & grad_output, const at::Tensor & self);
-TORCH_API std::vector<Shape> compute_shape__amp_foreach_non_finite_check_and_unscale_(at::TensorList self, at::Tensor & found_inf, const at::Tensor & inv_scale);
 TORCH_API std::vector<Shape> compute_shape_abs(const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_arange_out(const at::Scalar & start, const at::Scalar & end, const at::Scalar & step, at::Tensor & out);
 TORCH_API std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction);

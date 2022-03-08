@@ -7,7 +7,7 @@ from tools.codegen.model import (BackendIndex, NativeFunction,
 from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
-from tools.codegen.api.lazy import LazyIrSchema, isValueType, valueT, tensorListValueT
+from tools.codegen.api.lazy import LazyIrSchema, isValueType, tensorListValueT
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
 def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
