@@ -421,29 +421,28 @@ def combine_state_for_ensemble(models):
 
         assert output.shape == (num_models, batch_size, out_features)
 
+    .. warning::
+        All of the modules being stacked together must be the same (except for
+        the values of their parameters/buffers). For example, they should be in the
+        same mode (training vs eval).
+
+        This API is subject to change -- we're investigating better ways to
+        create ensembles and would love your feedback how to improve this.
     """
+    if len(models) == 0:
+        raise RuntimeError('combine_state_for_ensemble: Expected at least one model, got 0.')
+    if not (all(m.training for m in models) or all(not m.training for m in models)):
+        raise RuntimeError('combine_state_for_ensemble: Expected all models to '
+                           'have the same training/eval mode.')
+    model0_typ = type(models[0])
+    if not all(type(m) == model0_typ for m in models):
+        raise RuntimeError('combine_state_for_ensemble: Expected all models to '
+                           'be of the same class.')
     funcs, params, buffers = zip(*[make_functional_with_buffers(model)
                                    for model in models])
     params = transpose_stack(params)
     buffers = transpose_stack(buffers)
     return funcs[0], params, buffers
-
-
-# class Ensemble(nn.Module):
-#     def __init__(self, models, in_dims, out_dims=0):
-#         super(Ensemble, self).__init__()
-#         func_model, params, buffers = combine_state_for_ensemble(models)
-#         self.func_model = func_model
-#         self.params = params
-#         self.buffers = buffers if len(buffers) > 0 else None
-#
-#         in_dims_start = (0, 0) if self.buffers is not None else (0,)
-#         self.in_dims = in_dims_start + in_dims
-#         self.out_dims = out_dims
-#         self._vmap_func = vmap(func_model, self.in_dims, self.out_dims)
-#
-#     def forward(self, *args, **kwargs):
-#         return self._vmap_func(self.params, self.buffers, *args, **kwargs)
 
 
 def functional_init(model_class, ensemble_shape=(), device='cpu'):
