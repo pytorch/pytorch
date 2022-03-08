@@ -8,12 +8,6 @@ load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
-config_setting(
-    name = "using_gloo",
-    # Not compatible with macOS.
-    constraint_values = ["@platforms//os:linux"],
-)
-
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
     "-DHAVE_MMAP=1",
@@ -387,7 +381,7 @@ cc_library(
 ATEN_COPTS = COMMON_COPTS + [
     "-DCAFFE2_BUILD_MAIN_LIBS",
     "-DHAVE_AVX_CPU_DEFINITION",
-    # "-DHAVE_AVX2_CPU_DEFINITION",
+    "-DHAVE_AVX2_CPU_DEFINITION",
     "-fvisibility-inlines-hidden",
     "-fno-math-errno",
     "-fno-trapping-math",
@@ -506,16 +500,13 @@ cu_library(
 # caffe2
 CAFFE2_COPTS = COMMON_COPTS + [
     "-Dcaffe2_EXPORTS",
+    "-DCAFFE2_USE_GLOO",
     "-DCAFFE2_USE_CUDNN",
     "-DCAFFE2_BUILD_MAIN_LIB",
     "-fvisibility-inlines-hidden",
     "-fno-math-errno",
     "-fno-trapping-math",
-] + select({
-    ":using_gloo": ["-DCAFFE2_USE_GLOO"],
-    "//conditions:default": [],
-})
-
+]
 
 proto_library(
     name = "caffe2_proto_source",
@@ -557,20 +548,18 @@ header_template_rule(
 
 filegroup(
     name = "caffe2_contrib_srcs",
-    srcs = ["caffe2/contrib/aten/aten_op.cc"] + select({
-        ":using_gloo": [
-            "caffe2/contrib/gloo/allgather_ops.cc",
-            "caffe2/contrib/gloo/allreduce_ops.cc",
-            "caffe2/contrib/gloo/barrier_ops.cc",
-            "caffe2/contrib/gloo/broadcast_ops.cc",
-            "caffe2/contrib/gloo/common.cc",
-            "caffe2/contrib/gloo/common_world_ops.cc",
-            "caffe2/contrib/gloo/context.cc",
-            "caffe2/contrib/gloo/reduce_scatter_ops.cc",
-            "caffe2/contrib/gloo/store_handler.cc",
-        ],
-        "//conditions:default": [],
-    }),
+    srcs = [
+        "caffe2/contrib/aten/aten_op.cc",
+        "caffe2/contrib/gloo/allgather_ops.cc",
+        "caffe2/contrib/gloo/allreduce_ops.cc",
+        "caffe2/contrib/gloo/barrier_ops.cc",
+        "caffe2/contrib/gloo/broadcast_ops.cc",
+        "caffe2/contrib/gloo/common.cc",
+        "caffe2/contrib/gloo/common_world_ops.cc",
+        "caffe2/contrib/gloo/context.cc",
+        "caffe2/contrib/gloo/reduce_scatter_ops.cc",
+        "caffe2/contrib/gloo/store_handler.cc",
+    ],
 )
 
 filegroup(
@@ -1129,7 +1118,6 @@ filegroup(
     name = "caffe2_cuda_cpp_srcs",
     srcs = [
         "caffe2/contrib/aten/aten_op_gpu.cc",
-        # Fixme
         "caffe2/contrib/gloo/allreduce_ops_gpu.cc",
         "caffe2/contrib/gloo/broadcast_ops_gpu.cc",
         "caffe2/contrib/gloo/common_world_ops_gpu.cc",
@@ -1404,7 +1392,6 @@ cc_library(
     name = "caffe2_headers",
     hdrs = glob([
         "caffe2/contrib/aten/*.h",
-        # Fixme
         "caffe2/contrib/gloo/*.h",
         "caffe2/core/*.h",
         "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
@@ -1518,12 +1505,10 @@ cc_library(
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
         "@foxi",
+        "@gloo",
         "@onnx",
         "@fmt",
-    ] + select({
-        ":using_gloo": ["@gloo"],
-        "//conditions:default": [],
-    }) + if_cuda(
+    ] + if_cuda(
         [
             ":caffe2_cuda_cpp",
             ":aten_cuda",
@@ -1561,18 +1546,16 @@ cu_library(
         "@cuda//:curand",
         "@cudnn",
         "@eigen",
+        "@gloo",
         "@tensorpipe//:tensorpipe_cuda",
-    ] + select({
-        ":using_gloo": ["@gloo"],
-        "//conditions:default": [],
-    }),
+    ],
     alwayslink = True,
 )
 
 PERF_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DHAVE_AVX_CPU_DEFINITION",
-    # "-DHAVE_AVX2_CPU_DEFINITION",
+    "-DHAVE_AVX2_CPU_DEFINITION",
     "-DENABLE_ALIAS=1",
     "-DHAVE_MALLOC_USABLE_SIZE=1",
     "-DHAVE_MMAP=1",
@@ -1728,13 +1711,11 @@ TORCH_COPTS = COMMON_COPTS + [
     "-Dtorch_EXPORTS",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
+    "-DCAFFE2_USE_GLOO",
     "-fvisibility-inlines-hidden",
     "-fno-math-errno ",
     "-fno-trapping-math",
-] + select({
-    ":using_gloo": ["-DCAFFE2_USE_GLOO"],
-    "//conditions:default": [],
-})
+]
 
 cu_library(
     name = "torch_distributed_cuda",
