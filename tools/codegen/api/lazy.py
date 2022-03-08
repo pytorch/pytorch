@@ -116,6 +116,7 @@ class LazyArgument:
         self.name = arg.name
         self.orig_type = arg.type
         self.is_generator = isGeneratorType(arg.type)
+        assert isinstance(arg.type, OptionalType), "We expect all generators are optional since currently they are"
         if self.is_generator:
             self.lazy_type = None
         else:
@@ -167,6 +168,7 @@ class LazyIrSchema:
                     curr_args = curr_args.all()
                 for arg in curr_args:
                     if isGeneratorType(arg.type):
+                        assert self.generator_arg is None, "We expect there is only one generator arg"
                         self.generator_arg = NamedCType(arg.name, arg.type)
                 keyword_args.extend([LazyArgument(arg) for arg in curr_args])
         self.keyword_args = tuple(keyword_args)
@@ -195,6 +197,11 @@ class LazyIrSchema:
 
     def filtered_args(self, positional: bool = True, keyword: bool = True,
                       values: bool = True, scalars: bool = True, generator: bool = False) -> List[LazyArgument]:
+        # This function maintains the sorted order of arguments but provides different filtered views.
+        # Some parts of the code care about kwargs vs args (TS lowerings),
+        # other parts care about whether they need to wrap the arg in a lazy value or leave it alone.
+        # Generators are special cased, as they are needed for fallback/shape-inference but not supported
+        # in TS lowerings and therefore also omitted from lazy IR.
         args: List[LazyArgument] = []
         if positional:
             args.extend(self.positional_args)

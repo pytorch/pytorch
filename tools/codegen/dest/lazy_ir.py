@@ -66,8 +66,8 @@ def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
     or_has_generator = ""
     if schema.generator_arg:
-        # TODO(whc) generators are? always optional and there is never more than one
-        or_has_generator = " || (generator.has_value() && generator->defined())"
+        # generators are always optional and there is never more than one, at least currently
+        or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
         if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
             return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
@@ -245,7 +245,6 @@ class GenLazyNativeFuncDefinition:
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
-            # TODO: INTEGRATION POINT HERE:
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
         {meta_out}"""
         else:
