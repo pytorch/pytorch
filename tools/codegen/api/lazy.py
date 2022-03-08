@@ -122,9 +122,8 @@ class LazyIrSchema:
     # The name of the operator this function schema describes.
     name: 'OperatorName'
 
-    positional_arg_types: Tuple[NamedCType, ...]
     positional_args: Tuple[LazyArgument, ...]
-    keyword_arg_types: Tuple[NamedCType, ...]
+    keyword_args: Tuple[LazyArgument, ...]
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple['Return', ...]
@@ -133,26 +132,18 @@ class LazyIrSchema:
 
     def __init__(self, func: FunctionSchema):
 
-        positional_arg_types = []
         positional_args = []
         for arg_field in ["pre_self_positional",
                           "self_arg",
                           "post_self_positional"]:
             if arg_field == "self_arg" and func.arguments.self_arg is not None:
                 arg = getattr(func.arguments, "self_arg").argument
-                positional_arg_types.append(NamedCType(arg.name, process_ir_type(arg.type)))
                 positional_args.append(LazyArgument(arg))
             elif getattr(func.arguments, arg_field) is not None:
-                positional_arg_types.extend([
-                    NamedCType(
-                        arg.name,
-                        process_ir_type(arg.type)) for arg in getattr(func.arguments, arg_field)])
                 positional_args.extend([
                     LazyArgument(arg) for arg in getattr(func.arguments, arg_field)])
-        self.positional_arg_types = tuple(positional_arg_types)
         self.positional_args = tuple(positional_args)
 
-        keyword_arg_types = []
         keyword_args = []
         for arg_field in ["pre_tensor_options_kwarg_only",
                           "tensor_options",
@@ -162,9 +153,7 @@ class LazyIrSchema:
             if curr_args is not None:
                 if isinstance(curr_args, TensorOptionsArguments):
                     curr_args = curr_args.all()
-                keyword_arg_types.extend([NamedCType(arg.name, process_ir_type(arg.type)) for arg in curr_args])
                 keyword_args.extend([LazyArgument(arg) for arg in curr_args])
-        self.keyword_arg_types = tuple(keyword_arg_types)
         self.keyword_args = tuple(keyword_args)
         self.name = func.name
         self.returns = func.returns
@@ -190,24 +179,6 @@ class LazyIrSchema:
     def base_name(self) -> str:
         return f"{self.name.name.base}"
 
-    def filtered_types(self, positional: bool = True, keyword: bool = True,
-                       values: bool = True, scalars: bool = True) -> List[NamedCType]:
-        types: List[NamedCType] = []
-        if positional:
-            types.extend(self.positional_arg_types)
-        if keyword:
-            types.extend(self.keyword_arg_types)
-
-        if values and scalars:
-            return types
-
-        if values:
-            return [t for t in types if isValueType(t.type)]
-        elif scalars:
-            return [t for t in types if not isValueType(t.type)]
-
-        return []
-
     def filtered_args(self, positional: bool = True, keyword: bool = True,
                       values: bool = True, scalars: bool = True) -> List[LazyArgument]:
         args: List[LazyArgument] = []
@@ -227,17 +198,17 @@ class LazyIrSchema:
         return []
 
     @property
-    def positional_values(self) -> List[NamedCType]:
-        return self.filtered_types(positional=True, keyword=False, values=True, scalars=False)
+    def positional_values(self) -> List[LazyArgument]:
+        return self.filtered_args(positional=True, keyword=False, values=True, scalars=False)
 
     @property
-    def positional_scalars(self) -> List[NamedCType]:
-        return self.filtered_types(positional=True, keyword=False, values=False, scalars=True)
+    def positional_scalars(self) -> List[LazyArgument]:
+        return self.filtered_args(positional=True, keyword=False, values=False, scalars=True)
 
     @property
-    def keyword_values(self) -> List[NamedCType]:
-        return self.filtered_types(positional=False, keyword=True, values=True, scalars=False)
+    def keyword_values(self) -> List[LazyArgument]:
+        return self.filtered_args(positional=False, keyword=True, values=True, scalars=False)
 
     @property
-    def keyword_scalars(self) -> List[NamedCType]:
-        return self.filtered_types(positional=False, keyword=True, values=False, scalars=True)
+    def keyword_scalars(self) -> List[LazyArgument]:
+        return self.filtered_args(positional=False, keyword=True, values=False, scalars=True)
