@@ -100,15 +100,20 @@ class TestCommunication(FSDPTest):
                         loss.backward()
                     num_all_gather = mock_all_gather.call_count
                     num_reduce_scatter = mock_reduce_scatter.call_count
-                    assert num_all_gather == expected_num_all_gather_no_sync, \
-                        f"Expected {expected_num_all_gather_no_sync} " \
-                        f"all-gathers but saw {num_all_gather} all-gathers " \
+                    self.assertEqual(
+                        num_all_gather,
+                        expected_num_all_gather_no_sync,
+                        f"Expected {expected_num_all_gather_no_sync} "
+                        f"all-gathers but saw {num_all_gather} all-gathers "
                         f"when using `no_sync()`"
-                    assert num_reduce_scatter == \
-                        expected_num_reduce_scatter_no_sync, \
-                        f"Expected {expected_num_reduce_scatter_no_sync} " \
-                        f"reduce-scatters but saw {num_reduce_scatter} " \
+                    )
+                    self.assertEqual(
+                        num_reduce_scatter,
+                        expected_num_reduce_scatter_no_sync,
+                        f"Expected {expected_num_reduce_scatter_no_sync} "
+                        f"reduce-scatters but saw {num_reduce_scatter} "
                         "reduce-scatters when using `no_sync()`"
+                    )
 
             # Check the normal communication cost (when not using `no_sync()`)
             for _ in range(num_sync_iters):
@@ -118,15 +123,20 @@ class TestCommunication(FSDPTest):
                 loss.backward()
                 num_all_gather = mock_all_gather.call_count
                 num_reduce_scatter = mock_reduce_scatter.call_count
-                assert num_all_gather == expected_num_all_gather_sync, \
-                    f"Expected {expected_num_all_gather_sync} all-gathers " \
-                    f"but saw {num_all_gather} all-gathers when not using " \
+                self.assertEqual(
+                    num_all_gather,
+                    expected_num_all_gather_sync,
+                    f"Expected {expected_num_all_gather_sync} all-gathers "
+                    f"but saw {num_all_gather} all-gathers when not using "
                     "`no_sync()`"
-                assert num_reduce_scatter == \
-                    expected_num_reduce_scatter_sync, \
-                    f"Expected {expected_num_reduce_scatter_sync} reduce-" \
-                    f"scatters but saw {num_reduce_scatter} reduce-scatters " \
+                )
+                self.assertEqual(
+                    num_reduce_scatter,
+                    expected_num_reduce_scatter_sync,
+                    f"Expected {expected_num_reduce_scatter_sync} reduce-"
+                    f"scatters but saw {num_reduce_scatter} reduce-scatters "
                     "when not using `no_sync()`"
+                )
 
 
 instantiate_parametrized_tests(TestCommunication)
