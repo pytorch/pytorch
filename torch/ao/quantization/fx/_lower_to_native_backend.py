@@ -1,4 +1,3 @@
-import itertools
 import torch
 from torch.fx import map_arg
 from torch.fx.graph import Graph
@@ -18,13 +17,14 @@ from .utils import (
     collect_producer_nodes,
     get_linear_prepack_op_for_dtype,
     get_new_attr_name_with_prefix,
+    get_qconv_prepack_op,
     graph_module_from_producer_nodes,
 )
 from ..utils import _parent_name
 from ..qconfig import QConfigAny
 from ..quantization_mappings import get_quantized_operator
 from .utils import create_node_from_old_node_preserve_meta
-from typing import Dict, Tuple, Type, List, Callable, Any, Union
+from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set
 from torch.fx import Node
 import operator
 
@@ -221,22 +221,34 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
 #   1) The inner reference module class
 #   2) The replacement quantized module class for lowering
 LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
-    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU)
+    nni.LinearReLU: (nnqr.Linear, nniq.LinearReLU),
+    nni.ConvReLU1d: (nnqr.Conv1d, nniq.ConvReLU1d),
+    nni.ConvReLU2d: (nnqr.Conv2d, nniq.ConvReLU2d),
+    nni.ConvReLU3d: (nnqr.Conv3d, nniq.ConvReLU3d),
 }
 
 # Mapping from a functional to lower to a 2-tuple of
 #   1) The quantized version of the op
 #   2) The quantized version of the op fused with relu, if it exists, else None
-LOWER_FUNCTIONAL_MAP = {
+LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Callable]] = {
     F.linear: (torch.ops.quantized.linear, torch.ops.quantized.linear_relu),
+    F.conv1d: (torch.ops.quantized.conv1d, torch.ops.quantized.conv1d_relu),
+    F.conv2d: (torch.ops.quantized.conv2d, torch.ops.quantized.conv2d_relu),
+    F.conv3d: (torch.ops.quantized.conv3d, torch.ops.quantized.conv3d_relu),
 }
 
-WEIGHT_PREPACK_OPS = {
+WEIGHT_PREPACK_OPS: Set[Callable] = {
     torch._ops.ops.quantized.linear_prepack,
     torch._ops.ops.quantized.linear_prepack_fp16,
     torch._ops.ops.quantized.conv1d_prepack,
     torch._ops.ops.quantized.conv2d_prepack,
     torch._ops.ops.quantized.conv3d_prepack,
+}
+
+CONV_FUNCTIONAL_OPS: Set[Callable] = {
+    F.conv1d,
+    F.conv2d,
+    F.conv3d,
 }
 
 def fold_weight(
@@ -368,77 +380,74 @@ def _lower_weighted_ref_functional(
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
-    for ref_func, (q_func, q_relu_func) in LOWER_FUNCTIONAL_MAP.items():
-        configurations = itertools.product(
-            (False, True),  # is_relu: whether ref_func is wrapped in a relu op
-            (False, True),  # has_bias: whether bias is passed as an extra argument to ref_func
-        )
-        for is_relu, has_bias in configurations:
-            if is_relu and q_relu_func is None:
-                continue
+    modules = dict(model.named_modules(remove_duplicate=False))
+    nodes = list(model.graph.nodes)
+    for n in model.graph.nodes:
 
-            # Set up match pattern: (dequantize - [relu_op - ] func_op - quantize)
-            # Func args: (dequantized inputs, dequantized weights[, bias])
-            # Quantize args: (func, scale, zp, dtype)
-            func_pattern: Tuple[Any, ...] = ()
-            if has_bias:
-                func_pattern = (ref_func, "dequantize", "dequantize", MatchAllNode)
-            else:
-                func_pattern = (ref_func, "dequantize", "dequantize")
-            if is_relu:
-                func_pattern = (F.relu, func_pattern)
-            pattern = (torch.quantize_per_tensor, func_pattern, MatchAllNode, MatchAllNode, MatchAllNode)
+        # Step 0: Find nodes that match this pattern (dequantize - functional op - quantize)
+        # We search for the pattern backwards, starting with the quantize node
+        # Quantize node args: (func, scale, zp, dtype)
+        if n.op != "call_function" or n.target != torch.quantize_per_tensor:
+            continue
+        q_node = n
+        (func_node, output_scale_node, output_zp_node, _) = q_node.args
+        # Handle cases where the functional op is wrapped in a ReLU
+        if func_node.target == F.relu:
+            relu_node = func_node
+            func_node = relu_node.args[0]
+        else:
+            relu_node = None
+        if should_skip_lowering(func_node, qconfig_map):
+            continue
+        # Linear args: (dequantized inputs, dequantized weights[, bias])
+        # Conv args: (dequantized inputs, dequantized weights[, bias, stride, padding, dilation, groups])
+        if func_node.op != "call_function" or func_node.target not in LOWER_FUNCTIONAL_MAP:
+            continue
+        (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
+        if input_dq_node.target != "dequantize" or weight_dq_node.target != "dequantize":
+            continue
+        quantized_weight = weight_dq_node.args[0]
+        if quantized_weight.op != "call_function" or\
+                quantized_weight.target not in (torch.quantize_per_tensor, torch.quantize_per_channel):
+            continue
 
-            # Iterate through nodes in the graph to find a match
-            # If there is a match, replace the above pattern with the corresponding quantized op
-            modules = dict(model.named_modules(remove_duplicate=False))
-            nodes = list(model.graph.nodes)
-            for n in model.graph.nodes:
-                if not is_match(modules, n, pattern):
-                    continue
-                q_node = n
-                (func_node, output_scale_node, output_zp_node, dtype) = q_node.args
-                if is_relu:
-                    relu_node = func_node
-                    func_node = relu_node.args[0]
-                else:
-                    relu_node = None
-                input_dq_node = func_node.args[0]
-                weight_dq_node = func_node.args[1]
+        # Step 1: Replace quantized weights with packed weights, which will be folded later
+        # Use the right prepack op and prepare the corresponding args
+        # Linear prepack args: (quantized weights[, bias])
+        # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
+        prepack_args = [quantized_weight] + remaining_func_args
+        if func_node.target == F.linear:
+            weight_dtype = quantized_weight.args[-1]
+            prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+        elif func_node.target in CONV_FUNCTIONAL_OPS:
+            prepack_op = get_qconv_prepack_op(func_node.target)
+            # For conv1d, the stride, padding, and dilation args may be ints,
+            # in which case we need to convert them to tuples
+            if func_node.target == F.conv1d:
+                for i in [2, 3, 4]:
+                    if len(prepack_args) > i and isinstance(prepack_args[i], int):
+                        prepack_args[i] = (prepack_args[i],)
+        else:
+            raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
+        with model.graph.inserting_before(output_scale_node):
+            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
 
-                if should_skip_lowering(func_node, qconfig_map):
-                    continue
+        # Step 2: Replace reference pattern with the corresponding quantized op
+        (q_func, q_relu_func) = LOWER_FUNCTIONAL_MAP[func_node.target]
+        func_node.target = q_relu_func if relu_node is not None else q_func
+        func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+        q_node.replace_all_uses_with(func_node)
+        # Move func_node after output_zp_node in the graph
+        output_zp_node.append(func_node)
 
-                # Step 1: Replace quantized weights with packed weights, which will be folded later
-                quantized_weight = weight_dq_node.args[0]
-                weight_dtype = quantized_weight.args[-1]
-                if has_bias:
-                    bias = func_node.args[2]
-                else:
-                    bias = func_node.kwargs.get("bias", None)
-                prepack_args = (quantized_weight, bias)
-                if ref_func == F.linear:
-                    prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
-                else:
-                    raise ValueError("Lowering for functional currently only supports linear op")
-                insert_prepack_after = bias if has_bias else quantized_weight
-                with model.graph.inserting_after(insert_prepack_after):
-                    packed_weight = model.graph.create_node("call_function", prepack_op, prepack_args, {})
-
-                # Step 2: Replace reference pattern with the corresponding quantized op
-                func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
-                func_node.target = q_relu_func if is_relu else q_func
-                q_node.replace_all_uses_with(func_node)
-                output_zp_node.append(func_node)
-
-                # Clean up: Remove dequantize and quantize nodes and the old func node
-                for dqn in [input_dq_node, weight_dq_node]:
-                    dqn_input = dqn.args[0]
-                    dqn.replace_all_uses_with(dqn_input)
-                    model.graph.erase_node(dqn)
-                model.graph.erase_node(q_node)
-                if is_relu:
-                    model.graph.erase_node(relu_node)
+        # Clean up: Remove dequantize and quantize nodes and the old func node
+        for dqn in [input_dq_node, weight_dq_node]:
+            dqn_input = dqn.args[0]
+            dqn.replace_all_uses_with(dqn_input)
+            model.graph.erase_node(dqn)
+        model.graph.erase_node(q_node)
+        if relu_node is not None:
+            model.graph.erase_node(relu_node)
     return model
 
 def _lower_quantized_binary_op(
