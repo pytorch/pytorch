@@ -151,10 +151,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
   return (
     !THPVariable_CheckTypeExact(tp) &&
     // TODO: test if Python key is disabled
-    PyObject_FastGetAttrString(obj, "__torch_dispatch__").ptr() != nullptr
+    attr.ptr() != nullptr &&
+    attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -414,7 +416,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
   // key, which will immediately segfault because the data pointer is null.  By
   // forcing users to define __torch_dispatch__ we ensure this does not happen
-  TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
+  // TODO: This check is not complete; because the user can disable torch
+  // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
+  // to delete this function entirely
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_dispatch_impl()
+,
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
@@ -1677,6 +1684,7 @@ void concrete_dispatch_fn(
   // Parse the name into namespace and name (no overload_name)
   // TODO: put this into the library
   const auto& qualified_name = op.operator_name().name;
+  const auto& overload_name = schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
   // Make me some null terminated strings
@@ -1697,6 +1705,12 @@ void concrete_dispatch_fn(
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+  py::handle torch_api_function_overload;
+  if (overload_name == "") {
+    torch_api_function_overload = torch_api_function.attr("default");
+  } else {
+    torch_api_function_overload = torch_api_function.attr(overload_name.c_str());
+  }
   std::string module_name_str = "torch.ops." + ns_str;
 
   // About all the pointers:
@@ -1788,7 +1802,7 @@ void concrete_dispatch_fn(
     args.ptr(),
     kwargs.ptr(),
     func_name,
-    torch_api_function.ptr(),
+    torch_api_function_overload.ptr(),
     module_name_str.c_str(),
     "__torch_dispatch__"
   ));
@@ -1828,7 +1842,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
     args.ptr(),
     kwargs.ptr(),
     "detach",
-    py::module::import("torch").attr("ops").attr("aten").attr("detach").ptr(),
+    py::module::import("torch").attr("ops").attr("aten").attr("detach").attr("default").ptr(),
     "torch.ops.aten",
     "__torch_dispatch__"
   ));
