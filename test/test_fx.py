@@ -1111,8 +1111,8 @@ class TestFX(JitTestCase):
 
         for node in gm.graph.nodes:
             if node.op == 'call_function':
-                assert isinstance(node.target, torch.ops.OpOverload)
-                assert node.target.__name__ == 'aten.add.Tensor'
+                assert isinstance(node.target, torch._ops.OpOverload)
+                assert node.target.__name__ == 'add.Tensor'
 
     def test_pickle_torch_custom_ops(self):
         class M(torch.nn.Module):
