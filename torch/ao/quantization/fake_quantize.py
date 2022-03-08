@@ -332,7 +332,7 @@ Default fake_quant for activations.
 default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 """
-Default fake_quant for weights. 
+Default fake_quant for weights.
 Observer is memoryless since averaging_constant is 1.
 """
 
@@ -353,7 +353,7 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                reduce_range=False,
                                                                ch_axis=0)
 """
-Default fake_quant for per-channel weights. 
+Default fake_quant for per-channel weights.
 Observer is memoryless since averaging_constant is 1.
 """
 default_embedding_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
@@ -364,7 +364,7 @@ default_embedding_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerC
                                                       ch_axis=0,
                                                       averaging_constant=1)
 """
-Default fake_quant for embeddings. 
+Default fake_quant for embeddings.
 Observer is memoryless since averaging_constant is 1.
 """
 
