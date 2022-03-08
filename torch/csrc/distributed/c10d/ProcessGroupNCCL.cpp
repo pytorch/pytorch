@@ -1600,6 +1600,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   return work;
 }
 
+// Experimental features, don't merge back to master.
 std::vector<at::Tensor> extractCudaTensors(const std::vector<at::Tensor>& inputs) {
   std::vector<at::Tensor> cudaInputs;
   cudaInputs.reserve(inputs.size());
