@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """Updates the default value of opset_version.
 
@@ -42,7 +42,7 @@ new_default = None
 
 subprocess.check_call(("git", "checkout", f"v{version_str}"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
-    from onnx import helper
+    from onnx import helper  # type: ignore
     for version in helper.VERSION_TABLE:
         if version[0] == version_str:
             new_default = version[2]
@@ -56,7 +56,7 @@ finally:
 os.chdir(pytorch_dir)
 
 
-def read_sub_write(path, prefix_pat):
+def read_sub_write(path: str, prefix_pat: str) -> None:
     with open(path, encoding="utf-8") as f:
         content_str = f.read()
     content_str = re.sub(prefix_pat, r"\g<1>{}".format(new_default), content_str)
