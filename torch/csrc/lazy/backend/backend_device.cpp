@@ -56,7 +56,7 @@ c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
 
 c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   if (auto lt = TryGetLtcTensor(tensor)) {
-    return lt.GetDevice();
+    return lt->GetDevice();
   }
   return c10::nullopt;
 }
