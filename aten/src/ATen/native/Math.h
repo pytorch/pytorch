@@ -12,7 +12,7 @@
 #include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/jit_macros.h>
+#include <ATen/jiterator_macros.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -82,7 +82,7 @@ namespace {
  * domain of the approximation.
  */
 jiterator_code_stringify(
-    CODE(
+    jiterator_code(
         template <typename T>
         T chbevl(T x, const T array[], const int len) {
           T b0, b1, b2;

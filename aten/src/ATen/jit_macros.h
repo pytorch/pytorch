@@ -12,24 +12,3 @@
     #define AT_USE_JITERATOR() false
     #define jiterator_stringify(...) static_assert(false, "Jiterator is not supported on ROCm");
 #endif // USE_ROCM
-
-#if !AT_ROCM_ENABLED() && !defined(__CUDACC__)
-    // CPU only case
-    // Only needs the function
-    #define CODE(...) __VA_ARGS__
-    #define jiterator_code_stringify(code, str_name) code
-#elif AT_ROCM_ENABLED()
-    // ROCm case
-    // Only needs the function with __host__ __device__ attribute
-    #define CODE(...) __VA_ARGS__
-    #define jiterator_code_stringify(code, str_name) C10_HOST_DEVICE code
-#else
-    // CUDA case
-    // CODE and stringify are helper macro to deal with `,` in code which preprocessor
-    // splits into multiple arguments.
-    #define CODE(...) __VA_ARGS__
-    #define stringify(...) #__VA_ARGS__
-    #define jiterator_code_stringify(code, str_name) \
-        code \
-        const std::string str_name = std::string(stringify(code));
-#endif
