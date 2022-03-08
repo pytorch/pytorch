@@ -186,7 +186,13 @@ Node* transformToONNXConcatNode(
   for (auto* input : lc_node->inputs()) {
     auto new_input =
         need_new_input ? g->addInput()->copyMetadata(input) : input;
-
+    // Skip unsqueeze for input node if input dim is already 1 or more
+    if (auto type = new_input->type()->cast<TensorType>()) {
+      if (type->dim() && type->dim() > 0) {
+        unsqueezed.emplace_back(new_input);
+        continue;
+      }
+    }
     Node* unsqueezed_node =
         createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
     unsqueezed_node->copyMetadata(lc_node);
