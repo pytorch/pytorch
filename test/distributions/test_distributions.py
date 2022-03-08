@@ -2544,14 +2544,17 @@ class TestDistributions(TestCase):
         self._check_sampler_sampler(InverseWishart(df, cov),
                                     scipy.stats.invwishart(df.item(), cov.detach().numpy()),
                                     'InverseWishart(df={}, covariance_matrix={})'.format(df, cov),
+                                    num_samples=ndim*ndim*10000,
                                     multivariate=True)
         self._check_sampler_sampler(InverseWishart(df, precision_matrix=prec),
                                     scipy.stats.invwishart(df.item(), cov.detach().numpy()),
                                     'InverseWishart(df={}, precision_matrix={})'.format(df, prec),
+                                    num_samples=ndim*ndim*10000,
                                     multivariate=True)
         self._check_sampler_sampler(InverseWishart(df, scale_tril=scale_tril),
                                     scipy.stats.invwishart(df.item(), cov.detach().numpy()),
                                     'InverseWishart(df={}, scale_tril={})'.format(df, scale_tril),
+                                    num_samples=ndim*ndim*10000,
                                     multivariate=True)
 
     def test_inverse_wishart_properties(self):
