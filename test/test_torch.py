@@ -7109,6 +7109,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_setting_real_imag_to_a_number(self):
+        x = torch.randn(4, dtype=torch.cfloat)
+        x.real = 0
+        x.imag = 0
+        zeros = torch.zeros(4)
+        self.assertEqual(x.real, zeros)
+        self.assertEqual(x.imag, zeros)
+
     def test_batch_norm_cpu_inference(self):
         # input nchw in (2,1,1,1), (2,2,2,2)
         inputs = [
