@@ -12,7 +12,9 @@
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/random.h"
+#include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
+#include "lazy_tensor_core/csrc/ops/to_copy.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
@@ -199,6 +201,105 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   }
   return dst;
 }
+
+at::Tensor LazyNativeFunctions::_to_copy(const at::Tensor & self,
+                                         c10::optional<at::ScalarType> dtype,
+                                         c10::optional<at::Layout> layout,
+                                         c10::optional<at::Device> device,
+                                         c10::optional<bool> pin_memory,
+                                         bool non_blocking,
+                                         c10::optional<at::MemoryFormat> memory_format) {
+
+    if (force_eager_fallback(at::aten::_to_copy)) {
+      TORCH_INTERNAL_ASSERT(false,
+        "Fallback is currently impossible for _to_copy since the fallback helper itself reinvokes _to_copy");
+    }
+
+    auto options = self.options();
+    if (dtype) {
+      // I put each of these setters in a conditional instead of doing `self.options().dtype(dtype).layout(layout)...
+      // because calling .dtype(nullopt) on an options() that already has dtype appears to wipe it
+      options = options.dtype(dtype);
+    }
+    if (layout) {
+      options = options.layout(layout);
+    }
+    if (memory_format) {
+      options = options.memory_format(memory_format);
+    }
+    if (pin_memory) {
+      // TODO(whc) can we honor 'pin_memory' in some/all cases?
+      options = options.pinned_memory(pin_memory);
+      TORCH_WARN_ONCE("Pinned memory used in lazy _to_copy, check if the behavior is as intended");
+    }
+
+    TORCH_LAZY_FN_COUNTER("lazy::");
+    auto lazy_self = torch::lazy::TryGetLtcTensor(self);
+    if (!lazy_self && device && device->type() == c10::kLazy) {
+      // Case 1: eager->lazy (we create a new lazy tensor)
+
+      auto eager_tensor = self.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
+      lazy_self = torch::lazy::GetOrCreateLtcTensor(eager_tensor,
+                                                    torch::lazy::atenDeviceToBackendDevice(*device));
+      return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
+    } else if(device && device->type() != c10::kLazy) {
+      // Case 2: lazy->eager (forces a graph break since we are materializing a tensor)
+
+      TORCH_INTERNAL_ASSERT(lazy_self);
+      auto eager_tensor = lazy_self->ToTensor(/*detached=*/true);
+      options = options.device(device);
+      auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
+      return moved_eager_tensor;
+    } else if (device &&
+               device->type() == c10::kLazy &&
+               device->has_index() &&
+               device->index() != self.device().index()) {
+      // Case 3: lazy:0 -> lazy:1
+
+      // TODO(whc) what do we actually want to do here?
+      //   option 1: materialize, move eager tensor, create new lazy tensor
+      //     - this should be our default, as it is what would happen before we implemented _to_copy
+      //     - actually combines case 1 + case 2
+      //   option 2: support multiple devices inside one lazy/TS executor (case 4)
+      //     - but: we may have other assumptions that there is just one device per executor? so don't take this lightly
+
+      TORCH_INTERNAL_ASSERT(lazy_self);
+      auto eager_tensor = lazy_self->ToTensor(/*detached=*/true);
+      // we move the eager tensor to the 'eager' equivalent of our lazy device
+      // e.g. if our device is lazy:1, the backend maps that to cuda:1, which is what we use
+      auto eager_device = c10::Device(torch::lazy::getBackend()->EagerFallbackDeviceType(), device->index());
+      options = options.device(eager_device);
+      auto moved_eager_tensor = eager_tensor.to(options, /*non_blocking=*/false, /*copy=*/true);
+      lazy_self = torch::lazy::GetOrCreateLtcTensor(moved_eager_tensor,
+                                                    torch::lazy::atenDeviceToBackendDevice(eager_device));
+      return torch::lazy::CreateAtenFromLtcTensor(lazy_self);
+
+    } else {
+      // Case 4: lazy->lazy (special case: keep the _to_copy INSIDE the lazy graph)
+
+      // Note: captured _to_copy will be executed with real eager tensors, not lazy tensors.
+      // We DO NOT want to burn 'lazy:0' as the device into this captured IR, or we will try to
+      // convert an eager tensor back to a lazy one inside the torchscript executor
+      // lazy:0 -> lazy:1 is handled in case3, so we can safely drop the device argument
+      device = c10::nullopt;
+
+      auto shapes = torch::lazy::compute_shape__to_copy(self, dtype, layout, device, pin_memory, non_blocking, memory_format);
+      TORCH_INTERNAL_ASSERT(shapes.size() == 1);
+      auto node = torch::lazy::MakeNode<ir::ops::ToCopy>(lazy_self->GetIrValue(),
+                            dtype,
+                            layout,
+                            device,
+                            pin_memory,
+                            non_blocking,
+                            memory_format,
+                            std::move(shapes));
+
+      auto result = torch::lazy::CreateAtenFromLtcTensor(
+              torch::lazy::LazyTensor::Create(std::move(node), lazy_self->GetDevice()));
+      return result;
+    }
+};
+
 
 at::Tensor LazyNativeFunctions::empty(
     at::IntArrayRef size, c10::optional<at::ScalarType> dtype,
@@ -439,8 +540,25 @@ at::Tensor LazyNativeFunctions::slice(const at::Tensor& self, int64_t dim,
 
 at::Tensor LazyNativeFunctions::stack(at::TensorList tensors, int64_t dim) {
   TORCH_LAZY_FN_COUNTER("lazy::");
+  auto common_device = torch::lazy::GetBackendDevice(tensors);
+  TORCH_INTERNAL_ASSERT(common_device);
+
+  // TODO(whc) - highly suboptimal old code to support calling the canonicalization method,
+  // could clean this up but prefer to actually delete canonicalizatoin,
+  // but need to rewrite shape inference at the same time since it asserts dim <=0
+  auto lazy_tensors = torch::lazy::GetLtcTensors(tensors);
+  CHECK_GT(tensors.size(), 0);
+  std::vector<torch::lazy::Value> values;
+  for (auto tensor : lazy_tensors) {
+    values.push_back(tensor->GetIrValue());
+  }
+  int64_t canonical_dim = torch::lazy::GetCanonicalDimensionIndex(
+      dim, lazy_tensors.front()->shape().Get().dim() + 1);
+
   return torch::lazy::CreateAtenFromLtcTensor(
-      lazy_tensor_aten_ops::stack(torch::lazy::GetLtcTensors(tensors), dim));
+    torch::lazy::LazyTensor::Create(
+      torch::lazy::MakeNode<ir::ops::Stack>(torch::lazy::GetTensorList(tensors), canonical_dim),
+      *common_device));
 }
 
 at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self) {

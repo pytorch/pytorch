@@ -54,6 +54,7 @@ TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, bool unb
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
 TORCH_API std::vector<Shape> compute_shape_sum(const at::Tensor & self, c10::optional<at::ScalarType> dtype);
+TORCH_API std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<at::MemoryFormat> memory_format);
 TORCH_API std::vector<Shape> compute_shape_trace(const at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_zero_(at::Tensor & self);
 

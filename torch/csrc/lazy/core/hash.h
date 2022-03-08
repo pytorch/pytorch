@@ -73,6 +73,22 @@ static inline hash_t Hash(const c10::ScalarType& value) {
   return DataHash(&value, sizeof(value));
 }
 
+static inline hash_t Hash(const c10::MemoryFormat& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::DeviceType& value) {
+  return DataHash(&value, sizeof(value));
+}
+
+static inline hash_t Hash(const c10::Device& value) {
+  return HashCombine(Hash(value.type()), Hash(value.index()));
+}
+
+static inline hash_t Hash(const c10::Layout& value) {
+  return DataHash(&value, sizeof(value));
+}
+
 static inline hash_t Hash(const c10::Scalar& value) {
   switch(value.type()){
   case c10::ScalarType::ComplexDouble:
