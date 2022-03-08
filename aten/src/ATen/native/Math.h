@@ -144,9 +144,6 @@ jiterator_code_stringify(
           return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / sqrt(x);
         }),
     i0e_string); // i0e_string
-
-  // Upcast bfloat16 input to float for numerical accuracy purposes
-  C10_HOST_DEVICE static inline c10::BFloat16 calc_i0e(c10::BFloat16 a) { return calc_i0e(static_cast<float>(a)); }
 }
 
 #define CENTRAL_RANGE 0.7
