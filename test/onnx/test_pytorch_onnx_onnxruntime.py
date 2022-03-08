@@ -5620,16 +5620,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
-    def test_zeros_with_tensorinput(self):
-        class Zero_(torch.nn.Module):
-            def forward(self, x):
-                return x, torch.zeros(x, 1)
-
-        x = torch.tensor([2])
-        self.run_test(Zero_(), (x, ))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_ones(self):
         class OnesModel(torch.nn.Module):
             def forward(self, x):
@@ -5649,6 +5639,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([2])
         self.run_test(Zero_(), (x, ))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()
+    def test_ones_with_tensorinput(self):
+        class Ones_(torch.nn.Module):
+            def forward(self, x):
+                return x, torch.ones(x, 1)
+
+        x = torch.tensor([2])
+        self.run_test(Ones_(), (x, ))
+
     @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tolist(self):
@@ -5662,16 +5662,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3)
         self.run_test(List(), (x,))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
-    def test_ones_with_tensorinput(self):
-        class Ones_(torch.nn.Module):
-            def forward(self, x):
-                return x, torch.ones(x, 1)
-
-        x = torch.tensor([2])
-        self.run_test(Ones_(), (x, ))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
