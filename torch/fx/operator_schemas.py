@@ -7,7 +7,6 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast, TYPE_CHECKING
 from torch._jit_internal import boolean_dispatched
 from ._compatibility import compatibility
-from torch._ops import OpOverloadPacket, OpOverload
 
 if TYPE_CHECKING:
     from .node import Argument
