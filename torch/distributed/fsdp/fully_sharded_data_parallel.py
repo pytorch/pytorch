@@ -361,14 +361,30 @@ class FullyShardedDataParallel(nn.Module):
         assert isinstance(self._fsdp_wrapped_module, FlattenParamsWrapper)
         return self._fsdp_wrapped_module
 
-    def fsdp_modules(self) -> List["FullyShardedDataParallel"]:
+    def check_is_root(self) -> bool:
+        self._lazy_init()
+        assert self._is_root is not None
+        return self._is_root
+
+    @staticmethod
+    def fsdp_modules(
+        module: nn.Module, root_only: bool = False
+    ) -> List["FullyShardedDataParallel"]:
         """
         Helper function to return all nested FSDP instances, including self.
+
+        Args:
+            module: the root module. This module does not have to be a FSDP module.
+            root_only: whether to return only root FSDP modules (default: False).
+
+        Returns:
+            fsdp_modules: the FSDP modules that are nested in the input module.
         """
         fsdp_modules = []
-        for module in self.modules():
-            if isinstance(module, FullyShardedDataParallel):
-                fsdp_modules.append(module)
+        for sub_module in module.modules():
+            if isinstance(sub_module, FullyShardedDataParallel):
+                if not root_only or sub_module.check_is_root():
+                    fsdp_modules.append(sub_module)
 
         return fsdp_modules
 
@@ -395,7 +411,7 @@ class FullyShardedDataParallel(nn.Module):
         # Reset lazy init that might be called by summon_full_params, since
         # it could have set is_root incorrectly for non-root FSDP instances.
         if uninitialized and self._is_root:
-            for module in self.fsdp_modules():
+            for module in self.fsdp_modules(self):
                 module._reset_lazy_init()
 
         return ret
@@ -769,25 +785,22 @@ class FullyShardedDataParallel(nn.Module):
         Args:
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
-        self._lazy_init()
-        if not self._is_root:
+        if not self.check_is_root():
             raise RuntimeError(
-                f"state_dict_type context manager can only be called from the root FSDP module.  {self._is_root}"
+                "state_dict_type context manager can only be called from the root FSDP module."
             )
         prev_state_dict_type = self._state_dict_type
-        for module in self.modules():
-            if isinstance(module, FullyShardedDataParallel):
-                if module._state_dict_type != prev_state_dict_type:
-                    raise RuntimeError(
-                        "All FSDP module should the same state_dict_type."
-                    )
-                module._state_dict_type = state_dict_type
+        for module in self.fsdp_modules(self):
+            if module._state_dict_type != prev_state_dict_type:
+                raise RuntimeError(
+                    "All FSDP module should the same state_dict_type."
+                )
+            module._state_dict_type = state_dict_type
         try:
             yield
         finally:
-            for module in self.modules():
-                if isinstance(module, FullyShardedDataParallel):
-                    module._state_dict_type = prev_state_dict_type
+            for module in self.fsdp_modules(self):
+                module._state_dict_type = prev_state_dict_type
 
     def _full_post_state_dict_hook(
         self,
@@ -1157,13 +1170,12 @@ class FullyShardedDataParallel(nn.Module):
         if recurse:
             with contextlib.ExitStack() as stack:
                 # Summon all params for any nested FSDP instances.
-                for module in self.modules():
-                    if isinstance(module, FullyShardedDataParallel):
-                        stack.enter_context(
-                            module.summon_full_params(
-                                recurse=False, writeback=writeback
-                            )
+                for module in self.fsdp_modules(self):
+                    stack.enter_context(
+                        module.summon_full_params(
+                            recurse=False, writeback=writeback
                         )
+                    )
                 # Yield to the caller, with full params in all nested instances.
                 yield
             # Exiting from the ExitStack will re-shard params.
