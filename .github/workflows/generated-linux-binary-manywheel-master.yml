@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  manywheel-py3_7-cuda10_2-build:
+  manywheel-py3_7-cpu10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
     timeout-minutes: 240
@@ -43,10 +43,10 @@ jobs:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
+      DESIRED_CUDA: cpu
       GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: nil
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
@@ -159,7 +159,7 @@ jobs:
           docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v3
         with:
-          name: manywheel-py3_7-cuda10_2
+          name: manywheel-py3_7-cpu10_2
           retention-days: 14
           if-no-files-found: error
           path:
@@ -182,19 +182,19 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  manywheel-py3_7-cuda10_2-test:  # Testing
+  manywheel-py3_7-cpu10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda10_2-build
-    runs-on: linux.4xlarge.nvidia.gpu
+    needs: manywheel-py3_7-cpu10_2-build
+    runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
+      DESIRED_CUDA: cpu
       GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: nil
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
@@ -244,7 +244,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_7-cuda10_2
+          name: manywheel-py3_7-cpu10_2
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -269,17 +269,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
       - name: Pull Docker image
         run: |
           retry () {

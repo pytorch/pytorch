@@ -60,10 +60,16 @@
       "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test"
     ],
     "ciflow/binaries": [
-      "windows-binary-conda"
+      "windows-binary-conda",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release"
     ],
     "ciflow/binaries_conda": [
       "windows-binary-conda"
+    ],
+    "ciflow/binaries_libtorch": [
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release"
     ],
     "ciflow/cpu": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
@@ -117,7 +123,9 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3",
-      "windows-binary-conda"
+      "windows-binary-conda",
+      "windows-binary-libtorch-debug",
+      "windows-binary-libtorch-release"
     ],
     "ciflow/docs": [
       "linux-docs"

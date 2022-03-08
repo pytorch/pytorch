@@ -13,7 +13,8 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["10.2", "11.3", "11.5"]
+# CUDA_ARCHES = ["10.2", "11.3", "11.5"]
+CUDA_ARCHES = ["11.3"]
 
 
 ROCM_ARCHES = ["4.5.2", "5.0"]
@@ -199,11 +200,10 @@ def generate_wheels_matrix(os: str,
                     "desired_cuda": translate_desired_cuda(
                         gpu_arch_type, gpu_arch_version
                     ),
-                    "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                    "container_image": WHEEL_CONTAINER_IMAGES.get(arch_version, "nil"),
                     "package_type": package_type,
                     "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                         ".", "_"
-                    ),
-                }
+                    ), }
             )
     return ret

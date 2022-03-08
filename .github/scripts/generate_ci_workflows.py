@@ -1015,30 +1015,30 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             isolated_workflow=True,
         ),
     ),
-    # BinaryBuildWorkflow(
-    #     os=OperatingSystem.WINDOWS,
-    #     package_type="libtorch",
-    #     abi_version=generate_binary_build_matrix.CXX11_ABI,
-    #     build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-    #         OperatingSystem.WINDOWS, generate_binary_build_matrix.CXX11_ABI
-    #     ),
-    #     ciflow_config=CIFlowConfig(
-    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-    #         isolated_workflow=True,
-    #     ),
-    # ),
-    # BinaryBuildWorkflow(
-    #     os=OperatingSystem.WINDOWS,
-    #     package_type="libtorch",
-    #     abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-    #     build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-    #         OperatingSystem.WINDOWS, generate_binary_build_matrix.PRE_CXX11_ABI
-    #     ),
-    #     ciflow_config=CIFlowConfig(
-    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-    #         isolated_workflow=True,
-    #     ),
-    # ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.RELEASE,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.RELEASE
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="libtorch",
+        abi_version=generate_binary_build_matrix.DEBUG,
+        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
+            OperatingSystem.WINDOWS, generate_binary_build_matrix.DEBUG
+        ),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
+            isolated_workflow=True,
+        ),
+    )
 ]
 
 WINDOWS_BINARY_SMOKE_WORKFLOWS = [
