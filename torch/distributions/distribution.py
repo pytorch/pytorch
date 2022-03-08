@@ -241,6 +241,9 @@ class Distribution(object):
         Args:
             sample_shape (torch.Size): the size of the sample to be drawn.
         """
+        if isinstance(sample_shape, int):
+            raise TypeError(f"sample_shape {sample_shape} of type int is not supported. "
+                            f"Did you mean ({sample_shape},)?")
         if not isinstance(sample_shape, torch.Size):
             sample_shape = torch.Size(sample_shape)
         return sample_shape + self._batch_shape + self._event_shape
