@@ -23,6 +23,7 @@ import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, jacfwd, grad_and_value, hessian,
     jvp, make_functional, make_functional_with_buffers,
+    combine_state_for_ensemble,
 )
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
@@ -2013,6 +2014,32 @@ class TestMakeFunctional(TestCase):
         mod = Foo()
         with self.assertRaisesRegex(RuntimeError, "parameter tying"):
             func, params, buffers = make_functional_with_buffers(mod)
+
+    def test_combine_state_for_ensemble_error(self):
+        in_features = 2
+        out_features = 2
+
+        models = []
+        with self.assertRaisesRegex(RuntimeError, "Expected at least one model"):
+            _ = combine_state_for_ensemble(models)
+
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1].eval()
+        with self.assertRaisesRegex(RuntimeError, "same training/eval mode"):
+            _ = combine_state_for_ensemble(models)
+
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        models[1] = torch.nn.Conv2d(3, 3, (3, 3))
+        with self.assertRaisesRegex(RuntimeError, "models to be of the same class"):
+            _ = combine_state_for_ensemble(models)
+
+    def test_combine_state_for_ensemble_smoke(self):
+        in_features = 2
+        out_features = 2
+        num_models = 3
+        models = [torch.nn.Linear(in_features, out_features) for i in range(num_models)]
+        _ = combine_state_for_ensemble(models)
 
 
 class TestExamplesCorrectness(TestCase):
