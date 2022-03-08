@@ -18,7 +18,6 @@ TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
  - binary_linux_libtorch_3_6m_cu90_devtoolset7_static-without-deps_build
 """
 
-import cimodel.lib.miniutils as miniutils
 import cimodel.data.simple.util.branch_filters
 
 
@@ -66,29 +65,6 @@ class SmoketestJob:
 
 WORKFLOW_DATA = [
     SmoketestJob(
-        "binary_linux_build",
-        ["manywheel", "3.7m", "cu102", "devtoolset7"],
-        "pytorch/manylinux-cuda102",
-        "binary_linux_manywheel_3_7m_cu102_devtoolset7_build",
-        is_master_only=True,
-    ),
-    SmoketestJob(
-        "binary_linux_build",
-        ["libtorch", "3.7m", "cpu", "devtoolset7"],
-        "pytorch/manylinux-cuda102",
-        "binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build",
-        is_master_only=True,
-        has_libtorch_variant=True,
-    ),
-    SmoketestJob(
-        "binary_linux_build",
-        ["libtorch", "3.7m", "cpu", "gcc5.4_cxx11-abi"],
-        "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest",
-        "binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build",
-        is_master_only=False,
-        has_libtorch_variant=True,
-    ),
-    SmoketestJob(
         "binary_mac_build",
         ["wheel", "3.7", "cpu"],
         None,
@@ -104,88 +80,9 @@ WORKFLOW_DATA = [
         "binary_macos_libtorch_3_7_cpu_build",
         is_master_only=True,
     ),
-    SmoketestJob(
-        "binary_windows_build",
-        ["libtorch", "3.7", "cpu", "debug"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_debug_build",
-        is_master_only=True,
-    ),
-    SmoketestJob(
-        "binary_windows_build",
-        ["libtorch", "3.7", "cpu", "release"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_release_build",
-        is_master_only=True,
-    ),
-    SmoketestJob(
-        "binary_windows_build",
-        ["wheel", "3.7", "cu113"],
-        None,
-        "binary_windows_wheel_3_7_cu113_build",
-        is_master_only=True,
-    ),
-
-    SmoketestJob(
-        "binary_windows_test",
-        ["libtorch", "3.7", "cpu", "debug"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_debug_test",
-        is_master_only=True,
-        requires=["binary_windows_libtorch_3_7_cpu_debug_build"],
-    ),
-    SmoketestJob(
-        "binary_windows_test",
-        ["libtorch", "3.7", "cpu", "release"],
-        None,
-        "binary_windows_libtorch_3_7_cpu_release_test",
-        is_master_only=False,
-        requires=["binary_windows_libtorch_3_7_cpu_release_build"],
-    ),
-    SmoketestJob(
-        "binary_windows_test",
-        ["wheel", "3.7", "cu113"],
-        None,
-        "binary_windows_wheel_3_7_cu113_test",
-        is_master_only=True,
-        requires=["binary_windows_wheel_3_7_cu113_build"],
-        extra_props={
-            "executor": "windows-with-nvidia-gpu",
-        },
-    ),
 
 
 
-    SmoketestJob(
-        "binary_linux_test",
-        ["manywheel", "3.7m", "cu102", "devtoolset7"],
-        "pytorch/manylinux-cuda102",
-        "binary_linux_manywheel_3_7m_cu102_devtoolset7_test",
-        is_master_only=True,
-        requires=["binary_linux_manywheel_3_7m_cu102_devtoolset7_build"],
-        extra_props={
-            "resource_class": "gpu.nvidia.small",
-            "use_cuda_docker_runtime": miniutils.quote((str(1))),
-        },
-    ),
-    SmoketestJob(
-        "binary_linux_test",
-        ["libtorch", "3.7m", "cpu", "devtoolset7"],
-        "pytorch/manylinux-cuda102",
-        "binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_test",
-        is_master_only=True,
-        requires=["binary_linux_libtorch_3_7m_cpu_devtoolset7_shared-with-deps_build"],
-        has_libtorch_variant=True,
-    ),
-    SmoketestJob(
-        "binary_linux_test",
-        ["libtorch", "3.7m", "cpu", "gcc5.4_cxx11-abi"],
-        "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest",
-        "binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test",
-        is_master_only=True,
-        requires=["binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build"],
-        has_libtorch_variant=True,
-    ),
 ]
 
 
