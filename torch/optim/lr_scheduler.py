@@ -74,7 +74,12 @@ class _LRScheduler(object):
         self._step_count = 0
         self.verbose = verbose
 
+        self.reset_optimizer_lr()
         self.step()
+
+    def reset_optimizer_lr(self):
+        for group in self.optimizer.param_groups:
+            group["lr"] = group["initial_lr"]
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -656,6 +661,7 @@ class SequentialLR(_LRScheduler):
         # decrement the last epoch, so that it remains the same after the step
         self.last_epoch -= 1
         # Call the step
+        self.reset_optimizer_lr()
         self.step()
 
     def step(self):
