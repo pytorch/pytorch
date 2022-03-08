@@ -1,28 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
-from copy import deepcopy
-from contextlib import suppress
-from enum import Enum
 import os
 import sys
+from contextlib import suppress
+from copy import deepcopy
+from enum import Enum
+from typing import Union
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed.fsdp import FullyShardedDataParallel, CPUOffload
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    TrainingState_,
-)
+from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel
+from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     TEST_SKIPS,
+    MultiProcessTestCase,
 )
-from torch.testing._internal.common_utils import (
-    FILE_SCHEMA,
-    get_cycles_per_ms,
-)
-
+from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
 class FSDPInitMode(Enum):
@@ -85,7 +80,8 @@ class DeterministicModel(torch.nn.Module):
         super().__init__()
         # keep everything deterministic for model initialization
         torch.manual_seed(0)
-        self.inner = torch.nn.Linear(2, 2).cuda()
+        self.inner: Union[torch.nn.Linear, FullyShardedDataParallel] = \
+            torch.nn.Linear(2, 2).cuda()
         if wrap_fsdp:
             self.inner = FullyShardedDataParallel(self.inner, cpu_offload=cpu_offload)
         self.outer = torch.nn.Linear(2, 2).cuda()
@@ -548,14 +544,24 @@ class FSDPTest(MultiProcessTestCase):
         )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, **model_kwargs
+        self, group, cuda_first=False, config=None, **model_kwargs
     ) -> FullyShardedDataParallel:
+        if config is None:
+            config = {}
+        move_to_cuda = not (
+            "cpu_offload" in config and config["cpu_offload"].offload_params
+        )
         if cuda_first:
-            model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs).cuda(), group
-            )
+            transformer = TransformerWithSharedParams(group, **model_kwargs)
+            if move_to_cuda:
+                transformer = transformer.cuda()
+            model = FullyShardedDataParallel(transformer, group, **config)
         else:
             model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs), group
-            ).cuda()
+                TransformerWithSharedParams(group, **model_kwargs),
+                group,
+                **config,
+            )
+            if move_to_cuda:
+                model = model.cuda()
         return model
