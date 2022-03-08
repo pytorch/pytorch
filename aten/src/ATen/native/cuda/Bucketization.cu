@@ -1,9 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/BucketizationUtils.h>
 #include <ATen/native/Resize.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_torch_cuda_cu_linker_symbol_op_native.h>
+#include <ATen/ops/bucketize_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/searchsorted_native.h>
+#endif
 
 namespace at {
 namespace native {
