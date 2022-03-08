@@ -367,24 +367,6 @@ at::Tensor quantized_relu(const at::Tensor& qx) {
 extern "C" {
 #endif
 
-typedef void (*ParallelCallee)(int64_t index, int8_t* packed_data);
-void DispatchParallel(
-    int8_t* func,
-    int64_t start,
-    int64_t stop,
-    int8_t* packed_data) noexcept {
-  // TODO: preserve the func type.
-  try {
-    ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
-    at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-      for (int64_t index = f_begin; index < f_end; index++) {
-        callee(index, packed_data);
-      }
-    });
-  } catch (...) {
-  }
-}
-
 void nnc_aten_conv2d(
     int64_t bufs_num,
     void** buf_data,
@@ -624,12 +606,6 @@ void nnc_aten_quantized_conv2d_relu_out(
   buf_data[0] = r.data_ptr();
   c10::raw::intrusive_ptr::incref(r.getIntrusivePtr().get());
   buf_data[bufs_in_num + bufs_out_num] = r.getIntrusivePtr().get();
-}
-
-void nnc_aten_free(int64_t bufs_num, void** ptrs) noexcept {
-  for (const auto i : c10::irange(bufs_num)) {
-    c10::raw::intrusive_ptr::decref((c10::TensorImpl*)ptrs[i]);
-  }
 }
 
 void nnc_aten_quantized_linear(

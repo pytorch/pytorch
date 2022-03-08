@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/tensorexpr/external_functions.h>
+#include <torch/csrc/jit/tensorexpr/external_functions_core.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 #include <c10/util/irange.h>
