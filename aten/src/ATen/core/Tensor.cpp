@@ -8,6 +8,7 @@
 #include <ATen/MethodOperators.h>
 #else
 #include <ATen/ops/contiguous_ops.h>
+#include <ATen/ops/fill.h>
 #include <ATen/ops/fill_ops.h>
 #include <ATen/ops/to_ops.h>
 #include <ATen/ops/zero_ops.h>
@@ -28,7 +29,7 @@ TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) co
 
 const TensorBase& TensorBase::fill_(const c10::Scalar &fill_value) const {
   Tensor self(*this);
-  at::_ops::fill__Scalar::call(self, fill_value);
+  at::fill_(self, fill_value);
   return *this;
 }
 
