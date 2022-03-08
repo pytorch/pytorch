@@ -8,6 +8,7 @@ div.container a.header-logo {
   width: 160px;
   background-image: url("../images/functorch.svg");
   background-size: 160px;
+  background-position-y: -50%;
 }
 
 .highlight pre {
