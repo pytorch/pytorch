@@ -11,8 +11,6 @@ import torch._utils_internal
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
-torch._C.Argument.__module__ = 'torch'
-
 @contextlib.contextmanager
 def dl_open_guard():
     """
@@ -33,13 +31,17 @@ class OpOverload:
         self._op = op
         self._schema = schema
         self._overloadpacket = overloadpacket
+        self._overloadname = 'default' if schema.overload_name == '' else schema.overload_name
+        self.__name__ = "{}.{}".format(self._schema.name.split("::")[1], self._overloadname)
+        self.__module__ = overloadpacket.__module__
+        op.__module__ = overloadpacket.__module__
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
 
-    def __str__(self):
-        return "OpOverload(op='{}.{}', overload='{}')".format(*self._schema.name.split("::"), self.overload_name)
+    def __repr__(self):
+        return "<OpOverload(op='{}.{}', overload='{}')>".format(*self._schema.name.split("::"), self._overloadname)
 
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
@@ -47,17 +49,15 @@ class OpOverload:
     def __getattr__(self, key):
         return getattr(self._op, key)
 
-    # `my_namespace::my_op`
-    @property
-    def name(self):
-        return "{}.{}".format(*self._schema.name.split("::"))
+    def __hash__(self):
+        return hash(self._op)
+
+    # `my_namespace.my_op_name.overload_name`
+    def __str__(self):
+        return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
     @property
-    def overload_name(self):
-        return self._schema.overload_name
-
-    @property
-    def overload_packet(self):
+    def overloadpacket(self):
         return self._overloadpacket
 
     @property
@@ -69,12 +69,12 @@ class OpOverload:
     # name, type, N, kwarg_only, has_default_value, default_value, is_mutable
     @property
     def inputs(self):
-        return self._schema.arguments
+        return tuple(self._schema.arguments)
 
     # returns a list of Argument class objects
     @property
     def returns(self):
-        return self._schema.returns
+        return tuple(self._schema.returns)
 
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
@@ -83,23 +83,21 @@ class OpOverloadPacket:
         # These attributes are accessible on the object through the properties
         # defined below but are immutable
         self._qualified_op_name = qualified_op_name
-        self._op_name = op_name
+        self.__name__ = op_name
         self._op = op
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
         return self
 
+    def __repr__(self):
+        return "<OpOverloadPacket(op='{}.{}')>".format(*self._qualified_op_name.split("::"))
+
+    def __hash__(self):
+        return hash(self._op)
+
     def __str__(self):
-        return "OpOverloadPacket(op='{}.{}')".format(*self._qualified_op_name.split("::"))
-
-    @property
-    def qualified_op_name(self):
         return "{}.{}".format(*self._qualified_op_name.split("::"))
-
-    @property
-    def op_name(self):
-        return self._op_name
 
     @property
     def op(self):

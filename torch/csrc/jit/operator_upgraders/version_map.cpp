@@ -59,7 +59,12 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersi
      {"aten::full.out",
       {{5,
         "full_out_0_4",
-        "aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}}});
+        "aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}},
+     {"aten::gelu", {{10, "gelu_0_9", "aten::gelu(Tensor self) -> Tensor"}}},
+     {"aten::gelu.out",
+      {{10,
+        "gelu_out_0_9",
+        "aten::gelu.out(Tensor self, *, Tensor(a!) out) -> Tensor"}}}});
 
 const std::unordered_map<std::string, std::vector<UpgraderEntry>>&
 get_operator_version_map() {

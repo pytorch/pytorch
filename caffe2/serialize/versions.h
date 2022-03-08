@@ -12,7 +12,7 @@ namespace serialize {
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
 
 #if ENABLE_UPGRADERS
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x9L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0xAL;
 #else
 constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 #endif
@@ -79,7 +79,11 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 //     Bump the version number to 9 to update aten::logspace and
 //     and aten::logspace.out to error out when steps is not
 //     provided. (see: https://github.com/pytorch/pytorch/issues/55951)
-constexpr uint64_t kProducedFileFormatVersion = 0x9L;
+// 3) [02/11/2022]
+//     Bump the version number to 10 to update aten::gelu and
+//     and aten::gelu.out to support the new approximate kwarg.
+//     (see: https://github.com/pytorch/pytorch/pull/61439)
+constexpr uint64_t kProducedFileFormatVersion = 0xAL;
 #else
 constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 #endif
@@ -106,22 +110,30 @@ constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 //  0x2L: (Comment missing)
 //  0x3L: (Comment missing)
 //  0x4L: (update) Added schema to function tuple. Forward-compatible change.
-//  0x5L: (update) Update bytecode is sharing constant tensor files from torchscript, and only serialize
-//  extra tensors that are not in the torchscript constant table. Also update tensor storage schema adapting
-//  to the unify format, the root key of tensor storage is updated from {index} to
-//  {the_pointer_value_the_tensor.storage}, for example: `140245072983168.storage`
-//  Forward-compatibility change.
+//  0x5L: (update) Update bytecode is sharing constant tensor files from
+//  torchscript, and only serialize extra tensors that are not in the
+//  torchscript constant table. Also update tensor storage schema adapting to
+//  the unify format, the root key of tensor storage is updated from {index} to
+//  {the_pointer_value_the_tensor.storage}, for example:
+//  `140245072983168.storage` Forward-compatibility change.
 //  0x6L: Implicit opereator versioning using number of specified argument.
-//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845
-//  for details.
+//  Refer to the summary of https://github.com/pytorch/pytorch/pull/56845 for details.
 //  0x7L: Enable support for operators with default arguments plus out arguments.
-constexpr uint64_t kProducedBytecodeVersion = 0x7L;
+//  Refer. See https://github.com/pytorch/pytorch/pull/63651 for details
+//  0x8L: Emit promoted operators as instructions.
+//  See https://github.com/pytorch/pytorch/pull/71662 for details
+constexpr uint64_t kProducedBytecodeVersion = 0x8L;
+
+// static_assert(
+//     kProducedBytecodeVersion >= kProducedFileFormatVersion,
+//     "kProducedBytecodeVersion must be higher or equal to
+//     kProducedFileFormatVersion.");
 
 // Introduce kMinSupportedBytecodeVersion and kMaxSupportedBytecodeVersion
 // for limited backward/forward compatibility support of bytecode. If
-// kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion (in loader),
-// we should support this model_version. For example, we provide a wrapper to
-// handle an updated operator.
+// kMinSupportedBytecodeVersion <= model_version <= kMaxSupportedBytecodeVersion
+// (in loader), we should support this model_version. For example, we provide a
+// wrapper to handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
 constexpr uint64_t kMaxSupportedBytecodeVersion = 0x8L;
 
