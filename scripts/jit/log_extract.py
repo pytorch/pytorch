@@ -2,7 +2,9 @@ from contextlib import contextmanager
 from torch.testing import make_tensor
 from typing import Any, List, Tuple
 import argparse
+import random
 import torch
+import traceback
 
 '''
 Usage:
@@ -52,9 +54,9 @@ def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
     inputs = []
     for inp in graph.inputs():
         if isinstance(inp.type(), torch._C.FloatType):
-            inputs.append(.5)
+            inputs.append(random.uniform(.1, 100))
         elif isinstance(inp.type(), torch._C.IntType):
-            inputs.append(2)
+            inputs.append(random.randint(1, 100))
         elif isinstance(inp.type(), torch._C.TensorType):
             inputs.append(make_tensor_from_type(inp.type()))
         else:
@@ -123,10 +125,13 @@ def run_nvfuser(ir, inputs) -> float:
 def test_nvfuser(graphs: List[str], baseline_fn, nvfuser_fn):
     for i, ir in enumerate(graphs):
         _, inputs = load_graph_and_inputs(ir)
-        baseline = baseline_fn(ir, inputs)
-        nvfuser = nvfuser_fn(ir, inputs)
-        improvement = (baseline / nvfuser - 1) * 100
-        print(f"  Graph {i}; baseline: {baseline:.2f} ms; nvfuser: {nvfuser:.2f} ms; improvement: {improvement:.2f}%")
+        try:
+            baseline = baseline_fn(ir, inputs)
+            nvfuser = nvfuser_fn(ir, inputs)
+            improvement = (baseline / nvfuser - 1) * 100
+            print(f"  Graph {i}; baseline: {baseline:.2f} ms; nvfuser: {nvfuser:.2f} ms; improvement: {improvement:.2f}%")
+        except RuntimeError:
+            print(f"  Graph {i} failed:", traceback.format_exc())
 
 
 def run():
