@@ -274,21 +274,12 @@ TORCH_META_FUNC(amax)
             self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
   }
   if (self.numel() == 0) {
+    TORCH_CHECK(
+      dims.empty() == 0,
+      "amax", ": Expected reduction dim to be specified for input.numel() == 0. ",
+        "Specify the reduction dim with the 'dim' argument.");
     at::native::zero_numel_check_dims(self, dims, "amax()");
   }
-  TORCH_CHECK(
-    self.numel() > 0,
-    "amax", ": Expected reduction dim to be specified for input.numel() == 0. ",
-      "Specify the reduction dim with the 'dim' argument.");
-    //at::native::zero_numel_check_dims(self, dims, "amax()");
-  }
-  /*if (dims.has_value()) {
-    at::native::zero_numel_check_dims(self, dims, "amax");
-  } else {
-    TORCH_CHECK_INDEX(
-     self.numel() != 0,
-        "amax", ": Expected reduction dim to be specified for input.numel() == 0.");
-  }*/
   const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
   resize_reduction(*this, self, dims, keepdim, out_dtype);
 }
@@ -1446,6 +1437,10 @@ Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
   TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
               self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
   if (self.numel() == 0) {
+    TORCH_CHECK(
+      dim.empty() == 0,
+      "amax", ": Expected reduction dim to be specified for input.numel() == 0. ",
+        "Specify the reduction dim with the 'dim' argument.");
     zero_numel_check_dims(self, dim, "amin()");
   }
 

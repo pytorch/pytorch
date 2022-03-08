@@ -3128,6 +3128,21 @@ as the input tensor excluding its innermost dimension'):
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
+    # Test to ensure that the reduction operators, amax and amix throws errors for zero-dim
+    # tensors (i.e. empty tensors)
+    def test_amax_amin_no_dim_arg(self, device):
+        shape = (2, 0, 4)
+        master_input = torch.randn(shape, device=device)
+        test_functions = [
+            ('amax', torch.amax, {'dtype': torch.int64}),
+            ('amin', torch.amin, {'dtype': torch.int64})
+        ]
+
+        for name, fn, dtype in test_functions:
+            err_msg = "Specify the reduction dim with the 'dim' argument."
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                fn(master_input)
+
     # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using comparison operators
     # raises an error if no `dim` parameter is specified. This exists separately from tests in
     # test_tensot_compare_ops_empty because not specifying a `dim` parameter in the former tests does
