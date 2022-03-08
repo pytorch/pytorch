@@ -97,6 +97,14 @@ cc_library(
         "ONNX_ML=1",
         "ONNX_NAMESPACE=onnx_torch",
     ],
+    copts = select({
+        "@platforms//os:linux": [],
+        # convert.h has an identifier named "DEBUG". This would
+        # conflict with any preprocessor definition by the same
+        # name. Compilations with --compilation_mode=fastbuild on
+        # macOS define this.
+        "@platforms//os:macos": ["-UDEBUG"],
+    }),
     includes = [
         ".",
         "onnx/",
