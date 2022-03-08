@@ -134,8 +134,6 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
             return_schemas=True, returns a tuple containing the optional Python signatures
             and the optional TorchScript Function signature
     """
-    if isinstance(op, OpOverloadPacket) or isinstance(op, OpOverload):
-        op = op.op
     override = _manual_overrides.get(op)
     if override:
         return (override, None) if return_schemas else None
