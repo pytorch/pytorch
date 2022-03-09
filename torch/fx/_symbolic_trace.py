@@ -583,7 +583,7 @@ class Tracer(TracerBase):
             if node.op == 'placeholder' and len(node.args) and isinstance(node.args[0], torch.fx.Node):
                 default_value = node.args[0]
                 node.args = (DefaultTensorSentinel,)
-                with self.graph.inserting_after(default_value):
+                with self.graph.inserting_after(node):
                     actual_value = self.graph.call_function(null_coalesce_tensor_sentinel)
                 node.replace_all_uses_with(actual_value)
                 # Populate arg now because replace_all_uses_with would interfere if we did it during
