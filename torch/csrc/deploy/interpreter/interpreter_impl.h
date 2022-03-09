@@ -16,8 +16,8 @@
    the client application.
 
    It is safe to throw exception types that are defined once in
-   the context of the client application, such as c10::Error, which is defined
-   in libtorch, which isn't duplicated in torch::deploy interpreters.
+   the context of the client application, such as std::runtime_error,
+   which isn't duplicated in torch::deploy interpreters.
 
    ==> Use TORCH_DEPLOY_TRY, _SAFE_CATCH_RETHROW around _ALL_ torch::deploy APIs
 
