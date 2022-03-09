@@ -1548,10 +1548,18 @@ def type_as(g, self, other):
 
 @parse_args("v", "v", "i", "f")
 def cosine_similarity(g, x1, x2, dim, eps):
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    # preserve legacy behavior for Caffe2
+    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and \
+       torch.onnx._CAFFE2_ATEN_FALLBACK:
         return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
-    else:
-        return sym_help._onnx_unsupported("cosine_similarity")
+    cross = sym_help._reducesum_helper(g, mul(g, x1, x2),
+                                       axes_i=[dim], keepdims_i=0)
+    x1_l2 = sym_help._reducesum_helper(g, mul(g, x1, x1),
+                                       axes_i=[dim], keepdims_i=0)
+    x2_l2 = sym_help._reducesum_helper(g, mul(g, x2, x2),
+                                       axes_i=[dim], keepdims_i=0)
+    div_tens = max(g, sqrt(g, mul(g, x1_l2, x2_l2)), g.op("Constant", value_t=torch.tensor([eps])))
+    return div(g, cross, div_tens)
 
 
 # ignore clone operators that are inserted by PyTorch autograd
