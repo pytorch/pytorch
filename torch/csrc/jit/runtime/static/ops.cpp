@@ -396,7 +396,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   return fast_ops.count(op_name) > 0;
 }
 
-std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
+SROperator getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SROperatorRegistry()->Has(op_name) && !disableUnsafeMathOp(op_name)) {
     return SROperatorRegistry()->Create(op_name)->Generate(n);
@@ -795,6 +795,7 @@ SROperator aten_stack(Node* n) {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "stack expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
@@ -2288,6 +2289,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto size = p_node->Input(0).toDimVector();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+      const auto device = p_node->Input(3).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(4).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::ones(size, dtype, layout, device, pin_memory);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::ones_out(size, out_t);
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"))) {
@@ -2368,6 +2392,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "concat expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
@@ -2547,35 +2572,6 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-namespace {
-
-void where_out(
-    at::Tensor& out,
-    const at::Tensor& condition,
-    const at::Tensor& self,
-    const at::Tensor& other) {
-  // No need to do the device check, everything is CPU in static runtime
-
-  if (condition.scalar_type() == c10::ScalarType::Byte) {
-    TORCH_WARN_ONCE(
-        "where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-    TORCH_CHECK(
-        condition.scalar_type() == c10::ScalarType::Bool,
-        "where expected condition to be a boolean tensor, but got a tensor with dtype ",
-        condition.scalar_type());
-  }
-
-  c10::MaybeOwned<at::Tensor> b_condition, b_self, b_other;
-  std::tie(b_condition, b_self, b_other) =
-      expand_outplace(condition, self, other, "where");
-
-  // `out` will be resized by TensorIterator in the op implementation.
-  at::cpu::_s_where_out(out, condition, self, other);
-}
-
-} // namespace
-
 REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"))) {
@@ -2589,7 +2585,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      where_out(out, cond, self, other);
+      at::cpu::where_out(out, cond, self, other);
     };
   }
 
