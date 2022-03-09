@@ -5536,32 +5536,32 @@ def error_inputs_cov(op_info, device, **kwargs):
     a = torch.rand(S, device=device)
     error_inputs = []
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'fweights': torch.rand(S,S, device=device)})),
-        error_type=RuntimeError, error_regex="expected input to have two or fewer dimensions")
+        SampleInput(torch.rand(S, S, S, device=device)),
+        error_type=RuntimeError, error_regex="expected input to have two or fewer dimensions"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'fweights': torch.rand(S,S, device=device)})),
-        error_type=RuntimeError, error_regex="expected fweights to have one of fewer dimensions")
+        SampleInput(a, kwargs={'fweights': torch.rand(S, S, device=device)}),
+        error_type=RuntimeError, error_regex="expected fweights to have one or fewer dimensions"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'aweights': torch.rand(S,S, device=device)})),
-        error_type=RuntimeError, error_regex="expected aweights to have one of fewer dimensions")
+        SampleInput(a, kwargs={'aweights': torch.rand(S, S, device=device)}),
+        error_type=RuntimeError, error_regex="expected aweights to have one or fewer dimensions"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'fweights': torch.rand(S, device=device)})),
-        error_type=RuntimeError, error_regex="expected fweights to have integral dtype")
+        SampleInput(a, kwargs={'fweights': torch.rand(S, device=device)}),
+        error_type=RuntimeError, error_regex="expected fweights to have integral dtype"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'aweights': torch.tensor([1,1], device=device)})),
-        error_type=RuntimeError, error_regex="expected aweights to have floating point dtype")
+        SampleInput(a, kwargs={'aweights': torch.tensor([1, 1], device=device)}),
+        error_type=RuntimeError, error_regex="expected aweights to have floating point dtype"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'fweights': torch.tensor([1], device=device)})),
-        error_type=RuntimeError, error_regex="expected fweights to have the same numel")
+        SampleInput(a, kwargs={'fweights': torch.tensor([1], device=device)}),
+        error_type=RuntimeError, error_regex="expected fweights to have the same numel"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'aweights': torch.rand(1, device=device)})),
-        error_type=RuntimeError, error_regex="expected aweights to have the same numel")
+        SampleInput(a, kwargs={'aweights': torch.rand(1, device=device)}),
+        error_type=RuntimeError, error_regex="expected aweights to have the same numel"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'fweights': torch.tensor([-1, -2], device=device)})),
-        error_type=RuntimeError, error_regex="fweights cannot be negative")
+        SampleInput(a, kwargs={'fweights': torch.tensor([-1, -2, -3, -4 , -5], device=device)}),
+        error_type=RuntimeError, error_regex="fweights cannot be negative"))
     error_inputs.append(ErrorInput(
-        SampleInput(a, kwargs={'aweights': torch.tensor([-1., -2.], device=device)})),
-        error_type=RuntimeError, error_regex="aweights cannot be negative")
+        SampleInput(a, kwargs={'aweights': torch.tensor([-1., -2., -3., -4., -5.], device=device)}),
+        error_type=RuntimeError, error_regex="aweights cannot be negative"))
     return error_inputs
 
 
