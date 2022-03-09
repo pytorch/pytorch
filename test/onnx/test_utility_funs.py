@@ -11,7 +11,9 @@ from torch.onnx import (utils,
                         unregister_custom_op_symbolic)
 from torch.onnx.symbolic_helper import (_set_opset_version,
                                         _set_operator_export_type,
-                                        _set_onnx_shape_inference)
+                                        _set_onnx_shape_inference,
+                                        _unpack_list,
+                                        parse_args)
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
@@ -1311,6 +1313,32 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[2].op_type, "Identity")
         self.assertEqual(graph.graph.node[3].op_type, "Gemm")
         self.assertEqual(graph.graph.node[4].op_type, "Identity")
+
+    def test_bad_symbolic_registration(self):
+        _onnx_opset_version = 9
+
+        @parse_args("v")
+        def cat(g, tensor_list, dim):
+            tensors = _unpack_list(tensor_list)
+            return g.op("Concat", *tensors, axis_i=dim)
+
+        register_custom_op_symbolic('::cat', cat, _onnx_opset_version)
+
+        class CatModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat((x, x, x), 0)
+
+        model = CatModel()
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: torch.onnx.export(model, (x,), f, opset_version=_onnx_opset_version),
+            ("A mismatch between the number of arguments (2) and their descriptors (1) was found at symbolic function "
+             "'cat'. If you believe this is not due to custom symbolic implementation within your code or an external "
+             "library, please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to "
+             "report this bug."))
+        unregister_custom_op_symbolic('::cat', _onnx_opset_version)
 
 
 class TestUtilityFuns_opset10(TestUtilityFuns_opset9):

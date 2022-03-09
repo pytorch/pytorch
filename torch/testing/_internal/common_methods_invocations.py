@@ -2429,12 +2429,15 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), False)
     )
     samples = []
-
-    for shape, dim, keepdim in inputs:
-        t = make_tensor(shape, dtype=dtype, device=device,
-                        low=None, high=None,
-                        requires_grad=requires_grad)
-        samples.append(SampleInput(t, args=(dim, keepdim)))
+    # Test large inputs to check numerical stability
+    lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64) else (None,)
+    for low in lows:
+        high = low * 2 if low is not None else None
+        for shape, dim, keepdim in inputs:
+            t = make_tensor(shape, dtype=dtype, device=device,
+                            low=low, high=high,
+                            requires_grad=requires_grad)
+            samples.append(SampleInput(t, args=(dim, keepdim)))
 
     return tuple(samples)
 
@@ -2588,6 +2591,7 @@ def sample_inputs_normal_tensor_first(self, device, dtype, requires_grad, **kwar
         ([3], [3], {}),
         ([3, 4, 2], [3, 4, 2], {}),
         ([2, 3], 1.1, {}),
+        ([1, 2, 3], [5, 2, 3], {}),  # broadcasting
     ]
 
     return sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs)
@@ -8748,12 +8752,14 @@ op_db: List[OpInfo] = [
            ),
            supports_out=False),
     OpInfo('broadcast_to',
+           ref=np.broadcast_to,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_broadcast_to),
     OpInfo('broadcast_tensors',
+           ref=np.broadcast_arrays,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -10685,6 +10691,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
@@ -10693,6 +10700,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
+           supports_forward_ad=True,
            supports_out=False),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -10704,6 +10712,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_jit_shape_analysis=False,
            assert_autodiffed=False,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('nn.functional.softmin',
            variant_test_name="with_dtype",
@@ -10711,6 +10720,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=False,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
@@ -10718,6 +10728,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
+        supports_forward_ad=True,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -14211,6 +14222,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
            assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
@@ -14335,6 +14348,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # Allowed exception: sparse tensors don't have strides
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+               # TODO: implement csr.to_sparse(sample_dim) where sampled_dim is 1.
+               DecorateInfo(unittest.skip("csr.to_sparse(1) not implemented. Skipped!"),
+                            'TestSparseCSR', 'test_sparse_csr_consistency'),
            )
            ),
     OpInfo('logcumsumexp',
@@ -14503,6 +14519,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_softmax_variant,
+        supports_forward_ad=True,
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
@@ -14511,6 +14528,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
+        supports_forward_ad=True,
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
@@ -15340,6 +15358,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
         supports_out=False),
     OpInfo(
         '_masked.log_softmax',
@@ -15358,6 +15377,7 @@ op_db: List[OpInfo] = [
                          'TestMasked', 'test_reference_masked'),
         ],
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
         supports_out=False),
     OpInfo(
         '_masked.softmin',
@@ -15372,6 +15392,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_forward_ad=True,
         supports_out=False),
     OpInfo(
         '_masked.normalize',
@@ -15439,6 +15460,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
+        supports_forward_ad=True,
         decorators=[
             # FIXME: Derivative wrt. weight not implemented
             DecorateInfo(unittest.expectedFailure, "TestCommon",
@@ -15637,7 +15659,6 @@ unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
-sparse_csr_funcs = [op for op in op_db if op.supports_sparse_csr]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
