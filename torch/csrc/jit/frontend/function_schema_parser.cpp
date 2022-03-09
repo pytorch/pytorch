@@ -2,7 +2,6 @@
 
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/Optional.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -28,13 +27,8 @@ namespace jit {
 
 namespace {
 struct SchemaParser {
-  explicit SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(
-            c10::string_view(str),
-            c10::nullopt,
-            0,
-            nullptr,
-            Source::DONT_COPY)),
+  SchemaParser(const std::string& str)
+      : L(std::make_shared<SourceView>(c10::string_view(str))),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
@@ -147,7 +141,7 @@ struct SchemaParser {
     return result;
   }
 
-  Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
+  Argument parseArgument(size_t /*idx*/, bool is_return, bool kwarg_only) {
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -282,7 +276,7 @@ struct SchemaParser {
     return convertToList(type, kind, tok.range, vs);
   }
 
-  IValue parseTensorDefault(const SourceRange& range) {
+  IValue parseTensorDefault(const SourceRange& /*range*/) {
     L.expect(TK_NONE);
     return IValue();
   }

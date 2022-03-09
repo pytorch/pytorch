@@ -1,6 +1,6 @@
 from typing import List
 
-from ..metadata import ShardMetadata
+from torch.distributed._shard.metadata import ShardMetadata
 
 def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetadata):
     """
