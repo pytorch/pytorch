@@ -3137,6 +3137,11 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
                          error_regex="index 34 is out of bounds for dimension 0 with size 3")
 
+def error_inputs_renorm(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(0.5, 0, 1.0)), error_type=RuntimeError,
+                     error_regex="needs at least 2 dimensions, got 0 dimensions")
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -14034,7 +14039,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_renorm),
+           sample_inputs_func=sample_inputs_renorm,
+           error_inputs_func=error_inputs_renorm),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
