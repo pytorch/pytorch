@@ -14,6 +14,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
+#include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <c10/util/Flags.h>
 
@@ -157,6 +158,10 @@ class TORCH_API Node {
   size_t num_outputs() const {
     return num_outputs_;
   }
+
+  virtual c10::ArrayRef<Shape> shapes() const = 0;
+
+  virtual const Shape& shape(size_t output_index = 0) const = 0;
 
   virtual const std::vector<Output>& operands() const = 0;
 

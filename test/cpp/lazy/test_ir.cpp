@@ -23,7 +23,8 @@ class TestLeafNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
-
+  const Shape& shape(size_t i) const override { return Shape(); }
+  c10::ArrayRef<Shape> shapes() const override { return {}; }
  private:
   size_t param_;
 };

@@ -48,10 +48,10 @@ class TORCH_API TsNode : public lazy::Node {
       const std::function<Shape()>& shape_fn) const;
 
   // Retrieves the full shape of the IR Node.
-  c10::ArrayRef<Shape> shapes() const { return shapes_; }
+  c10::ArrayRef<Shape> shapes() const override { return shapes_; }
 
   // Retrieves the shape of the output at a given index.
-  const Shape& shape(size_t output_index = 0) const;
+  const Shape& shape(size_t output_index = 0) const override;
 
   std::string ToString() const override;
 
