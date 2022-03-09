@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set, List, Any
+from typing import Dict, Set, List, Iterable, Any
 
 import jinja2
 import json
