@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
-#include <c10/util/irange.h>
+#include <torch/csrc/deploy/irange.h>
 #include <libgen.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
@@ -103,7 +103,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  for (const auto i : c10::irange(ninterp)) {
+  for (const auto i : multipy::irange(ninterp)) {
     (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
@@ -112,7 +112,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (const auto i : c10::irange(ninterp)) {
+  for (const auto i : multipy::irange(ninterp)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 
@@ -147,11 +147,11 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  for (const auto i : c10::irange(nthreads)) {
+  for (const auto i : multipy::irange(nthreads)) {
     (void)i;
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (const auto j : c10::irange(100)) {
+      for (const auto j : multipy::irange(100)) {
         (void)j;
         model({input.alias()}).toTensor();
       }
@@ -159,7 +159,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
       return result;
     }));
   }
-  for (const auto i : c10::irange(nthreads)) {
+  for (const auto i : multipy::irange(nthreads)) {
     outputs.push_back(futures[i].get());
   }
 
@@ -167,7 +167,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (const auto i : c10::irange(nthreads)) {
+  for (const auto i : multipy::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
@@ -249,13 +249,13 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  for (const auto n : c10::irange(trials)) {
+  for (const auto n : multipy::irange(trials)) {
     (void)n;
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
     at::parallel_for(0, nthreads, 1, [&](int64_t begin, int64_t end) {
-      for (const auto i : c10::irange(begin, end)) {
+      for (const auto i : multipy::irange(begin, end)) {
         auto I = m.allInstances()[i].acquireSession();
         try {
           I.fromIValue(t);
@@ -301,7 +301,7 @@ TEST(TorchpyTest, FxModule) {
 
   std::vector<at::Tensor> outputs;
   auto input = torch::ones({5, 10});
-  for (const auto i : c10::irange(nthreads)) {
+  for (const auto i : multipy::irange(nthreads)) {
     (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
@@ -314,7 +314,7 @@ TEST(TorchpyTest, FxModule) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (const auto i : c10::irange(nthreads)) {
+  for (const auto i : multipy::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }

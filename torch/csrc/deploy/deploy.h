@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
+#include <torch/csrc/deploy/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/deploy/noop_environment.h>
