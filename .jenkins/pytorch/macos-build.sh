@@ -56,6 +56,18 @@ build_lite_interpreter() {
     popd || exit
 
     "${CPP_BUILD}/caffe2/build/bin/test_lite_interpreter_runtime"
+    test_codegen_unboxing
+}
+
+test_codegen_unboxing() {
+  echo "Testing codegen unboxing"
+
+  CPP_BUILD="$(pwd)/../cpp_build"
+  TESTS_SETUP_PY=$PWD/test/mobile/lightweight_dispatch/tests_setup.py
+
+  python "${TESTS_SETUP_PY}" setup
+  "${CPP_BUILD}/caffe2/build/bin/test_codegen_unboxing"
+  python "${TESTS_SETUP_PY}" shutdown
 }
 
 if [[ ${BUILD_ENVIRONMENT} = *arm64* ]]; then
