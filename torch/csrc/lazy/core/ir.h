@@ -29,77 +29,6 @@ class Node;
 
 using NodePtr = std::shared_ptr<Node>;
 
-// Represents a specific output produced by a node. Since the output of a node
-// can be composed by multiple outputs, the node+index coordinates fully qualify
-// each single output.
-struct TORCH_API Output {
-  struct Hasher {
-    size_t operator()(const Output& output) const;
-  };
-
-  Output() = default;
-  explicit Output(const Node* node, size_t index = 0)
-      : node(node), index(index) {}
-
-  hash_t hash() const;
-
-  bool operator==(const Output& rhs) const {
-    return node == rhs.node && index == rhs.index;
-  }
-  bool operator!=(const Output& rhs) const {
-    return !operator==(rhs);
-  }
-
-  const Shape& shape() const {
-    return node->shape(index);
-  }
-
-  std::string ToString() const;
-
-  // The node providing the output.
-  const Node* node{nullptr};
-  // The index in the node's output this output refers to.
-  size_t index{0};
-};
-
-inline std::ostream& operator<<(std::ostream& stream, const Output& output) {
-  stream << output.ToString();
-  return stream;
-}
-
-template <typename T>
-using OutputMap = std::unordered_map<Output, T, Output::Hasher>;
-
-// Represents an input/operand for a Node object.
-struct TORCH_API Value {
-  Value() = default;
-  /* implicit */ Value(NodePtr&& node, size_t index = 0) : node(std::move(node)), index(index) {}
-  /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
-
-  hash_t hash() const;
-  hash_t hash_with_sizes() const;
-  hash_t hash_without_sizes() const;
-
-  operator bool() const {
-    return node != nullptr;
-  }
-
-  operator Output() const {
-    return Output(node.get(), index);
-  }
-
-  const Shape& shape() const {
-    return node->shape(index);
-  }
-
-  Node* operator->() const {
-    return node.get();
-  }
-
-  NodePtr node;
-  size_t index = 0;
-};
-
 // The Kind of operation a Node can be associated to.
 struct TORCH_API OpKind {
   OpKind() = default;
@@ -256,6 +185,79 @@ const T* NodeCast(const Node* node, OpKind op) {
   return &dynamic_cast<const T&>(*node);
 #endif
 }
+
+
+// Represents a specific output produced by a node. Since the output of a node
+// can be composed by multiple outputs, the node+index coordinates fully qualify
+// each single output.
+struct TORCH_API Output {
+  struct Hasher {
+    size_t operator()(const Output& output) const;
+  };
+
+  Output() = default;
+  explicit Output(const Node* node, size_t index = 0)
+      : node(node), index(index) {}
+
+  hash_t hash() const;
+
+  bool operator==(const Output& rhs) const {
+    return node == rhs.node && index == rhs.index;
+  }
+  bool operator!=(const Output& rhs) const {
+    return !operator==(rhs);
+  }
+
+  const Shape& shape() const {
+    return node->shape(index);
+  }
+
+  std::string ToString() const;
+
+  // The node providing the output.
+  const Node* node{nullptr};
+  // The index in the node's output this output refers to.
+  size_t index{0};
+};
+
+inline std::ostream& operator<<(std::ostream& stream, const Output& output) {
+  stream << output.ToString();
+  return stream;
+}
+
+template <typename T>
+using OutputMap = std::unordered_map<Output, T, Output::Hasher>;
+
+// Represents an input/operand for a Node object.
+struct TORCH_API Value {
+  Value() = default;
+  /* implicit */ Value(NodePtr&& node, size_t index = 0) : node(std::move(node)), index(index) {}
+  /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
+
+  hash_t hash() const;
+  hash_t hash_with_sizes() const;
+  hash_t hash_without_sizes() const;
+
+  operator bool() const {
+    return node != nullptr;
+  }
+
+  operator Output() const {
+    return Output(node.get(), index);
+  }
+
+  const Shape& shape() const {
+    return node->shape(index);
+  }
+
+  Node* operator->() const {
+    return node.get();
+  }
+
+  NodePtr node;
+  size_t index = 0;
+};
+
 
 } // namespace lazy
 } // namespace torch
