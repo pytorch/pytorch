@@ -1433,30 +1433,45 @@ class TestFunctionalIterDataPipe(TestCase):
 
 class TestFunctionalMapDataPipe(TestCase):
 
-    def _serialization_test_helper(self, datapipe, has_two_children=False):
+    def _serialization_test_helper(self, datapipe):
         serialized_dp = pickle.dumps(datapipe)
         deserialized_dp = pickle.loads(serialized_dp)
-        if not has_two_children:
+        try:
             self.assertEqual(list(datapipe), list(deserialized_dp))
-        else:
-            for c1, c2 in zip(list(datapipe), list(deserialized_dp)):
-                self.assertEqual(list(c1), list(c2))
+        except AssertionError as e:
+            print(f"{datapipe} is failing.")
+            raise e
+
+    def _serialization_test_for_single_dp(self, dp):
+        # 1. Testing for serialization before any iteration starts
+        self._serialization_test_helper(dp)
+        # 2. Testing for serialization after DataPipe is partially read
+        it = iter(dp)
+        _ = next(it)
+        self._serialization_test_helper(dp)
+        # 3. Testing for serialization after DataPipe is fully read
+        _ = list(it)
+        self._serialization_test_helper(dp)
 
     def test_serializable(self):
-        input_dp = dp.map.SequenceWrapper(range(10))
-        picklable_datapipes: List[
-            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
-        ] = [
-            (dp.map.Mapper, (), {}),
-            (dp.map.Mapper, (_fake_fn, ), {}),
-            (dp.map.Mapper, (partial(_fake_add, 1), ), {}),
+        picklable_datapipes: List = [
+            (dp.map.Batcher, None, (2,), {}),
+            (dp.map.Concater, None, (dp.map.SequenceWrapper(range(10)),), {}),
+            (dp.map.Mapper, None, (), {}),
+            (dp.map.Mapper, None, (_fake_fn, ), {}),
+            (dp.map.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.map.SequenceWrapper, range(10), (), {}),
+            (dp.map.Shuffler, dp.map.SequenceWrapper([0] * 5), (), {}),
+            (dp.map.Zipper, None, (dp.map.SequenceWrapper(range(10)),), {}),
         ]
-        for dpipe, dp_args, dp_kwargs in picklable_datapipes:
-            _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
-            datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-            self._serialization_test_helper(datapipe)
+        for dpipe, custom_input, dp_args, dp_kwargs in picklable_datapipes:
+            if custom_input is None:
+                custom_input = dp.map.SequenceWrapper(range(10))
+            datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+            self._serialization_test_for_single_dp(datapipe)
 
     def test_serializable_with_dill(self):
+        """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
         unpicklable_datapipes: List[
             Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
