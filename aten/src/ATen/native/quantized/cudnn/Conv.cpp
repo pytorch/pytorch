@@ -49,8 +49,9 @@ struct CacheKey {
 };
 
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+namespace {
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
-
+}
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
 // multiple operators
 // reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
