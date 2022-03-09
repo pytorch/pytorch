@@ -3147,6 +3147,15 @@ def error_inputs_lstsq(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
                      error_regex="iteration over a 0-d tensor")
 
+def error_inputs_eig(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+
+    yield ErrorInput(SampleInput(zero_d, args=(False)), error_type=TypeError,
+                     error_regex="iteration over a 0-d tensor")
+
+    yield ErrorInput(SampleInput(zero_d, args=(True)), error_type=TypeError,
+                     error_regex="iteration over a 0-d tensor")
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -12927,6 +12936,7 @@ op_db: List[OpInfo] = [
            op=torch.eig,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_eig,
+           error_inputs_func=error_inputs_eig,
            decorators=[
                skipCUDAIfNoMagma,
                skipCPUIfNoLapack,

@@ -453,10 +453,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
 
-        # eig
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
-
         # this is only implemented on cpu
         if (torch.device(device).type == 'cpu'):
             self.assertRaises(RuntimeError, lambda: torch.ormqr(zero_d, zero_d, zero_d))
