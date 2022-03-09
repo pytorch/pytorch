@@ -15,42 +15,42 @@
          "torch/onnx/**"
       ],
       "approved_by": ["BowenBao", "garymm"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
       "name": "NVFuser",
       "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
       "approved_by": ["csarofeen", "ngimel"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
       "name": "OSS CI",
       "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
       "approved_by": ["janeyx99", "ezyang"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
       "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
       "approved_by": ["mruberry", "ngimel", "janeyx99"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
       "name": "Android",
       "patterns": ["android/**", "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
       "name": "iOS",
       "patterns": ["ios/**", "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
       "name": "superuser",
       "patterns": ["*"],
       "approved_by": ["albanD", "jbschlosser", "suo", "osalpekar", "malfet", "seemethere", "ezyang"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check"]
    }
 ]
