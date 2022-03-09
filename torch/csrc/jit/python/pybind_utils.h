@@ -1219,7 +1219,7 @@ inline py::object _get_operation_for_overload_or_packet(
       if (overload_name == "") {
         self_func = self_func.attr("default");
       } else {
-        self_func.attr(overload_name.c_str());
+        self_func = self_func.attr(overload_name.c_str());
       }
     }
     std::string module_name("torch.ops");
