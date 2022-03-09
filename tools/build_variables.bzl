@@ -11,6 +11,8 @@
 
 # In both open-source and fbcode builds, these are generated into
 # torch/csrc/{autograd,jit}/generated.i
+
+# Foo
 GENERATED_CPP = [
     "autograd/generated/Functions.cpp",
     "autograd/generated/VariableType_0.cpp",
