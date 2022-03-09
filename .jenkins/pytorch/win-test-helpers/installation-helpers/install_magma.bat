@@ -1,3 +1,8 @@
+if "%CUDA_VERSION%" == "cpu" (
+  echo skip magma installation for cpu builds
+  exit /b 0
+)
+
 rem remove dot in cuda_version, fox example 11.1 to 111
 
 if not "%USE_CUDA%"=="1" (
@@ -23,6 +28,10 @@ if "%REBUILD%"=="" (
   ) else (
     aws s3 cp s3://ossci-windows/magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z --quiet
   )
+  if errorlevel 1 exit /b
+  if not errorlevel 0 exit /b
   7z x -aoa %TMP_DIR_WIN%\magma_2.5.4_%CUDA_SUFFIX%_%BUILD_TYPE%.7z -o%TMP_DIR_WIN%\magma
+  if errorlevel 1 exit /b
+  if not errorlevel 0 exit /b
 )
 set MAGMA_HOME=%TMP_DIR_WIN%\magma

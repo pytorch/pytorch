@@ -1,5 +1,7 @@
 #include <c10/core/DispatchKey.h>
 
+#include <unordered_map>
+
 namespace c10 {
 
 const char* toString(DispatchKey t) {
@@ -65,6 +67,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Python:
       return "Python";
+    case DispatchKey::PythonTLSSnapshot:
+      return "PythonTLSSnapshot";
 
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
@@ -109,16 +113,27 @@ const char* toString(DispatchKey t) {
       return "AutogradPrivateUse3";
     case DispatchKey::AutogradOther:
       return "AutogradOther";
+
+    case DispatchKey::ZeroTensor:
+      return "ZeroTensor";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Named:
       return "Named";
 
+    case DispatchKey::Functionalize:
+      return "Functionalize";
+
     case DispatchKey::Tracer:
       return "Tracer";
 
+    // Note: AutocastCUDA and Autocast are the same, currently.
+    // See comments in DispatchKey.h
     case DispatchKey::Autocast:
       return "Autocast";
+
+    case DispatchKey::AutocastCPU:
+      return "AutocastCPU";
 
     case DispatchKey::Batched:
       return "Batched";
@@ -144,8 +159,6 @@ const char* toString(DispatchKey t) {
     // https://github.com/zou3519/functorch
     // We plan on eventually upstreaming the prototype into core, at which
     // point it will have a different design that should use fewer keys.
-    case DispatchKey::FuncTorchPython:
-      return "FuncTorchPython";
     case DispatchKey::FuncTorchDynamicLayerBackMode:
       return "FuncTorchDynamicLayerBackMode";
     case DispatchKey::FuncTorchDynamicLayerFrontMode:
@@ -200,6 +213,85 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
     default:
       return DispatchKey::AutogradOther;
   }
+}
+
+c10::DispatchKey parseDispatchKey(const std::string& k) {
+  static std::unordered_map<std::string, c10::DispatchKey> key_map = {
+      {"Undefined", c10::DispatchKey::Undefined},
+      {"CPU", c10::DispatchKey::CPU},
+      {"CUDA", c10::DispatchKey::CUDA},
+      {"HIP", c10::DispatchKey::HIP},
+      {"FPGA", c10::DispatchKey::FPGA},
+      {"ORT", c10::DispatchKey::ORT},
+      {"XLA", c10::DispatchKey::XLA},
+      {"MLC", c10::DispatchKey::MLC},
+      {"Vulkan", c10::DispatchKey::Vulkan},
+      {"Metal", c10::DispatchKey::Metal},
+      {"XPU", c10::DispatchKey::XPU},
+      {"HPU", c10::DispatchKey::HPU},
+      {"VE", c10::DispatchKey::VE},
+      {"Lazy", c10::DispatchKey::Lazy},
+      {"Meta", c10::DispatchKey::Meta},
+      {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
+      {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
+      {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
+      {"CustomRNGKeyId", c10::DispatchKey::CustomRNGKeyId},
+      {"MkldnnCPU", c10::DispatchKey::MkldnnCPU},
+      {"SparseCPU", c10::DispatchKey::SparseCPU},
+      {"SparseCUDA", c10::DispatchKey::SparseCUDA},
+      {"SparseHIP", c10::DispatchKey::SparseHIP},
+      {"SparseXPU", c10::DispatchKey::SparseXPU},
+      {"SparseVE", c10::DispatchKey::SparseVE},
+      {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
+      {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
+      {"NestedTensor", c10::DispatchKey::NestedTensor},
+      {"PrivateUse1", c10::DispatchKey::PrivateUse1},
+      {"PrivateUse2", c10::DispatchKey::PrivateUse2},
+      {"PrivateUse3", c10::DispatchKey::PrivateUse3},
+      {"BackendSelect", c10::DispatchKey::BackendSelect},
+      {"Python", c10::DispatchKey::Python},
+      {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},
+      {"Named", c10::DispatchKey::Named},
+      {"Conjugate", c10::DispatchKey::Conjugate},
+      {"Negative", c10::DispatchKey::Negative},
+      {"ZeroTensor", c10::DispatchKey::ZeroTensor},
+      {"FuncTorchDynamicLayerBackMode",
+       c10::DispatchKey::FuncTorchDynamicLayerBackMode},
+      {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
+      {"AutogradOther", c10::DispatchKey::AutogradOther},
+      {"AutogradCPU", c10::DispatchKey::AutogradCPU},
+      {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
+      {"AutogradXLA", c10::DispatchKey::AutogradXLA},
+      {"AutogradLazy", c10::DispatchKey::AutogradLazy},
+      {"AutogradXPU", c10::DispatchKey::AutogradXPU},
+      {"AutogradMLC", c10::DispatchKey::AutogradMLC},
+      {"AutogradHPU", c10::DispatchKey::AutogradHPU},
+      {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
+      {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
+      {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
+      {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
+      {"Tracer", c10::DispatchKey::Tracer},
+      {"AutocastCPU", c10::DispatchKey::AutocastCPU},
+      {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
+      {"FuncTorchBatched", c10::DispatchKey::FuncTorchBatched},
+      {"FuncTorchVmapMode", c10::DispatchKey::FuncTorchVmapMode},
+      {"Batched", c10::DispatchKey::Batched},
+      {"VmapMode", c10::DispatchKey::VmapMode},
+      {"FuncTorchGradWrapper", c10::DispatchKey::FuncTorchGradWrapper},
+      {"FuncTorchDynamicLayerFrontMode",
+       c10::DispatchKey::FuncTorchDynamicLayerFrontMode},
+      {"TESTING_ONLY_GenericWrapper",
+       c10::DispatchKey::TESTING_ONLY_GenericWrapper},
+      {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
+      {"Autograd", c10::DispatchKey::Autograd},
+      {"CompositeImplicitAutograd",
+       c10::DispatchKey::CompositeImplicitAutograd},
+      {"CompositeExplicitAutograd",
+       c10::DispatchKey::CompositeExplicitAutograd},
+  };
+  auto it = key_map.find(k);
+  TORCH_CHECK(it != key_map.end(), "could not parse dispatch key: ", k);
+  return it->second;
 }
 
 } // namespace c10

@@ -30,7 +30,8 @@ static PyObject* recursive_to_list(
 }
 
 PyObject* tensor_to_list(const Tensor& tensor) {
-  Tensor data = tensor;
+  TORCH_CHECK(!tensor.unsafeGetTensorImpl()->is_python_dispatch(), ".tolist() is not supported for tensor subclasses.");
+  Tensor data = tensor.resolve_conj().resolve_neg();
   if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);

@@ -127,10 +127,12 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # OrderedDict(), if you pass a None you'll run afoul #12219.
 
 
+# TODO: Once we decide to break serialization FC, `storage` no longer needs to
+# be a _TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage.device)
-    return t.set_(storage, storage_offset, size, stride)
+    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped().device)
+    return t.set_(storage._untyped(), storage_offset, size, stride)
 
 
 def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
@@ -158,8 +160,18 @@ _sparse_tensors_to_validate: List["torch.Tensor"] = []
 def _validate_loaded_sparse_tensors():
     try:
         for t in _sparse_tensors_to_validate:
-            torch._validate_sparse_coo_tensor_args(t._indices(), t._values(),
-                                                   t.size())
+            if t.is_sparse:
+                torch._validate_sparse_coo_tensor_args(t._indices(), t._values(),
+                                                       t.size())
+            elif t.is_sparse_csr:
+                # TODO: Validation currently involves an expensive traversal
+                # on CPU, which may include a device transfer.
+                torch._validate_sparse_csr_tensor_args(t.crow_indices(), t.col_indices(),
+                                                       t.values(), t.size())
+            else:
+                raise NotImplementedError(
+                    '_validate_loaded_sparse_tensors for layout `%s`' % (t.layout))
+
     finally:
         _sparse_tensors_to_validate.clear()
 
@@ -167,6 +179,15 @@ def _rebuild_sparse_tensor(layout, data):
     if layout == torch.sparse_coo:
         indices, values, size = data
         result = torch._sparse_coo_tensor_unsafe(indices, values, size)
+        _sparse_tensors_to_validate.append(result)
+        return result
+
+    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
+
+def _rebuild_sparse_csr_tensor(layout, data):
+    if layout == torch.sparse_csr:
+        crow_indices, col_indices, values, size = data
+        result = torch._sparse_csr_tensor_unsafe(crow_indices, col_indices, values, size)
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -188,6 +209,14 @@ def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
     return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
 
 
+def _rebuild_wrapper_subclass(cls, dtype, size, stride, storage_offset, layout, device, requires_grad):
+    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        cls, size, strides=stride, storage_offset=storage_offset, layout=layout,
+        device=device, requires_grad=requires_grad)
+
+
+# TODO: Once we decide to break serialization FC, `storage` no longer needs to
+# be a _TypedStorage
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
@@ -522,3 +551,34 @@ def _handle_complex(tensor):
     """
     return torch.view_as_real(tensor) if not isinstance(tensor,
                                                         torch.nn.UninitializedParameter) and tensor.is_complex() else tensor
+
+def _element_size(dtype):
+    """
+    Returns the element size for a dtype, in bytes
+    """
+    if not isinstance(dtype, torch.dtype):
+        raise RuntimeError(f'expected torch.dtype, but got {type(dtype)}')
+
+    if dtype.is_complex:
+        return torch.finfo(dtype).bits >> 2
+    elif dtype.is_floating_point:
+        return torch.finfo(dtype).bits >> 3
+    elif dtype == torch.bool:
+        # NOTE: torch.bool is not supported in torch.iinfo()
+        return 1
+    else:
+        return torch.iinfo(dtype).bits >> 3
+
+class _ClassPropertyDescriptor:
+    def __init__(self, fget, fset=None):
+        self.fget = fget
+
+    def __get__(self, instance, owner=None):
+        if owner is None:
+            owner = type(instance)
+        return self.fget.__get__(instance, owner)()
+
+def classproperty(func):
+    if not isinstance(func, (classmethod, staticmethod)):
+        func = classmethod(func)
+    return _ClassPropertyDescriptor(func)

@@ -1,73 +1,196 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 
 #include <ATen/core/jit_type.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
+const c10::DeviceIndex INVALID_INDEX = -2;
+
 namespace {
+
+bool hasNonElementWiseOperation(const Node* node) {
+  if (node->kind() == prim::CudaFusionGroup) {
+    for (auto n : node->g(attr::Subgraph)->nodes()) {
+      if (hasNonElementWiseOperation(n)) {
+        return true;
+      }
+    }
+  } else {
+    // prim::Constant is not parsible, but it is also not nonElementWise
+    if (node->kind() != prim::Constant && !isElementWiseNode(node)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Check all outputs are:
 //   1. TensorType
 //   2. on the same device;
 // TODO: update this when codegen can output scalar
 static c10::optional<c10::Device> getDevice(const Value* value) {
-  if (!value->type()->isSubtypeOf(TensorType::get())) {
+  if (!value->type()->isSubtypeOf(*TensorType::get())) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
-  return value->type()->expectRef<TensorType>().device();
+  auto tensor_type = value->type()->expectRef<TensorType>();
+  // special case for scalar tensor: return c10::nullopt instead of cpu device.
+  // this allows us to fuse scalar cpu tensor with cuda tensor, while avoid
+  // merging ops with pure scalar cpu tensors.
+  if (is_cpu_scalar(tensor_type)) {
+    return c10::nullopt;
+  }
+  return tensor_type.device();
 }
 
 static c10::optional<c10::Device> getDevice(const Node* node) {
-  auto outputs = node->outputs();
-  for (auto output : outputs) {
-    auto device = getDevice(output);
+  c10::optional<c10::Device> ret = c10::nullopt;
+  auto merge_devices = [&ret](const c10::optional<c10::Device>& device) {
     if (device.has_value()) {
-      return device;
+      if (ret.has_value()) {
+        if (ret.value() != device.value()) {
+          // invalidate device to reflect conflicts
+          ret->set_index(INVALID_INDEX);
+          // return false to indicate early termination
+          return false;
+        } else {
+          // same device, do nothing
+          return true;
+        }
+      } else {
+        // initialize return device
+        ret = device.value();
+        return true;
+      }
+    }
+    // no device information, do nothing
+    return true;
+  };
+  for (auto val : node->inputs()) {
+    if (!merge_devices(getDevice(val))) {
+      return ret;
     }
   }
-  return c10::nullopt;
+  for (auto val : node->outputs()) {
+    if (!merge_devices(getDevice(val))) {
+      return ret;
+    }
+  }
+  return ret;
 }
 
-static bool isFusableDevice(const Node* node, const c10::Device device) {
-  for (auto value : node->outputs()) {
-    auto output_device = getDevice(value);
-    if (output_device.has_value() && output_device.value() != device) {
+static bool isFusibleDevice(const Node* node, const c10::Device device) {
+  TORCH_INTERNAL_ASSERT(
+      device.index() != INVALID_INDEX, "fusible device needs to be validate");
+  auto opt_device = getDevice(node);
+  // we can be more relaxed here as we known that this function tries to merge
+  // node into an existing `device`
+  if (opt_device.has_value() &&
+      (opt_device->index() == INVALID_INDEX || opt_device != device)) {
+    return false;
+  }
+  return true;
+}
+
+// TODO: we need to check input type when we handle `to()`
+static bool isFusibleDevice(const Node* node) {
+  auto device = getDevice(node);
+  // be conservative and only fuse cuda operations, this avoids us initializing
+  // operations that produces cpu scalar outputs
+  if (!device.has_value()) {
+    return false;
+  }
+  return device->index() != INVALID_INDEX && device->is_cuda() &&
+      (at::cuda::getDeviceProperties(device->index())->major >= 7 ||
+       !hasNonElementWiseOperation(node));
+}
+
+bool compatibleType(const torch::jit::Value* val) {
+  if (auto tensor_type = val->type()->cast<c10::TensorType>()) {
+    if (tensor_type->scalarType().has_value()) {
+      if (aten_to_data_type(tensor_type->scalarType().value()) ==
+          DataType::Null) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool checkInputTensorTypes(const Node* node) {
+  for (const auto i : c10::irange(node->inputs().size())) {
+    const auto& val = node->inputs()[i];
+    if (!compatibleType(val)) {
+      // special case on aten::_batch_norm_impl_index_backward, the 11th output
+      // is going to be discarded, so no need to check data type there.
+      if (node->kind() ==
+              c10::Symbol::fromQualString(
+                  "aten::_batch_norm_impl_index_backward") &&
+          i == 11) {
+        continue;
+      }
       return false;
     }
   }
   return true;
 }
 
-// TODO: we need to check input type when we handle `to()`
-static bool isFusableDevice(const Node* node) {
-  auto device = getDevice(node);
-  if (!device.has_value()) {
-    return true;
+bool checkOutputTensorTypes(const Node* node) {
+  for (const auto i : c10::irange(node->outputs().size())) {
+    const auto& val = node->outputs()[i];
+    if (!compatibleType(val)) {
+      // special case on aten::_batch_norm_impl_index, the 4th output
+      // is going to be discarded, so no need to check data type there.
+      if (node->kind() ==
+              c10::Symbol::fromQualString("aten::_batch_norm_impl_index") &&
+          i == 3) {
+        continue;
+      }
+      return false;
+    }
   }
-  return device->is_cuda();
+  return true;
 }
 
-inline bool isFusableNode(const Node* node) {
-  // checks if node is compatible with parser:
-  // 1. if we have a parsing rule; or 2. if the node is already a fusion group.
-  return (isNodeParsible(node) || node->kind() == prim::CudaFusionGroup);
+inline bool isFusibleNode(const Node* node) {
+  if (node->kind() == prim::CudaFusionGroup)
+    return true;
+  // Check we have a parsing rule
+  bool isFusible = isNodeParsible(node);
+  // Check if we have a tensor type it's one we support
+  isFusible = isFusible && checkInputTensorTypes(node);
+  isFusible = isFusible && checkOutputTensorTypes(node);
+  // Check if already part of a fusion group
+  return isFusible;
 }
 
-bool hasReductionOperation(const Node* node) {
-  if (isReductionNode(node)) {
-    return true;
-  }
-  if (node->kind() == prim::CudaFusionGroup) {
-    for (auto n : node->g(attr::Subgraph)->nodes()) {
-      if (hasReductionOperation(n)) {
-        return true;
+bool maybeBroadcast(
+    const TensorTypePtr& type,
+    const std::vector<c10::optional<int64_t>>& shape) {
+  if (type->dim()) {
+    if (type->dim().value() < shape.size()) {
+      // no broadcast for reduction operation;
+      return false;
+    } else if (type->dim().value() > shape.size()) {
+      // increased rank means there is reduction;
+      return true;
+    } else {
+      // same rank, we need to iterate through sizes and check if size-1
+      // exists in input `shape`
+      for (const auto& opt_size : shape) {
+        // TODO: not sure if we need to check for output size != 1, since we
+        // are currently marking all size-1 dimension as broadcast in codegen.
+        if (opt_size.has_value() && opt_size.value() == 1) {
+          return true;
+        }
       }
     }
   }
@@ -85,33 +208,44 @@ bool hasReductionOperation(const Node* node) {
 bool maybeBroadcastOnShape(
     const Node* n,
     const std::vector<c10::optional<int64_t>>& shape) {
-  TORCH_INTERNAL_ASSERT(
-      n->outputs().size() == 1,
-      "not expecting multiple outputs from a node, graph partitioning logic needs to be updated");
+  // TODO: we are only checking output 0. This means that our current check for
+  // normalization is not complete.
   // assumes that if output is not a tensor type, it's not broadcasting
   if (auto out_type = n->output(0)->type()->cast<TensorType>()) {
-    if (out_type->dim()) {
-      if (out_type->dim().value() < shape.size()) {
-        // no broadcast for reduction operation;
-        return false;
-      } else if (out_type->dim().value() > shape.size()) {
-        // increased rank means there is reduction;
-        return true;
-      } else {
-        // same rank, we need to iterate through sizes and check if size-1
-        // exists in input `shape`
-        for (const auto& opt_size : shape) {
-          // TODO: not sure if we need to check for output size != 1, since we
-          // are currently marking all size-1 dimension as broadcast in codegen.
-          if (opt_size.has_value() && opt_size.value() == 1) {
-            return true;
+    return maybeBroadcast(out_type, shape);
+  }
+  return false;
+};
+
+// return true if node is pointwise operation and input tensors all have
+// identical shape.
+bool isNonBroadcastElementWise(const Node* n) {
+  if (hasNonElementWiseOperation(n)) {
+    return false;
+  }
+
+  for (const auto output : n->outputs()) {
+    const auto& n_output_type = output->type()->cast<TensorType>();
+
+    // TODO: we need to stay on safer side instead of "default to return true
+    // when shape information is not available.", Change that when we enable
+    // profiling on autodiff FW execution.
+    if (n_output_type != nullptr && n_output_type->sizes().sizes()) {
+      const std::vector<c10::optional<int64_t>>& n_output_shape =
+          n_output_type->sizes().sizes().value();
+
+      for (auto input : n->inputs()) {
+        if (auto t_type = input->type()->cast<TensorType>()) {
+          if (maybeBroadcast(t_type, n_output_shape)) {
+            return false;
           }
         }
       }
     }
   }
-  return false;
-};
+
+  return true;
+}
 
 //! [ Note - tricky broadcasting ]
 //!
@@ -291,30 +425,30 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
 
 } // namespace
 
-bool isFusableCudaFusionGroup(const Node* node) {
-  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
+bool isFusibleCudaFusionGroup(const Node* node) {
+  FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
 
-  if (isFusableNode(node)) {
-    return isFusableDevice(node);
+  if (isFusibleNode(node)) {
+    auto ret = isFusibleDevice(node);
+    return ret;
   }
   return false;
 }
 
-bool isFusableCudaFusionGroup(const Node* fusion, const Node* node) {
-  FUSER_PERF_SCOPE("isFusableCudaFusionGroup");
-
+bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
+  FUSER_PERF_SCOPE("isFusibleCudaFusionGroup");
+  bool fused = false;
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
-  if (isFusableCudaFusionGroup(node) && !hasReductionOperation(node) &&
-      !createTrickyBroadcast(fusion, node)) {
+  if (isFusibleNode(node)) {
     // ensure if the node has a designated device, it's on the same device with
     // fusion.
     // TODO: is there a danger of us fusing operations that's supposed to be on
     //       separate GPUs? And is that necessarily bad?
     auto device = getDevice(fusion);
-    return (!device.has_value() || isFusableDevice(node, device.value()));
+    fused = (!device.has_value() || isFusibleDevice(node, device.value()));
   }
-  return false;
+  return fused;
 }
 
 } // namespace cuda

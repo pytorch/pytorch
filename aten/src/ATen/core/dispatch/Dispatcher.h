@@ -252,6 +252,13 @@ public:
    */
   std::vector<OperatorHandle> findDanglingImpls() const;
 
+  /**
+   * Useful for inspecting global Dispatcher registration state.
+   * Returns the names of all operators with a kernel registered for the specified DispatchKey.
+   * If no DispatchKey is specified, it returns all registered operators.
+   */
+  std::vector<OperatorName> getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const;
+
 private:
   Dispatcher();
 
@@ -276,7 +283,11 @@ private:
   void checkSchemaCompatibility(const OperatorHandle& op, const FunctionSchema& schema, const std::string& debug);
 
   std::list<OperatorDef> operators_;
+#if !defined(C10_MOBILE)
   LeftRight<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+#else
+  RWSafeLeftRightWrapper<ska::flat_hash_map<OperatorName, OperatorHandle>> operatorLookupTable_;
+#endif
   // Map from namespace to debug string (saying, e.g., where the library was defined)
   ska::flat_hash_map<std::string, std::string> libraries_;
 
@@ -297,6 +308,7 @@ public:
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
+  ~OperatorHandle();
 
   const OperatorName& operator_name() const {
     return operatorDef_->op.operator_name();
@@ -317,6 +329,11 @@ public:
   std::string dumpState() const {
     return operatorDef_->op.dumpState();
   }
+
+  bool hasKernelForDispatchKey(DispatchKey k) const {
+    return operatorDef_->op.hasKernelForDispatchKey(k);
+  }
+
 
   std::string dumpComputedTable() const {
     return operatorDef_->op.dumpComputedTable();

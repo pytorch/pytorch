@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/Config.h>
-#include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
+#include <functional>
 
 namespace at {
 
@@ -144,19 +144,17 @@ void launch_no_thread_state(std::function<void()> fn);
 // Launches intra-op parallel task
 TORCH_API void intraop_launch(std::function<void()> func);
 
-// Launches intra-op parallel task, returns a future
-TORCH_API c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    std::function<void()> func);
-
 // Returns number of intra-op threads used by default
 TORCH_API int intraop_default_num_threads();
 
 } // namespace at
 
 #if AT_PARALLEL_OPENMP
-#include <ATen/ParallelOpenMP.h>
+#include <ATen/ParallelOpenMP.h> // IWYU pragma: keep
 #elif AT_PARALLEL_NATIVE
-#include <ATen/ParallelNative.h>
+#include <ATen/ParallelNative.h> // IWYU pragma: keep
 #elif AT_PARALLEL_NATIVE_TBB
-#include <ATen/ParallelNativeTBB.h>
+#include <ATen/ParallelNativeTBB.h> // IWYU pragma: keep
 #endif
+
+#include <ATen/Parallel-inl.h> // IWYU pragma: keep

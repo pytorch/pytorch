@@ -1,5 +1,10 @@
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/mkl/LinearAlgebra.h>
 #include <ATen/Config.h>
+
+#include <c10/util/SmallBuffer.h>
+#include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 
 #include <climits>
 
@@ -8,6 +13,14 @@ extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, doubl
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
+#ifdef BLAS_HAS_SBGEMM
+extern "C" void sbgemm_(char *transa, char *transb, int *m, int *n, int *k,
+                float *alpha,
+                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int *lda,
+                const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int *ldb,
+                float *beta,
+                float *c, int *ldc);
+#endif  // BLAS_HAS_SBGEMM
 #endif  // AT_BUILD_WITH_BLAS()
 
 #if AT_BUILD_WITH_BLAS()
@@ -62,7 +75,7 @@ namespace {
 bool use_blas_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
-    int64_t &lda, int64_t &ldb, int64_t &ldc) {
+    int64_t lda, int64_t ldb, int64_t ldc) {
   const bool transa_ = transa != TransposeType::NoTranspose;
   const bool transb_ = transb != TransposeType::NoTranspose;
   return (
@@ -209,6 +222,41 @@ void gemm(
 }
 
 void gemm(
+   TransposeType transa, TransposeType transb,
+   int64_t m, int64_t n, int64_t k,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) alpha,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *a, int64_t lda,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *b, int64_t ldb,
+   const decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) beta,
+   decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t) *c, int64_t ldc) {
+   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+#if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
+   if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+      int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
+      char transa_ = to_blas(transa), transb_ = to_blas(transb);
+      // alpha and beta and C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
+      float alpha_ = (float) alpha, beta_ = (float) beta;
+      int c_size = n_ * ldc_;
+      std::vector<float> float_v(c, c + c_size);
+      sbgemm_(&transa_, &transb_,
+              &m_, &n_, &k_,
+              &alpha_,
+              a, &lda_,
+              b, &ldb_,
+              &beta_,
+              float_v.data(), &ldc_);
+      for (auto cv: float_v) {
+        *(c++) = static_cast<_bfloat16_t>(cv);
+      }
+      return;
+   }
+#endif
+   gemm_stub(
+      at::kCPU, at::kBFloat16,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     const int64_t alpha,
@@ -250,6 +298,154 @@ void gemm(
       kCPU, kLong,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
+
+template <typename scalar_t>
+static void gemm_batched_mkl_impl(
+      TransposeType transa, TransposeType transb,
+      int64_t batch_size, int64_t m, int64_t n, int64_t k,
+      scalar_t alpha,
+      const scalar_t **a, int64_t lda,
+      const scalar_t **b, int64_t ldb,
+      scalar_t beta,
+      scalar_t **c, int64_t ldc) {
+  for (int64_t i = 0; i < batch_size;) {
+    int sub_batch = std::min(batch_size - i, int64_t{INT_MAX});
+    mkl_gemm_batched(transa, transb, sub_batch, m, n, k, alpha,
+                     &a[i], lda, &b[i], ldb, beta, &c[i], ldc);
+    i += sub_batch;
+  }
+}
+
+template <typename scalar_t>
+using is_blas_library_type = std::integral_constant<bool,
+    std::is_same<scalar_t, double>::value ||
+    std::is_same<scalar_t, float>::value ||
+    std::is_same<scalar_t, c10::complex<double>>::value ||
+    std::is_same<scalar_t, c10::complex<float>>::value>;
+
+template <typename scalar_t>
+void gemm_batched_generic(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t **a, int64_t lda,
+    const scalar_t **b, int64_t ldb,
+    scalar_t beta,
+    scalar_t **c, int64_t ldc) {
+  for (const auto batch : c10::irange(batch_size)) {
+    gemm(transa, transb, m, n, k, alpha, a[batch], lda, b[batch], ldb, beta, c[batch], ldc);
+  }
+}
+
+template <typename scalar_t>
+void gemm_batched(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t **a, int64_t lda,
+    const scalar_t **b, int64_t ldb,
+    scalar_t beta,
+    scalar_t **c, int64_t ldc) {
+  if (batch_size == 1) {
+    return gemm(transa, transb, m, n, k, alpha, a[0], lda, b[0], ldb, beta, c[0], ldc);
+  }
+
+  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
+      [&](auto _) {
+        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+          gemm_batched_mkl_impl(
+              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+        } else {
+          gemm_batched_generic(
+              transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+        }
+      },
+      [&](auto _) {
+        gemm_batched_generic(
+            transa, transb, batch_size, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+      }
+    );
+}
+
+template <typename scalar_t>
+void gemm_batched_with_stride_generic(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t *a, int64_t lda, int64_t batch_stride_a,
+    const scalar_t *b, int64_t ldb, int64_t batch_stride_b,
+    scalar_t beta,
+    scalar_t *c, int64_t ldc, int64_t batch_stride_c) {
+  for (const auto batch : c10::irange(batch_size)) {
+    const auto a_batch = a + batch_stride_a * batch;
+    const auto b_batch = b + batch_stride_b * batch;
+    const auto c_batch = c + batch_stride_c * batch;
+    gemm(transa, transb, m, n, k, alpha, a_batch, lda, b_batch, ldb, beta, c_batch, ldc);
+  }
+}
+
+template <typename scalar_t>
+void gemm_batched_with_stride(
+    TransposeType transa, TransposeType transb,
+    int64_t batch_size, int64_t m, int64_t n, int64_t k,
+    scalar_t alpha,
+    const scalar_t *a, int64_t lda, int64_t batch_stride_a,
+    const scalar_t *b, int64_t ldb, int64_t batch_stride_b,
+    scalar_t beta,
+    scalar_t *c, int64_t ldc, int64_t batch_stride_c) {
+  if (batch_size == 1) {
+    return gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+  }
+
+  c10::guts::if_constexpr<AT_MKL_ENABLED() && is_blas_library_type<scalar_t>::value>(
+      [&](auto _) {
+        internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+        if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
+          c10::SmallBuffer<const scalar_t*, 16> a_ptrs(batch_size);
+          c10::SmallBuffer<const scalar_t*, 16> b_ptrs(batch_size);
+          c10::SmallBuffer<scalar_t*, 16> c_ptrs(batch_size);
+
+          for (const auto batch : c10::irange(batch_size)) {
+            a_ptrs[batch] = a + batch_stride_a * batch;
+            b_ptrs[batch] = b + batch_stride_b * batch;
+            c_ptrs[batch] = c + batch_stride_c * batch;
+          }
+          gemm_batched_mkl_impl(
+              transa, transb, batch_size, m, n, k, alpha, a_ptrs.data(), lda,
+              b_ptrs.data(), ldb, beta, c_ptrs.data(), ldc);
+        } else {
+          gemm_batched_with_stride_generic(
+              transa, transb, batch_size, m, n, k, alpha, a, lda, batch_stride_a,
+              b, ldb, batch_stride_b, beta, c, ldc, batch_stride_c);
+        }
+      },
+      [&](auto _) {
+        gemm_batched_with_stride_generic(transa, transb, batch_size, m, n, k, alpha,
+                                         a, lda, batch_stride_a, b, ldb, batch_stride_b,
+                                         beta, c, ldc, batch_stride_c);
+      });
+}
+
+#define INSTANTIATE_BATCHED_GEMM(scalar_t, DType)               \
+  template void gemm_batched(                                   \
+      TransposeType transa, TransposeType transb,               \
+      int64_t batch_size, int64_t m, int64_t n, int64_t k,      \
+      scalar_t alpha,                                           \
+      const scalar_t **a, int64_t lda,                          \
+      const scalar_t **b, int64_t ldb,                          \
+      scalar_t beta,                                            \
+      scalar_t **c, int64_t ldc);                               \
+  template void gemm_batched_with_stride(                       \
+      TransposeType transa, TransposeType transb,               \
+      int64_t batch_size, int64_t m, int64_t n, int64_t k,      \
+      scalar_t alpha,                                           \
+      const scalar_t *a, int64_t lda, int64_t batch_stride_a,   \
+      const scalar_t *b, int64_t ldb, int64_t batch_stride_b,   \
+      scalar_t beta,                                            \
+      scalar_t *c, int64_t ldc, int64_t batch_stride_c);
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(INSTANTIATE_BATCHED_GEMM)
 
 DEFINE_DISPATCH(axpy_stub);
 

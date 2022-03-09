@@ -1,4 +1,4 @@
-#include <ATen/Context.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/Exception.h>
 #include <ATen/cuda/Exceptions.h>
@@ -6,7 +6,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cusparse.h>
-#include <ATen/cuda/CUDASolver.h>
 
 // LIMITATION (cusparseSpMM):
 // The generic APIs are available on all platforms on CUDA 11.0

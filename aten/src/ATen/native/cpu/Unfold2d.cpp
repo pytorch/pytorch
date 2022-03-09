@@ -1,7 +1,10 @@
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/Unfold2d.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/irange.h>
 #include <cmath>
 
 namespace at {
@@ -46,7 +49,7 @@ static void unfolded2d_acc(
     int64_t output_height,
     int64_t output_width) {
   at::parallel_for(0, n_input_plane, 0, [&](int64_t start, int64_t end) {
-    for (auto nip = start; nip < end; nip++) {
+    for (const auto nip : c10::irange(start, end)) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t kw, kh, y, x;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -118,8 +121,9 @@ static void unfolded2d_acc(
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
 void unfolded2d_acc_kernel(
-    Tensor& finput,
-    Tensor& input,
+    ScalarType dtype,
+    void *finput_data,
+    void *input_data,
     int64_t kH,
     int64_t kW,
     int64_t dH,
@@ -136,13 +140,10 @@ void unfolded2d_acc_kernel(
   // output_width*dW does not overflow a int64_t
 
   AT_DISPATCH_FLOATING_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_acc", [&] {
-        scalar_t* finput_data = finput.data_ptr<scalar_t>();
-        scalar_t* input_data = input.data_ptr<scalar_t>();
-
+      at::ScalarType::BFloat16, dtype, "unfolded2d_acc", [&] {
         unfolded2d_acc(
-            finput_data,
-            input_data,
+            static_cast<scalar_t*>(finput_data),
+            static_cast<scalar_t*>(input_data),
             kH,
             kW,
             dH,
@@ -174,7 +175,7 @@ static void unfolded2d_copy(
     int64_t output_width) {
   at::parallel_for(
       0, (int64_t)n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
-        for (auto k = start; k < end; k++) {
+        for (const auto k : c10::irange(start, end)) {
           int64_t nip = k / (kH * kW);
           int64_t rest = k % (kH * kW);
           int64_t kh = rest / kW;
@@ -265,8 +266,9 @@ static void unfolded2d_copy(
 }
 
 void unfolded2d_copy_kernel(
-    Tensor& finput,
-    Tensor& input,
+    ScalarType dtype,
+    void *finput_data,
+    void *input_data,
     int64_t kH,
     int64_t kW,
     int64_t dH,
@@ -285,13 +287,10 @@ void unfolded2d_copy_kernel(
   // output_width*dW does not overflow a int64_t
 
   AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16, input.scalar_type(), "unfolded2d_copy", [&] {
-        scalar_t* input_data = input.data_ptr<scalar_t>();
-        scalar_t* finput_data = finput.data_ptr<scalar_t>();
-
+      at::ScalarType::BFloat16, dtype, "unfolded2d_copy", [&] {
         unfolded2d_copy(
-            input_data,
-            finput_data,
+            static_cast<scalar_t*>(input_data),
+            static_cast<scalar_t*>(finput_data),
             kH,
             kW,
             dH,

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 
 namespace torch {
@@ -345,14 +346,14 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
     return inputs;
   } else if (n->kind() == prim::ListUnpack || n->kind() == prim::TupleUnpack) {
     // only propagate dequantize for Tensor
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       return {n->input(0)};
     } else {
       return {};
     }
   } else if (
       n->kind() == prim::ListConstruct &&
-      v->type()->isSubtypeOf(ListType::ofTensors())) {
+      v->type()->isSubtypeOf(*ListType::ofTensors())) {
     std::vector<Value*> inputs;
     for (auto* v : n->inputs()) {
       inputs.push_back(v);
@@ -361,7 +362,7 @@ std::vector<Value*> getPassThroughInputs(Value* v) {
   } else if (n->kind() == prim::TupleConstruct) {
     std::vector<Value*> inputs;
     for (auto* input : n->inputs()) {
-      if (input->type()->isSubtypeOf(TensorType::get())) {
+      if (input->type()->isSubtypeOf(*TensorType::get())) {
         inputs.push_back(input);
       }
     }
@@ -533,9 +534,9 @@ bool useQuantizable(const Use& use, QuantType quant_type) {
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
   auto* func_node = n->input(0)->node();
   auto func = func_node->output()->type()->expectRef<FunctionType>().function();
-  TORCH_CHECK(
-      func->isGraphFunction(), "Quantization only works for graph function");
-  return func->graph();
+  auto graphFunc = tryToGraphFunction(*func);
+  TORCH_CHECK(graphFunc, "Quantization only works for graph function");
+  return graphFunc->graph();
 }
 
 // Block helper functions
@@ -560,8 +561,8 @@ bool alwaysRaisesException(Block* block) {
 // Check if a value in the graph is a Scalar value
 bool isScalar(Value* v) {
   auto iv = toIValue(v);
-  return v->type()->isSubtypeOf(NumberType::get()) ||
-      (v->type()->isSubtypeOf(TensorType::get()) && iv && iv->isTensor() &&
+  return v->type()->isSubtypeOf(*NumberType::get()) ||
+      (v->type()->isSubtypeOf(*TensorType::get()) && iv && iv->isTensor() &&
        iv->toTensor().dim() == 0);
 }
 
@@ -706,12 +707,6 @@ bool is_relu_module(
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
       match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
-}
-
-bool is_functional_linear(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  return is_functional(match, vmap, "linear", "linear");
 }
 
 bool is_linear_module(

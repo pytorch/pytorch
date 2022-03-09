@@ -297,14 +297,14 @@ Tensor& div__Tensor(Tensor& input1, const Tensor& input2) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("add.Tensor", TORCH_FN(add_Tensor));
-  m.impl("add_.Tensor", TORCH_FN(add__Tensor));
-  m.impl("mul.Tensor", TORCH_FN(mul_Tensor));
-  m.impl("mul_.Tensor", TORCH_FN(mul__Tensor));
-  m.impl("sub.Tensor", TORCH_FN(sub_Tensor));
-  m.impl("sub_.Tensor", TORCH_FN(sub__Tensor));
-  m.impl("div.Tensor", TORCH_FN(div_Tensor));
-  m.impl("div_.Tensor", TORCH_FN(div__Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Tensor"), TORCH_FN(add_Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Tensor"), TORCH_FN(add__Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Tensor"), TORCH_FN(mul_Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Tensor"), TORCH_FN(mul__Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Tensor"), TORCH_FN(sub_Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Tensor"), TORCH_FN(sub__Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Tensor"), TORCH_FN(div_Tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Tensor"), TORCH_FN(div__Tensor));
 };
 
 }

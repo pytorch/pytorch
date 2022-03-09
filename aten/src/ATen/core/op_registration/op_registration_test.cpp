@@ -18,6 +18,8 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 
+#include <algorithm>
+
 using c10::RegisterOperators;
 using c10::OperatorKernel;
 using c10::OperatorHandle;
@@ -668,6 +670,17 @@ TEST(OperatorRegistrationTest, whenRegisterWithLazyKernelAndCatchAll_AutogradLaz
   whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey::Lazy);
 }
 
+TEST(OperatorRegistrationTest, whenregisteringwithinvalidoverloadname) {
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy.default", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "default is not a legal overload name for aten operators");
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy.__name__", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "__name__ is not a legal overload name for aten operators");
+}
+
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
@@ -1239,6 +1252,16 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     makeDeeplyNestedObject(), [] (const DeeplyNestedType& v) {EXPECT_EQ("1", v.get(0).at("key").get(0).value().at(1));},
     makeDeeplyNestedObject(), [] (const IValue& v) {EXPECT_EQ("1", v.to<DeeplyNestedType>().get(0).at("key").get(0).value().at(1));},
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
+}
+
+TEST(NewOperatorRegistrationTest, erroroutwithinvalidoverloadname) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  expectThrows<c10::Error>([&] {
+   m.def("dummy.default(Tensor self) -> Tensor");
+  }, "default is not a legal overload name for aten operators");
+  expectThrows<c10::Error>([&] {
+   m.def("dummy.__name__(Tensor self) -> Tensor");
+  }, "__name__ is not a legal overload name for aten operators");
 }
 
 TEST(NewOperatorRegistrationTest, testBasics) {
@@ -2099,6 +2122,23 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_mixedCall
   EXPECT_TRUE(called_kernel_tracing);
   EXPECT_TRUE(called_kernel_autograd);
   EXPECT_TRUE(called_kernel_cpu);
+}
+
+TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
+  // should return every registered op
+  auto all_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(c10::nullopt);
+  // should return every registered op with a cpu kernel
+  auto cpu_ops = Dispatcher::singleton().getRegistrationsForDispatchKey(c10::DispatchKey::CPU);
+  ASSERT_TRUE(all_ops.size() > 0);
+  ASSERT_TRUE(cpu_ops.size() > 0);
+
+  auto cmp_lambda = [](const c10::OperatorName a, const c10::OperatorName& b) -> bool {
+      return c10::toString(a) < c10::toString(b);
+  };
+
+  std::sort(all_ops.begin(), all_ops.end(), cmp_lambda);
+  std::sort(cpu_ops.begin(), cpu_ops.end(), cmp_lambda);
+  ASSERT_TRUE(std::includes(all_ops.begin(), all_ops.end(), cpu_ops.begin(), cpu_ops.end(), cmp_lambda));
 }
 
 }

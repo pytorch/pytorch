@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
@@ -12,95 +14,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-
-ComputeAtData::ComputeAtData(TensorView* tv)
-    : tv_ref_(tv),
-      original_has_compute_at_(tv->hasComputeAt()),
-      original_compute_at_position(tv->getThisComputeAtAxis()),
-      original_domain_(tv->domain()),
-      new_compute_at_domain_(tv->domain()) {}
-
-// Clear pass based data
-void ComputeAtData::clearPass() {
-  // If the last pass set a position, update the new_compute_at_position if
-  // latest position would be greater than previously set.
-  if (current_traversal_position_set &&
-      current_traversal_position > new_compute_at_position) {
-    new_compute_at_position = current_traversal_position;
-  }
-
-  current_traversal_position_set = false;
-  current_traversal_position = 0;
-}
-
-void ComputeAtData::setPassPosition(unsigned int pos) {
-  if (current_traversal_position_set) {
-    // A single traversal cannot try to enforce more than one position on a
-    // TensorView as it would produce in incorrect code. If this is hit, then
-    // the given tensor and its production should be duplicated.
-    TORCH_CHECK(
-        pos == current_traversal_position,
-        "Error during computeAt. ComputeAt pass wanted to set position of ",
-        tv_ref_,
-        " at position ",
-        pos,
-        " but was already set to position ",
-        current_traversal_position,
-        ". This tensor would have to be recomputed to satsify the selected computeAt position.");
-  }
-
-  current_traversal_position = pos;
-  touched_ = true;
-  current_traversal_position_set = true;
-}
-
-unsigned int ComputeAtData::getNewPosition() const {
-  // If the last pass set a position, return the latest position if
-  // it would be greater than previously set.
-  if (current_traversal_position_set &&
-      current_traversal_position > new_compute_at_position) {
-    return current_traversal_position;
-  } else {
-    return new_compute_at_position;
-  }
-}
-
-void ComputeAtData::validateNewComputeAt() const {
-  FUSER_PERF_SCOPE("validateNewComputeAt");
-
-  TORCH_INTERNAL_ASSERT(
-      getNewPosition() >= original_compute_at_position,
-      "Invalid computeAt detected. This computeAt would invalidate the set computeAt on ",
-      tv_ref_,
-      " as the new computeAt position was found to be ",
-      getNewPosition(),
-      ".");
-  auto mismatch = BestEffortReplay::findFirstMismatchedID(
-      tv_ref_->domain(), original_domain_);
-  TORCH_CHECK(
-      mismatch >= (int)original_compute_at_position,
-      "Invalid computeAt detected. This computeAt call would invalidate the set computeAt on ",
-      tv_ref_,
-      " as the previous set computeAt was on the domain ",
-      original_domain_,
-      " with a computeAt position of ",
-      original_compute_at_position,
-      ".");
-}
-
-void ComputeAtData::setComputeAtDomain(TensorDomain* td) {
-  if (new_compute_at_domain_ != original_domain_) {
-    TORCH_INTERNAL_ASSERT(
-        *new_compute_at_domain_ == *td,
-        "TensorDomain, ",
-        td,
-        ", does not match with the previously set domain of ",
-        tv_ref_,
-        ", which is ",
-        new_compute_at_domain_);
-  }
-  new_compute_at_domain_ = td;
-}
 
 namespace {
 
@@ -117,38 +30,262 @@ std::set<T> set_intersection(const std::set<T>& set1, const std::set<T>& set2) {
   return intersection;
 }
 
-// convert an iterable of Val* to be an iterable of TensorView*
-template <typename T1, typename T2>
-T1 tvIterable(const T2& val_iterable) {
-  T1 tv_iterable = T1();
-  std::transform(
-      val_iterable.begin(),
-      val_iterable.end(),
-      std::back_inserter(tv_iterable),
-      [](Val* v) {
-        TORCH_INTERNAL_ASSERT(
-            v->getValType().value() == ValType::TensorView,
-            "When following the computeAt dependency chain, a non TensorView value was found.");
-        return v->as<TensorView>();
-      });
-  return tv_iterable;
-}
-
 std::deque<std::deque<TensorView*>> tvChains(
     std::deque<std::deque<Val*>> val_chains) {
   std::deque<std::deque<TensorView*>> tv_chains(val_chains.size());
   for (const auto i : c10::irange(val_chains.size())) {
-    tv_chains[i] = tvIterable<std::deque<TensorView*>>(val_chains[i]);
+    auto tv_iterable = ir_utils::filterByType<TensorView>(val_chains[i]);
+    tv_chains[i] =
+        std::deque<TensorView*>(tv_iterable.begin(), tv_iterable.end());
   }
   return tv_chains;
 }
 
-} // namespace
+bool validateDomain(TensorView* tv, TensorDomain* new_td) {
+  auto first_mismatch =
+      BestEffortReplay::findFirstMismatchedID(tv->domain(), new_td);
+  return first_mismatch >= (int)tv->getMaxProducerPosition() &&
+      first_mismatch >= (int)tv->getComputeAtPosition();
+}
 
-void ComputeAt::run(
+// Return the max position in consumer that producer can be inlined to
+// Cannot inline:
+//   Reduction dimensions in producer
+//   Block broadcast dimensions in producer
+//   Vectorized dimensions in producer or consumer
+//   Unrolled dimensions in producer or consumer
+//   Dimensions derived from root dimensions that exist in both but are
+//   unmappable
+unsigned int getReplayablePosPasC(
     TensorView* producer,
     TensorView* consumer,
-    unsigned int consumer_position) {
+    const std::unordered_set<IterDomain*>& unmappable_producer_dims,
+    ComputeAtMode mode) {
+  // Check if any consumer dimensions are marked as vectorize as producer can
+  // not be inlined to vectorized dimensions in consumer.
+  auto c_dom = consumer->domain()->domain();
+  auto vector_dim_it =
+      std::find_if(c_dom.begin(), c_dom.end(), [&mode](IterDomain* id) {
+        return isParallelTypeVectorize(id->getParallelType()) ||
+            ((mode == ComputeAtMode::BestEffort ||
+              mode == ComputeAtMode::MostInlined) &&
+             id->getParallelType() == ParallelType::Unroll);
+      });
+
+  // Limit max position based on vectorized dims in consumer.
+  auto max_consumer_pos = std::distance(c_dom.begin(), vector_dim_it);
+
+  auto pairwise_root_map = PairwiseRootDomainMap(producer, consumer);
+  auto c2p_root_map =
+      PairwiseRootDomainMap(producer, consumer)
+          .mapConsumerToProducer(consumer->domain(), producer->domain());
+
+  auto replay_PasC =
+      BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_root_map);
+
+  // Look for id's that map to a consumer id that's vectorized
+  auto c2p_replay_map = replay_PasC.getReplay();
+
+  for (size_t consumer_pos = max_consumer_pos; consumer_pos > 0;
+       consumer_pos--) {
+    auto map_it = c2p_replay_map.find(consumer->axis((int)consumer_pos - 1));
+    if (map_it != c2p_replay_map.end()) {
+      auto p_id = map_it->second;
+      // If we find a consumer dim that maps to a producer dim that's
+      // vectorized or unrolled limit max compute at by it.
+      if (isParallelTypeVectorize(p_id->getParallelType()) ||
+          ((mode == ComputeAtMode::BestEffort ||
+            mode == ComputeAtMode::MostInlined) &&
+           p_id->getParallelType() == ParallelType::Unroll)) {
+        max_consumer_pos = consumer_pos - 1;
+      }
+    }
+  }
+
+  // Start at max position and work backwards,  try to find a location where
+  // producer can be inlined.
+  for (size_t consumer_pos = max_consumer_pos; consumer_pos > 0;
+       consumer_pos--) {
+    // Grab all root dimensions of consumer as roots must be used to understand
+    // inlining potential.
+    auto consumer_root_dim_vals =
+        IterVisitor::getInputsTo({c_dom.begin(), c_dom.begin() + consumer_pos});
+    // convert to iter domains
+    auto consumer_root_dim_ids =
+        ir_utils::filterByType<IterDomain>(consumer_root_dim_vals);
+    // If any root dimensions cannot be mapped to producer we can't inline. If
+    // any root dimension
+    if (std::any_of(
+            consumer_root_dim_ids.begin(),
+            consumer_root_dim_ids.end(),
+            [&unmappable_producer_dims, &c2p_root_map](IterDomain* c_root_id) {
+              auto p_root_id_it = c2p_root_map.find(c_root_id);
+              if (p_root_id_it == c2p_root_map.end()) {
+                return false;
+              }
+              auto p_id = p_root_id_it->second;
+              return unmappable_producer_dims.find(p_id) !=
+                  unmappable_producer_dims.end();
+            })) {
+      continue;
+    }
+    return consumer_pos;
+  }
+
+  return 0;
+}
+
+// Return the max position in producer that can be inlined to consumer
+// Cannot inline:
+//   Reduction dimensions in producer
+//   Vectorized dimensions in producer or consumer
+//   Unrolled dimensions in producer or consumer
+//   Dimensions derived from root dimensions that exist in both but are
+//   unmappable
+unsigned int getReplayablePosCasP(
+    TensorView* consumer,
+    TensorView* producer,
+    const std::unordered_set<IterDomain*>& unmappable_producer_dims,
+    ComputeAtMode mode) {
+  auto p_dom = producer->domain()->domain();
+  auto first_reduction =
+      std::find_if(p_dom.begin(), p_dom.end(), [](IterDomain* id) {
+        return id->isReduction();
+      });
+
+  auto first_vectorized_axis =
+      std::find_if(p_dom.begin(), first_reduction, [&mode](IterDomain* id) {
+        return isParallelTypeVectorize(id->getParallelType()) ||
+            ((mode == ComputeAtMode::BestEffort ||
+              mode == ComputeAtMode::MostInlined) &&
+             id->getParallelType() == ParallelType::Unroll);
+      });
+
+  auto max_producer_pos = std::distance(p_dom.begin(), first_vectorized_axis);
+
+  auto pairwise_root_map = PairwiseRootDomainMap(producer, consumer);
+  auto p2c_root_map = pairwise_root_map.mapProducerToConsumer(
+      producer->domain(), consumer->domain());
+
+  auto replay_CasP =
+      BestEffortReplay::replayCasP(consumer, producer, -1, pairwise_root_map);
+
+  // Look for id's that map to a consumer id that's vectorized
+  auto p2c_replay_map = replay_CasP.getReplay();
+
+  for (size_t producer_pos = max_producer_pos; producer_pos > 0;
+       producer_pos--) {
+    auto map_it = p2c_replay_map.find(producer->axis((int)producer_pos - 1));
+    if (map_it != p2c_replay_map.end()) {
+      auto c_id = map_it->second;
+      // If we find a producer dim that maps to a consumer vectorized or
+      // unrolled dim, limit max compute at by it
+      if (isParallelTypeVectorize(c_id->getParallelType()) ||
+          ((mode == ComputeAtMode::BestEffort ||
+            mode == ComputeAtMode::MostInlined) &&
+           c_id->getParallelType() == ParallelType::Unroll)) {
+        max_producer_pos = producer_pos - 1;
+      }
+    }
+  }
+
+  for (size_t producer_pos = max_producer_pos; producer_pos > 0;
+       producer_pos--) {
+    auto all_vals = DependencyCheck::getAllValsBetween(
+        {producer->getMaybeRFactorDomain().begin(),
+         producer->getMaybeRFactorDomain().end()},
+        {p_dom.begin(), p_dom.begin() + producer_pos});
+
+    // If any root dims could have mapped to consumer, but don't, then we can't
+    // compute at this point
+    if (std::any_of(
+            producer->getMaybeRFactorDomain().begin(),
+            producer->getMaybeRFactorDomain().end(),
+            [&unmappable_producer_dims, &all_vals](IterDomain* p_root_id) {
+              return std::find(all_vals.begin(), all_vals.end(), p_root_id) !=
+                  all_vals.end() &&
+                  unmappable_producer_dims.find(p_root_id) !=
+                  unmappable_producer_dims.end();
+            })) {
+      continue;
+    }
+
+    return producer_pos;
+  }
+  return 0;
+}
+
+unsigned int getInnermostNonBroadcastIdFrom(TensorView* tv) {
+  unsigned int ret = tv->getComputeAtPosition();
+
+  // Still assuming we only have block broadcast for now.
+  //  This part may change
+  while (ret > 0 && tv->axis((int)ret - 1)->isBroadcast()) {
+    ret--;
+  }
+
+  return ret;
+}
+
+// Try to find the aligned position on consumer's domain corresponding to the
+//  compute at position of producer domain. Used in computeAt pass only. No
+//  checking on actual producer-consumer relationship.
+unsigned int getConsumerPosAlignedToProducerCA(
+    TensorView* consumer,
+    TensorView* producer) {
+  // Locate consumer's position that aligns with
+  //  the producer's new compute at axis. We need broadcast axes forwarded so we
+  //  need to replay PasC as CasP will not forward braodcast dims. For example
+  //  if we have:
+  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
+  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
+  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
+  // NVFuserTest.FusionComplexBCast1_CUDA
+
+  auto c2p_map =
+      BestEffortReplay::replayPasC(
+          producer,
+          consumer,
+          -1,
+          // Compute at root domain may not be valid here, as all
+          // producers don't have to be able to map into consumer at
+          // max producer position. Since computeAt should be valid
+          // and this mechanism is only intended to lower produce
+          // position of consumer, we can simply use the pairwise map.
+          PairwiseRootDomainMap(producer, consumer))
+          .getReplay();
+
+  // Find the innermost position of consumer that has
+  //  been mapped within the producer ca axis.
+  unsigned int consumer_pos = consumer->nDims();
+  while (consumer_pos > 0) {
+    auto consumer_id = consumer->axis((int)consumer_pos - 1);
+    auto p_dom = producer->domain()->domain();
+    if (std::any_of(
+            p_dom.begin(),
+            p_dom.begin() + producer->getComputeAtPosition(),
+            [&consumer_id, &c2p_map](IterDomain* p_id) {
+              auto c_id_it = c2p_map.find(consumer_id);
+              if (c_id_it != c2p_map.end()) {
+                return c_id_it->second == p_id;
+              }
+              return false;
+            })) {
+      break;
+    }
+    consumer_pos--;
+  }
+
+  return consumer_pos;
+}
+
+} // namespace
+
+void ComputeAt::runAt(
+    TensorView* producer,
+    TensorView* consumer,
+    unsigned int consumer_position,
+    ComputeAtMode mode) {
   FUSER_PERF_SCOPE("ComputeAt::run");
 
   // Make sure the correct fusion is setup between this and consumer.
@@ -162,101 +299,277 @@ void ComputeAt::run(
   // Make sure Fusion Guard is set appropriately
   FusionGuard fg(producer->fusion());
 
-  std::vector<TensorView*> producers;
-
-  // It doesn't make sense to set computeAt on an input as it's not generated,
-  // it's provided. If this was called, move the computeAt to users of the
-  // producer that are in a dependency between prodcer and consumer.
-  if (producer->fusion()->hasInput(producer)) {
-    auto all_chains =
-        tvChains(DependencyCheck::getAllDependencyChains(producer, consumer));
-
-    TORCH_CHECK(
-        !all_chains.empty(),
-        "Compute At expects ",
-        producer,
-        " is a dependency of ",
-        consumer,
-        ", however it is not.");
-
-    std::unordered_set<TensorView*> added_producers;
-
-    // Check all dependency chains, select the next TV after producer towards
-    // consumer. These are the TVs we're going to actually call computeAt on.
-    for (const auto& tv_chain : all_chains) {
-      // When a chain only has two tensors, they must be the producer,
-      // which is an input, and the consumer. There is nothing we need
-      // to do for such chains.
-      if (tv_chain.size() > 2) {
-        // Make sure we only add once, but we want to add in a determinsitic
-        // order
-        if (added_producers.find(tv_chain[1]) == added_producers.end()) {
-          producers.push_back(tv_chain[1]);
-          added_producers.emplace(tv_chain[1]);
-        }
-      }
-    }
-  } else {
-    // If producer is not an input, it's the only one.
-    producers.push_back(producer);
-  }
+  TORCH_CHECK(
+      DependencyCheck::isDependencyOf(producer, consumer),
+      "Compute At expects ",
+      producer->name(),
+      " is a dependency of ",
+      consumer->name(),
+      ", however it is not.");
 
   // Run computeAt on our potentially modified producer(s)
-  if (!producers.empty()) {
-    for (auto producer_to_run : producers) {
-      ComputeAt ca(producer_to_run, consumer, consumer_position);
-      ca.runPass();
+  ComputeAt ca(producer, consumer, consumer, consumer_position, mode);
+  ca.runPass();
+}
+
+void ComputeAt::runWith(
+    TensorView* producer,
+    TensorView* consumer,
+    unsigned int producer_position,
+    ComputeAtMode mode) {
+  FUSER_PERF_SCOPE("ComputeAt::runWith");
+
+  // Make sure the correct fusion is setup between this and consumer.
+  TORCH_CHECK(
+      producer->fusion() == consumer->fusion(),
+      producer,
+      " and ",
+      consumer,
+      " are not in the same fusion.");
+
+  TORCH_CHECK(
+      DependencyCheck::isDependencyOf(producer, consumer),
+      "Compute At expects ",
+      producer->name(),
+      " is a dependency of ",
+      consumer->name(),
+      ", however it is not.");
+
+  // Make sure Fusion Guard is set appropriately
+  FusionGuard fg(producer->fusion());
+
+  ComputeAt ca(producer, consumer, producer, producer_position, mode);
+  ca.runPass();
+}
+
+namespace {
+
+// Checks if producer and consumer are transformed consistently so that to
+// satisfy the provided compute at position. This means no replay is actually
+// necessary for the compute at requested. If consumer_pos then
+// consumer_or_producer_pos is relative to the consumer and skipReplay returns
+// the associated position in producer.
+//
+// If producer and consumer are not transformed consistently with provided
+// postition, returns -1.
+int skipReplay(
+    const TensorView* producer,
+    const TensorView* consumer,
+    int consumer_or_producer_pos,
+    bool consumer_pos = true) {
+  FUSER_PERF_SCOPE("transform_replay.cpp::skipReplay");
+
+  const auto c2p_root_map =
+      PairwiseRootDomainMap(producer, consumer)
+          .mapConsumerToProducer(consumer->domain(), producer->domain());
+
+  // IterDomains in consumer root also in producer root
+  std::unordered_set<Val*> mapped_consumer_roots;
+  for (auto entry : c2p_root_map) {
+    mapped_consumer_roots.emplace(entry.first);
+  }
+
+  const auto consumer_domain = consumer->domain()->domain();
+
+  auto mapped_consumer_domain_ids_vec = DependencyCheck::getAllValsBetween(
+      mapped_consumer_roots, {consumer_domain.begin(), consumer_domain.end()});
+
+  std::unordered_set<Val*> mapped_consumer_domain_ids(
+      mapped_consumer_domain_ids_vec.begin(),
+      mapped_consumer_domain_ids_vec.end());
+
+  const auto producer_domain = producer->domain()->domain();
+
+  auto it_consumer = consumer_domain.begin();
+  auto it_producer = producer_domain.begin();
+
+  auto best_effort_PasC = BestEffortReplay::replayPasC(
+      producer, consumer, -1, PairwiseRootDomainMap(producer, consumer));
+
+  auto c2p_map = best_effort_PasC.getReplay();
+
+  int mismatched_consumer_pos = 0;
+  int mismatched_producer_pos = 0;
+  while (it_consumer != consumer_domain.end()) {
+    auto consumer_id = *it_consumer;
+    if (!mapped_consumer_domain_ids.count(consumer_id)) {
+      ++it_consumer;
+      mismatched_consumer_pos++;
+      continue;
+    }
+
+    auto c2p_it = c2p_map.find(consumer_id);
+    if (c2p_it == c2p_map.end()) {
+      break;
+    }
+
+    if (it_producer == producer_domain.end()) {
+      break;
+    }
+
+    auto producer_id = *it_producer;
+
+    if (c2p_it->second == producer_id) {
+      ++mismatched_consumer_pos;
+      ++mismatched_producer_pos;
+      ++it_consumer;
+      ++it_producer;
+      if (consumer_pos) {
+        if (consumer_or_producer_pos == mismatched_consumer_pos) {
+          return mismatched_producer_pos;
+        }
+      } else {
+        if (consumer_or_producer_pos == mismatched_producer_pos) {
+          return mismatched_consumer_pos;
+        }
+      }
+    } else {
+      break;
     }
   }
+  return -1;
 }
+
+} // namespace
 
 // Actually applies transformation
 unsigned int ComputeAt::backwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
-    unsigned int consumer_compute_at_axis) {
+    unsigned int consumer_compute_at_pos) {
   FUSER_PERF_SCOPE("backwardComputeAt_impl");
 
-  auto& producer_entry = tv_data.at(producer);
+  auto max_consumer_compute_at_pos =
+      getReplayablePosPasC(producer, consumer, unmappable_dims_, mode_);
 
-  // Use TensorDomain interface so it doesn't set computeAt automatically
-  auto replay = TransformReplay::replayPasC(
-      producer, consumer, (int)consumer_compute_at_axis);
-
-  producer_entry.setPassPosition(replay.second);
-
-  if (producer_entry.shouldSetComputeAt(replay.second)) {
-    producer->setComputeAt(consumer, (int)consumer_compute_at_axis);
-    producer_entry.setComputeAtDomain(producer->domain());
+  if (mode_ == ComputeAtMode::BestEffort) {
+    consumer_compute_at_pos =
+        std::min(consumer_compute_at_pos, max_consumer_compute_at_pos);
+  } else if (mode_ == ComputeAtMode::MostInlined) {
+    consumer_compute_at_pos = max_consumer_compute_at_pos;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        consumer_compute_at_pos <= max_consumer_compute_at_pos,
+        "Invalid compute at position detected in compute at when trying to replay producer: ",
+        producer,
+        " as consumer: ",
+        consumer,
+        " tried to do this at position: ",
+        consumer_compute_at_pos,
+        " but max position that's allowed is ",
+        max_consumer_compute_at_pos);
   }
 
-  return replay.second;
+  // Short cut if no replay is necessary
+  auto maybe_producer_pos =
+      skipReplay(producer, consumer, (int)consumer_compute_at_pos, true);
+  if (maybe_producer_pos >= 0) {
+    if (!producer->isFusionInput()) {
+      producer->setComputeAt((unsigned int)maybe_producer_pos);
+    }
+    consumer->setMaxProducer(consumer_compute_at_pos);
+    return (unsigned int)maybe_producer_pos;
+  }
+
+  auto replay_producer_pair = TransformReplay::replayPasC(
+      producer, consumer, (int)consumer_compute_at_pos, root_map_);
+
+  if (replay_producer_pair.second == 0) {
+    return 0;
+  }
+
+  if (replay_producer_pair.second >= producer->getComputeAtPosition()) {
+    const TensorDomain* current_domain = producer->domain();
+    TensorDomain* new_domain = replay_producer_pair.first;
+
+    TORCH_INTERNAL_ASSERT(
+        validateDomain(producer, new_domain),
+        "Tried to set the domain of ",
+        producer,
+        " to ",
+        new_domain,
+        " but that would invalidate previously compute at position or max producer position.");
+
+    producer->setDomain(new_domain);
+    if (!producer->isFusionInput()) {
+      producer->setComputeAt(replay_producer_pair.second);
+    }
+
+    consumer->setMaxProducer(consumer_compute_at_pos);
+    root_map_.setAlias(current_domain, new_domain);
+  }
+
+  return replay_producer_pair.second;
 }
 
-// Actually applies transformation
+// Actually applies transformation, replay consumer based on producer, set
+// compute at of producer, set pass position of consumer, return position
+// relative to consumer
 unsigned int ComputeAt::forwardComputeAt_impl(
     TensorView* producer,
     TensorView* consumer,
-    unsigned int producer_compute_at_axis) {
+    unsigned int producer_compute_at_pos) {
   FUSER_PERF_SCOPE("forwardComputeAt_impl");
 
-  auto& consumer_entry = tv_data.at(consumer);
-  const auto& producer_entry = tv_data.at(producer);
+  auto max_producer_compute_at_pos =
+      getReplayablePosCasP(consumer, producer, unmappable_dims_, mode_);
 
-  auto replay = TransformReplay::replayCasP(
-      consumer, producer, (int)producer_compute_at_axis);
-
-  if (producer_entry.shouldSetComputeAt(producer_compute_at_axis)) {
-    producer->setComputeAt(consumer, replay.second);
+  if (mode_ == ComputeAtMode::BestEffort) {
+    producer_compute_at_pos =
+        std::min(producer_compute_at_pos, max_producer_compute_at_pos);
+  } else if (mode_ == ComputeAtMode::MostInlined) {
+    producer_compute_at_pos = max_producer_compute_at_pos;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        producer_compute_at_pos <= max_producer_compute_at_pos,
+        "Invalid compute at position detected in compute at when trying to replay consumer: ",
+        consumer,
+        " as producer: ",
+        producer,
+        " tried to do this at position: ",
+        producer_compute_at_pos,
+        " but max position that's allowed is ",
+        max_producer_compute_at_pos);
   }
 
-  consumer_entry.setPassPosition(replay.second);
-  if (consumer_entry.shouldSetComputeAt(replay.second) &&
-      consumer != consumer_) {
-    consumer_entry.setComputeAtDomain(consumer->domain());
+  // Short cut if no replay is necessary
+  auto maybe_consumer_pos =
+      skipReplay(producer, consumer, (int)producer_compute_at_pos, false);
+  if (maybe_consumer_pos > -1) {
+    if (!producer->isFusionInput()) {
+      producer->setComputeAt(producer_compute_at_pos);
+    }
+    consumer->setMaxProducer((unsigned int)maybe_consumer_pos);
+    return (unsigned int)maybe_consumer_pos;
   }
 
-  return replay.second;
+  auto replay_consumer_pair = TransformReplay::replayCasP(
+      consumer, producer, (int)producer_compute_at_pos, root_map_);
+
+  if (producer_compute_at_pos > producer->getComputeAtPosition()) {
+    if (!producer->isFusionInput()) {
+      producer->setComputeAt((int)producer_compute_at_pos);
+    }
+  }
+
+  if (replay_consumer_pair.second > consumer->getMaxProducerPosition()) {
+    const TensorDomain* current_domain = consumer->domain();
+    TensorDomain* new_domain = replay_consumer_pair.first;
+
+    TORCH_INTERNAL_ASSERT(
+        validateDomain(consumer, new_domain),
+        "Tried to set the domain of ",
+        consumer,
+        " to ",
+        new_domain,
+        " but that would invalidate previously compute at position or max producer position.");
+
+    consumer->setDomain(new_domain);
+    consumer->setMaxProducer(replay_consumer_pair.second);
+    root_map_.setAlias(current_domain, new_domain);
+  }
+
+  return replay_consumer_pair.second;
 }
 
 void ComputeAt::setCommonConsumer() {
@@ -282,9 +595,9 @@ void ComputeAt::setCommonConsumer() {
   TORCH_CHECK(
       !all_chains.empty(),
       "Compute At expects ",
-      producer_,
+      producer_->name(),
       " is a dependency of ",
-      consumer_,
+      consumer_->name(),
       ", however it is not.");
 
   // Remove all TVs from producer to consumer as common consumer must be at or
@@ -315,6 +628,11 @@ void ComputeAt::setCommonConsumer() {
 // computeAt if it will increase computeAt positions.
 void ComputeAt::traverseBackward() {
   FUSER_PERF_SCOPE("ComputeAt::traverseBackward");
+  if (reference_ == producer_) {
+    // Forward compute at don't need to run backward traversal
+    producer_position_ = reference_position_;
+    return;
+  }
 
   // propagate *backward* through all *producer* use_chains or from *producer*
   // to common_consumer if common_consumer exists. Only apply transform if
@@ -325,7 +643,7 @@ void ComputeAt::traverseBackward() {
   for (auto tv_chain : chains) {
     TensorView* running_producer = tv_chain.back();
     TensorView* running_consumer = nullptr;
-    unsigned int running_consumer_pos = consumer_position_;
+    unsigned int running_consumer_pos = reference_position_;
     tv_chain.pop_back();
 
     TORCH_INTERNAL_ASSERT(running_producer == consumer_);
@@ -338,6 +656,11 @@ void ComputeAt::traverseBackward() {
       running_consumer_pos = backwardComputeAt_impl(
           running_producer, running_consumer, running_consumer_pos);
     }
+
+    TORCH_INTERNAL_ASSERT(
+        running_producer == producer_,
+        "Compute at backward traversal ended up on something other than the producer.");
+    producer_position_ = running_consumer_pos;
   }
 }
 
@@ -352,14 +675,12 @@ void ComputeAt::traverseForward() {
         DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
   }
 
-  unsigned int producer_pos = tv_data.at(producer_).getNewPosition();
-
   // propagate forward through all chains
   for (auto tv_dep_chain : chains) {
     TensorView* running_producer = nullptr;
     TensorView* running_consumer = tv_dep_chain.front();
     tv_dep_chain.pop_front();
-    unsigned int running_producer_pos = producer_pos;
+    unsigned int running_producer_pos = producer_position_;
 
     TORCH_INTERNAL_ASSERT(running_consumer == producer_);
 
@@ -367,90 +688,193 @@ void ComputeAt::traverseForward() {
       running_producer = running_consumer;
       running_consumer = tv_dep_chain.front();
       tv_dep_chain.pop_front();
-
       running_producer_pos = forwardComputeAt_impl(
           running_producer, running_consumer, running_producer_pos);
     }
   }
 }
 
-void ComputeAt::runPass() {
-  FUSER_PERF_SCOPE("ComputeAt::runPass");
+void ComputeAt::resetMaxProducerPos(TensorView* consumer_tv) {
+  if (consumer_tv->definition() == nullptr) {
+    consumer_tv->setMaxProducer(0, true);
+  }
 
-  // Initialize tv_data for all TensorViews we may modify
+  unsigned int new_consummer_pa_pos = 0;
+
+  // Re-compute the max producer position as one or more
+  //  of the producers of this consumer have updated their
+  //  compute at position.
+  for (auto inp : ir_utils::producerTvsOf(consumer_tv)) {
+    if (!inp->isFusionInput()) {
+      // Locate consumer's position that aligns with
+      //  the producer's new compute at axis.
+      unsigned int inp_ca_pos_to_consumer =
+          getConsumerPosAlignedToProducerCA(consumer_tv, inp);
+
+      // Populate the max consumer position required by
+      //  producer compute at.
+      new_consummer_pa_pos =
+          std::max(new_consummer_pa_pos, inp_ca_pos_to_consumer);
+    }
+  }
+
+  consumer_tv->setMaxProducer(new_consummer_pa_pos, true);
+}
+
+void ComputeAt::hoistInnermostBroadcast() {
+  auto fusion = producer_->fusion();
+
+  std::unordered_set<TensorView*> consumers_to_update;
+
+  auto all_vals = fusion->usedMathVals();
+  auto all_tvs = ir_utils::filterByType<TensorView>(all_vals);
+
+  for (auto running_producer : all_tvs) {
+    if (!running_producer->isFusionInput()) {
+      auto producer_ca_pos = running_producer->getComputeAtPosition();
+      // Find the innermost iterdomain that is not a broadcast
+      auto new_ca_pos = getInnermostNonBroadcastIdFrom(running_producer);
+      // Update the compute at pos of this producer if the original
+      //  compute at is within inner most broadcast axes
+      if (new_ca_pos < producer_ca_pos) {
+        running_producer->setComputeAt(new_ca_pos, true);
+      }
+      // Mark all consumers of this producer for later produce
+      //  position update.
+      // This is safe with segmented fusion. TV uses will reset
+      //  when FusionSegmentGuard try to change the IO.
+      auto tv_consumers = ir_utils::consumerTvsOf(running_producer);
+      consumers_to_update.insert(tv_consumers.begin(), tv_consumers.end());
+    }
+  }
+}
+
+void ComputeAt::updateSiblings() {
+  // Track which consumers may have a wrong produce at position to update
+  // later
+  auto updateSiblingsOfTv = [&](TensorView* tv) {
+    if (tv->definition() == nullptr) {
+      return;
+    }
+
+    std::unordered_set<TensorView*> consumers_to_update;
+
+    if (tv->definition()->outputs().size() > 1) {
+      auto outs = tv->definition()->outputs();
+      auto out_tvs = ir_utils::filterByType<TensorView>(outs);
+      for (auto sibling_tv : out_tvs) {
+        if (sibling_tv == tv) {
+          continue;
+        }
+
+        std::unordered_map<IterDomain*, IterDomain*> tv_to_sibling_map;
+        TORCH_INTERNAL_ASSERT(
+            tv->getRootDomain().size() == sibling_tv->getRootDomain().size(),
+            "Error replaying multiple output expressions in computeAt.");
+
+        // Propagate any root parallelization as fullSelfReplay expects it.
+        for (const auto i : c10::irange(sibling_tv->getRootDomain().size())) {
+          auto id = tv->getRootDomain()[i];
+          auto sibling_id = sibling_tv->getRootDomain()[i];
+          if (id->getParallelType() != ParallelType::Serial &&
+              sibling_id->getParallelType() == ParallelType::Serial) {
+            sibling_id->parallelize(id->getParallelType());
+          } else if (
+              id->getParallelType() == ParallelType::Serial &&
+              sibling_id->getParallelType() != ParallelType::Serial) {
+            id->parallelize(sibling_id->getParallelType());
+          }
+        }
+        if (tv->getComputeAtPosition() > sibling_tv->getComputeAtPosition()) {
+          auto sibling_domain = TransformReplay::fullSelfReplay(
+              sibling_tv->domain(), tv->domain());
+          validateDomain(sibling_tv, sibling_domain);
+          sibling_tv->setDomain(sibling_domain);
+          sibling_tv->setComputeAt(tv->getComputeAtPosition());
+          sibling_tv->setMaxProducer(tv->getMaxProducerPosition());
+          auto consumer_tvs = ir_utils::consumerTvsOf(sibling_tv);
+          consumers_to_update.insert(consumer_tvs.begin(), consumer_tvs.end());
+        }
+      }
+    }
+
+    // Update sibling consumer tv's max producer position
+    for (auto consumer : consumers_to_update) {
+      this->resetMaxProducerPos(consumer);
+    }
+  };
+
+  // Find all tensor views that may have been modified
   auto chains = producer_use_chains_;
   if (common_consumer_ != nullptr) {
     chains = tvChains(
         DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
   }
 
-  for (const auto& tv_chain : chains) {
-    for (auto tv : tv_chain) {
-      if (tv_data.find(tv) == tv_data.end()) {
-        tv_data[tv] = ComputeAtData(tv);
-      }
-    }
+  std::unordered_set<TensorView*> participating_tvs;
+  for (auto chain : chains) {
+    participating_tvs.insert(chain.begin(), chain.end());
   }
+
+  for (auto tv : participating_tvs) {
+    updateSiblingsOfTv(tv);
+  }
+}
+
+void ComputeAt::runPass() {
+  FUSER_PERF_SCOPE("ComputeAt::runPass");
 
   // Traverse backward through all dep chains from producer to consumer
   traverseBackward();
 
-  // Clear data from backward traversal:
-  for (auto& entry : tv_data) {
-    entry.second.clearPass();
-  }
-
   // Start at producer and traverse forward through all chains
   traverseForward();
 
-  setupOutputs();
+  // Back off on inlining the inner broadcast axes
+  hoistInnermostBroadcast();
 
-  for (const auto& entry : tv_data) {
-    entry.first->setDomain(entry.second.getComputeAtDomain());
-    entry.second.validateNewComputeAt();
+  // Update siblings of multi output expressions
+  updateSiblings();
+
+  // Update the compute at position of all consumers, this used to be done
+  // during the compute at pass itself, but its cleaner to do this as a cleanup
+  // pass similar to hoistInnermostBroadcast and updateSiblings.
+  std::unordered_set<TensorView*> all_consumers;
+
+  // Find all tensor views that may have been modified
+  auto chains = producer_use_chains_;
+  if (common_consumer_ != nullptr) {
+    chains = tvChains(
+        DependencyCheck::getAllDependencyChains(producer_, common_consumer_));
   }
 
-  TORCH_INTERNAL_ASSERT(
-      BestEffortReplay::findFirstMismatchedID(
-          consumer_->domain(), tv_data.at(consumer_).getOriginalDomain()) ==
-          (int)consumer_->domain()->nDims(),
-      "ComputeAt logic changed the consumer domain which should not happen. Domain was ",
-      tv_data.at(consumer_).getOriginalDomain(),
-      " but is now: ",
-      consumer_->domain());
-}
-
-void ComputeAt::setupOutputs() {
-  FUSER_PERF_SCOPE("ComputeAt::setupOutputs");
-
-  if (common_consumer_ != nullptr)
-    return;
-
-  std::vector<TensorView*> touched_output_order;
-  const auto& terminating_outputs =
-      FusionGuard::getCurFusion()->getTerminatingOutputs();
-
-  for (auto out : ir_utils::filterByType<TensorView>(
-           FusionGuard::getCurFusion()->outputs())) {
-    if (tv_data.find(out) != tv_data.end()) {
-      if (tv_data[out].touched()) {
-        // No need to adjust computeAt when an output is not
-        // a terminating output.
-        if (std::find(
-                terminating_outputs.begin(), terminating_outputs.end(), out) !=
-            terminating_outputs.end()) {
-          touched_output_order.push_back(out);
-        }
-      }
+  for (const auto& chain : chains) {
+    for (auto tv : chain) {
+      all_consumers.emplace(tv);
     }
   }
 
-  if (touched_output_order.size() > 0) {
-    for (size_t i = 0; i < touched_output_order.size() - 1; i++) {
-      touched_output_order[i]->setComputeAt(
-          touched_output_order[i + 1],
-          (int)tv_data.at(touched_output_order[i]).getNewPosition(),
-          (int)tv_data.at(touched_output_order[i + 1]).getNewPosition());
+  // Reset max producer position of all tensor views.
+  for (auto tv : all_consumers) {
+    resetMaxProducerPos(tv);
+  }
+}
+
+void ComputeAt::buildUnmappableDims() {
+  auto all_tvs = ir_utils::allTvs(producer_->fusion());
+  for (auto tv : all_tvs) {
+    auto consumers = ir_utils::consumerTvsOf(tv);
+    for (auto consumer : consumers) {
+      // Grab dimensions in producer and consumer that are mappable to eachother
+      // based on the computeAtRootDomainMap. This will tell us which dimensions
+      // can be inlined based on avoiding trying to inline reduction structures.
+      auto mappable_roots =
+          root_map_.getMappableDims(tv->domain(), consumer->domain());
+      for (auto tv_root_id : tv->getMaybeRFactorDomain()) {
+        if (mappable_roots.find(tv_root_id) == mappable_roots.end()) {
+          unmappable_dims_.emplace(tv_root_id);
+        }
+      }
     }
   }
 }
@@ -458,18 +882,31 @@ void ComputeAt::setupOutputs() {
 ComputeAt::ComputeAt(
     TensorView* _producer,
     TensorView* _consumer,
-    unsigned int _consumer_position)
+    TensorView* _reference,
+    unsigned int _reference_position,
+    ComputeAtMode _mode)
     : producer_(_producer),
       consumer_(_consumer),
-      consumer_position_(_consumer_position) {
+      reference_(_reference),
+      reference_position_(_reference_position),
+      mode_(_mode) {
   TORCH_INTERNAL_ASSERT(
-      consumer_position_ >= 0 && consumer_position_ <= consumer_->nDims(),
+      reference_ == producer_ || reference_ == consumer_,
+      "For compute at reference must be producer or consumer, it's neither.",
+      " reference: ",
+      reference_,
+      " consumer: ",
+      consumer_,
+      " producer: ",
+      producer_);
+  TORCH_INTERNAL_ASSERT(
+      reference_position_ >= 0 && reference_position_ <= reference_->nDims(),
       "Invalid computeAt axis, received ",
-      _consumer_position,
+      reference_position_,
       " but should be > -",
-      consumer_->nDims(),
+      reference_->nDims(),
       " and <= ",
-      consumer_->nDims(),
+      reference_->nDims(),
       ".");
 
   producer_use_chains_ = tvChains(DependencyCheck::getAllUseChains(producer_));
@@ -478,6 +915,10 @@ ComputeAt::ComputeAt(
   // consumer for all chains at or after the consumer specified in the computeAt
   // call.
   setCommonConsumer();
+
+  root_map_.build();
+
+  buildUnmappableDims();
 }
 
 } // namespace cuda

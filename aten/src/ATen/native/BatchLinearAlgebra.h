@@ -1,10 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/cpu/zmath.h>
+#include <ATen/native/TransposeType.h>
 
 
 namespace at { namespace native {
@@ -161,6 +160,8 @@ void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv,
 template <class scalar_t>
 void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 
+template<class scalar_t, class value_t=scalar_t>
+void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda, value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 #endif
 
 #if AT_BUILD_WITH_BLAS()
@@ -211,20 +212,20 @@ using lstsq_fn = void (*)(
 DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using triangular_solve_fn = void (*)(
-    Tensor& /*A*/,
-    Tensor& /*B*/,
+    const Tensor& /*A*/,
+    const Tensor& /*B*/,
     bool /*left*/,
     bool /*upper*/,
     TransposeType /*transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
-using lu_fn = void (*)(
+using lu_factor_fn = void (*)(
     const Tensor& /*input*/,
     const Tensor& /*pivots*/,
     const Tensor& /*infos*/,
     bool /*compute_pivots*/);
-DECLARE_DISPATCH(lu_fn, lu_stub);
+DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
 using lu_solve_fn = void (*)(
     const Tensor& /*b*/,
@@ -239,5 +240,14 @@ using lu_solve_trans_fn = void (*)(
     TransposeType /*trans*/);
 DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
 
+using svd_fn = void (*)(
+    const Tensor& /*A*/,
+    const bool /*full_matrices*/,
+    const bool /*compute_uv*/,
+    const Tensor& /*U*/,
+    const Tensor& /*S*/,
+    const Tensor& /*Vh*/,
+    const Tensor& /*info*/);
+DECLARE_DISPATCH(svd_fn, svd_stub);
 
 }} // namespace at::native

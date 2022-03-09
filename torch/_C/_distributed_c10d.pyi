@@ -30,10 +30,10 @@ class GradBucket:
 class Reducer:
     def __init__(
         self,
-        replicas: List[List[Tensor]],
+        params: List[Tensor],
         bucket_indices: List[List[int]],
         process_group: ProcessGroup,
-        expect_sparse_gradients: List[List[bool]],
+        expect_sparse_gradients: List[bool],
         bucket_bytes_cap: int,
         find_unused_parameters: bool,
         gradient_as_bucket_view: bool,
@@ -48,12 +48,15 @@ class Logger:
         device_ids: List[int],
         output_device: int,
         broadcast_buffers: bool,
+        has_sync_bn: bool,
     ): ...
     ...
 
-def _get_debug_mode(): ...
+def get_debug_level(): ...
+def set_debug_level(): ...
+def set_debug_level_from_env(): ...
 
-class _DistributedDebugLevel(Enum):
+class DebugLevel(Enum):
     OFF = ...
     INFO = ...
     DETAIL = ...
@@ -350,6 +353,8 @@ class _ProcessGroupWrapper(ProcessGroup):
         pg: ProcessGroup,
         gloo_pg: ProcessGroupGloo
     ): ...
+    wrapped_pg: ProcessGroup
+
 
 class ProcessGroupNCCL(ProcessGroup):
     class Options: ...
@@ -389,6 +394,6 @@ def _broadcast_coalesced(
     src: int,
 ): ...
 def _test_python_store(store: Store): ...
-def _verify_model_across_ranks(
-    process_group: ProcessGroup, replicas: List[List[Tensor]]
+def _verify_params_across_processes(
+    process_group: ProcessGroup, params: List[Tensor]
 ): ...

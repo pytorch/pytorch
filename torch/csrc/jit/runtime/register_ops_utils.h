@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/mobile/register_ops_common_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -55,8 +56,6 @@ c10::List<T> make_result_list(const TypePtr& elemType) {
 template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType);
 
-inline void noop(Stack& n) {}
-
 // As described in https://docs.python.org/3/library/functions.html#round
 // When a number is exactly halfway between two integers, python builtin round
 // function will round to even number. We use round(x/2)*2 to handle the
@@ -73,22 +72,6 @@ inline double round_to_even(double a) {
 // tensor cannot have grad set, tensor must be 0 dim,
 // and if the dest is an int the source must be integral type
 void checkImplicitTensorToNum(const at::Tensor& t, bool toInt);
-
-// Convert the tensor pointed to by \p data to a nested list. \p dim is the
-// number of dimensions in the tensor and \p cur_dim is the dimension being
-// processed by the current invocation. \p ty is the expected output IR type of
-// the operation. \p is the scalar type of \p data. \p sizes and \p strides are
-// the sizes and strides of the tensor operand and \p element_size is the size
-// in bytes of one tensor element.
-IValue tensorToListRecursive(
-    char* data,
-    int64_t cur_dim,
-    int64_t num_tensor_dims,
-    TypePtr ty,
-    at::ScalarType scalar_ty,
-    at::IntArrayRef sizes,
-    at::IntArrayRef strides,
-    size_t element_size);
 
 static C10_UNUSED int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
@@ -135,30 +118,8 @@ static const double radToDeg = 180.0 / std::acos(-1.0);
 double degrees(double x);
 double radians(double x);
 
-// reference function THPVariable_to in python_variable_methods.cpp
-static C10_UNUSED at::Tensor to_dispatch(
-    at::Tensor self,
-    c10::optional<at::Device> device,
-    c10::optional<at::ScalarType> scalarType,
-    bool non_blocking,
-    bool copy) {
-  if (device && device->is_cuda()) {
-    at::globalContext().lazyInitCUDA();
-  }
-  if (!device && !scalarType && !copy) {
-    return self;
-  } else if (!device) {
-    return self.to(*scalarType, non_blocking, copy);
-  } else if (!scalarType) {
-    return self.to(*device, non_blocking, copy);
-  } else {
-    return self.to(*device, *scalarType, non_blocking, copy);
-  }
-}
-
 // Convert an python index (which may be negative) into an index usable for a
 // C++ container
-int64_t normalizeIndex(int64_t idx, int64_t list_size);
 
 // Equivalent to list.at(idx)
 template <typename T>
@@ -347,7 +308,7 @@ inline bool tensor_list_equal(
     // elements, then passes the result to bool().
     // see: https://docs.python.org/3.4/reference/datamodel.html#object.__ge__
     const auto cmp_result = a_element.eq(b_element);
-    if (!cmp_result.is_nonzero()) {
+    if (!at::native::is_nonzero(cmp_result)) {
       return false;
     }
   }

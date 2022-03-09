@@ -9,19 +9,19 @@ class TORCH_API FileStoreHandler : public StoreHandler {
   explicit FileStoreHandler(const std::string& path, const std::string& prefix);
   virtual ~FileStoreHandler();
 
-   void set(const std::string& name, const std::string& data) override;
+  void set(const std::string& name, const std::string& data) override;
 
   virtual std::string get(
       const std::string& name,
       const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
-   int64_t add(const std::string& name, int64_t value) override;
+  int64_t add(const std::string& name, int64_t value) override;
 
-   bool deleteKey(const std::string& key) override;
+  bool deleteKey(const std::string& key) override;
 
-   int64_t getNumKeys() override;
+  int64_t getNumKeys() override;
 
-   bool check(const std::vector<std::string>& names) override;
+  bool check(const std::vector<std::string>& names) override;
 
   virtual void wait(
       const std::vector<std::string>& names,

@@ -41,7 +41,8 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     for (const auto thread_id : c10::irange(config.num_calling_threads)) {
       // Just in case we generate num_iters inputs for each of the threads
       // This was if one thread does all the work we will be fine
-      for (int i = 0; i < config.num_iters + config.num_warmup_iters; ++i) {
+      for (const auto i :
+           c10::irange(config.num_iters + config.num_warmup_iters)) {
         thread_inputs[thread_id].push_back(cloneInput(inputs_[dist(engine)]));
       }
       input_iters[thread_id] = 0;
@@ -64,6 +65,7 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
       for (const auto j : c10::irange(config.num_warmup_iters)) {
+        (void)j;
         runOnce(std::move(thread_inputs[thread_id][input_iters[thread_id]]));
         ++input_iters[thread_id];
       }
@@ -89,7 +91,6 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
         LOG(INFO) << "Shutting down forward thread " << thread_id
                   << ". Total number of finished threads: " << finished;
       }
-
     });
   }
 
@@ -107,7 +108,8 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
     if (!config.profiler_output_path.empty()) {
       LOG(INFO) << "Using Autograd profiler. Trace will be saved to "
                 << config.profiler_output_path;
-      profiler_guard = std::make_unique<RecordProfile>(config.profiler_output_path);
+      profiler_guard =
+          std::make_unique<RecordProfile>(config.profiler_output_path);
     }
     LOG(INFO) << "Starting threads";
     start = true;

@@ -1,9 +1,12 @@
 #pragma once
 
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NamedTensorUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/Optional.h>
 #include <limits>
@@ -155,50 +158,22 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, c10::optional<in
 
 // ==================================================== Normal ========================================================
 
-// This function computes broadcasted size of mean and std, resize the output to the broadcasted size if it was empty
-// [Note] The following features will be deprecated in version 1.6 release and function signature will be changed after
-//   When mean and std are not broadcastable but have same number of elements:
-//     This function will resize the output to the size of mean if it was empty.
-//     This function will reshape the std to the shape of mean.
-//     This function will return true in deprecated case, false in broadcastable case and throw in all other cases before deprecation.
-//     This function will not return and throw if mean and std are not broadcastable after deprecation
-static bool resize_output_for_normal(at::Tensor& output, const at::Tensor& mean, const at::Tensor& std) {
-  bool expandable = at::are_expandable(mean.sizes(), std.sizes());
-  bool empty_output = output.numel() == 0;
+#define CHECK_NORMAL_TENSOR_STD(std) \
+  do { \
+    TORCH_CHECK( \
+      !std.is_complex(), \
+      "normal expects standard deviation to be non-complex"); \
+    TORCH_CHECK( \
+      std.numel() == 0 || std.min().ge(0).item<bool>(), \
+      "normal expects all elements of std >= 0.0"); \
+  } while (0)
 
-  if (expandable) {
-    auto shape = at::infer_size(mean.sizes(), std.sizes());
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(shape),
-        "inconsistent tensor, output size (", output.sizes(), ") is not the same as broadcasted mean and std size (", shape, ")");
-    if (empty_output) {
-      at::native::resize_(output, shape);
-    }
-    return false;
-  }
-  else {
-    TORCH_CHECK(
-        mean.numel() == std.numel(),
-        "inconsistent tensor, std and mean are not broadcastable and have different number of elements, "
-        "expected mean ", mean.sizes(), " and std ", std.sizes(), " to have same number of elements)");
-    TORCH_CHECK(
-        empty_output || output.sizes().equals(mean.sizes()),
-        "inconsistent tensor, std and mean are not broadcastable, output size (", output.sizes(), ") is not the same as mean size (", mean.sizes(), ")");
-    TORCH_WARN_ONCE(
-        "std and mean have the same number of elements, but are not broadcastable. This was previously a "
-        "supported mode of operation, but is now deprecated and the support will be removed in version 1.6 release. "
-        "Note that the current implementation reshapes std to the shape of mean, which may be incur data copies. "
-        "Please ensure that std and mean are broadcastable to avoid these issues.");
-    if (empty_output) {
-      at::native::resize_(output, mean.sizes());
-    }
-    return true;
-  }
-}
+#define CHECK_NORMAL_STD(std) \
+  TORCH_CHECK(std >= 0.0, "normal expects std >= 0.0, but found std ", std);
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  TORCH_CHECK(std >= 0.0, "normal_ expects std >= 0.0, but found std=", std);
+  CHECK_NORMAL_STD(std);
   if (self.is_complex()) {
     auto float_tensor = at::view_as_real(self);
     // variance for normal distribution of the real and imaginary values
@@ -212,6 +187,10 @@ Tensor& normal_impl_(Tensor& self, double mean, double std, c10::optional<Genera
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::optional<Generator> gen) {
+  CHECK_NORMAL_STD(std);
+  auto std_tensor = at::empty_like(output, MemoryFormat::Contiguous);
+  auto shape = at::infer_size(mean.sizes(), std_tensor.sizes());
+  at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, std, gen);
   output.add_(mean);
   return output;
@@ -219,12 +198,11 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, double std, c10::opt
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::optional<Generator> gen) {
-  TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
-  TORCH_CHECK(
-    std.min().ge(0).item<bool>(),
-    "normal expects all elements of std >= 0.0");
-  normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
+  CHECK_NORMAL_TENSOR_STD(std);
   auto mean_tensor = at::full({}, mean, output.options());
+  auto shape = at::infer_size(mean_tensor.sizes(), std.sizes());
+  at::native::resize_output(output, shape);
+  normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean_tensor, output, std, 1);
@@ -236,28 +214,22 @@ Tensor& normal_out_impl(Tensor& output, double mean, const Tensor& std, c10::opt
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  TORCH_CHECK(!std.is_complex(), "normal expects standard deviation to be non-complex");
-  TORCH_CHECK(
-    std.min().ge(0).item<bool>(),
-    "normal expects all elements of std >= 0.0");
-  bool is_deprecated_th_impl = resize_output_for_normal(output, mean, std);
+  CHECK_NORMAL_TENSOR_STD(std);
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  at::native::resize_output(output, shape);
   normal_impl_<normal_kernel, RNG>(output, 0, 1, gen);
   // CUDA NB: addcmul_out copies the tensor to be added into the output.
   // Please look at aten/src/THC/generic/THCTensorMathPointwise.cu
   // The previous function here was addcmul_out(output, mean, output, std, 1);
   // The third argument is not a constant reference and hence the samples in output are overwritten.
   // Consequently, the computation performed is mean + mean * std instead of mean + output * std
-  if (is_deprecated_th_impl) {
-    output.mul_(std.reshape(mean.sizes())).add_(mean);
-  }
-  else {
-    output.mul_(std).add_(mean);
-  }
+  output.mul_(std).add_(mean);
   return output;
 }
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen) {
+  CHECK_NORMAL_STD(std);
   Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
@@ -265,6 +237,7 @@ Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen)
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen) {
+  CHECK_NORMAL_TENSOR_STD(std);
   Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
@@ -272,7 +245,9 @@ Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen)
 
 template<template<typename> class normal_kernel, typename RNG>
 Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
+  CHECK_NORMAL_TENSOR_STD(std);
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  Tensor ret = at::empty(shape, mean.options(), MemoryFormat::Contiguous);
   normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
   return ret;
 }

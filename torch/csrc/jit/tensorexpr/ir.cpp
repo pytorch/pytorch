@@ -83,7 +83,8 @@ StorePtr BufHandle::store(
 
 ExprPtr flatten_index(
     const std::vector<ExprPtr>& dims,
-    const std::vector<ExprPtr>& indices) {
+    const std::vector<ExprPtr>& indices,
+    const std::vector<ExprPtr>& strides) {
   // Handle already flattened indices first
   if (indices.size() == 1) {
     return indices[0];
@@ -93,17 +94,12 @@ ExprPtr flatten_index(
   if (ndim != indices.size()) {
     throw malformed_input("dimensions mismatch in flatten_index");
   }
+  if (ndim != strides.size()) {
+    throw malformed_input("strides mismatch in flatten_index");
+  }
   if (ndim == 0) {
     return alloc<LongImm>(0);
   }
-  std::vector<ExprPtr> strides(ndim);
-  // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
-  // stride[i] = 1,                     i = ndim-1
-  strides[ndim - 1] = immLike(dims[ndim - 1], 1);
-  for (size_t i = 1; i < ndim; i++) {
-    strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
-  }
-
   ExprPtr total_index = immLike(indices[0], 0);
   for (const auto i : c10::irange(ndim)) {
     total_index = alloc<Add>(total_index, alloc<Mul>(indices[i], strides[i]));

@@ -1,7 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
@@ -10,21 +11,31 @@
 #include <ATen/native/Resize.h>
 #include <algorithm>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#endif
+
 #include <cuda_runtime.h>
 #include <type_traits>
 
-#include <THC/THCThrustAllocator.cuh>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
+#include <ATen/cuda/ThrustAllocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
+#include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
+#include <thrust/fill.h>
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
@@ -67,79 +78,45 @@ void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& in
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename input_t, typename output_t>
+__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows) {
+  int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if (tid < nrows) {
+    for (int64_t i = data_in[tid]; i < data_in[tid + 1]; i++)
+      data_out[i] = static_cast<output_t>(tid);
+  }
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    indices.zero_();
+    return;
+  }
+
+  auto crow_indices_ = crow_indices.expect_contiguous();
+  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
+  auto row0 = indices.select(0, transpose?1:0);
+  auto row1 = indices.select(0, transpose?0:1);
+  output_t* data_out = row0.data_ptr<output_t>();
+
+  // Run nrows threads...
+  int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t BLOCKS = (nrows + THREADS) / THREADS;
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+  row1.copy_(*col_indices.expect_contiguous());
+  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 } // namespace
 
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
-
-Tensor& addmm_out_sparse_csr_dense_cuda(
-  const Tensor& self,
-  const SparseCsrTensor& sparse,
-  const Tensor& dense,
-  const Scalar& beta,
-  const Scalar& alpha,
-  Tensor& r)
-{
-
-  TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
-  Tensor t = *expand_size(self, {sparse.size(0), dense.size(1)}, "addmm_out_sparse_csr");
-
-  TORCH_CHECK(t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CUDA tensor");
-  TORCH_CHECK(
-      r.is_cuda(),
-      "Expected all tensors to be on the same device. addmm: expected 'out' to be CUDA tensor, but got CPU tensor");
-  TORCH_CHECK(
-      sparse.is_cuda(),
-      "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CUDA tensor, but got a CPU tensor");
-  TORCH_CHECK(
-      dense.is_cuda(),
-      "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CUDA tensor, but got a CPU tensor");
-
-  TORCH_CHECK(
-      sparse.dim() == 2,
-      "addmm: 2-D matrices expected, got ",
-      sparse.dim(),
-      "D tensor");
-  TORCH_CHECK(
-      dense.dim() == 2,
-      "addmm: 2-D matrices expected, got ",
-      dense.dim(),
-      "D tensor");
-
-  TORCH_CHECK(
-      r.is_contiguous(),
-      "out argument must be contiguous, but got: ",
-      r.suggest_memory_format());
-
-  // mxk * kxn = mxn
-  int64_t m = sparse.size(0);
-  int64_t k = sparse.size(1);
-  int64_t n = dense.size(1);
-
-  TORCH_CHECK(
-      dense.size(0) == k,
-      "addmm: Expected dense matrix (dense) size(0)=",
-      k,
-      ", got ",
-      dense.size(0));
-
-  resize_output(r, {m, n});
-  int64_t nnz = sparse._nnz();
-
-  if (nnz == 0) {
-    at::mul_out(r, t, at::scalar_tensor(beta, r.options()));
-    return r;
-  }
-  // TODO: Check if cusparseSpMM can use 64-bit indices
-  // https://docs.nvidia.com/cuda/cusparse/index.html
-  auto col_indices = sparse.col_indices().to(at::kInt);
-  auto crow_indices = sparse.crow_indices().to(at::kInt);
-  auto values = sparse.values();
-
-  s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, r, beta, t, alpha, crow_indices, col_indices, values, dense);
-  return r;
-}
 
 Tensor& add_out_dense_sparse_csr_cuda(
     Tensor& output,
@@ -216,7 +193,7 @@ Tensor& add_out_dense_sparse_csr_cuda(
                 int64_t out_strides1 = out_strides[1];
 
                 cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-                auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+                at::cuda::ThrustAllocator allocator;
                 auto policy = thrust::cuda::par(allocator).on(stream);
 
                // Note that this could be wildly imbalanced if the sparsity pattern varies a lot between rows.
@@ -256,11 +233,16 @@ Tensor& add_out_sparse_csr_cuda(
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    return add_out_dense_sparse_csr_cuda(out, self, other, alpha);
+    add_out_dense_sparse_csr_cuda(out, self, other, alpha);
   } else {
     TORCH_CHECK(
-        false,
-        "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }
   return out;
 }
@@ -275,6 +257,20 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
       convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
+    });
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const bool transpose, const Tensor& result
+) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int32_t>(result, crow_indices, col_indices, transpose);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int64_t>(result, crow_indices, col_indices, transpose);
     });
   }
 }

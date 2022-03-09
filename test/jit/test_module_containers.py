@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -375,7 +377,7 @@ class TestModuleContainers(JitTestCase):
             def forward(self, input):
                 assert self.moduledict['blah'] == "blah", "this is a keyerror"
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Key Error, blah", "self.moduledict['b"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Key Error, blah", "self.moduledict['blah'"):
             b = BadModule()
             torch.jit.script(b)
 

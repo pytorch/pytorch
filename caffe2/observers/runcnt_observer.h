@@ -27,10 +27,9 @@ class TORCH_API RunCountOperatorObserver final
   RunCountNetObserver* netObserver_;
 };
 
-class TORCH_API RunCountNetObserver final
-    : public OperatorAttachingNetObserver<
-          RunCountOperatorObserver,
-          RunCountNetObserver> {
+class TORCH_API RunCountNetObserver final : public OperatorAttachingNetObserver<
+                                                RunCountOperatorObserver,
+                                                RunCountNetObserver> {
  public:
   explicit RunCountNetObserver(NetBase* subject_)
       : OperatorAttachingNetObserver<

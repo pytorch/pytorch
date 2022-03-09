@@ -61,7 +61,7 @@ void SubgraphRewriter::RegisterRewritePattern(
 Module SubgraphRewriter::runOnModule(const Module& module) {
   nodes_to_delete_.clear();
   for (const auto& m : module.get_methods()) {
-    auto g = m.function().graph();
+    auto g = toGraphFunction(m.function()).graph();
     runOnGraph(g);
   }
   return module;
@@ -175,7 +175,8 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
     AT_ASSERT(outputs.size() == new_outputs.size());
     for (const auto idx : c10::irange(outputs.size())) {
       values_to_rewrite.push_back(outputs[idx]);
-      rewrite_map[outputs[idx]] = new_outputs[idx];
+      rewrite_map[outputs[idx]] =
+          new_outputs[idx]->setType(outputs[idx]->type());
     }
     // Record all planned deletions
     for (Node* pattern_n : pattern_graph.nodes()) {

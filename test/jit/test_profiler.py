@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -229,6 +231,24 @@ class TestProfiler(JitTestCase):
         self.assertEqual(foo_script(x, x), foo(x, x))
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_count("aten::add", 2, exactly=True).run(g)
+
+    def test_local_fusion_strategy(self):
+        @torch.jit.script
+        def foo(x):
+            return x + x + x
+
+        torch.jit.set_fusion_strategy([("STATIC", 1)])
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        torch.jit.set_fusion_strategy([("STATIC", 10)])
+
+        for i in range(10):
+            foo(torch.rand([i]))
+            foo(torch.rand([i]))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
     def test_iterative_fusion(self):
         @torch.jit.script

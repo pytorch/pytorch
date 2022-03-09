@@ -1,20 +1,9 @@
 import os.path
 from glob import glob
-from typing import Any, List
+from typing import cast
 
 import torch
-
-_storages: List[Any] = [
-    torch.DoubleStorage,
-    torch.FloatStorage,
-    torch.LongStorage,
-    torch.IntStorage,
-    torch.ShortStorage,
-    torch.CharStorage,
-    torch.ByteStorage,
-    torch.BoolStorage,
-]
-_dtype_to_storage = {data_type(0).dtype: data_type for data_type in _storages}
+from torch.types import Storage
 
 # because get_storage_from_record returns a tensor!?
 class _HasStorage(object):
@@ -44,9 +33,10 @@ class DirectoryReader(object):
             return f.read()
 
     def get_storage_from_record(self, name, numel, dtype):
-        storage = _dtype_to_storage[dtype]
         filename = f"{self.directory}/{name}"
-        return _HasStorage(storage.from_file(filename=filename, size=numel))
+        nbytes = torch._utils._element_size(dtype) * numel
+        storage = cast(Storage, torch._UntypedStorage)
+        return _HasStorage(storage.from_file(filename=filename, nbytes=nbytes))
 
     def has_record(self, path):
         full_path = os.path.join(self.directory, path)

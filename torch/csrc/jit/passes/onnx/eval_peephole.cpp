@@ -121,6 +121,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       newConv->copyAttributes(*oldConv);
       newConv->insertBefore(bnNode);
       newConv->addInput(oldConv->inputs().at(0));
+      newConv->copyMetadata(oldConv);
 
       auto newConvW = b->owningGraph()->addInput();
       valsToParamsMap.insert(
@@ -128,7 +129,7 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       newConvW->inferTypeFrom(convW);
       newConv->addInput(newConvW);
 
-      auto newConvB = b->addInput();
+      auto newConvB = b->owningGraph()->addInput();
       valsToParamsMap.insert(
           {newConvB, std::make_pair(newConvB->debugName(), convB)});
       newConvB->inferTypeFrom(convB);

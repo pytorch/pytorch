@@ -4,7 +4,7 @@ from torch.distributions.gamma import Gamma
 
 class Chi2(Gamma):
     r"""
-    Creates a Chi2 distribution parameterized by shape parameter :attr:`df`.
+    Creates a Chi-squared distribution parameterized by shape parameter :attr:`df`.
     This is exactly equivalent to ``Gamma(alpha=0.5*df, beta=0.5)``
 
     Example::

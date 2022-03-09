@@ -2,10 +2,11 @@
 #include <ATen/core/jit_type.h>
 #if AT_PARALLEL_OPENMP
 #include <ATen/Parallel.h>
+#include <ATen/ParallelFuture.h>
 
 #include <atomic>
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -30,7 +31,7 @@ void init_num_threads() {
   if (nthreads > 0) {
     set_num_threads(nthreads);
   } else {
-#if defined(_OPENMP) && defined(TH_BLAS_MKL) && !defined(TH_BLAS_MKL_SEQ)
+#if defined(_OPENMP) && AT_MKL_ENABLED() && !AT_MKL_SEQUENTIAL()
     // If we are using MKL an OpenMP make sure the number of threads match.
     // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
     // size of the OpenMP thread pool, resulting in worse performance (and memory
@@ -48,7 +49,7 @@ void set_num_threads(int nthreads) {
 #ifdef _OPENMP
   omp_set_num_threads(nthreads);
 #endif
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   mkl_set_num_threads_local(nthreads);
 
   // because PyTorch uses OpenMP outside of MKL invocations

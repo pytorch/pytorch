@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from io import BytesIO
 
 from torch.package import PackageExporter, PackageImporter
@@ -95,6 +97,15 @@ class TestMangling(PackageTestCase):
         # See mangling.md for more info.
         self.assertNotEqual(type(obj2).__module__, type(loaded1).__module__)
         self.assertNotEqual(type(loaded1).__module__, type(loaded2).__module__)
+
+    def test_package_mangler(self):
+        a = PackageMangler()
+        b = PackageMangler()
+        a_mangled = a.mangle("foo.bar")
+        # Since `a` mangled this string, it should demangle properly.
+        self.assertEqual(a.demangle(a_mangled), "foo.bar")
+        # Since `b` did not mangle this string, demangling should leave it alone.
+        self.assertEqual(b.demangle(a_mangled), a_mangled)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ To launch a **fault-tolerant** job, run the following on all nodes.
     torchrun
        --nnodes=NUM_NODES
        --nproc_per_node=TRAINERS_PER_NODE
+       --max_restarts=NUM_ALLOWED_FAILURES
        --rdzv_id=JOB_ID
        --rdzv_backend=c10d
        --rdzv_endpoint=HOST_NODE_ADDR
@@ -22,10 +23,19 @@ and at most ``MAX_SIZE`` nodes.
     torchrun
         --nnodes=MIN_SIZE:MAX_SIZE
         --nproc_per_node=TRAINERS_PER_NODE
+        --max_restarts=NUM_ALLOWED_FAILURES_OR_MEMBERSHIP_CHANGES
         --rdzv_id=JOB_ID
         --rdzv_backend=c10d
         --rdzv_endpoint=HOST_NODE_ADDR
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
+
+.. note::
+   TorchElastic models failures as membership changes. When a node fails,
+   this is treated as a "scale down" event. When the failed node is replaced by
+   the scheduler, it is a "scale up" event. Hence for both fault tolerant
+   and elastic jobs, ``--max_restarts`` is used to control the total number of
+   restarts before giving up, regardless of whether the restart was caused
+   due to a failure or a scaling event.
 
 ``HOST_NODE_ADDR``, in form <host>[:<port>] (e.g. node1.example.com:29400),
 specifies the node and the port on which the C10d rendezvous backend should be
