@@ -310,6 +310,8 @@ ProcessGroupMPI::ProcessGroupMPI(int rank, int size, MPI_Comm pgComm)
 
   // Start the worker thread accepting MPI calls
   workerThread_ = std::thread(&ProcessGroupMPI::runLoop, this);
+
+  init();
 }
 
 ProcessGroupMPI::~ProcessGroupMPI() {
