@@ -2771,3 +2771,31 @@ TEST(StaticRuntime, IfThenElse) {
   testStaticRuntime(src, args1);
   testStaticRuntime(src, args2);
 }
+
+TEST(StaticRuntime, StackEmpty) {
+  const auto src = R"JIT(
+    def forward(self):
+        x = torch.stack([])
+        return x
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_THROW(smod({}), c10::Error);
+}
+
+TEST(StaticRuntime, ConcatEmpty) {
+  const auto src = R"JIT(
+    def forward(self):
+        x = torch.concat([])
+        return x
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_THROW(smod({}), c10::Error);
+}

@@ -2618,7 +2618,7 @@ class TestQuantizeFx(QuantizationTestCase):
         def _check_node_not_observed(model, arg_node, node):
             if isinstance(arg_node, tuple) or isinstance(arg_node, list):
                 for new_node in arg_node:
-                    _check_node_indices_not_observed(model, new_node, node)
+                    _check_node_not_observed(model, new_node, node)
             elif arg_node.op == "call_module":
                 self.assertTrue(
                     not is_activation_post_process(getattr(model, arg_node.target)),
