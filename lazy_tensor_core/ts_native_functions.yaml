@@ -23,6 +23,7 @@ full_codegen:
   - bitwise_and.Tensor
   - bitwise_or.Tensor
   - bmm
+  - cat
   - clamp
   - clamp_min
   - constant_pad_nd
@@ -113,6 +114,7 @@ full_codegen:
   - softplus_backward
   - sort
   - sqrt
+  - stack
   - std
   - std.dim
   - std.correction
@@ -138,7 +140,6 @@ supported:
   - as_strided_
   - bernoulli
   - bernoulli_.float
-  - cat
   - clone
   - _copy_from
   - _copy_from_and_resize
@@ -161,7 +162,6 @@ supported:
   - squeeze.dim
   - squeeze_
   - squeeze_.dim
-  - stack
   - t
   - t_
   - _to_copy

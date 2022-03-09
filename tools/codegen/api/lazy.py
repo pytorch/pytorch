@@ -8,22 +8,22 @@ from tools.codegen.api.types import (CType, BaseCppType, BaseCType, OptionalCTyp
                                      scalarT, scalarTypeT, memoryFormatT)
 
 valueT = BaseCppType('torch::lazy', 'Value')
-
+# this is a bad hack. I need to refactor the data model to represent each arg in the schema as an object,
+# making it easier to represent special properties of an arg.
+tensorListValueT = BaseCppType('torch::lazy', 'Value')
 
 def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, ListCType]:
     """
     This function takes a type from NativeFunctions and converts it for use with
-    lazy tensor codegen.  Currently its output is used in several places, and so far
-    it has been possible for them to all use the same conversions, but that may not be
-    optimal or possible in the finished system.
+    lazy tensor codegen.
 
     Type conversion for lazy currently consists of
-     (1) changing Tensor-like things into Value-like things
+     (1) changing at::Tensors into lazy::Values
      (2) wrapping everything in a BaseCType
-     (3) making reference types into values (e.g. vector instead of IntArrayRef)
+     (3) making cpp-reference types into cpp-value types (e.g. vector instead of IntArrayRef)
 
-    (1) converts Tensors to Values since Values are how Lazy IR represents tensors.  There
-    is special handling for Optional[Tensor] or List[Tensor], etc- hence 'tensor-like'
+    (1) converts at::Tensors to lazy::Values (which wrap lazy::Nodes, with which Lazy IR represents tensors.)
+    There is special handling for Optional[Tensor] or List[Tensor], etc- hence 'tensor-like'
 
     This is incomplete- there are assertions in places that it's expected to need to add
     more types as the codegen is used with more operators.
@@ -33,7 +33,7 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(valueT)
         elif typ.name == BaseTy.Scalar:
             # at::scalar has special handling,
-            # and is wrapped in an IR value just like at::tensor
+            # and is wrapped in an lazy::Value just like at::tensor
             return BaseCType(valueT)
         elif typ.name == BaseTy.ScalarType:
             return BaseCType(scalarTypeT)
@@ -59,6 +59,9 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
         if str(typ.elem) == 'Tensor?':
             # TODO(whc) is this actually correct? or should it use a Vector like above
             return ListCType(OptionalCType(BaseCType(valueT)))
+        elif str(typ.elem) == 'Tensor':
+            # this is a TensorList which comes in from GetTensorList as a Value
+            return BaseCType(tensorListValueT)
         else:
             return VectorCType(process_ir_type(typ.elem))
     else:

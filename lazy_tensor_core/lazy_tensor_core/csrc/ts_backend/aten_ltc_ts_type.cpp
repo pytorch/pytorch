@@ -10,9 +10,7 @@
 
 #include "ATen/MetaFunctions.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
-#include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/random.h"
-#include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/normal.h"
 #include "lazy_tensor_core/csrc/ops/to_copy.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
@@ -106,23 +104,6 @@ at::Tensor& LazyNativeFunctions::bernoulli_(
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   lazy_tensor_aten_ops::bernoulli_(self_tensor, p);
   return self;
-}
-
-at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto lazy_tensors = torch::lazy::GetLtcTensors(tensors);
-  std::vector<torch::lazy::Value> values;
-  values.reserve(lazy_tensors.size());
-  for (auto& tensor : lazy_tensors) {
-    values.emplace_back(tensor->GetIrValue());
-  }
-
-  auto shapes = torch::lazy::compute_shape_cat(tensors, dim);
-  auto node =
-      torch::lazy::MakeNode<ir::ops::Cat>(values, dim, std::move(shapes));
-  auto result = torch::lazy::CreateAtenFromLtcTensor(
-      torch::lazy::LazyTensor::Create(torch::lazy::Value(node, 0), lazy_tensors[0]->GetDevice()));
-  return result;
 }
 
 at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at::MemoryFormat> memory_format) {
@@ -529,29 +510,6 @@ at::Tensor LazyNativeFunctions::slice(const at::Tensor& self, int64_t dim,
   TORCH_LAZY_FN_COUNTER("lazy::");
   return torch::lazy::CreateAtenFromLtcTensor(lazy_tensor_aten_ops::slice(
       torch::lazy::TryGetLtcTensor(self), dim, start_val, end_val, step));
-}
-
-at::Tensor LazyNativeFunctions::stack(at::TensorList tensors, int64_t dim) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  auto common_device = torch::lazy::GetBackendDevice(tensors);
-  TORCH_INTERNAL_ASSERT(common_device);
-
-  // TODO(whc) - highly suboptimal old code to support calling the canonicalization method,
-  // could clean this up but prefer to actually delete canonicalizatoin,
-  // but need to rewrite shape inference at the same time since it asserts dim <=0
-  auto lazy_tensors = torch::lazy::GetLtcTensors(tensors);
-  CHECK_GT(tensors.size(), 0);
-  std::vector<torch::lazy::Value> values;
-  for (auto tensor : lazy_tensors) {
-    values.push_back(tensor->GetIrValue());
-  }
-  int64_t canonical_dim = torch::lazy::GetCanonicalDimensionIndex(
-      dim, lazy_tensors.front()->shape().Get().dim() + 1);
-
-  return torch::lazy::CreateAtenFromLtcTensor(
-    torch::lazy::LazyTensor::Create(
-      torch::lazy::MakeNode<ir::ops::Stack>(torch::lazy::GetTensorList(tensors), canonical_dim),
-      *common_device));
 }
 
 at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self) {

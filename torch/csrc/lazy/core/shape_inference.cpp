@@ -540,6 +540,23 @@ std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
+  TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
+  auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
+
+  // Copied from 'check_stack_inputs' in TensorShape.cpp
+  at::IntArrayRef entry_shape = tensors[0].sizes();
+  for (const auto i : c10::irange(1, tensors.size())) {
+    TORCH_CHECK(tensors[i].sizes() == entry_shape,
+      "stack expects each tensor to be equal size, but got ", entry_shape,
+      " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
+  }
+
+  auto result_sizes = tensors[0].sizes().vec();
+  result_sizes.insert(result_sizes.begin() + wrapped_dim, tensors.size());
+  return {Shape(tensors[0].scalar_type(), result_sizes)};
+}
+
 std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef repeats) {
   CHECK_GE(repeats.size(), self.dim());
   int64_t num_new_dimensions = repeats.size() - self.dim();

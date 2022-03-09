@@ -51,6 +51,7 @@ TORCH_API std::vector<Shape> compute_shape_relu_(at::Tensor & self);
 TORCH_API std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef repeats);
 TORCH_API std::vector<Shape> compute_shape_smooth_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, double beta);
 TORCH_API std::vector<Shape> compute_shape_sort(const at::Tensor & self, int64_t dim, bool descending);
+TORCH_API std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, bool unbiased);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, at::IntArrayRef dim, bool unbiased, bool keepdim);
 TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, c10::optional<at::IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
