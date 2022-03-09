@@ -587,6 +587,16 @@ inline void guardAgainstNamedTensor(const T& var) {
 // python_ivalue.h
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
 
+// Extract custom class registered with torchbind
+template <typename T>
+c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
+  static_assert(
+      std::is_base_of<CustomClassHolder, T>::value, "T is not a CustomClass");
+  const auto& type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  c10::IValue ivalue = toIValue(obj, type);
+  return std::move(ivalue).toCustomClass<T>();
+}
+
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
 inline std::string friendlyTypeName(py::handle obj) {
