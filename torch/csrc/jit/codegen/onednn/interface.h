@@ -8,13 +8,13 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-static std::atomic<bool> onednn_enabled{true};
+static std::atomic<bool> onednn_enabled{false};
 
 std::atomic<bool>& getLlgaEnabled() {
   return onednn_enabled;
 }
 
-TORCH_API void fuseGraph(std::shared_ptr<Graph>& g);
+C10_EXPORT void fuseGraph(std::shared_ptr<Graph>& g);
 
 } // namespace onednn
 } // namespace fuser
