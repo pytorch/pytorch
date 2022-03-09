@@ -5,12 +5,12 @@
 #include <string>
 #include <type_traits>
 #include <ATen/ATen.h>
+#include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_compat.h>
 
 #ifdef USE_CUDA
-#include <THC/THC.h>
 #include <c10/cuda/CUDAStream.h>
 #endif
 
@@ -118,13 +118,16 @@
 #define THPQUInt4x2Utils_checkReal(object)      THPUtils_checkReal_INT(object)
 #define THPQUInt4x2Utils_unpackReal(object)     (int)THPUtils_unpackReal_INT(object)
 #define THPQUInt4x2Utils_newReal(value)         THPUtils_newReal_INT(value)
+#define THPQUInt2x4Utils_checkReal(object)      THPUtils_checkReal_INT(object)
+#define THPQUInt2x4Utils_unpackReal(object)     (int)THPUtils_unpackReal_INT(object)
+#define THPQUInt2x4Utils_newReal(value)         THPUtils_newReal_INT(value)
 
 
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
-THP_API void THPUtils_setError(const char *format, ...);
-THP_API void THPUtils_invalidArguments(
+TORCH_PYTHON_API void THPUtils_setError(const char *format, ...);
+TORCH_PYTHON_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
@@ -135,7 +138,6 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
-#define THWStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THWTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
 #define THPStoragePtr TH_CONCAT_3(THP,Real,StoragePtr)
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)
@@ -147,27 +149,9 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateAllTypes.h>
+#include <torch/csrc/THGenerateByteType.h>
 
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateHalfType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBFloat16Type.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBoolType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateQTypes.h>
-
-THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
-bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
-bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
 template<typename _real, typename = void>
@@ -194,5 +178,10 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 #ifdef USE_CUDA
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
+
+void storage_copy(at::Storage dst, at::Storage src, bool non_blocking=false);
+void storage_fill(at::Storage self, uint8_t value);
+void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
+uint8_t storage_get(at::Storage self, ptrdiff_t idx);
 
 #endif

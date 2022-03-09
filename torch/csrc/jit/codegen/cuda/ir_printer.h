@@ -1,8 +1,9 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <iostream>
 
@@ -45,21 +46,10 @@ class TORCH_CUDA_CU_API IrTransformPrinter : public IrPrinter {
  public:
   IrTransformPrinter(std::ostream& os) : IrPrinter(os) {}
 
-  void handle(const UnaryOp* const uop) override {
-    if (printInline()) {
-      IrPrinter::handle(uop);
-    }
-  }
+  void handle(Fusion* f) override;
 
-  void handle(const BinaryOp* const bop) override {
-    if (printInline()) {
-      IrPrinter::handle(bop);
-    }
-  }
-
-  void handle(Fusion* f) override {
-    IrPrinter::handle(f);
-  }
+ private:
+  void printTransforms(TensorView* tv);
 };
 
 } // namespace cuda

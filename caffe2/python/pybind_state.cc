@@ -1064,15 +1064,15 @@ void addGlobalMethods(py::module& m) {
 #endif // CAFFE2_USE_MKLDNN
   );
 
-  // if the binary is built with __HIP_PLATFORM_HCC__, this is a ROCm build
+  // if the binary is built with USE_ROCM, this is a ROCm build
   // and therefore we need to ignore dyndep failures (because the the module
   // may not have a ROCm equivalent yet e.g. nccl)
   m.attr("use_rocm") = py::bool_(
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
       true
-#else // __HIP_PLATFORM_HCC__
+#else // USE_ROCM
       false
-#endif // __HIP_PLATFORM_HCC__
+#endif // USE_ROCM
   );
 
   m.attr("use_trt") = py::bool_(

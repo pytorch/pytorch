@@ -21,6 +21,7 @@ class ConcreteSourceRangeUnpickler : public SourceRangeUnpickler {
 
   void unpickle();
 
+  std::mutex mutex;
   std::shared_ptr<SourceRangeDeserializer> deserializer;
   std::shared_ptr<SourceRangeRecords> unpickled_records;
 };

@@ -76,3 +76,10 @@ a generic definition of `sumImplAll`. This function allows the user to reduce
 over a dimension or all dimensions. The appropiate capability is chosen at
 runtime using cpuinfo. If the current platform has AVX2, `sumImpl` will be set
 to `sumImplAll<CPUCapability::AVX2>`.
+
+At runtime, the following environment variables control which codepath is taken:
+
+x64 options:
+ATEN_CPU_CAPABILITY=avx2    # Force AVX2 codepaths to be used
+ATEN_CPU_CAPABILITY=avx     # Force AVX codepaths to be used
+ATEN_CPU_CAPABILITY=default # Use oldest supported vector instruction set

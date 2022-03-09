@@ -1,13 +1,11 @@
 #pragma once
 #include <ATen/ExpandUtils.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/List.h>
-
-#include <limits>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
-
-TORCH_API bool canUse32BitIndexMath(const at::Tensor &t, int64_t max_elem=std::numeric_limits<int32_t>::max());
 
 [[noreturn]]
 static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, int64_t maskIdx) {
@@ -31,7 +29,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, const t
         }
         // The sizes of the ByteTensor mask or bool tensor must match the sizes of the
         // corresponding dimensions in self
-        for (int64_t j = 0; j < index.dim(); j++) {
+        for (const auto j : c10::irange(index.dim())) {
           int64_t srcIdx = result.size() + j;
           if (index.size(j) != self.size(srcIdx)) {
             invalid_mask(self, srcIdx, index, j);
@@ -39,7 +37,7 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, const t
         }
         // Replace with nonzeros
         auto nonzero = index.nonzero();
-        for (int64_t j = 0; j < index.dim(); j++) {
+        for (const auto j : c10::irange(index.dim())) {
           result.emplace_back(nonzero.select(1, j));
         }
       } else {
@@ -75,7 +73,7 @@ inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   torch::List<c10::optional<Tensor>> result;
   result.reserve(list.size());
   for (const IValue& a : list) {
-    result.push_back(a.toTensor());
+    result.push_back(a.isTensor() ? c10::optional<Tensor>(a.toTensor()) : c10::optional<Tensor>());
   }
   return result;
 }
@@ -102,13 +100,13 @@ transposeToFront(Tensor self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
-  for (auto i = decltype(self.dim()){0}; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);
       transposedIndices.emplace_back(indices[i]);
     }
   }
-  for (auto i = decltype(self.dim()){0}; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     if (!indices[i].defined()) {
       dims.push_back(i);
       transposedIndices.emplace_back();
@@ -124,19 +122,19 @@ transposeToFrontAndInvPerm(Tensor self, TensorList indices) {
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());
   invPerm.resize(self.dim());
-  for (auto i = decltype(self.dim()){0}; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     if (indices[i].defined()) {
       dims.push_back(i);
       transposedIndices.emplace_back(indices[i]);
     }
   }
-  for (auto i = decltype(self.dim()){0}; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     if (!indices[i].defined()) {
       dims.push_back(i);
       transposedIndices.emplace_back();
     }
   }
-  for (auto i = decltype(self.dim()){0}; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     invPerm[dims[i]] = i;
   }
   return std::make_tuple(self.permute(dims), std::move(transposedIndices), std::move(invPerm));

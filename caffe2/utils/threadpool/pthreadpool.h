@@ -8,7 +8,7 @@
 #include <stddef.h> // for size_t
 #include <stdint.h> // for uint32_t
 
-#ifdef USE_PTHREADPOOL
+#if defined(USE_PTHREADPOOL) && !(defined(__XROS__))
 // This is a hack.
 // Mainly introduced here because
 // 1. NNPACK can be compiled to use internal legacy threadpool implementation because much of C2 depends on that.

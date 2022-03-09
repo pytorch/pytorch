@@ -1,19 +1,5 @@
+
 namespace broadcast {
-
-template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
-__host__ __device__ unsigned offset_of_source(
-    const dim3& block_dim,
-    const dim3& thread_idx) {
-  unsigned offset = 0;
-  if (!Z_THREAD)
-    offset = offset * block_dim.z + thread_idx.z;
-  if (!Y_THREAD)
-    offset = offset * block_dim.y + thread_idx.y;
-  if (!X_THREAD)
-    offset = offset * block_dim.x + thread_idx.x;
-  return offset;
-}
-
 // Broadcasts within partitioned groups of threads.
 //
 // X_THREAD: Broadcast from threadIdx.x == 0 if true
@@ -23,19 +9,29 @@ __host__ __device__ unsigned offset_of_source(
 // out: Per-thread output location
 //
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename T>
-__device__ void blockBroadcast(T& out, T inp_val, T* shared_mem) {
+__device__ void blockBroadcast(
+    T& out,
+    const T& inp_val,
+    T* shared_mem,
+    bool read_write_pred) {
   const bool has_valid_data = (!X_THREAD || threadIdx.x == 0) &&
       (!Y_THREAD || threadIdx.y == 0) && (!Z_THREAD || threadIdx.z == 0);
 
   const auto shared_offset =
-      offset_of_source<X_THREAD, Y_THREAD, Z_THREAD>(blockDim, threadIdx);
+      index_utils::maskedOffset<!X_THREAD, !Y_THREAD, !Z_THREAD>(
+          threadIdx, blockDim);
 
-  if (has_valid_data)
+  if (has_valid_data && read_write_pred) {
     shared_mem[shared_offset] = inp_val;
+  }
 
-  __syncthreads();
+  block_sync::sync();
 
-  out = shared_mem[shared_offset];
+  if (read_write_pred) {
+    out = shared_mem[shared_offset];
+  }
+
+  block_sync::sync();
 }
 
 } // namespace broadcast

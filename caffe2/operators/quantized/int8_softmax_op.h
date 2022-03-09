@@ -15,7 +15,11 @@ namespace int8 {
 class Int8SoftmaxOp final : public Operator<CPUContext> {
  public:
   explicit Int8SoftmaxOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<CPUContext>(operator_def, ws), ws_(ws) {}
+      : Operator<CPUContext>(operator_def, ws) {
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+        ws_ = ws;
+#endif
+      }
 
   ~Int8SoftmaxOp() {
     if (this->qnnpackOperator_ != nullptr) {
@@ -38,7 +42,6 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
      * in-place, we may overwrite these parameters later, when we set
      * quantization parameters for output tensor.
      */
-    const uint8_t X_zero_point = X.zero_point;
     const float X_scale = X.scale;
 
     Y->scale = Y_scale;
@@ -89,7 +92,9 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
   }
 
  private:
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
   Workspace* ws_;
+#endif
   // QNNPACK SoftArgMax operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };

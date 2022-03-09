@@ -2,7 +2,9 @@
 
 #include <ATen/CPUFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 namespace torch {
 namespace jit {
@@ -25,10 +27,6 @@ void TEWrapper::call(const std::vector<void*>& args) {
   cg->call_raw(args);
 }
 
-bool TEWrapper::supports(const at::Tensor& t) {
-  return t.is_contiguous() && t.dtype().Match<float>();
-}
-
 void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
@@ -49,6 +47,16 @@ std::shared_ptr<TEWrapper> wrapTECompute(
   s = IRSimplifier::simplify(s);
   args.insert(args.begin(), out);
   auto cg = std::make_unique<LLVMCodeGen>(s, args);
+  cg->cleanup_memory();
+  wrap->update(std::move(cg));
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> wrapTECompute(
+    std::shared_ptr<TEWrapper> wrap,
+    LoopNest* ln,
+    std::vector<CodeGen::BufferArg> args) {
+  auto cg = std::make_unique<LLVMCodeGen>(ln->root_stmt(), args);
   wrap->update(std::move(cg));
   return wrap;
 }
@@ -59,15 +67,18 @@ void TEWrapper::call(const std::vector<void*>& args) {
   DCHECK(0 && "Invalid call");
 }
 
-bool TEWrapper::supports(const at::Tensor& t) {
-  return false;
-}
-
 std::shared_ptr<TEWrapper> wrapTECompute(
     std::shared_ptr<TEWrapper> wrap,
     Tensor out,
     std::vector<CodeGen::BufferArg> args,
     int width = kVectorWidth) {
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> wrapTECompute(
+    std::shared_ptr<TEWrapper> wrap,
+    LoopNest* ln,
+    std::vector<CodeGen::BufferArg> args) {
   return wrap;
 }
 
@@ -137,7 +148,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
-    return ifThenElse(a < zero, zero, a);
+    return CompareSelect::make(a, zero, zero, a, kLT);
   });
   wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);
@@ -176,6 +187,39 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   constexpr int kSleefWidth = 8;
   wrap = wrapTECompute(wrap, B, {A, N}, kSleefWidth);
   updateNNCCache(aten::sigmoid, wrap);
+  return wrap;
+}
+
+std::shared_ptr<TEWrapper> createSignedLog1p() {
+  static auto signed_log1p_symbol =
+      c10::Symbol::fromQualString("static_runtime::signed_log1p");
+  auto wrap = lookupNNCCache(signed_log1p_symbol);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+  auto N = VarHandle("N", kInt);
+  BufHandle A("A", {N}, kFloat);
+  Tensor abs_result = Compute("aten_abs", {N}, [&](const VarHandle& i) {
+    return tensorexpr::abs(A.load(i));
+  });
+  Tensor log1p_result = Compute("aten_log1p", {N}, [&](const VarHandle& i) {
+    return log1p(abs_result.load(i));
+  });
+  Tensor sign = computeSign({A}, {N});
+  Tensor output = Compute("aten_mul", {N}, [&](const VarHandle& i) {
+    return sign.load(i) * log1p_result.load(i);
+  });
+  LoopNest ln({output}, {abs_result, log1p_result, sign, output});
+  GRAPH_DEBUG("Original stmt: ", *ln.root_stmt());
+  ln.inlineIntermediateBufs(true);
+  ln.prepareForCodegen();
+  ln.simplify();
+  ln.vectorizeInnerLoops();
+  ln.simplify();
+  GRAPH_DEBUG("Final stmt: ", *ln.root_stmt());
+  wrap = wrapTECompute(wrap, &ln, {output, A, N});
+  updateNNCCache(signed_log1p_symbol, wrap);
   return wrap;
 }
 

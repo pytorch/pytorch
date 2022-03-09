@@ -145,7 +145,7 @@ class _BatchNorm(_NormBase):
         if self.training and self.track_running_stats:
             # TODO: if statement only here to tell the jit to skip emitting this when it is None
             if self.num_batches_tracked is not None:  # type: ignore[has-type]
-                self.num_batches_tracked = self.num_batches_tracked + 1  # type: ignore[has-type]
+                self.num_batches_tracked.add_(1)  # type: ignore[has-type]
                 if self.momentum is None:  # use cumulative moving average
                     exponential_average_factor = 1.0 / float(self.num_batches_tracked)
                 else:  # use exponential moving average
@@ -228,8 +228,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
-    inputs with optional additional channel dimension) as described in the paper
+    r"""Applies Batch Normalization over a 2D or 3D input as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
     Internal Covariate Shift <https://arxiv.org/abs/1502.03167>`__ .
 
@@ -239,9 +238,9 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are set
-    to 1 and the elements of :math:`\beta` are set to 0. The standard-deviation is calculated
-    via the biased estimator, equivalent to `torch.var(input, unbiased=False)`.
+    of size `C` (where `C` is the number of features or channels of the input). By default, the
+    elements of :math:`\gamma` are set to 1 and the elements of :math:`\beta` are set to 0. The
+    standard-deviation is calculated via the biased estimator, equivalent to `torch.var(input, unbiased=False)`.
 
     Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -264,8 +263,7 @@ class BatchNorm1d(_BatchNorm):
     on `(N, L)` slices, it's common terminology to call this Temporal Batch Normalization.
 
     Args:
-        num_features: :math:`C` from an expected input of size
-            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
+        num_features: number of features or channels :math:`C` of the input
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
@@ -281,7 +279,8 @@ class BatchNorm1d(_BatchNorm):
             in both training and eval modes. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, C)` or :math:`(N, C, L)`
+        - Input: :math:`(N, C)` or :math:`(N, C, L)`, where :math:`N` is the batch size,
+          :math:`C` is the number of features or channels, and :math:`L` is the sequence length
         - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
     Examples::
@@ -695,7 +694,7 @@ class SyncBatchNorm(_BatchNorm):
 
         if self.training and self.track_running_stats:
             assert self.num_batches_tracked is not None
-            self.num_batches_tracked = self.num_batches_tracked + 1
+            self.num_batches_tracked.add_(1)
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average

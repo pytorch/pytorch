@@ -40,7 +40,7 @@ namespace guts {
 
 template <typename Base, typename Child, typename... Args>
 typename std::enable_if<
-    !std::is_array<Base>::value && !std::is_array<Base>::value &&
+    !std::is_array<Base>::value && !std::is_array<Child>::value &&
         std::is_base_of<Base, Child>::value,
     std::unique_ptr<Base>>::type
 make_unique_base(Args&&... args) {
@@ -107,7 +107,7 @@ using void_t = typename make_void<Ts...>::type;
 
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 // rocm doesn't like the C10_HOST_DEVICE
 #define CUDA_HOST_DEVICE
 #else

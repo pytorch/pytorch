@@ -5,19 +5,17 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <c10/hip/HIPGuard.h>
 #include "caffe2/core/hip/common_miopen.h"
 #include "caffe2/core/hip/context_gpu.h"
 #include "caffe2/operators/hip/operator_fallback_gpu.h"
 #include "caffe2/python/pybind_state_registry.h"
-#include <c10/hip/HIPGuard.h>
 
 namespace caffe2 {
 namespace python {
 
 REGISTER_HIP_OPERATOR(Python, GPUFallbackOp);
-REGISTER_HIP_OPERATOR(
-    PythonGradient,
-    GPUFallbackOp);
+REGISTER_HIP_OPERATOR(PythonGradient, GPUFallbackOp);
 
 REGISTER_HIP_OPERATOR(PythonDLPack, GPUFallbackOp);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, GPUFallbackOp);

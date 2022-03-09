@@ -7,7 +7,7 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from torch.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
     get_base_name_to_sets_of_related_ops,
@@ -18,7 +18,7 @@ from .pattern_utils import (
     get_reversed_fusions,
     end_node_matches_reversed_fusion,
 )
-from torch.quantization import (
+from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
 )
@@ -81,7 +81,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # be made configurable later if needed.
             for _reverse_fusion_ops, base_op_idx in get_reversed_fusions():
                 is_match = end_node_matches_reversed_fusion(
-                    cur_end_node, _reverse_fusion_ops, self.gm)
+                    cur_end_node, _reverse_fusion_ops, self.gm, self.seen_nodes)
                 if is_match:
                     # navigate to the base node
                     for rev_fusion_idx in range(len(_reverse_fusion_ops) - 1):

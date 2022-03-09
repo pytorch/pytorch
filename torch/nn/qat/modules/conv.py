@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
-from torch.nn.intrinsic import ConvReLU2d, ConvReLU3d
+from torch.nn.intrinsic import ConvReLU2d, ConvReLU3d, _FusedModule
 
-
+# TODO: factor out the common parts to _ConvNd
 class Conv2d(nn.Conv2d):
     r"""
     A Conv2d module attached with FakeQuantize modules for weight,
@@ -40,7 +40,7 @@ class Conv2d(nn.Conv2d):
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
-            Args: `mod` a float module, either produced by torch.quantization utilities
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
@@ -72,7 +72,18 @@ class Conv2d(nn.Conv2d):
         conv.weight = torch.nn.Parameter(self.weight.detach())
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
-        return conv
+        cls = type(self)
+        # conv relu
+        if issubclass(cls, _FusedModule):
+            modules = [conv]
+            assert hasattr(cls, "_FLOAT_RELU_MODULE")
+            relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
+            modules.append(relu)
+            fused = cls._FLOAT_MODULE(*modules)  # type: ignore[arg-type]
+            fused.train(self.training)
+            return fused
+        else:
+            return conv
 
 class Conv3d(nn.Conv3d):
     r"""
@@ -130,7 +141,7 @@ class Conv3d(nn.Conv3d):
     def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
-        Args: `mod` a float module, either produced by torch.quantization utilities
+        Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
         assert type(mod) == cls._FLOAT_MODULE, (
@@ -174,4 +185,15 @@ class Conv3d(nn.Conv3d):
         conv.weight = torch.nn.Parameter(self.weight.detach())
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
-        return conv
+        cls = type(self)
+        # conv relu
+        if issubclass(cls, _FusedModule):
+            modules = [conv]
+            assert hasattr(cls, "_FLOAT_RELU_MODULE")
+            relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
+            modules.append(relu)
+            fused = cls._FLOAT_MODULE(*modules)  # type: ignore[arg-type]
+            fused.train(self.training)
+            return fused
+        else:
+            return conv

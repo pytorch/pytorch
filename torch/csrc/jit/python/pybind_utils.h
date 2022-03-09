@@ -9,10 +9,10 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Stream.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -510,7 +510,7 @@ inline InferredType tryToInferContainerType(py::handle input) {
 }
 
 inline bool isTraceableType(const TypePtr& type) {
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return true;
   }
 
@@ -551,7 +551,7 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
       info.type()->repr_str(),
       "' cannot be traced. Only Tensors and (possibly nested) Lists, Dicts, and"
       " Tuples of Tensors can be traced");
-  return info.toTuple()->elements();
+  return info.toTupleRef().elements().vec();
 }
 
 inline IValue createGenericList(py::handle obj, const TypePtr& elem_type) {
@@ -586,6 +586,16 @@ inline void guardAgainstNamedTensor(const T& var) {
 // Defined in pybind_utils.cpp to break a circular dependency with
 // python_ivalue.h
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N);
+
+// Extract custom class registered with torchbind
+template <typename T>
+c10::intrusive_ptr<T> toCustomClass(py::handle obj) {
+  static_assert(
+      std::is_base_of<CustomClassHolder, T>::value, "T is not a CustomClass");
+  const auto& type = c10::getCustomClassType<c10::intrusive_ptr<T>>();
+  c10::IValue ivalue = toIValue(obj, type);
+  return std::move(ivalue).toCustomClass<T>();
+}
 
 // Small wrapper around getting the type name string from Python to make
 // types easier to interpret, e.g. give the structural type for a NamedTuple
@@ -683,15 +693,10 @@ inline py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    if (tensor.is_sparse()) {
-      TORCH_WARN_ONCE(
-          "Using sparse tensors in TorchScript is experimental. Many optimization "
-          "pathways have not been thoroughly tested with sparse tensors. Please "
-          "include the fact that the network is running sparse tensors in any bug "
-          "reports submitted.");
-    }
     guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
+  } else if (ivalue.isStorage()) {
+    return py::cast(ivalue.toStorage());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
@@ -979,7 +984,7 @@ inline py::object runAndInsertCall(
     // and then run the callee with tracing disabled.
 
     // Get the graph `Value`s that represent the input IValues
-    auto inputs = last(stack, callee.graph()->inputs().size());
+    auto inputs = last(stack, callee.num_inputs());
     auto input_values =
         fmap(inputs, [](const IValue& v) { return tracer::getValueTrace(v); });
     TORCH_INTERNAL_ASSERT(callee.getSchema().returns().size() == 1)
@@ -1155,6 +1160,73 @@ inline py::object invokeOperatorFromPython(
   }
 
   return createPyObjectForStack(std::move(stack));
+}
+
+inline py::object _get_operation_for_overload_or_packet(
+    const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    py::args args,
+    const py::kwargs& kwargs,
+    bool is_overload) {
+  std::vector<py::handle> overloaded_args;
+  size_t total_arg_num = args.size() + kwargs.size();
+  for (const auto i : c10::irange(args.size())) {
+    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
+    is_tensor_list_and_append_overloaded(
+        args[i].ptr(),
+        &overloaded_args,
+        static_cast<int>(total_arg_num),
+        false /* throw_error */);
+  }
+  // NB: for kwargs, we cannot guarantee the order of appending
+  // is the same as the argument order in operator's schema.
+  // This is suboptimal, but should be fine. Later when we have
+  // better schema matching and argument parsing, we could
+  // match the operator in `operations` first, then the order will
+  // be guaranteed.
+  for (auto item : kwargs) {
+    is_tensor_and_append_overloaded(item.second.ptr(), &overloaded_args);
+    is_tensor_list_and_append_overloaded(
+        item.second.ptr(),
+        &overloaded_args,
+        total_arg_num,
+        false /* throw_error */);
+  }
+  if (overloaded_args.size() > 0) {
+    std::vector<py::object> overloaded_types;
+    overloaded_types.reserve(overloaded_args.size());
+    for (auto& oarg : overloaded_args) {
+      overloaded_types.push_back(
+          py::reinterpret_borrow<py::object>((PyObject*)Py_TYPE(oarg.ptr())));
+    }
+    py::tuple py_types = py::cast(overloaded_types);
+    py::object ret;
+    std::string ns = symbol.ns().toUnqualString();
+    std::string method_name = symbol.toUnqualString();
+    auto self_func = py::module::import("torch")
+                         .attr("ops")
+                         .attr(ns.c_str())
+                         .attr(method_name.c_str());
+    if (is_overload) {
+      auto overload_name = operations[0]->schema().overload_name();
+      if (overload_name == "") {
+        self_func = self_func.attr("default");
+      } else {
+        self_func = self_func.attr(overload_name.c_str());
+      }
+    }
+    std::string module_name("torch.ops");
+    module_name.append(ns);
+    return pybind11::reinterpret_steal<py::object>(
+        handle_torch_function_no_python_arg_parser(
+            overloaded_args,
+            args.ptr(),
+            kwargs.ptr(),
+            method_name.c_str(),
+            self_func.ptr(),
+            module_name.c_str()));
+  }
+  return invokeOperatorFromPython(operations, args, kwargs);
 }
 
 } // namespace jit

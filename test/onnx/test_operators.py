@@ -1,3 +1,4 @@
+# Owner(s): ["module: onnx"]
 
 from test_pytorch_common import TestCase, run_tests, flatten, skipIfNoLapack, \
     BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
@@ -9,6 +10,7 @@ from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symboli
 from torch.autograd import Variable, Function
 from torch.nn import Module, functional
 import torch.nn as nn
+import torch.nn.functional as F
 
 import itertools
 import io
@@ -16,6 +18,7 @@ import inspect
 import glob
 import os
 import shutil
+import tempfile
 import torch.testing._internal.common_utils as common
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -30,8 +33,7 @@ _onnx_dep = True  # flag to import onnx package.
 
 def export_to_pbtxt(model, inputs, *args, **kwargs):
     return torch.onnx.export_to_pretty_string(
-        model, inputs, None, verbose=False, google_printer=True,
-        *args, **kwargs)
+        model, inputs, google_printer=True, *args, **kwargs)
 
 
 def export_to_pb(model, inputs, *args, **kwargs):
@@ -279,15 +281,14 @@ class TestOperators(TestCase):
     def test_conv_variable_length(self):
         x = torch.ones(5, 3, 6, 6, requires_grad=True)
         model = torch.nn.Conv2d(3, 2, 3)
-        y = model(x)
 
         dynamic_axes = {"input_1": [0, 2, 3], "output_1": {0: "output_1_variable_dim_0", 1: "output_1_variable_dim_1"}}
-        model_proto_name = "conv2d.onnx"
-        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
-                          example_outputs=y, dynamic_axes=dynamic_axes)
+        model_proto_file = tempfile.NamedTemporaryFile()
+        torch.onnx.export(model, x, model_proto_file.name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+                          dynamic_axes=dynamic_axes)
 
         import onnx
-        onnx_model = onnx.load(model_proto_name)
+        onnx_model = onnx.load(model_proto_file.name)
         onnx.checker.check_model(onnx_model)
 
         # Asserting the default dynamic axes names are generated when custom names are not provided
@@ -388,13 +389,11 @@ class TestOperators(TestCase):
 
     def test_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::mean",
-                                   lambda x: torch.mean(x, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.mean(x, dtype=torch.double), x)
 
     def test_reduced_mean_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::mean",
-                                   lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.mean(x, dim=0, dtype=torch.double), x)
 
     def test_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -402,13 +401,11 @@ class TestOperators(TestCase):
 
     def test_sum_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::sum",
-                                   lambda x: torch.sum(x, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.sum(x, dtype=torch.double), x)
 
     def test_reduced_sum_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::sum",
-                                   lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.sum(x, dim=0, dtype=torch.double), x)
 
     def test_reduced_sum(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
@@ -432,13 +429,11 @@ class TestOperators(TestCase):
 
     def test_prod_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::prod",
-                                   lambda x: torch.prod(x, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.prod(x, dtype=torch.double), x)
 
     def test_reduced_prod_dtype(self):
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
-        self.assertONNXRaisesRegex(RuntimeError, "Couldn't export operator aten::prod",
-                                   lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
+        self.assertONNX(lambda x: torch.prod(x, dim=0, dtype=torch.double), x)
 
     def test_sqrt(self):
         x = torch.randn(3, 4, requires_grad=True)
@@ -729,47 +724,32 @@ class TestOperators(TestCase):
         x = torch.randn(2, 3, 4, requires_grad=True)
         self.assertONNX(lambda x: torch.cumsum(x, dim=1), x, opset_version=11)
 
-    def test_retain_param_name_disabled(self):
-        class MyModule(Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.fc1 = nn.Linear(4, 5, bias=False)
-                self.fc1.weight.data.fill_(2.)
-                self.fc2 = nn.Linear(5, 6, bias=False)
-                self.fc2.weight.data.fill_(3.)
-
-            def forward(self, x):
-                return self.fc2(self.fc1(x))
-
-        x = torch.randn(3, 4).float()
-        self.assertONNX(MyModule(), (x,), _retain_param_name=False,
-                        keep_initializers_as_inputs=True)
-
-    def test_c2_op(self):
-        class MyModel(torch.nn.Module):
-            def __init__(self):
-                super(MyModel, self).__init__()
-
-            def forward(self, scores, bbox_deltas, im_info, anchors):
-                a, b = torch.ops._caffe2.GenerateProposals(
-                    (scores), (bbox_deltas), (im_info), (anchors),
-                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
-                )
-                return a, b
-
-        model = MyModel()
-        A = 4
-        H = 10
-        W = 8
-        img_count = 3
-        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
-        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
-                                     dtype=torch.float32)
-        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
-        im_info = torch.ones(img_count, 3, dtype=torch.float32)
-        anchors = torch.ones(A, 4, dtype=torch.float32)
-        inputs = (scores, bbox_deltas, im_info, anchors)
-        self.assertONNX(model, inputs, custom_opsets={"org.pytorch._caffe2": 0})
+# Github Issue: https://github.com/pytorch/pytorch/issues/71095
+#    def test_c2_op(self):
+#        class MyModel(torch.nn.Module):
+#            def __init__(self):
+#                super(MyModel, self).__init__()
+#
+#            def forward(self, scores, bbox_deltas, im_info, anchors):
+#                a, b = torch.ops._caffe2.GenerateProposals(
+#                    (scores), (bbox_deltas), (im_info), (anchors),
+#                    2.0, 6000, 300, 0.7, 16, True, -90, 90, 1.0, True,
+#                )
+#                return a, b
+#
+#        model = MyModel()
+#        A = 4
+#        H = 10
+#        W = 8
+#        img_count = 3
+#        scores = torch.ones(img_count, A, H, W, dtype=torch.float32)
+#        bbox_deltas = torch.linspace(0, 10, steps=img_count * 4 * A * H * W,
+#                                     dtype=torch.float32)
+#        bbox_deltas = bbox_deltas.view(img_count, 4 * A, H, W)
+#        im_info = torch.ones(img_count, 3, dtype=torch.float32)
+#        anchors = torch.ones(A, 4, dtype=torch.float32)
+#        inputs = (scores, bbox_deltas, im_info, anchors)
+#        self.assertONNX(model, inputs, custom_opsets={"org.pytorch._caffe2": 0})
 
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -936,6 +916,12 @@ class TestOperators(TestCase):
                         dynamic_axes={"input_1": {1: "dim_1"}, "input_2": {1: "dim_2"}},
                         opset_version=12)
 
+    def test_dynamic_axes_add_inputs_same_symbolic_shape(self):
+        m1 = torch.randn(2, 3, requires_grad=True)
+        self.assertONNX(lambda x: torch.add(x, x), (m1,), input_names=["input_1"],
+                        dynamic_axes={"input_1": {1: "dim_1"}},
+                        opset_version=12)
+
     def test_dynamic_axes_matmul(self):
         m1 = torch.randn(2, 2, 4, requires_grad=True)
         m2 = torch.randn(2, 4, 3, requires_grad=True)
@@ -1033,6 +1019,41 @@ class TestOperators(TestCase):
                         dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}})
 
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
+
+    # Without shapeValueMap, the onnx graph looks like:
+    # graph(%0 : Float(*, 1, 128, 1, strides=[128, 128, 1, 1], requires_grad=0, device=cpu)):
+    #   %2 : Long(4, strides=[1], device=cpu) = onnx::Shape(%0)
+    #   %4 : Long(device=cpu) = onnx::Constant[value={0}]()
+    #   %5 : Long(device=cpu) = onnx::Gather[axis=0](%2, %4)
+    #   %6 : Long(device=cpu) = onnx::Constant[value={1}]()
+    #   %7 : Long(device=cpu) = onnx::Constant[value={2}]()
+    #   %8 : Long(device=cpu) = onnx::Constant[value={-1}]()
+    #   %9 : int[] = prim::ListConstruct(%5, %6, %7, %8)
+    #   %10 : Float(*, *, *, *, strides=[128, 128, 64, 1], requires_grad=0, device=cpu) = onnx::Reshape(%0, %9)
+    #   ...
+    # With shapeValueMap, it becomes:
+    #   ...
+    #   %10 : Float(*, 1, 2, 64, strides=[128, 128, 64, 1], requires_grad=0, device=cpu) = onnx::Reshape(%0, %9)
+    #   ...
+    def test_shape_value_map(self):
+        class RSoftMax(torch.nn.Module):
+            def __init__(self, radix, cardinality):
+                super().__init__()
+                self.radix = radix
+                self.cardinality = cardinality
+
+            def forward(self, x):
+                batch = x.size(0)
+                x = x.view(batch, self.cardinality, self.radix, -1).transpose(1, 2)
+                x = F.softmax(x, dim=1)
+                x = x.reshape(batch, -1)
+                return x
+        radix = 2
+        cardinality = 1
+        x = torch.randn(10, 1, 128, 1)
+        self.assertONNX(RSoftMax(radix, cardinality), (x,),
+                        input_names=["x"],
+                        dynamic_axes={"x": {0: "dim_0"}})
 
 if __name__ == "__main__":
     no_onnx_dep_flag = "--no-onnx"

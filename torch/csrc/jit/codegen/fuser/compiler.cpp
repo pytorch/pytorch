@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_desc.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
@@ -123,7 +122,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     // This needs to be revisited when you start allowing
     // other things e.g. nonconstant scalars.
     if (producer->kind() == prim::Param &&
-        val->type()->isSubtypeOf(TensorType::get())) {
+        val->type()->isSubtypeOf(*TensorType::get())) {
       inputs.insert(val);
       continue;
     }
@@ -230,10 +229,10 @@ std::shared_ptr<FusedKernel> compileKernel(
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
-      if (p->type()->isSubtypeOf(FloatType::get())) {
+      if (p->type()->isSubtypeOf(*FloatType::get())) {
         flat_inputs.emplace_back(p, c10::nullopt);
       }
-      if (!p->type()->isSubtypeOf(TensorType::get())) {
+      if (!p->type()->isSubtypeOf(*TensorType::get())) {
         continue;
       }
       if (const Node* chunk = usedInFusedChunk(p)) {

@@ -1,4 +1,4 @@
-ir_version: 6
+ir_version: 4
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
@@ -27,6 +27,11 @@ graph {
       type: STRING
     }
     attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    attribute {
       name: "scale_grad_by_freq"
       i: 0
       type: INT
@@ -37,7 +42,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 10
     dims: 8

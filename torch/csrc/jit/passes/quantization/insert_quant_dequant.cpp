@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
@@ -16,8 +17,6 @@ namespace torch {
 namespace jit {
 
 namespace {
-using graph_rewrite_helper::getFuncName;
-using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
@@ -325,6 +324,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
   } else {
     TORCH_INTERNAL_ASSERT(
+        false,
         "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
   }
 
@@ -725,15 +725,19 @@ class InsertQuantDeQuantHelper {
       Node* n);
   void checkQScheme(Graph* g, c10::QScheme qscheme) {
     if (qscheme_for_graph_.count(g)) {
+      // FIXME[T110786721]: This check was broken before nevery failing.
+      // Once fixed, this check triggers and fails tests.
+      // Fix the tests that enabling this check produce!
+      /*
       TORCH_CHECK(
-          qscheme_for_graph_.at(g) == qscheme ||
-
-              "Quantizing same graph with different types of "
-              "QSchemes is not supported.\n",
+          qscheme_for_graph_.at(g) == qscheme,
+          "Quantizing same graph with different types of "
+          "QSchemes is not supported.\n",
           " Expecting:",
           c10::toString(qscheme_for_graph_.at(g)),
           " Got:",
           c10::toString(qscheme));
+      */
     } else {
       qscheme_for_graph_[g] = toAffine(qscheme);
     }
@@ -931,7 +935,7 @@ std::unique_ptr<GraphFunction> SubGraphCloneHelper::buildGraphFromNodes(
     const std::vector<Node*>& nodes,
     const std::string& name) {
   auto observer_subgraph = std::make_shared<Graph>();
-  auto build_observer_graph = [&](Function& func) {
+  auto build_observer_graph = [&](GraphFunction& func) {
     buildObserverSubgraph(nodes, func.graph());
   };
   return torch::make_unique<GraphFunction>(
@@ -1024,7 +1028,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   // TODO: refactor findObserverName to take Node* as input
   Value* v = n->output();
   TORCH_INTERNAL_ASSERT(
-      v->type()->isSubtypeOf(TensorType::get()),
+      v->type()->isSubtypeOf(*TensorType::get()),
       "Expected output of observer node to be Tensor");
   auto observer_name = findObserverName(v);
   TORCH_INTERNAL_ASSERT(
@@ -1352,7 +1356,7 @@ void InsertQuantDeQuantHelper::runWeightObserver(
     blocks_to_visit.pop();
     for (auto n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         auto observer_name = findObserverName(v);
@@ -1416,7 +1420,7 @@ void InsertQuantDeQuantHelper::run(
   std::vector<Value*> input_values;
   for (const auto idx : c10::irange(1, method.num_inputs())) {
     auto& v = graph->inputs()[idx];
-    if (v->type()->isSubtypeOf(TensorType::get())) {
+    if (v->type()->isSubtypeOf(*TensorType::get())) {
       input_values.push_back(v);
     }
   }
@@ -1429,7 +1433,7 @@ void InsertQuantDeQuantHelper::run(
     for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end;) {
       Node* n = *it++;
       for (Value* v : n->outputs()) {
-        if (!v->type()->isSubtypeOf(TensorType::get())) {
+        if (!v->type()->isSubtypeOf(*TensorType::get())) {
           continue;
         }
         collectObserverNodesAndValueToQuantize(module, v);
@@ -1466,38 +1470,6 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
 }
 
 } // namespace
-
-void SwapFunctionalLinear(Module& module) {
-  for (auto& method : module.get_methods()) {
-    std::shared_ptr<Graph> g = method.graph();
-    SwapFunctionalLinear(g);
-  }
-  for (Module m : module.children()) {
-    SwapFunctionalLinear(m);
-  }
-}
-
-void SwapFunctionalLinear(std::shared_ptr<Graph>& graph) {
-  std::string functional_linear = R"(
-graph(%linear, %input, %weight, %bias):
-  %r = prim::CallFunction(%linear, %input, %weight, %bias)
-  return (%r) )";
-  std::string aten_linear = R"(
-graph(%linear, %input, %weight, %bias):
-  %r = aten::linear(%input, %weight, %bias)
-  return (%r) )";
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear = getValue("linear", match_vmap, vmap);
-    auto func_name = getFuncName(linear);
-    return func_name == "linear";
-  };
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(functional_linear, aten_linear);
-  // TODO: runOnGraph takes const ref?
-  rewriter.runOnGraph(graph, filter);
-}
 
 void ReplicateQuant(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;

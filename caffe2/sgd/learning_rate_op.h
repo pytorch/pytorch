@@ -5,6 +5,7 @@
 #include <cmath>
 #include "caffe2/core/context.h"
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/operator.h"
 #include "caffe2/sgd/learning_rate_functors.h"
 
@@ -162,7 +163,7 @@ class LearningRateOp final : public Operator<Context> {
           sub_policy_num_iters.size(),
           0,
           "Must specify at least one sub learning rate policy.");
-      for (size_t i = 0; i < sub_policy_num_iters.size(); ++i) {
+      for (const auto i : c10::irange(sub_policy_num_iters.size())) {
         CAFFE_ENFORCE_GT(
             sub_policy_num_iters[i],
             0,

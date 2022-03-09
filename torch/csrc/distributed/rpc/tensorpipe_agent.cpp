@@ -359,7 +359,6 @@ TensorPipeAgent::TensorPipeAgent(
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
-    c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
@@ -377,8 +376,8 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      worldSize_(worldSize),
-      processGroup_(std::move(processGroup)) {
+      shutdownStore_("shutdown", store),
+      worldSize_(worldSize) {
   // collect worker names
   prepareNames();
 
@@ -398,6 +397,7 @@ void TensorPipeAgent::startImpl() {
   int lowestPriority = std::numeric_limits<int>::max();
   std::string lowestPriorityTransport;
 
+  // Register transports
   for (auto& key : TensorPipeTransportRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.transports.has_value()) {
@@ -428,6 +428,7 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->transport));
   }
 
+  // Register channels
   for (auto& key : TensorPipeChannelRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.channels.has_value()) {
@@ -1010,11 +1011,6 @@ void TensorPipeAgent::pollTimeoutRpcs() {
   }
 }
 
-// TODO: Remove sync()
-void TensorPipeAgent::sync() {
-  VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is syncing (no-op)";
-}
-
 // TODO: Remove join()
 void TensorPipeAgent::join(bool shutdown) {
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is joining";
@@ -1040,7 +1036,7 @@ void TensorPipeAgent::join(bool shutdown) {
     }
     VLOG(1) << "RPC agent for " << workerInfo_.name_
             << " completed all client calls and is entering a barrier";
-    processGroup_->barrier()->wait();
+    syncCallCount(shutdownStore_, worldSize_);
     {
       std::unique_lock<std::mutex> lock(callCountMutex_);
       // At this point, the count may have become non-zero again. We can't wait
@@ -1051,18 +1047,16 @@ void TensorPipeAgent::join(bool shutdown) {
       VLOG(1) << "RPC agent for " << workerInfo_.name_
               << " exited the barrier and found " << clientActiveCalls_
               << " active client calls";
-      std::vector<at::Tensor> totalClientActiveCalls = {
-          at::zeros({}, at::kLong)};
-      *totalClientActiveCalls[0].data_ptr<int64_t>() = clientActiveCalls_;
-      processGroup_->allreduce(totalClientActiveCalls)->wait();
+      int totalClientActiveCalls =
+          syncCallCount(shutdownStore_, worldSize_, clientActiveCalls_);
       VLOG(1) << "RPC agent for " << workerInfo_.name_
-              << " completed the allreduce and got a total of "
-              << (*totalClientActiveCalls[0].data_ptr<int64_t>())
+              << " completed sync call counts and got a total of "
+              << totalClientActiveCalls
               << " active client calls across all workers";
-      if (*totalClientActiveCalls[0].data_ptr<int64_t>() == 0) {
+      if (totalClientActiveCalls == 0) {
         if (shutdown) {
           shuttingDown_ = true;
-          processGroup_->barrier()->wait();
+          syncCallCount(shutdownStore_, worldSize_);
         }
         break;
       }

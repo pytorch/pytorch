@@ -4,24 +4,9 @@
 #include <ATen/TensorUtils.h>
 #include <c10/core/Storage.h>
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/CPUFunctions.h>
 
-#include <THC/THC.h>
-#include <THC/THCGeneral.hpp>
-
-#include <stdexcept>
-
 namespace at {
-
-namespace cuda {
-
-at::Allocator* getPinnedMemoryAllocator() {
-  auto state = globalContext().lazyInitCUDA();
-  return state->cudaHostAllocator;
-}
-
-} // namespace cuda
 
 namespace native {
 

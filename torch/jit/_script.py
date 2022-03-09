@@ -26,7 +26,7 @@ from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
-from torch.jit._fuser import _graph_for
+from torch.jit._fuser import _graph_for, _script_method_graph_for
 from torch.jit._state import (
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
@@ -47,7 +47,7 @@ from torch._classes import classes
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
-torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore[attr-defined]
+torch._C.ScriptMethod.graph_for = _script_method_graph_for  # type: ignore[attr-defined]
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore[attr-defined]
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
@@ -55,6 +55,13 @@ Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
+
+# Throws an error if a jit function is pickled.
+# Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
+def _reduce(cls):
+    raise pickle.PickleError("ScriptFunction cannot be pickled")
+
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
 
 if _enabled:
@@ -712,7 +719,7 @@ if _enabled:
             return "original_name={}".format(self.original_name)
 
         def graph_for(self, *args, **kwargs):
-            return self.forward.graph_for(*args, **kwargs)
+            return self.forward.graph_for(self, *args, **kwargs)
 
         @property
         def original_name(self):
@@ -874,6 +881,7 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_module",
         "add_module",
         "_apply",
         "apply",
@@ -885,6 +893,7 @@ if _enabled:
         "double",
         "half",
         "state_dict",
+        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",
@@ -1299,6 +1308,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        # some functions are explicitly marked as not supported in script mode
+        if hasattr(obj, "__script_unsupported"):
+            raise RuntimeError("TorchScript error: " + obj.__script_unsupported)
 
         _check_directly_compile_overloaded(obj)
         maybe_already_compiled_fn = _try_get_jit_cached_function(obj)

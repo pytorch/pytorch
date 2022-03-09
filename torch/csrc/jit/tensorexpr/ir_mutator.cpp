@@ -200,6 +200,22 @@ ExprPtr IRMutator::mutate(BufPtr v) {
     v->set_dims(dims_new);
   }
 
+  ExprPtr qscale = v->qscale();
+  if (qscale) {
+    ExprPtr qscale_new = qscale->accept_mutator(this);
+    if (qscale != qscale_new) {
+      v->set_qscale(qscale_new);
+    }
+  }
+
+  ExprPtr qzero = v->qzero();
+  if (qzero) {
+    ExprPtr qzero_new = qzero->accept_mutator(this);
+    if (qzero != qzero_new) {
+      v->set_qzero(qzero_new);
+    }
+  }
+
   return v;
 }
 
@@ -478,6 +494,22 @@ StmtPtr IRMutator::mutate(FreePtr v) {
   if (buf != buf_new) {
     v->set_buf(buf_new);
   }
+  return v;
+}
+
+StmtPtr IRMutator::mutate(PlacementAllocatePtr v) {
+  BufPtr buf = v->buf();
+  BufPtr buf_new = to<Buf>(buf->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(
+      buf_new, buildErrorMessage("IRMutator produced null for Buf."));
+  v->set_buf(buf_new);
+
+  BufPtr buf_to_reuse = v->buf_to_reuse();
+  BufPtr buf_to_reuse_new = to<Buf>(buf_to_reuse->accept_mutator(this));
+  TORCH_INTERNAL_ASSERT(
+      buf_to_reuse_new, buildErrorMessage("IRMutator produced null for Buf."));
+  v->set_buf_to_reuse(buf_to_reuse_new);
+
   return v;
 }
 

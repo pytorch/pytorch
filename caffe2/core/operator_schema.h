@@ -9,13 +9,14 @@
 #include <unordered_map>
 #include <vector>
 
-#include "c10/util/Registry.h"
-#include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
-#include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/utils/filler.h"
-#include "caffe2/utils/proto_utils.h"
+#include <c10/util/irange.h>
+#include <c10/util/Registry.h>
+#include <caffe2/core/common.h>
+#include <caffe2/core/logging.h>
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/utils/filler.h>
+#include <caffe2/utils/proto_utils.h>
 
 namespace caffe2 {
 
@@ -519,7 +520,7 @@ inline uint64_t nElemFromDim(const TensorShape& X, int dim = 0) {
   CAFFE_ENFORCE_GE(dim, 0, "Invalid maximum index specified");
 
   uint64_t nElem = 1;
-  for (int i = dim; i < X.dims_size(); ++i) {
+  for (const auto i : c10::irange(dim, X.dims_size())) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -531,7 +532,7 @@ inline uint64_t nElemBetweenDim(const TensorShape& X, int start, int stop) {
   CAFFE_ENFORCE_LE(stop, X.dims_size(), "Invalid maximum index specified");
 
   uint64_t nElem = 1;
-  for (int i = start; i < stop; ++i) {
+  for (const auto i : c10::irange(start, stop)) {
     nElem *= X.dims(i);
   }
   return nElem;
@@ -560,7 +561,7 @@ OpSchema::Cost PointwiseCostInference(
   const TensorShape X = inputs[0];
   uint64_t nElemX = nElemFromDim(X);
   uint64_t nElemRead = 0;
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     nElemRead += nElemFromDim(inputs[i]);
   }
 

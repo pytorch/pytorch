@@ -20,8 +20,6 @@ import subprocess
 
 from typing import List
 
-CUDA_VERSION = "cu102"
-PYTHON_VERSION = "3.7"
 TORCHBENCH_CONFIG_NAME = "config.yaml"
 MAGIC_PREFIX = "RUN_TORCHBENCH:"
 MAGIC_TORCHBENCH_PREFIX = "TORCHBENCH_BRANCH:"
@@ -44,6 +42,17 @@ def gen_abtest_config(control: str, treatment: str, models: List[str]) -> str:
         config = f"{config}\n  - {model}"
     config = config + "\n"
     return config
+
+def setup_gha_env(name: str, val: str) -> None:
+    fname = os.environ["GITHUB_ENV"]
+    content = f"{name}={val}\n"
+    with open(fname, "a") as fo:
+        fo.write(content)
+
+def find_current_branch(repo_path: str) -> str:
+    repo = git.Repo(repo_path)
+    name: str = repo.active_branch.name
+    return name
 
 def deploy_torchbench_config(output_dir: str, config: str) -> None:
     # Create test dir if needed
@@ -73,25 +82,18 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
             return []
     return model_list
 
-def identify_torchbench_branch(torchbench_path: str, prbody_file: str) -> None:
-    branch_name: str
+def find_torchbench_branch(prbody_file: str) -> str:
+    branch_name: str = ""
     with open(prbody_file, "r") as pf:
         lines = map(lambda x: x.strip(), pf.read().splitlines())
         magic_lines = list(filter(lambda x: x.startswith(MAGIC_TORCHBENCH_PREFIX), lines))
         if magic_lines:
             # Only the first magic line will be recognized.
             branch_name = magic_lines[0][len(MAGIC_TORCHBENCH_PREFIX):].strip()
-    # If not specified, directly return without the branch checkout
+    # If not specified, use main as the default branch
     if not branch_name:
-        return
-    try:
-        print(f"Checking out the TorchBench branch: {branch_name} ...")
-        repo = git.Repo(torchbench_path)
-        origin = repo.remotes.origin
-        origin.fetch(branch_name)
-        repo.create_head(branch_name, origin.refs[branch_name]).checkout()
-    except git.exc.GitCommandError:
-        raise RuntimeError(f'{branch_name} doesn\'t exist in the pytorch/benchmark repository. Please double check.')
+        branch_name = "main"
+    return branch_name
 
 def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str) -> None:
     # Copy system environment so that we will not override
@@ -104,28 +106,41 @@ def run_torchbench(pytorch_path: str, torchbench_path: str, output_dir: str) -> 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run TorchBench tests based on PR')
-    parser.add_argument('--pr-num', required=True, type=str, help="The Pull Request number")
-    parser.add_argument('--pr-base-sha', required=True, type=str, help="The Pull Request base hash")
-    parser.add_argument('--pr-head-sha', required=True, type=str, help="The Pull Request head hash")
     parser.add_argument('--pr-body', required=True, help="The file that contains body of a Pull Request")
-    parser.add_argument('--pytorch-path', required=True, type=str, help="Path to pytorch repository")
-    parser.add_argument('--torchbench-path', required=True, type=str, help="Path to TorchBench repository")
+
+    subparsers = parser.add_subparsers(dest='command')
+    # parser for setup the torchbench branch name env
+    branch_parser = subparsers.add_parser("set-torchbench-branch")
+    # parser to run the torchbench branch
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument('--pr-num', required=True, type=str, help="The Pull Request number")
+    run_parser.add_argument('--pr-base-sha', required=True, type=str, help="The Pull Request base hash")
+    run_parser.add_argument('--pr-head-sha', required=True, type=str, help="The Pull Request head hash")
+    run_parser.add_argument('--pytorch-path', required=True, type=str, help="Path to pytorch repository")
+    run_parser.add_argument('--torchbench-path', required=True, type=str, help="Path to TorchBench repository")
     args = parser.parse_args()
 
-    output_dir: str = os.path.join(os.environ["HOME"], ".torchbench", "bisection", f"pr{args.pr_num}")
-    # Identify the specified models and verify the input
-    models = extract_models_from_pr(args.torchbench_path, args.pr_body)
-    if not models:
-        print("Can't parse the model filter from the pr body. Currently we only support allow-list.")
-        exit(1)
-    # Identify the specified TorchBench branch, verify the branch exists, and checkout the branch
-    try:
-        identify_torchbench_branch(args.torchbench_path, args.pr_body)
-    except RuntimeError as e:
-        print(f"Identify TorchBench branch failed: {str(e)}")
-        exit(1)
-    print(f"Ready to run TorchBench with benchmark. Result will be saved in the directory: {output_dir}.")
-    # Run TorchBench with the generated config
-    torchbench_config = gen_abtest_config(args.pr_base_sha, args.pr_head_sha, models)
-    deploy_torchbench_config(output_dir, torchbench_config)
-    run_torchbench(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path, output_dir=output_dir)
+    if args.command == 'set-torchbench-branch':
+        branch_name = find_torchbench_branch(args.pr_body)
+        # env name: "TORCHBENCH_BRANCH"
+        setup_gha_env(MAGIC_TORCHBENCH_PREFIX[:-1], branch_name)
+    elif args.command == 'run':
+        output_dir: str = os.path.join(os.environ["HOME"], ".torchbench", "bisection", f"pr{args.pr_num}")
+        # Identify the specified models and verify the input
+        models = extract_models_from_pr(args.torchbench_path, args.pr_body)
+        if not models:
+            print("Can't parse the model filter from the pr body. Currently we only support allow-list.")
+            exit(-1)
+        # Assert the current branch in args.torchbench_path is the same as the one specified in pr body
+        branch_name = find_torchbench_branch(args.pr_body)
+        current_branch = find_current_branch(args.torchbench_path)
+        assert branch_name == current_branch, f"Torchbench repo {args.torchbench_path} is on branch {current_branch}, \
+                                                but user specified to run on branch {branch_name}."
+        print(f"Ready to run TorchBench with benchmark. Result will be saved in the directory: {output_dir}.")
+        # Run TorchBench with the generated config
+        torchbench_config = gen_abtest_config(args.pr_base_sha, args.pr_head_sha, models)
+        deploy_torchbench_config(output_dir, torchbench_config)
+        run_torchbench(pytorch_path=args.pytorch_path, torchbench_path=args.torchbench_path, output_dir=output_dir)
+    else:
+        print(f"The command {args.command} is not supported.")
+        exit(-1)

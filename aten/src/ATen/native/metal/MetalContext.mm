@@ -77,7 +77,7 @@ using namespace at::native::metal;
   }
   id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
   TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
-  NSError* errors;
+  NSError* errors = nil;
   state = [_device newComputePipelineStateWithFunction:func error:&errors];
   TORCH_CHECK(state, errors.localizedDescription.UTF8String);
   _pipelineCache[kernel] = state;
@@ -122,7 +122,7 @@ using namespace at::native::metal;
       floatArgIndex++;
     }
   }
-  NSError* errors;
+  NSError* errors = nil;
   id<MTLFunction> func = [_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]
                                         constantValues:constantValues
                                                  error:&errors];

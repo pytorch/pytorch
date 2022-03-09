@@ -25,7 +25,8 @@ TORCH_API bool ConstantPropagationImmutableTypes(std::shared_ptr<Graph>& graph);
 // specified, nodes that output user defined classes are not run.
 TORCH_API c10::optional<Stack> runNodeIfInputsAreConstant(
     const Node* node,
-    bool ignore_custom_classes = false);
+    bool ignore_custom_classes = false,
+    AliasDb* db = nullptr);
 
 } // namespace jit
 } // namespace torch

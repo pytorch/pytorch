@@ -52,4 +52,4 @@ class StoreWaitOp final : public Operator<CPUContext> {
 
   INPUT_TAGS(HANDLER);
 };
-}
+} // namespace caffe2

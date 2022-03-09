@@ -533,10 +533,14 @@ function getTensorStorages(data) {
   throw new Error("Can't handle data type.", data);
 }
 
-function getTensorMemoryByDevice(data) {
-  const tensors = getTensorStorages(data);
+function getTensorMemoryByDevice(pickles) {
+  let all_tensors = [];
+  for (const [name, pickle] of pickles) {
+    const tensors = getTensorStorages(pickle);
+    all_tensors.push(...tensors.values());
+  }
   let result = {};
-  for (const storage of tensors.values()) {
+  for (const storage of all_tensors.values()) {
     const [dtype, key, device, numel] = storage;
     const size = computeTensorMemory(numel, dtype);
     result[device] = (result[device] || 0) + size;
@@ -547,7 +551,10 @@ function getTensorMemoryByDevice(data) {
 // Make this a separate component so it is rendered lazily.
 class OpenTensorMemorySection extends Component {
   render({model: {model_data, constants}}) {
-    let sizes = getTensorMemoryByDevice([model_data, constants]);
+    let sizes = getTensorMemoryByDevice(new Map([
+      ["data", model_data],
+      ["constants", constants],
+    ]));
     return html`
       <table>
         <thead>

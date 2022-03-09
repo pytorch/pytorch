@@ -406,7 +406,7 @@ void IRParser::parseOperator(Block* b) {
         // Don't currently support checking against type variables
         // TODO: support?
         if (!schema_return_type->hasFreeVariables() &&
-            !v.type->isSubtypeOf(schema_return_type)) {
+            !v.type->isSubtypeOf(*schema_return_type)) {
           throw ErrorReport(source_range)
               << "Annotated type " << v.type->repr_str()
               << " does not match schema type "

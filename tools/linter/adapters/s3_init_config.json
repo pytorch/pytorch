@@ -1,0 +1,30 @@
+{
+    "clang-format": {
+        "Darwin": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/mac/clang-format-mojave",
+            "hash": "1485a242a96c737ba7cdd9f259114f2201accdb46d87ac7a8650b1a814cd4d4d",
+            "object_name": "mac/clang-format-mojave",
+            "s3_bucket": "oss-clang-format"
+        },
+        "Linux": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/clang-format-linux64",
+            "hash": "e1c8b97b919541a99e0a355df5c3f9e8abebc64259dbee6f8c68e1ef90582856",
+            "object_name": "linux64/clang-format-linux64",
+            "s3_bucket": "oss-clang-format"
+        }
+    },
+    "clang-tidy": {
+        "Darwin": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos/clang-tidy",
+            "hash": "541797a7b8fa795e2f3c1adcd8236cc336a40aa927028dc5bc79172e1d9eca36",
+            "object_name": "macos/clang-tidy",
+            "s3_bucket": "oss-clang-format"
+        },
+        "Linux": {
+            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/clang-tidy",
+            "hash": "49343a448fcb75cd1e0fb9d6b1f6c2ef4b008b6f91d6ff899d4ac6060f5e52a5",
+            "object_name": "linx64/clang-tidy",
+            "s3_bucket": "oss-clang-format"
+        }
+    }
+}

@@ -32,5 +32,5 @@ def average_parameters(
 
     offset = 0
     for p in params_it2:
-        p.data = flat_params[offset : offset + p.numel()].view_as(p)
+        p.data = flat_params[offset : offset + p.numel()].view_as(p).type_as(p)
         offset += p.numel()

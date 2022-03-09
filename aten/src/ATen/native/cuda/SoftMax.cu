@@ -3,8 +3,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCThrustAllocator.cuh>
 #include <c10/macros/Macros.h>
 
 #include <ATen/AccumulateType.h>
@@ -89,7 +87,7 @@ struct SoftMaxBackwardEpilogue {
 // The 2d grid is used to parallelize inner dimension over y axis and outer over x.
 inline dim3 SpatialSoftMax_getGridSize(
     dim3 block, uint32_t max_active_blocks,
-    uint64_t outer_size, uint64_t dim_size, uint64_t inner_size) {
+    uint64_t outer_size, uint64_t inner_size) {
   // First, tile as many blocks as we can over the y axis
   uint32_t inner_blocks = (inner_size + block.y - 1) / block.y;
   if (inner_blocks > max_active_blocks)
@@ -104,7 +102,7 @@ inline dim3 SpatialSoftMax_getGridSize(
 const int max_threads = 1024;
 
 inline dim3 SpatialSoftMax_getBlockSize(
-  uint64_t outer_size, uint64_t dim_size, uint64_t inner_size) {
+  uint64_t dim_size, uint64_t inner_size) {
   uint32_t inner_threads = inner_size;
   inner_threads = std::min(inner_threads, static_cast<uint32_t>(max_threads));
   uint32_t dim_threads = 1;
@@ -122,11 +120,11 @@ void SpatialSoftMax_getLaunchSizes(
     Kernel k,
     uint64_t outer_size, uint64_t dim_size, uint64_t inner_size,
     dim3& grid, dim3& block, uint32_t& smem_size) {
-  block = SpatialSoftMax_getBlockSize(outer_size, dim_size, inner_size);
+  block = SpatialSoftMax_getBlockSize(dim_size, inner_size);
   uint32_t block_threads = block.x * block.y;
   smem_size = block.x == 1 ? 0 : block_threads * sizeof(accscalar_t);
   int max_active_blocks;
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION < 305
+#if defined(USE_ROCM) && TORCH_HIP_VERSION < 305
   // HIP function signature is not compatible yet.
   uint32_t max_blocks;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
@@ -137,7 +135,7 @@ void SpatialSoftMax_getLaunchSizes(
                                                 k, block_threads, smem_size);
 #endif
   max_active_blocks *= at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, dim_size, inner_size);
+  grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, inner_size);
 }
 
 inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
@@ -155,7 +153,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
 
   while (block_size < (max_block_size)) block_size *= 2;
   // Launch at least a single warp - the kernel assumes that.
-  block_size = std::max(block_size, static_cast<uint64_t>(C10_WARP_SIZE));
+  block_size = std::max(block_size, static_cast<uint64_t>(at::cuda::warp_size()));
   return dim3(block_size);
 }
 
@@ -359,7 +357,7 @@ blockReduce(AccumT* smem, AccumT val,
       for (int i = 0; i < C10_WARP_SIZE; ++i) {
         warpVal = r(warpVal, smem[lane * C10_WARP_SIZE + i]);
       }
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
       __syncwarp(mask);
 #endif
       smem[lane] = warpVal;
@@ -715,8 +713,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             int64_t remaining = outer_size;
             int64_t chunk_size = (1L << 30L) / dim_size;
             while(remaining > 0) {
-              dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
-                output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+              dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax, false>(
+                output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), nullptr/* not masked */);
               input_ptr += chunk_size * dim_size;
               output_ptr += chunk_size * dim_size;
               remaining -= chunk_size;
@@ -736,8 +734,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             int64_t remaining = outer_size;
             int64_t chunk_size = (1<<30) / dim_size;
             while(remaining > 0) {
-              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
-                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, false>(
+                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), nullptr/* not masked */);
               input_ptr += chunk_size * dim_size;
               output_ptr += chunk_size * dim_size;
               remaining -= chunk_size;
@@ -907,13 +905,13 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
   const Tensor& grad,
   const Tensor& output,
   int64_t dim,
-  const Tensor& input,
+  ScalarType input_dtype,
   const Tensor& grad_input) {
-  bool half_to_float = grad.scalar_type() != input.scalar_type();
+  bool half_to_float = grad.scalar_type() != input_dtype;
   if (half_to_float) {
     TORCH_CHECK(
         (grad.scalar_type() == ScalarType::Float &&
-         input.scalar_type() == ScalarType::Half),
+         input_dtype == ScalarType::Half),
         "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   host_softmax_backward<LogSoftMaxBackwardEpilogue,true>(grad, output, dim, half_to_float, grad_input);
@@ -931,17 +929,84 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
- const Tensor& input,
+ ScalarType input_dtype,
  const Tensor& grad_input) {
-  bool half_to_float = grad.scalar_type() != input.scalar_type();
+  bool half_to_float = grad.scalar_type() != input_dtype;
   if (half_to_float) {
     TORCH_CHECK(
         (grad.scalar_type() == ScalarType::Float &&
-         input.scalar_type() == ScalarType::Half),
+         input_dtype == ScalarType::Half),
         "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   Tensor tmp = grad * output;
   host_softmax_backward<SoftMaxBackwardEpilogue,false>(tmp, output, dim, half_to_float, grad_input);
+}
+
+Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
+    TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
+    bool is_transformer_mask = (input.dim() == 4 && mask.dim() == 2 && input.size(0) == mask.size(0) && input.size(2) == mask.size(1) && input.size(3) == mask.size(1));
+    TORCH_CHECK(mask.sizes() == input.sizes() || is_transformer_mask, "Mask shape should match input");
+    // Always do masked softmax on last dim
+    int softmax_elements = input.size(input.dim() - 1);
+    // Persistent softmax only support softmax_elements <= 1024,
+    // Therefore once softmax_elements > 1024, we need to fallback to vanilla masked_softmax
+    Tensor output = at::empty_like(input, input.options());
+    // Fallback to a slower masked softmax solution
+    if (softmax_elements > 1024 || softmax_elements * input.element_size() > 4096 || !mask.is_contiguous()) {
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+          ScalarType::Half,
+          ScalarType::BFloat16,
+          input.scalar_type(),
+          "masked_softmax",
+          [&] {
+            Tensor mask_not = mask.logical_not();
+            output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), -1);
+          });
+        return output;
+    }
+    int batch_count = input.numel() / softmax_elements;
+    int chunk_size = input.numel() / input.size(0);
+    if (is_transformer_mask) {
+    // Only support when num_heads is even in transformer
+    TORCH_CHECK(input.size(1) % 2 == 0, "Only support when num_heads is even in transformer");
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      input.scalar_type(),
+      "masked_softmax",
+      [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
+        dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false/* is_log_softmax */, true/* is_masked */>(
+          output.data_ptr<scalar_t>(),      // dst
+          input.data_ptr<scalar_t>(),       // src
+          softmax_elements,
+          softmax_elements,
+          batch_count,
+          mask.data_ptr<bool>(),
+          chunk_size,
+          true // is_transformer_mask
+        );
+      });
+
+    } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      input.scalar_type(),
+      "masked_softmax",
+      [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
+        dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false/* is_log_softmax */, true/* is_masked */>(
+          output.data_ptr<scalar_t>(),      // dst
+          input.data_ptr<scalar_t>(),       // src
+          softmax_elements,
+          softmax_elements,
+          batch_count,
+          mask.data_ptr<bool>()
+        );
+      });
+    }
+    return output;
 }
 }
 }

@@ -1,5 +1,3 @@
-from typing import Any, Iterator, Type
-
 import torch
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 
@@ -11,11 +9,8 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
     After the warm-up stage, it averages parameters periodically afer the local optimizer is applied.
 
     Args:
-        params: All the parameters.
-        optimizer_class: The class of the local optimizer.
+        optim: The local optimizer.
         averager: A model averager instance to run post-localSGD algorithm.
-        **defaults: A dict containing default values of optimization options,
-            which are forwarded to the local optimizer.
 
     Example::
 
@@ -24,48 +19,41 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  import torch.distributed.algorithms.model_averaging.averagers as averagers
         >>>  import torch.nn as nn
         >>>  from torch.distributed.optim import PostLocalSGDOptimizer
+        >>> from torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook import post_localSGD_hook
         >>>
         >>>  model = nn.parallel.DistributedDataParallel(
         >>>     module, device_ids=[rank], output_device=rank
         >>>  )
         >>>
         >>>  # Register a post-localSGD communication hook.
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>>  # Create a post-localSGD optimizer that wraps a local optimizer.
         >>>  # Note that ``warmup_steps`` used in ``PostLocalSGDOptimizer`` must be the same as
         >>>  # ``start_localSGD_iter`` used in ``PostLocalSGDState``.
+        >>>  local_optim = torch.optim.SGD(params=model.parameters(), lr=0.01)
         >>>  opt = PostLocalSGDOptimizer(
-        >>>      model.parameters(),
-        >>>      optimizer_class=torch.optim.SGD,
-        >>>      averager=averagers.PeriodicModelAverager(period=4, warmup_steps=100),
-        >>>      lr=0.01
+        >>>      optim=local_optim,
+        >>>      averager=averagers.PeriodicModelAverager(period=4, warmup_steps=100)
         >>>  )
         >>>
         >>>  # In the first 100 steps, DDP runs global gradient averaging at every step.
         >>>  # After 100 steps, DDP runs gradient averaging within each subgroup (intra-node by default),
         >>>  # and post-localSGD optimizer runs global model averaging every 4 steps after applying the local optimizer.
-        >>>  for step in range(0, 20):
+        >>>  for step in range(0, 200):
         >>>     opt.zero_grad()
         >>>     loss = loss_fn(output, labels)
         >>>     loss.backward()
         >>>     opt.step()
-
-    .. warning ::
-        `PostLocalSDGOptimizer` is experimental and subject to change.
     """
 
     def __init__(
         self,
-        params: Iterator[torch.nn.Parameter],
-        optimizer_class: Type[torch.optim.Optimizer],
-        averager: averagers.ModelAverager,
-        **defaults: Any,
+        optim: torch.optim.Optimizer,
+        averager: averagers.ModelAverager
     ):
-        self.params = list(params)
-        self.optim = optimizer_class(iter(self.params), **defaults)
+        self.optim = optim
         self.param_groups = self.optim.param_groups
         self.averager = averager
 
@@ -87,7 +75,11 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         Performs a single optimization step (parameter update).
         """
         self.optim.step()
-        self.averager.average_parameters(iter(self.params))
+        for param_group in self.param_groups:
+            for params in param_group["params"]:
+                if params.grad is None:
+                    continue
+                self.averager.average_parameters(iter(params))
 
     def zero_grad(self):
         self.optim.zero_grad()
