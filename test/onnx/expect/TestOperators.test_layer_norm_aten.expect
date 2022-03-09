@@ -7,7 +7,6 @@ graph {
     input: "weight"
     input: "bias"
     output: "3"
-    name: "ATen_0"
     op_type: "ATen"
     attribute {
       name: "cudnn_enable"
