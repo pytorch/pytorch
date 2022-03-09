@@ -2615,7 +2615,7 @@ class TestQuantizeFx(QuantizationTestCase):
 
         # this is a helper function (for easier recursion) that checks whether
         # arg_node is observed
-        def _check_node_indices_not_observed(model, arg_node, node):
+        def _check_node_not_observed(model, arg_node, node):
             if isinstance(arg_node, tuple) or isinstance(arg_node, list):
                 for new_node in arg_node:
                     _check_node_indices_not_observed(model, new_node, node)
@@ -2634,7 +2634,7 @@ class TestQuantizeFx(QuantizationTestCase):
             for index in indices:
                 if index < len(node.args):
                     arg_node = node.args[index]
-                    _check_node_indices_not_observed(model, arg_node, node)
+                    _check_node_not_observed(model, arg_node, node)
 
     # This test checks that the model gets prepared correct, doesn't have observers
     # on specific ops (see _check_not_observed) and that the prepared model runs
