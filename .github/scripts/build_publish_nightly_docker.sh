@@ -3,7 +3,7 @@
 set -xeuo pipefail
 
 PYTORCH_DOCKER_TAG=$(git describe --tags --always)-devel
-CUDA_VERSION=11.3
+CUDA_VERSION=11.3.0
 
 # Build PyTorch nightly docker
 make -f docker.Makefile \

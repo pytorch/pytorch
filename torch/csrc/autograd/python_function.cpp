@@ -564,6 +564,11 @@ static void _trace_post_record(
   }
 
   node->i_(jit::attr::inplace, is_inplace);
+  if (PyObject* module_name = PyDict_GetItemString(((PyTypeObject*)op_obj)->tp_dict, "__module__")) {
+    if (auto ptr = PyUnicode_AsUTF8(module_name)) {
+        node->s_(jit::attr::module, std::string(ptr));
+    }
+  }
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
