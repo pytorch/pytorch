@@ -40,6 +40,14 @@ func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
     torch.nn.functional.adaptive_avg_pool2d,
     torch.nn.functional.adaptive_avg_pool3d,
+    torch.nn.functional.elu,
+    torch.nn.functional.hardswish,
+    torch.nn.functional.instance_norm,
+    torch.nn.functional.layer_norm,
+    torch.nn.functional.leaky_relu,
+    torch.nn.functional.silu,
+    torch.nn.functional.mish,
+    torch.nn.functional.dropout,
     torch.nn.functional.max_pool1d,
     torch.nn.functional.max_pool2d,
     torch.nn.functional.max_pool3d,
@@ -53,6 +61,7 @@ func_list = {
     torch.sigmoid,
     torch.squeeze,
     torch.stack,
+    torch.sum,
     torch.tanh,
     torch.unsqueeze,
     torch.cat,
@@ -180,6 +189,12 @@ def activation_is_int8_quantized(qconfig):
     quantized to int8 or not, this includes quantizing to quint8, qint8
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
+
+def activation_is_int32_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    quantized to int32 or not
+    """
+    return activation_dtype(qconfig) == torch.qint32
 
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be

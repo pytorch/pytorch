@@ -136,7 +136,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
         inputs_(inputs),
         outputs_(outputs),
         config_(config) {}
-  c10::List<torch::Tensor> execute(c10::impl::GenericList inputs) {
+  c10::List<torch::Tensor> execute(const c10::impl::GenericList& inputs) {
     std::vector<PTMCoreMLFeatureSpecs> inputSpecs;
     std::vector<PTMCoreMLFeatureSpecs> outputSpecs;
     int inputSpecIndex = 0;
@@ -144,7 +144,7 @@ struct API_AVAILABLE(ios(11.0), macos(10.13)) CoreMLExecutorWrapper
     for (int i = 0; i < inputs.size(); ++i) {
       auto val = inputs.get(i);
       if (val.isTuple()) {
-        auto tuples = val.toTupleRef().elements();
+        auto& tuples = val.toTupleRef().elements();
         for (auto& ival : tuples) {
           TORCH_CHECK(ival.isTensor());
           auto tensor = ival.toTensor();
