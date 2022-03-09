@@ -180,12 +180,21 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
+std::tuple<Tensor,optional<int64_t>> where_self_batch_rule(
     const Tensor& condition, optional<int64_t> condition_bdim,
     const Tensor& self, optional<int64_t> self_bdim, const Tensor& other, optional<int64_t> other_bdim) {
+  auto condition_logical_rank = rankWithoutBatchDim(condition, condition_bdim);
+  auto tensor_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto other_logical_rank = rankWithoutBatchDim(other, other_bdim);
+  auto max_logical_rank = std::max({tensor_logical_rank, other_logical_rank, condition_logical_rank});
+
   auto condition_ = moveBatchDimToFront(condition, condition_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto other_ = moveBatchDimToFront(other, other_bdim);
+
+  condition_ = maybePadToLogicalRank(condition_, condition_bdim, max_logical_rank);
+  self_ = maybePadToLogicalRank(self_, self_bdim, max_logical_rank);
+  other_ = maybePadToLogicalRank(other_, other_bdim, max_logical_rank);
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
@@ -372,7 +381,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_3_Tensor(special_xlogy, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
 
-  VMAP_SUPPORT(_s_where, _s_where_batch_rule);
+  VMAP_SUPPORT2(where, self, where_self_batch_rule);
 
   BINARY_SCALAR_3(xlogy, Tensor, Scalar_Other, Scalar_Self);
 
