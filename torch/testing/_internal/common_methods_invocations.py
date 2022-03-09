@@ -3142,6 +3142,11 @@ def error_inputs_renorm(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(zero_d, args=(0.5, 0, 1.0)), error_type=RuntimeError,
                      error_regex="needs at least 2 dimensions, got 0 dimensions")
 
+def error_inputs_lstsq(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
+                     error_regex="iteration over a 0-d tensor")
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -9960,6 +9965,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
+           error_inputs_func=error_inputs_lstsq,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # we skip gradient checks for this suite as they are tested in
@@ -9974,6 +9980,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
+           error_inputs_func=error_inputs_lstsq,
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
