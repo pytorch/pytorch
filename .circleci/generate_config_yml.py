@@ -11,7 +11,6 @@ import sys
 from collections import namedtuple
 
 import cimodel.data.simple.android_definitions
-import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
@@ -138,7 +137,6 @@ def gen_build_workflows_tree():
     build_workflows_functions = [
         cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
-        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
