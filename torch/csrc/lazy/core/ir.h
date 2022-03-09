@@ -26,6 +26,8 @@ namespace lazy {
 static const hash_t kHashSeed(static_cast<uint32_t>(0x5a2d296e9));
 
 class Node;
+class Output;
+class Value;
 
 using NodePtr = std::shared_ptr<Node>;
 

@@ -31,12 +31,13 @@ class IrUtilNode : public Node {
     return operands_as_outputs_.at(i);
   }
 
-  const Shape& shape(size_t i) const override { return Shape(); }
-  c10::ArrayRef<Shape> shapes() const override { return {}; }
+  const Shape& shape(size_t i) const override { return shape_; }
+  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
 
  private:
   std::vector<NodePtr> operands_;
   std::vector<Output> operands_as_outputs_;
+  Shape shape_;
 };
 
 /*  a

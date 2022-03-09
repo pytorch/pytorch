@@ -2,7 +2,6 @@
 
 #include <ATen/InferSize.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/core/ir_util.h>
