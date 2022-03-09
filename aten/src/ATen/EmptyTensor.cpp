@@ -36,10 +36,7 @@ size_t computeStorageNbytesContiguous(
   // Ignore overflow checks on mobile
 #ifndef C10_MOBILE
   uint64_t size = 1;
-  bool overflowed = false;
-  for (const auto s : sizes) {
-    overflowed |= c10::mul_overflows(size, s, &size);
-  }
+  bool overflowed = c10::safe_multiplies_u64(sizes.begin(), sizes.end(), &size);
   overflowed |= c10::add_overflows(size, storage_offset, &size);
   overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
   overflowed |= size > storage_max();

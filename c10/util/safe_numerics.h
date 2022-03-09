@@ -7,19 +7,12 @@
 #include <type_traits>
 
 // GCC has __builtin_mul_overflow from before it supported __has_builtin
-#ifdef __GNUC__
-#define C10_HAS_BUILTIN_OVERFLOW() (1)
-#elif defined(__has_builtin)
-#define C10_HAS_BUILTIN_OVERFLOW()          \
-  (__has_builtin(__builtin_mul_overflow) && \
-   __has_builtin(__builtin_add_overflow))
-#else
+#ifdef _MSC_VER
 #define C10_HAS_BUILTIN_OVERFLOW() (0)
-#endif
-
-#if defined(_MSC_VER)
 #include <c10/util/llvmMathExtras.h>
 #include <intrin.h>
+#else
+#define C10_HAS_BUILTIN_OVERFLOW() (1)
 #endif
 
 namespace c10 {
@@ -27,30 +20,46 @@ namespace c10 {
 C10_ALWAYS_INLINE bool add_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_add_overflow(a, b, out);
-#elif defined(_MSC_VER)
+#else
   unsigned long long tmp;
   auto carry = _addcarry_u64(0, a, b, &tmp);
   *out = tmp;
   return carry;
-#else
-  auto result = a + b;
-  *out = result;
-  return result < (a | b);
 #endif
 }
 
 C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   return __builtin_mul_overflow(a, b, out);
-#elif defined(_MSC_VER)
+#else
   *out = a * b;
   // This test isnt exact, but avoids doing integer division
   return (
       (c10::llvm::countLeadingZeros(a) + c10::llvm::countLeadingZeros(b)) < 64);
+#endif
+}
+
+template <typename It>
+bool safe_multiplies_u64(It first, It last, uint64_t *out) {
+#if C10_HAS_BUILTIN_OVERFLOW()
+  uint64_t prod = 1;
+  bool overflow = false;
+  for (; first != last; ++first) {
+    overflow |= c10::mul_overflows(prod, *first, &prod);
+  }
+  *out = prod;
+  return overflow;
 #else
-  auto result = a * b;
-  *out = result;
-  return (a != 0) && (result / a != b);
+  uint64_t prod = 1;
+  uint64_t prod_log2 = 0;
+  for (; first != last; ++first) {
+    auto x = static_cast<uint64_t>(*first);
+    prod *= x;
+    prod_log2 += c10::llvm::Log2_64_Ceil(x);
+  }
+  *out = prod;
+  // This test isnt exact, but avoids doing integer division
+  return (prod_log2 >= 64);
 #endif
 }
 

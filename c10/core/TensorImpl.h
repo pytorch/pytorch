@@ -2301,11 +2301,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * using a sparse layout has multiple dimensions with large sizes.
    */
   int64_t safe_compute_numel() const {
+    const auto size = sizes();
     uint64_t n = 1;
-    bool overflows = false;
-    for (auto s : sizes()) {
-      overflows |= c10::mul_overflows(n, s, &n);
-    }
+    bool overflows = c10::safe_multiplies_u64(size.begin(), size.end(), &n);
     constexpr auto numel_max = std::min(
         static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
         static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
