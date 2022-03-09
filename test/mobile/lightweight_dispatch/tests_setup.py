@@ -150,6 +150,28 @@ class ModelWithStringOptional(FileSetup):
         script_model._save_for_lite_interpreter(self.path)
 
 
+class ModelWithMultipleOps(FileSetup):
+    path = 'multiple_ops.ptl'
+
+    def setup(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.ops = torch.nn.Sequential(
+                    torch.nn.ReLU(),
+                    torch.nn.Flatten(),
+                )
+
+            def forward(self, x):
+                x[1] = -2
+                return self.ops(x)
+
+        model = Model()
+        # Script the model and save
+        script_model = torch.jit.script(model)
+        script_model._save_for_lite_interpreter(self.path)
+
+
 tests = [
     ModelWithDTypeDeviceLayoutPinMemory(),
     ModelWithTensorOptional(),
@@ -159,6 +181,7 @@ tests = [
     ModelWithArrayOfInt(),
     ModelWithTensors(),
     ModelWithStringOptional(),
+    ModelWithMultipleOps(),
 ]
 
 
