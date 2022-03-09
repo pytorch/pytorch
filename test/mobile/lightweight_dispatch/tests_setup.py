@@ -149,6 +149,18 @@ class ModelWithStringOptional(FileSetup):
         script_model = torch.jit.script(model)
         script_model._save_for_lite_interpreter(self.path)
 
+class ModelTestsPoppingMoreThanStackSize(FileSetup):
+    path = 'randn_like.ptl'
+
+    def setup(self):
+        class Model(torch.nn.Module):
+            def forward(self, b):
+                return b.randn_like()
+        model = Model()
+        # Script the model and save
+        script_model = torch.jit.script(model)
+        script_model._save_for_lite_interpreter(self.path)
+
 
 class ModelWithMultipleOps(FileSetup):
     path = 'multiple_ops.ptl'
@@ -182,6 +194,7 @@ tests = [
     ModelWithTensors(),
     ModelWithStringOptional(),
     ModelWithMultipleOps(),
+    ModelTestsPoppingMoreThanStackSize(),
 ]
 
 

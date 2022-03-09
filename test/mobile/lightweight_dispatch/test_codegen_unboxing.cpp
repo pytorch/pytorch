@@ -214,6 +214,21 @@ TEST(LiteInterpreterTest, MultipleOps) {
   at::Tensor expected = torch::tensor({{1, 1, 1, 1, 1, 1, 1, 1}, {0, 0, 0, 0, 0, 0, 0, 0}}, c10::TensorOptions(c10::ScalarType::Float));
   AT_ASSERT(result.toTensor().equal(expected));
 }
+
+TEST(LiteInterpreterTest, StackOutOfBound) {
+  // Load check in model: randn_like.ptl
+  auto testModelFile = "randn_like.ptl";
+
+  //  class Model(torch.nn.Module):
+  //    def forward(self, b):
+  //      return b.randn_like()
+
+  Module bc = _load_for_mobile(testModelFile);
+  const auto result_1 = bc.forward({at::ones({1, 2})});
+
+  ASSERT_EQ(result_1.toTensor().size(0), 1);
+  ASSERT_EQ(result_1.toTensor().size(1), 2);
+}
 } // namespace mobile
 } // namespace jit
 } // namespace torch

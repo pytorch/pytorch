@@ -105,7 +105,7 @@ def name(f: NativeFunction) -> str:
 def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
     # we need the 'self' argument so method needs to be False
     args = CppSignatureGroup.from_native_function(f, method=False).most_faithful_signature().arguments()
-    code_list = [f"c10::IValue {args[i].name} = std::move(peek(stack, {i}, {len(args)}));" for i in
+    code_list = [f"c10::IValue {args[i].name} = safe_peek(stack, {i}, {len(args)});" for i in
                  range(len(args))] + [""]
     binding_list = []
     for i, arg in enumerate(args):

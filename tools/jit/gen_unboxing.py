@@ -67,7 +67,7 @@ TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
 TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
     {code_connector.join(code_list)}
 
-    drop(stack, {len(binding_list)});
+    drop(stack, {len(binding_list)} < stack.size() ? {len(binding_list)} : stack.size());
 
     {ret_str}{prefix}{sig.name()}({args_str});
     {push_str}

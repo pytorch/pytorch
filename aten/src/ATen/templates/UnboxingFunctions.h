@@ -8,6 +8,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
 namespace at {
 namespace unboxing {
 namespace {
@@ -23,6 +24,15 @@ std::array<T, N> as_array(const c10::List<c10::IValue>& list) {
     std::copy(vec.begin(), vec.end(), res.begin());
     return res;
 }
+
+static inline c10::IValue safe_peek(std::vector<c10::IValue>& stack, size_t i, size_t N) {
+  if (i < stack.size()) {
+    return torch::jit::peek(stack, i, std::min(N, stack.size()));
+  } else {
+    return c10::IValue(c10::nullopt);
+  }
+}
+
 }  // namespace <anonymous>
 using Stack = std::vector<c10::IValue>;
 // Generated function declaration
