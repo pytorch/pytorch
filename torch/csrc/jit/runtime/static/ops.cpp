@@ -795,6 +795,7 @@ SROperator aten_stack(Node* n) {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "stack expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
@@ -2391,6 +2392,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "concat expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
