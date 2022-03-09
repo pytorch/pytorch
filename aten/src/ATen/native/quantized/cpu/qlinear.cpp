@@ -439,15 +439,14 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
     int64_t output_zero_point) {
   const int64_t dim = input.dim();
   TORCH_CHECK(
-      input.dim() != 0,
-      "onednn_linear: input needs to has dim at least 1, input dim ",
-      input.dim());
+      dim != 0,
+      "qlinear (ONEDNN): input dim should be at least 1, but got 0");
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::QUInt8,
       "qlinear (ONEDNN): data type of input should be QUint8.");
 
   auto input_contig = input.expect_contiguous();
   auto& w = *(weight_.get());
-  auto K = input.size(input.dim() - 1), M = input.numel() / K, N = w.get_dim(1);
+  auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
   auto input_data_type = dnnl::memory::data_type::u8;
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);

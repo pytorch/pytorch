@@ -908,7 +908,6 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   std::vector<int64_t> output_sizes;
   if (transpose()) {
     // Prepacked weight format: [o, i, ...]
-    const bool with_groups = groups() > 1;
     const int N = act.size(0); // batch size
     const int C = act.size(1); // input channels
     const int M = weights.get_dim(0); // output channels
