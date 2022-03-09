@@ -260,7 +260,7 @@ class GenLazyNativeFuncDefinition:
         auto result = torch::lazy::TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
 
         if schema.name.name.inplace or func.func.is_out_fn():
-            assert returns_length <= 1, "We assumed there was no such case where an op is an in-place variant " \
+            assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
                                         f"and has tuple outputs, but got tuple of len {returns_length}."
             bridge_str = f"""lazy_{first_tensor_name}->SetInPlaceIrValue(node);
         auto& result = {first_tensor_name};"""

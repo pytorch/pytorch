@@ -22,7 +22,7 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
      (2) wrapping everything in a BaseCType
      (3) making cpp-reference types into cpp-value types (e.g. vector instead of IntArrayRef)
 
-    (1) converts at::Tensors to lazy::Values (which wrap lazy::Nodes, with whch Lazy IR represents tensors.)
+    (1) converts at::Tensors to lazy::Values (which wrap lazy::Nodes, with which Lazy IR represents tensors.)
     There is special handling for Optional[Tensor] or List[Tensor], etc- hence 'tensor-like'
 
     This is incomplete- there are assertions in places that it's expected to need to add
@@ -33,7 +33,7 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
             return BaseCType(valueT)
         elif typ.name == BaseTy.Scalar:
             # at::scalar has special handling,
-            # and is wrapped in an IR value just like at::tensor
+            # and is wrapped in an lazy::Value just like at::tensor
             return BaseCType(valueT)
         elif typ.name == BaseTy.ScalarType:
             return BaseCType(scalarTypeT)
