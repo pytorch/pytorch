@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/windows_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-binary-libtorch-debug
+name: windows-binary-libtorch-release
 
 on:
   push:
@@ -22,7 +22,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: windows-binary-libtorch-debug
+  BUILD_ENVIRONMENT: windows-binary-libtorch-release
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   IN_CI: 1
   IS_GHA: 1
@@ -32,11 +32,11 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: windows-binary-libtorch-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: windows-binary-libtorch-release-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  libtorch-cpu-shared-with-deps-debug-build:
+  libtorch-cpu-shared-with-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -48,7 +48,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -67,10 +67,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -114,7 +120,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-shared-with-deps-debug
+          name: libtorch-cpu-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -131,9 +137,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-debug-test:  # Testing
+  libtorch-cpu-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-debug-build
+    needs: libtorch-cpu-shared-with-deps-release-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -145,7 +151,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -164,10 +170,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -180,7 +192,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-with-deps-debug
+          name: libtorch-cpu-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -226,10 +238,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-with-deps-debug-test
+    needs: libtorch-cpu-shared-with-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -239,7 +251,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -258,6 +270,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -293,7 +306,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-with-deps-debug
+          name: libtorch-cpu-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -346,7 +359,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-shared-without-deps-debug-build:
+  libtorch-cpu-shared-without-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -358,7 +371,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -377,10 +390,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -424,7 +443,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-shared-without-deps-debug
+          name: libtorch-cpu-shared-without-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -441,9 +460,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-without-deps-debug-test:  # Testing
+  libtorch-cpu-shared-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-debug-build
+    needs: libtorch-cpu-shared-without-deps-release-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -455,7 +474,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -474,10 +493,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -490,7 +515,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-without-deps-debug
+          name: libtorch-cpu-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -536,10 +561,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-shared-without-deps-debug-upload:  # Uploading
+  libtorch-cpu-shared-without-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-shared-without-deps-debug-test
+    needs: libtorch-cpu-shared-without-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -549,7 +574,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -568,6 +593,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -603,7 +629,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-shared-without-deps-debug
+          name: libtorch-cpu-shared-without-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -656,7 +682,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-with-deps-debug-build:
+  libtorch-cpu-static-with-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -668,7 +694,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -687,10 +713,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -734,7 +766,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-static-with-deps-debug
+          name: libtorch-cpu-static-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -751,9 +783,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-with-deps-debug-test:  # Testing
+  libtorch-cpu-static-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-debug-build
+    needs: libtorch-cpu-static-with-deps-release-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -765,7 +797,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -784,10 +816,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -800,7 +838,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-with-deps-debug
+          name: libtorch-cpu-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -846,10 +884,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-with-deps-debug-upload:  # Uploading
+  libtorch-cpu-static-with-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-with-deps-debug-test
+    needs: libtorch-cpu-static-with-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -859,7 +897,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -878,6 +916,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -913,7 +952,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-with-deps-debug
+          name: libtorch-cpu-static-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -966,7 +1005,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cpu-static-without-deps-debug-build:
+  libtorch-cpu-static-without-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -978,7 +1017,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -997,10 +1036,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1044,7 +1089,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cpu-static-without-deps-debug
+          name: libtorch-cpu-static-without-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1061,9 +1106,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-without-deps-debug-test:  # Testing
+  libtorch-cpu-static-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-debug-build
+    needs: libtorch-cpu-static-without-deps-release-build
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1075,7 +1120,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1094,10 +1139,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1110,7 +1161,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-without-deps-debug
+          name: libtorch-cpu-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1156,10 +1207,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cpu-static-without-deps-debug-upload:  # Uploading
+  libtorch-cpu-static-without-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cpu-static-without-deps-debug-test
+    needs: libtorch-cpu-static-without-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1169,7 +1220,7 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1188,6 +1239,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -1223,7 +1275,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cpu-static-without-deps-debug
+          name: libtorch-cpu-static-without-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -1276,7 +1328,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-with-deps-debug-build:
+  libtorch-cuda11_3-shared-with-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1289,7 +1341,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1308,10 +1360,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1355,7 +1413,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-shared-with-deps-debug
+          name: libtorch-cuda11_3-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1372,9 +1430,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-with-deps-debug-test:  # Testing
+  libtorch-cuda11_3-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-with-deps-debug-build
+    needs: libtorch-cuda11_3-shared-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -1387,7 +1445,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1406,10 +1464,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1422,7 +1486,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-with-deps-debug
+          name: libtorch-cuda11_3-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1468,10 +1532,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cuda11_3-shared-with-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-with-deps-debug-test
+    needs: libtorch-cuda11_3-shared-with-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1482,7 +1546,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1501,6 +1565,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -1536,7 +1601,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-with-deps-debug
+          name: libtorch-cuda11_3-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -1589,7 +1654,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-shared-without-deps-debug-build:
+  libtorch-cuda11_3-shared-without-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1602,7 +1667,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1621,10 +1686,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1668,7 +1739,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-shared-without-deps-debug
+          name: libtorch-cuda11_3-shared-without-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1685,9 +1756,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-without-deps-debug-test:  # Testing
+  libtorch-cuda11_3-shared-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-without-deps-debug-build
+    needs: libtorch-cuda11_3-shared-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -1700,7 +1771,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1719,10 +1790,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1735,7 +1812,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-without-deps-debug
+          name: libtorch-cuda11_3-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -1781,10 +1858,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-shared-without-deps-debug-upload:  # Uploading
+  libtorch-cuda11_3-shared-without-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-shared-without-deps-debug-test
+    needs: libtorch-cuda11_3-shared-without-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -1795,7 +1872,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1814,6 +1891,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -1849,7 +1927,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-shared-without-deps-debug
+          name: libtorch-cuda11_3-shared-without-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -1902,7 +1980,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-with-deps-debug-build:
+  libtorch-cuda11_3-static-with-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1915,7 +1993,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1934,10 +2012,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -1981,7 +2065,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-static-with-deps-debug
+          name: libtorch-cuda11_3-static-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -1998,9 +2082,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-with-deps-debug-test:  # Testing
+  libtorch-cuda11_3-static-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-with-deps-debug-build
+    needs: libtorch-cuda11_3-static-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2013,7 +2097,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2032,10 +2116,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2048,7 +2138,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-with-deps-debug
+          name: libtorch-cuda11_3-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2094,10 +2184,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-with-deps-debug-upload:  # Uploading
+  libtorch-cuda11_3-static-with-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-with-deps-debug-test
+    needs: libtorch-cuda11_3-static-with-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2108,7 +2198,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2127,6 +2217,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -2162,7 +2253,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-with-deps-debug
+          name: libtorch-cuda11_3-static-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -2215,7 +2306,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_3-static-without-deps-debug-build:
+  libtorch-cuda11_3-static-without-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2228,7 +2319,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2247,10 +2338,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2294,7 +2391,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_3-static-without-deps-debug
+          name: libtorch-cuda11_3-static-without-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2311,9 +2408,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-without-deps-debug-test:  # Testing
+  libtorch-cuda11_3-static-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-without-deps-debug-build
+    needs: libtorch-cuda11_3-static-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2326,7 +2423,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2345,10 +2442,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2361,7 +2464,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-without-deps-debug
+          name: libtorch-cuda11_3-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2407,10 +2510,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_3-static-without-deps-debug-upload:  # Uploading
+  libtorch-cuda11_3-static-without-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_3-static-without-deps-debug-test
+    needs: libtorch-cuda11_3-static-without-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2421,7 +2524,7 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2440,6 +2543,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -2475,7 +2579,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_3-static-without-deps-debug
+          name: libtorch-cuda11_3-static-without-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -2528,7 +2632,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-with-deps-debug-build:
+  libtorch-cuda11_5-shared-with-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2541,7 +2645,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2560,10 +2664,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2607,7 +2717,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-shared-with-deps-debug
+          name: libtorch-cuda11_5-shared-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2624,9 +2734,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-with-deps-debug-test:  # Testing
+  libtorch-cuda11_5-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-debug-build
+    needs: libtorch-cuda11_5-shared-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2639,7 +2749,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2658,10 +2768,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2674,7 +2790,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-with-deps-debug
+          name: libtorch-cuda11_5-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -2720,10 +2836,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-with-deps-debug-upload:  # Uploading
+  libtorch-cuda11_5-shared-with-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-with-deps-debug-test
+    needs: libtorch-cuda11_5-shared-with-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -2734,7 +2850,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2753,6 +2869,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -2788,7 +2905,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-with-deps-debug
+          name: libtorch-cuda11_5-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -2841,7 +2958,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-shared-without-deps-debug-build:
+  libtorch-cuda11_5-shared-without-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2854,7 +2971,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2873,10 +2990,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2920,7 +3043,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-shared-without-deps-debug
+          name: libtorch-cuda11_5-shared-without-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -2937,9 +3060,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-without-deps-debug-test:  # Testing
+  libtorch-cuda11_5-shared-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-debug-build
+    needs: libtorch-cuda11_5-shared-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -2952,7 +3075,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -2971,10 +3094,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -2987,7 +3116,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-without-deps-debug
+          name: libtorch-cuda11_5-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -3033,10 +3162,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-shared-without-deps-debug-upload:  # Uploading
+  libtorch-cuda11_5-shared-without-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-shared-without-deps-debug-test
+    needs: libtorch-cuda11_5-shared-without-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3047,7 +3176,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3066,6 +3195,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -3101,7 +3231,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-shared-without-deps-debug
+          name: libtorch-cuda11_5-shared-without-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -3154,7 +3284,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-with-deps-debug-build:
+  libtorch-cuda11_5-static-with-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3167,7 +3297,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3186,10 +3316,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3233,7 +3369,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-static-with-deps-debug
+          name: libtorch-cuda11_5-static-with-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -3250,9 +3386,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-with-deps-debug-test:  # Testing
+  libtorch-cuda11_5-static-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-debug-build
+    needs: libtorch-cuda11_5-static-with-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -3265,7 +3401,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3284,10 +3420,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3300,7 +3442,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-with-deps-debug
+          name: libtorch-cuda11_5-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -3346,10 +3488,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-with-deps-debug-upload:  # Uploading
+  libtorch-cuda11_5-static-with-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-with-deps-debug-test
+    needs: libtorch-cuda11_5-static-with-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3360,7 +3502,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3379,6 +3521,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -3414,7 +3557,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-with-deps-debug
+          name: libtorch-cuda11_5-static-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
@@ -3467,7 +3610,7 @@ jobs:
           docker stop $(docker ps -q) || true
           # Prune all of the docker images
           docker system prune -af
-  libtorch-cuda11_5-static-without-deps-debug-build:
+  libtorch-cuda11_5-static-without-deps-release-build:
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3480,7 +3623,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3499,10 +3642,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3546,7 +3695,7 @@ jobs:
       - uses: seemethere/upload-artifact-s3@v3
         if: always()
         with:
-          name: libtorch-cuda11_5-static-without-deps-debug
+          name: libtorch-cuda11_5-static-without-deps-release
           retention-days: 14
           if-no-files-found: error
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
@@ -3563,9 +3712,9 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-without-deps-debug-test:  # Testing
+  libtorch-cuda11_5-static-without-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-debug-build
+    needs: libtorch-cuda11_5-static-without-deps-release-build
     runs-on: windows.8xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
@@ -3578,7 +3727,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3597,10 +3746,16 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
       # NOTE: These environment variables are put here so that they can be applied on every job equally
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
@@ -3613,7 +3768,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-without-deps-debug
+          name: libtorch-cuda11_5-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -3659,10 +3814,10 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
-  libtorch-cuda11_5-static-without-deps-debug-upload:  # Uploading
+  libtorch-cuda11_5-static-without-deps-release-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: libtorch-cuda11_5-static-without-deps-debug-test
+    needs: libtorch-cuda11_5-static-without-deps-release-test
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
       BUILDER_ROOT: ${{ github.workspace }}/builder
@@ -3673,7 +3828,7 @@ jobs:
       GPU_ARCH_VERSION: 11.5
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: debug
+      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: static-without-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -3692,6 +3847,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -3727,7 +3883,7 @@ jobs:
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download Build Artifacts
         with:
-          name: libtorch-cuda11_5-static-without-deps-debug
+          name: libtorch-cuda11_5-static-without-deps-release
           path: "${{ runner.temp }}/artifacts/"
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/'))) }}
