@@ -6,6 +6,7 @@ from torch.package import PackageImporter, PackageExporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional, Set
 from .graph import Graph, _PyTreeCodeGen, _is_from_torch, _custom_builtins, PythonCode
+from .node import _DefaultTensorSentinel
 from ._compatibility import compatibility
 from torch.package import Importer, sys_importer
 import copy
@@ -15,6 +16,10 @@ import traceback
 from pathlib import Path
 import os
 import warnings
+
+# Circulular import hack: `_symbolic_trace` will install the _null_coalesce_fn function as
+# elemt 0 when it is initialized.
+_null_coalesce_fn = []
 
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
@@ -563,13 +568,40 @@ class {module_name}(torch.nn.Module):
             raise RuntimeError('Code has not been generated! Please report a bug to PyTorch')
         return self._code
 
+    def _convert_tensor_default_args(self):
+        """
+        Make it so that placeholder arguments with a `Tensor` default argument are converted
+        to have a sentinel default value, and emit a function that replaces this sentinel
+        with the original tensor value (which has been stored away as an attribute).
+        """
+        for node in self.graph.nodes:
+            if node.op == 'placeholder' and len(node.args) and isinstance(node.args[0], torch.fx.Node):
+                default_value = node.args[0]
+                node.args = (_DefaultTensorSentinel,)
+                with self.graph.inserting_after(node):
+                    assert len(_null_coalesce_fn)
+                    actual_value = self.graph.call_function(_null_coalesce_fn[0])
+                node.replace_all_uses_with(actual_value)
+                # Populate arg now because replace_all_uses_with would interfere if we did it during
+                # node construction
+                actual_value.args = (node, default_value)
+
     @compatibility(is_backward_compatible=True)
-    def recompile(self) -> PythonCode:
+    def recompile(self, convert_tensor_default_args=True) -> PythonCode:
         """
         Recompile this GraphModule from its ``graph`` attribute. This should be
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
+
+        `convert_tensor_default_args` specifies whether `placeholder` nodes with default
+        arguments of type Tensor should be converted into using a special sentinel value
+        and a null coalescing operator emitted in the code. This is necessary for proper
+        serialization of GraphModules with such arguments. If for any reason you want to
+        disable this behavior, set `convert_tensor_default_args` to False
         """
+        if convert_tensor_default_args:
+            self._convert_tensor_default_args()
+
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec

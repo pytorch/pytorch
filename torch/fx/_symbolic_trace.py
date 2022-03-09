@@ -11,9 +11,9 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 import torch.utils._pytree as pytree
 
 from ._compatibility import compatibility
-from .node import Argument, _DefaultTensorSentinel, map_aggregate, base_types
+from .node import _DefaultTensorSentinel, Argument, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo, _PyTreeCodeGen
-from .graph_module import GraphModule
+from .graph_module import GraphModule, _null_coalesce_fn
 from .proxy import TracerBase, Proxy, ParameterProxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
@@ -579,17 +579,6 @@ class Tracer(TracerBase):
 
         self.submodule_paths = None
 
-        for node in self.graph.nodes:
-            if node.op == 'placeholder' and len(node.args) and isinstance(node.args[0], torch.fx.Node):
-                default_value = node.args[0]
-                node.args = (_DefaultTensorSentinel,)
-                with self.graph.inserting_after(node):
-                    actual_value = self.graph.call_function(null_coalesce_tensor_sentinel)
-                node.replace_all_uses_with(actual_value)
-                # Populate arg now because replace_all_uses_with would interfere if we did it during
-                # node construction
-                actual_value.args = (node, default_value)
-
         return self.graph
 
 
@@ -886,3 +875,5 @@ def null_coalesce_tensor_sentinel(val, default):
         return default
     else:
         return val
+
+_null_coalesce_fn.append(null_coalesce_tensor_sentinel)
