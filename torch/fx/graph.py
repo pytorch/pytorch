@@ -302,7 +302,7 @@ class CodeGen(object):
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
 
-        def add_global(name_hint: str, obj: Any):
+        def add_global(name_hint: str, obj: Any, is_wrapped=False):
             """Add an obj to be tracked as a global.
 
             We call this for names that reference objects external to the
@@ -310,7 +310,7 @@ class CodeGen(object):
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
+            if not is_wrapped and _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -431,7 +431,7 @@ class CodeGen(object):
                     return
 
                 qualified_name = _get_qualified_name(node.target)
-                global_name = add_global(qualified_name, node.target)
+                global_name = add_global(qualified_name, node.target, node.meta.get('is_wrapped', False))
                 # special case for getattr: node.args could be 2-argument or 3-argument
                 # 2-argument: attribute access; 3-argument: fall through to attrib function call with default value
                 if global_name == 'getattr' and \

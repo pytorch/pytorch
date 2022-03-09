@@ -16,13 +16,13 @@ if TYPE_CHECKING:
 # cannot be referenced from the default value slot on the function signature.
 # Use this sentinel value instead and emit a statement in the function body
 # to multiplex either the default value or the actual passed-in value
-class TensorSentinel:
+class _TensorSentinel:
     def __repr__(self):
-        return TensorSentinel.__module__ + '.DefaultTensorSentinel'
+        return _TensorSentinel.__module__ + '._DefaultTensorSentinel'
 
-DefaultTensorSentinel = TensorSentinel()
+_DefaultTensorSentinel = _TensorSentinel()
 
-BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, torch.layout, TensorSentinel]
+BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, torch.layout, _TensorSentinel]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]

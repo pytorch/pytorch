@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import inspect
+import io
 import math
 import numbers
 import operator
@@ -1256,6 +1257,17 @@ class TestFX(JitTestCase):
         retraced = torch.fx.symbolic_trace(traced)
         torch.testing.assert_allclose(retraced(x), torch.cat([x, default_param]))
         torch.testing.assert_allclose(retraced(x, x), torch.cat([x, x]))
+
+        bio = io.BytesIO()
+
+        torch.save(retraced, bio)
+
+        bio.seek(0)
+
+        loaded = torch.load(bio)
+
+        torch.testing.assert_allclose(loaded(x), torch.cat([x, default_param]))
+        torch.testing.assert_allclose(loaded(x, x), torch.cat([x, x]))
 
     def test_custom_proxy_input_dependent_control_flow(self):
         class ZeroTensor(metaclass=torch.fx.ProxyableClassMeta):

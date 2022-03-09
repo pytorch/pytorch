@@ -11,7 +11,7 @@ from torch._C import ScriptObject  # type: ignore[attr-defined]
 import torch.utils._pytree as pytree
 
 from ._compatibility import compatibility
-from .node import Argument, DefaultTensorSentinel, map_aggregate, base_types
+from .node import Argument, _DefaultTensorSentinel, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo, _PyTreeCodeGen
 from .graph_module import GraphModule
 from .proxy import TracerBase, Proxy, ParameterProxy
@@ -582,7 +582,7 @@ class Tracer(TracerBase):
         for node in self.graph.nodes:
             if node.op == 'placeholder' and len(node.args) and isinstance(node.args[0], torch.fx.Node):
                 default_value = node.args[0]
-                node.args = (DefaultTensorSentinel,)
+                node.args = (_DefaultTensorSentinel,)
                 with self.graph.inserting_after(node):
                     actual_value = self.graph.call_function(null_coalesce_tensor_sentinel)
                 node.replace_all_uses_with(actual_value)
@@ -882,7 +882,7 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable[..., Any]],
 
 @wrap
 def null_coalesce_tensor_sentinel(val, default):
-    if val is DefaultTensorSentinel:
+    if val is _DefaultTensorSentinel:
         return default
     else:
         return val
