@@ -1212,6 +1212,32 @@ TEST(StaticRuntime, FullLike) {
   testStaticRuntime(full_like_script, args, args2);
 }
 
+TEST(StaticRuntime, Ones) {
+  const auto script = R"JIT(
+    def forward(self,
+                size: List[int],
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool]):
+        a = torch.ones(size,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       pin_memory=pin_memory)
+        return (a.clone())
+  )JIT";
+
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{2, 5};
+  std::vector<IValue> args{size0, dtype, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{size1, dtype, at::kStrided, cpu, false};
+  testStaticRuntime(script, args);
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, Linear) {
   const auto linear_script = R"JIT(
     def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
@@ -2744,4 +2770,32 @@ TEST(StaticRuntime, IfThenElse) {
 
   testStaticRuntime(src, args1);
   testStaticRuntime(src, args2);
+}
+
+TEST(StaticRuntime, StackEmpty) {
+  const auto src = R"JIT(
+    def forward(self):
+        x = torch.stack([])
+        return x
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_THROW(smod({}), c10::Error);
+}
+
+TEST(StaticRuntime, ConcatEmpty) {
+  const auto src = R"JIT(
+    def forward(self):
+        x = torch.concat([])
+        return x
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_THROW(smod({}), c10::Error);
 }
