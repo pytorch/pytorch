@@ -51,7 +51,7 @@ if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$PYTORCH_TEST_WITH_SLOW" != "1" ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && ( "$PYTORCH_TEST_WITH_SLOW" != "1" || "$PYTORCH_TEST_WITH_SLOW_GRADCHECK" == "ON" ) ]]; then
   # Used so that only cuda specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
