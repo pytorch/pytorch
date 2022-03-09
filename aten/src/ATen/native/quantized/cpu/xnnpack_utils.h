@@ -25,7 +25,7 @@ std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in);
  * int8_t + 0      = int8_t
  */
 template <typename PT>
-void q8_conv_weight_copy_and_add_offset(const at::Tensor& in, at::Tensor& out);
+void q8_copy_int8_weight_and_add_offset(const at::Tensor& in, at::Tensor& out);
 
 template <int kSpatialDim>
 Tensor convert_conv_weights_to_channel_last_tensor(
@@ -34,7 +34,7 @@ Tensor convert_conv_weights_to_channel_last_tensor(
     bool transpose);
 
 /*
- * A series of create wrapper functions to call xnn_create_[de]conv* functions.
+ * Series of create wrapper functions to call xnn_create_[de]conv* functions.
  */
 C10_ALWAYS_INLINE
 enum xnn_status xnnp_create_convolution2d_nhwc(
@@ -163,7 +163,7 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
 }
 
 /*
- * A series of setup wrapper functions to call xnn_setup_[de]conv* functions.
+ * Series of setup wrapper functions to call xnn_setup_[de]conv* functions.
  */
 C10_ALWAYS_INLINE
 enum xnn_status xnnp_setup_convolution2d_nhwc(
@@ -212,6 +212,66 @@ enum xnn_status xnnp_setup_convolution2d_nhwc(
         pt_pool); /* pthreadpool_t threadpool      */
   }
 }
+
+
+/*
+ * Series of wrapper functions to call xnn_create* and xnn_setup*
+ * functions for linear
+ */
+C10_ALWAYS_INLINE
+enum xnn_status xnnp_create_fully_connected_nc(
+    size_t input_channels,
+    size_t output_channels,
+    size_t input_stride,
+    size_t output_stride,
+    int8_t input_zero_point,
+    float input_scale,
+    int8_t kernel_zero_point,
+    float kernel_scale,
+    const int8_t* kernel,
+    const int32_t* bias,
+    int8_t output_zero_point,
+    float output_scale,
+    int8_t output_min,
+    int8_t output_max,
+    uint32_t flags,
+    xnn_operator_t* fully_connected_op_out) {
+  /* Symmetric quantization forces kzp = 0 */
+  TORCH_CHECK(!kernel_zero_point, "XNNPACK QS8 linear kernel expects kernel zero point to be zero."
+                    "But got: ", kernel_zero_point);
+  return xnn_create_fully_connected_nc_qs8(
+      input_channels,          /* size_t input_channels                  */
+      output_channels,         /* size_t output_channels                 */
+      input_stride,            /* size_t input_stride                    */
+      output_stride,           /* size_t output_stride                   */
+      input_zero_point,        /* int8_t input_zero_point                */
+      input_scale,             /* float input_scale                      */
+      kernel_scale,            /* float kernel_scale                     */
+      kernel,                  /* const int8_t* kernel                   */
+      bias,                    /* const int32_t* bias                    */
+      output_zero_point,       /* int8_t output_zero_point               */
+      output_scale,            /* float output_scale                     */
+      output_min,              /* int8_t output_min                      */
+      output_max,              /* int8_t output_max                      */
+      flags,                   /* uint32_t flags                         */
+      fully_connected_op_out); /* xnn_operator_t* fully_connected_op_out */
+}
+
+C10_ALWAYS_INLINE
+enum xnn_status xnnp_setup_fully_connected_nc(
+    xnn_operator_t fully_connected_op,
+    size_t batch_size,
+    const int8_t* input,
+    int8_t* output,
+    pthreadpool_t threadpool) {
+  return xnn_setup_fully_connected_nc_qs8(
+      fully_connected_op, /* xnn_operator_t fully_connected_op */
+      batch_size,         /* size_t batch_size                 */
+      input,              /* const int8_t* input               */
+      output,             /* int8_t* output                    */
+      threadpool);        /* pthreadpool_t threadpool          */
+}
+
 } // namespace xnnp_utils
 } // namespace native
 } // namespace at

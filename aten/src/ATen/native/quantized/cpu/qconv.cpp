@@ -706,7 +706,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
     }
 
     // copy from the original weight and take care of dtype change if necessary
-    at::native::xnnp_utils::q8_conv_weight_copy_and_add_offset<scalar_t>(
+    at::native::xnnp_utils::q8_copy_int8_weight_and_add_offset<scalar_t>(
         weight_contig, weight_tensor);
     const at::Tensor xnnp_weight =
         at::native::xnnp_utils::convert_conv_weights_to_channel_last_tensor<
