@@ -350,8 +350,6 @@ class GitHubPR:
             repo.amend_commit_message(msg)
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
-        if self.base_ref() != self.default_branch():
-            raise RuntimeError("Not a pull request into default branch.")
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
         if repo.current_branch() != self.default_branch():
