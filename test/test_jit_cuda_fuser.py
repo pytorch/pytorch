@@ -4107,6 +4107,44 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(oo, jit_oo)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_native_batch_norm_backward(self):
+        grad_output = torch.randn(4, 2, 3, device="cuda")
+        input = torch.randn(4, 2, 3, device="cuda")
+        weight = torch.randn(2, device="cuda")
+
+        r_m = torch.randn(2, device="cuda")
+        r_v = torch.randn(2, device="cuda").abs()
+
+        save_mean = torch.randn(2, device="cuda")
+        save_invstd = torch.randn(2, device="cuda").abs()
+
+        with nvfuser_singleton_fusion(True):
+            def t(grad_out, input, weight, r_m, r_v, save_mean, save_invstd, train: bool, eps: float, mask: List[bool]):
+                return torch.ops.aten.native_batch_norm_backward(grad_out, input, weight, r_m, r_v, save_mean,
+                                                                 save_invstd, train, eps, mask)
+
+            t_jit = torch.jit.script(t)
+            for i in range(4):
+                jit_o = t_jit(grad_output, input, weight, r_m.clone(), r_v.clone(),
+                              save_mean, save_invstd, True, 1e-5, [True, True, True])
+
+            ref_m = r_m.clone()
+            ref_v = r_v.clone()
+            jit_o = t_jit(grad_output, input, weight, r_m, r_v, save_mean, save_invstd, True, 1e-5, [True, True, True])
+            o = t(grad_output, input, weight, ref_m, ref_v, save_mean, save_invstd, True, 1e-5, [True, True, True])
+            for oo, jit_oo in zip(o, jit_o):
+                self.assertEqual(oo.dtype, jit_oo.dtype)
+                self.assertEqual(oo, jit_oo)
+            self.assertEqual(ref_m.dtype, r_m.dtype)
+            self.assertEqual(ref_m, r_m)
+            self.assertEqual(ref_v.dtype, r_v.dtype)
+            self.assertEqual(ref_v, r_v)
+            self.assertGraphContains(t_jit.graph_for(grad_output, input, weight, r_m.clone(), r_v.clone, save_mean,
+                                                     save_invstd, True, 1e-5, [True, True, True]), FUSION_GUARD)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

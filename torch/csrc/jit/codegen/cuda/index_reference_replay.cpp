@@ -59,8 +59,8 @@ void IndexReferenceReplay::handle(Split* split) {
   // Don't produce the same values multiple times
   auto ref_outer = concreteToRefId(toConcrete(split->outer()));
   auto ref_inner = concreteToRefId(toConcrete(split->inner()));
-  if (ref_id_produced_.find(ref_outer) != ref_id_consumed_.end() ||
-      ref_id_produced_.find(ref_inner) != ref_id_consumed_.end()) {
+  if (ref_id_produced_.find(ref_outer) != ref_id_produced_.end() ||
+      ref_id_produced_.find(ref_inner) != ref_id_produced_.end()) {
     return;
   }
 
@@ -92,7 +92,7 @@ void IndexReferenceReplay::handle(Merge* merge) {
 
   // Don't produce the same values multiple times
   auto ref_out = concreteToRefId(toConcrete(merge->out()));
-  if (ref_id_produced_.find(ref_out) != ref_id_consumed_.end()) {
+  if (ref_id_produced_.find(ref_out) != ref_id_produced_.end()) {
     return;
   }
 

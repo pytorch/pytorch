@@ -143,9 +143,23 @@ TORCH_CUDA_CU_API ForwardNormResult instance_norm(
     TensorView* bias,
     TensorView* running_mean,
     TensorView* running_var,
-    const bool kUseInputStats,
+    const bool kUseInputStats, // kTraining?
     Val* momentum,
-    Val* eps);
+    Val* eps,
+    bool channels_last = false);
+
+TORCH_CUDA_CU_API BackwardNormResult instance_norm_backward(
+    TensorView* x,
+    TensorView* dy,
+    TensorView* weight,
+    TensorView* running_mean,
+    TensorView* running_var,
+    TensorView* save_mean,
+    TensorView* save_invstd,
+    const bool kTraining,
+    Val* eps,
+    const std::vector<bool>& output_mask,
+    bool channels_last = false);
 
 } // namespace cuda
 } // namespace fuser

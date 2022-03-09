@@ -7316,8 +7316,8 @@ TEST_F(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  const size_t dimx = 13;
-  const size_t dimy = 15;
+  const int64_t dimx = 13;
+  const int64_t dimy = 15;
 
   TensorView* tv0 = makeConcreteTensor({dimx, dimy});
   fusion.addInput(tv0);
@@ -8639,8 +8639,8 @@ TEST_F(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
     tensor->axis(-1)->parallelize(ParallelType::TIDx);
   }
 
-  const size_t dimx = 1024;
-  const size_t dimy = 4096;
+  const int64_t dimx = 1024;
+  const int64_t dimy = 4096;
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   auto aten_output = at::_softmax(aten_input.to(at::kDouble), -1, false);
@@ -9083,6 +9083,215 @@ TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       "");
 }
 
+TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalization_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  const float kMomentum = 0.1;
+  const float kEps = 1e-5;
+  const bool kUseInputStats = true;
+  std::vector<int64_t> input_shape{20, 100, 35, 45};
+
+  auto input = makeSymbolicTensor(input_shape.size());
+  auto weight = makeSymbolicTensor(1);
+  auto bias = makeSymbolicTensor(1);
+  auto running_mean = makeSymbolicTensor(1);
+  auto running_var = makeSymbolicTensor(1);
+  fusion->addInput(input);
+  fusion->addInput(weight);
+  fusion->addInput(bias);
+  fusion->addInput(running_mean);
+  fusion->addInput(running_var);
+
+  Double* momentum = IrBuilder::create<Double>(kMomentum);
+  Double* eps = IrBuilder::create<Double>(kEps);
+
+  auto result = instance_norm(
+      input,
+      weight,
+      bias,
+      running_mean,
+      running_var,
+      kUseInputStats,
+      momentum,
+      eps);
+
+  fusion->addOutput(result.output);
+  // fusion->addOutput(result.mean);
+  // fusion->addOutput(result.invstd);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_input = at::randn(input_shape, options);
+  auto at_weight = at::ones({input_shape[1]}, options);
+  auto at_bias = at::zeros({input_shape[1]}, options);
+  auto at_run_mean = at::zeros({input_shape[1]}, options);
+  auto at_run_var = at::ones({input_shape[1]}, options);
+
+  std::vector<IValue> aten_inputs = {
+      at_input, at_weight, at_bias, at_run_mean, at_run_var};
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+  auto cg_outputs_full = {at_run_mean, at_run_var, cg_outputs[0]};
+
+  auto aten_outputs = at::instance_norm(
+      at_input,
+      c10::optional<at::Tensor>(at_weight),
+      c10::optional<at::Tensor>(at_bias),
+      c10::optional<at::Tensor>(at_run_mean),
+      c10::optional<at::Tensor>(at_run_var),
+      kUseInputStats,
+      kMomentum,
+      kEps,
+      false);
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      aten_inputs,
+      // TODO: can run_mean/run_var be checked here?
+      // fusion_outputs.size() == aten_outputs.size() && aten_outputs.size() ==
+      // fusion->outputs().size() - output_alias_indices.size()
+      {aten_outputs},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
+TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalizationBackward_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
+  auto fusion_forward = std::make_unique<Fusion>();
+  FusionGuard fg_forward(fusion_forward.get());
+
+  const float kMomentum = 0.1;
+  const float kEps = 1e-5;
+  const bool kUseInputStats = true;
+  const bool channels_last = true;
+  const int B = 2;
+  const int C = 5;
+  const int S = 3;
+  std::vector<int64_t> input_shape{B, C, S, S, S};
+  // explicit channels-last for NVFuser
+  std::vector<int64_t> nvfuser_input_shape{B, S, S, S, C};
+
+  auto input = makeContigTensor(input_shape.size());
+  auto weight = makeContigTensor(1);
+  auto bias = makeContigTensor(1);
+  fusion_forward->addInput(input);
+  fusion_forward->addInput(weight);
+  fusion_forward->addInput(bias);
+
+  Double* momentum = IrBuilder::create<Double>(kMomentum);
+  Double* eps = IrBuilder::create<Double>(kEps);
+  auto result_forward = instance_norm(
+      input,
+      weight,
+      bias,
+      nullptr,
+      nullptr,
+      kUseInputStats,
+      momentum,
+      eps,
+      channels_last);
+  fusion_forward->addOutput(result_forward.output);
+  fusion_forward->addOutput(result_forward.mean);
+  fusion_forward->addOutput(result_forward.invstd);
+
+  FusionExecutorCache executor_cache_forward(std::move(fusion_forward));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto at_input = at::randn(input_shape, options)
+                      .to(at::MemoryFormat::ChannelsLast3d)
+                      .set_requires_grad(true);
+  auto at_input_nvfuser = at_input.clone().detach().permute({0, 2, 3, 4, 1});
+  auto at_weight = at::ones({input_shape[1]}, options).set_requires_grad(true);
+  auto at_weight_nvfuser = at_weight.clone().detach();
+  auto at_bias = at::zeros({input_shape[1]}, options).set_requires_grad(true);
+  auto at_bias_nvfuser = at_bias.clone().detach();
+  std::vector<torch::jit::IValue> aten_inputs_forward = {
+      at_input_nvfuser, at_weight_nvfuser, at_bias_nvfuser};
+  // out, mean, invstd
+  auto outputs_forward =
+      executor_cache_forward.runFusionWithInputs(aten_inputs_forward);
+  auto at_out = at::instance_norm(
+      at_input,
+      c10::optional<at::Tensor>(at_weight),
+      c10::optional<at::Tensor>(at_bias),
+      c10::optional<at::Tensor>(c10::nullopt),
+      c10::optional<at::Tensor>(c10::nullopt),
+      kUseInputStats,
+      kMomentum,
+      kEps,
+      false);
+  auto at_grad =
+      at::randn(input_shape, options).to(at::MemoryFormat::ChannelsLast3d);
+  auto at_grad_nvfuser = at_grad.clone().detach().permute({0, 2, 3, 4, 1});
+  at_out.backward(at_grad);
+  auto fusion_backward = std::make_unique<Fusion>();
+  FusionGuard fg_backward(fusion_backward.get());
+
+  input = makeContigTensor(input_shape.size());
+  auto grad_output = makeContigTensor(input_shape.size());
+  weight = makeContigTensor(1);
+  auto save_mean = makeContigTensor(2);
+  auto save_invstd = makeContigTensor(2);
+  auto dummy = makeContigTensor(0);
+
+  fusion_backward->addInput(input);
+  fusion_backward->addInput(grad_output);
+  fusion_backward->addInput(weight);
+  fusion_backward->addInput(dummy); // dummy for run_mean
+  fusion_backward->addInput(dummy); // dummy for run_var
+  fusion_backward->addInput(save_mean);
+  fusion_backward->addInput(save_invstd);
+
+  auto result_backward = instance_norm_backward(
+      input,
+      grad_output,
+      weight,
+      nullptr,
+      nullptr,
+      save_mean,
+      save_invstd,
+      kUseInputStats,
+      eps,
+      {true, true, true},
+      channels_last);
+
+  fusion_backward->addOutput(result_backward.grad_input);
+  fusion_backward->addOutput(result_backward.grad_weight);
+  fusion_backward->addOutput(result_backward.grad_bias);
+
+  FusionExecutorCache executor_cache_backward(std::move(fusion_backward));
+  std::vector<torch::jit::IValue> aten_inputs_backward = {
+      at_input_nvfuser,
+      at_grad_nvfuser,
+      at_weight_nvfuser,
+      at::empty({}),
+      at::empty({}),
+      outputs_forward[1],
+      outputs_forward[2]};
+  auto outputs_backward =
+      executor_cache_backward.runFusionWithInputs(aten_inputs_backward);
+  outputs_backward[0] = outputs_backward[0].permute({0, 4, 1, 2, 3});
+  testValidate(
+      executor_cache_backward.fusion(),
+      outputs_backward,
+      aten_inputs_backward,
+      {at_input.grad(), at_weight.grad(), at_bias.grad()},
+      __LINE__,
+      __FILE__,
+      "");
+}
+
 TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -9185,8 +9394,8 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
     }
   }
 
-  const size_t dimx = 1024;
-  const size_t dimy = 16384;
+  const int64_t dimx = 1024;
+  const int64_t dimy = 16384;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
