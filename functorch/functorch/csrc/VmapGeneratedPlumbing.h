@@ -12044,27 +12044,6 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   return makeBatchedVector(std::get<0>(results), std::get<1>(results), cur_level);
 }
 template <typename batch_rule_t, batch_rule_t batch_rule>
-at::Tensor _s_where_generated_plumbing(const at::Tensor & condition, const at::Tensor & self, const at::Tensor & other) {
-  c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-  if (!isBatchedAtLevel(condition, cur_level) && !isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(other, cur_level)) {
-    return ATEN_FN(_s_where)(condition, self, other);
-  }
-  Tensor condition_value;
-  optional<int64_t> condition_bdim;
-  std::tie(condition_value, condition_bdim) = unwrapTensorAtLevel(condition, cur_level);
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor other_value;
-  optional<int64_t> other_bdim;
-  std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
-  auto results = batch_rule(condition_value, condition_bdim, self_value, self_bdim, other_value, other_bdim);
-  return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
-}
-template <typename batch_rule_t, batch_rule_t batch_rule>
 at::Tensor norm_except_dim_generated_plumbing(const at::Tensor & v, int64_t pow, int64_t dim) {
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
