@@ -172,7 +172,7 @@ static DynamicLayer popDynamicLayer() {
   TORCH_INTERNAL_ASSERT(result.key() != DispatchKey::Undefined);
   dynamicLayerStack.pop_back();
 
-  if (dynamicLayerStack.size() == 0) {
+  if (dynamicLayerStack.size() == 1) {
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
     if (c10::show_dispatch_trace_enabled()) {
       std::cout << "DynamicLayer off" << std::endl;
