@@ -98,7 +98,7 @@ concurrency:
       !{{ display_ec2_information() }}
       - name: Start docker if docker deamon is not running
         run: |
-          if  $(systemctl is-active --quiet docker); then
+          if systemctl is-active --quiet docker; then
               echo "Docker daemon is running...";
           else
               echo "Starting docker deamon..." && sudo systemctl start docker;
