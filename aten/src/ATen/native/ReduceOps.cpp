@@ -275,7 +275,7 @@ TORCH_META_FUNC(amax)
   }
   if (self.numel() == 0) {
     TORCH_CHECK(
-      dims.empty() == 0,
+      !dims.empty(),
       "amax", ": Expected reduction dim to be specified for input.numel() == 0. ",
         "Specify the reduction dim with the 'dim' argument.");
     at::native::zero_numel_check_dims(self, dims, "amax()");
@@ -1438,7 +1438,7 @@ Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& resu
               self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
   if (self.numel() == 0) {
     TORCH_CHECK(
-      dim.empty() == 0,
+      !dim.empty(),
       "amin", ": Expected reduction dim to be specified for input.numel() == 0. ",
         "Specify the reduction dim with the 'dim' argument.");
     zero_numel_check_dims(self, dim, "amin()");

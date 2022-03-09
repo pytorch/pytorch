@@ -3138,8 +3138,9 @@ as the input tensor excluding its innermost dimension'):
             ('amin', torch.amin, {'dtype': torch.int64})
         ]
 
+        err_msg = "Specify the reduction dim with the 'dim' argument."
+
         for name, fn, dtype in test_functions:
-            err_msg = "Specify the reduction dim with the 'dim' argument."
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(master_input)
 
