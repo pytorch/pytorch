@@ -575,16 +575,32 @@ class {module_name}(torch.nn.Module):
         with the original tensor value (which has been stored away as an attribute).
         """
         for node in self.graph.nodes:
-            if node.op == 'placeholder' and len(node.args) and isinstance(node.args[0], torch.fx.Node):
-                default_value = node.args[0]
-                node.args = (_DefaultTensorSentinel,)
-                with self.graph.inserting_after(node):
-                    assert len(_null_coalesce_fn)
-                    actual_value = self.graph.call_function(_null_coalesce_fn[0])
-                node.replace_all_uses_with(actual_value)
-                # Populate arg now because replace_all_uses_with would interfere if we did it during
-                # node construction
-                actual_value.args = (node, default_value)
+            if node.op == 'placeholder' and len(node.args):
+                if isinstance(node.args[0], torch.Tensor):
+                    # HACK: hoisting this logic out of Tracer. We should probably figure
+                    # out how to do this in general when someone constructs a graph with
+                    # Tensor arguments and then manually constructs a GraphModule from it.
+                    tensor_val = node.args[0]
+                    i = 0
+                    while True:
+                        qualname = f'_tensor_constant{i}'
+                        if not hasattr(self, qualname):
+                            break
+                        i += 1
+                    setattr(self, qualname, tensor_val)
+                    with self.graph.inserting_before(node):
+                        node.args = (self.graph.get_attr(qualname),)
+
+                if isinstance(node.args[0], torch.fx.Node):
+                    default_value = node.args[0]
+                    node.args = (_DefaultTensorSentinel,)
+                    with self.graph.inserting_after(node):
+                        assert len(_null_coalesce_fn)
+                        actual_value = self.graph.call_function(_null_coalesce_fn[0])
+                    node.replace_all_uses_with(actual_value)
+                    # Populate arg now because replace_all_uses_with would interfere if we did it during
+                    # node construction
+                    actual_value.args = (node, default_value)
 
     @compatibility(is_backward_compatible=True)
     def recompile(self, convert_tensor_default_args=True) -> PythonCode:
