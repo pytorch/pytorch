@@ -757,11 +757,12 @@ def _scatter_helper(g, self, dim, index, src):
 
 def _repeat_interleave_split_helper(g, self, reps, dim):
     if _export_onnx_opset_version <= 12:
-        return g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
+        split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
-        return split(g, self, repeats, dim, _outputs=reps)
+        split_out = split(g, self, repeats, dim, _outputs=reps)
+    return split_out if reps > 1 else [split_out]
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):
@@ -950,6 +951,17 @@ def quantize_helper(g, tensor, scale, zero_point):
         zero_point = g.op("Cast", zero_point, to_i=torch.onnx.TensorProtoDataType.UINT8)
     output = g.op("QuantizeLinear", tensor, scale, zero_point)
     return g.op("prim::TupleConstruct", output, scale, zero_point)
+
+def requantize_bias_helper(g, bias, input_scale, weight_scale):
+    # In PyTorch, bias is float and is quantized implicitly inside the quantized ATen op kernel.
+    # In ONNX we need to make the quantization explicit because operators expect all of their inputs to be quantized.
+    # Since int32 is not supported by ONNX operator `QuantizeLinear`, quantization is exported using regular operators.
+    bias_scale = g.op("Mul", weight_scale, input_scale)
+    bias_zero_point = g.op("Constant", value_t=torch.tensor([0], dtype=torch.int))
+    q_bias = g.op("Cast",
+                  g.op("Div", bias, bias_scale),
+                  to_i=torch.onnx.TensorProtoDataType.INT32)
+    return g.op("prim::TupleConstruct", q_bias, bias_scale, bias_zero_point)
 
 # ---------------------------------------------------------------------
 # ONNX operator version

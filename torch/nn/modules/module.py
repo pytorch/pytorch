@@ -556,7 +556,7 @@ class Module:
         """
         raise RuntimeError(
             "Reached a code path in Module.get_extra_state() that should never be called. "
-            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
     def set_extra_state(self, state: Any):
@@ -571,7 +571,7 @@ class Module:
         """
         raise RuntimeError(
             "Reached a code path in Module.set_extra_state() that should never be called. "
-            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
     def _apply(self, fn):
@@ -896,7 +896,7 @@ class Module:
                 warnings.warn(
                     "Complex modules are a new feature under active development whose design may change, "
                     "and some modules might not work as expected when using complex tensors as parameters or buffers. "
-                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
                     "if a complex module does not work as expected.")
 
         def convert(t):
