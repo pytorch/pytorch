@@ -172,6 +172,108 @@ TEST(StaticRuntime, Clamp) {
   testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
 }
 
+TEST(StaticRuntime, LenWithTuple) {
+  const auto src = R"IR(
+    graph(%input : int[]):
+        %res : int = aten::len(%input)
+        return (%res)
+  )IR";
+
+  testStaticRuntime(src, {c10::List<int64_t>(4)});
+}
+
+TEST(StaticRuntime, LenWithTensor) {
+  const auto src = R"IR(
+    graph(%input : Tensor):
+        %res : int = aten::len(%input)
+        return (%res)
+  )IR";
+
+  testStaticRuntime(src, {at::randn({2, 2, 2})});
+}
+
+TEST(StaticRuntime, LenWithStr) {
+  const auto src = R"IR(
+    graph(%input : str):
+        %res : int = aten::len(%input)
+        return (%res)
+  )IR";
+
+  testStaticRuntime(src, {"static_runtime"});
+}
+
+TEST(StaticRuntime, LenWithDict_str) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[str, str]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<std::string, std::string> dict;
+  dict.insert("abc", "123");
+  dict.insert("def", "456");
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_int) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[int, int]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<int64_t, int64_t> dict;
+  dict.insert(0, 1);
+  dict.insert(2, 3);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_bool) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[bool, bool]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<bool, bool> dict;
+  dict.insert(true, false);
+  dict.insert(false, true);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_float) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[float, float]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<double, double> dict;
+  dict.insert(0.1, 0.9);
+  dict.insert(0.8, 0.18);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_complex) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[complex, complex]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<c10::complex<double>, c10::complex<double>> dict;
+  dict.insert(0.1, 0.4);
+  dict.insert(0.9, 0.45);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_Tensor) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[Tensor, Tensor]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<at::Tensor, at::Tensor> dict;
+  dict.insert(at::randn({1, 2}), at::randn({1, 2}));
+  dict.insert(at::randn({1, 2}), at::randn({1, 2}));
+  testStaticRuntime(script, {dict});
+}
+
 TEST(StaticRuntime, Logit) {
   // no nnc
   const auto logit_script_1 = R"JIT(
