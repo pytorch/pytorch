@@ -22,7 +22,8 @@ class _TensorSentinel:
 
 _DefaultTensorSentinel = _TensorSentinel()
 
-BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, torch.layout, _TensorSentinel]
+BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor, torch.device, torch.memory_format, torch.layout,
+                          _TensorSentinel]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
 Target = Union[Callable[..., Any], str]

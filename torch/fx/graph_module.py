@@ -4,7 +4,7 @@ import torch.overrides
 from torch.nn.modules.module import _addindent
 from torch.package import PackageImporter, PackageExporter
 import linecache
-from typing import Type, Dict, List, Any, Union, Optional, Set
+from typing import Type, Callable, Dict, List, Any, Union, Optional, Set
 from .graph import Graph, _PyTreeCodeGen, _is_from_torch, _custom_builtins, PythonCode
 from .node import _DefaultTensorSentinel
 from ._compatibility import compatibility
@@ -19,7 +19,7 @@ import warnings
 
 # Circulular import hack: `_symbolic_trace` will install the _null_coalesce_fn function as
 # elemt 0 when it is initialized.
-_null_coalesce_fn = []
+_null_coalesce_fn : List[Callable] = []
 
 # Normal exec loses the source code, however we can work with
 # the linecache module to recover it.
