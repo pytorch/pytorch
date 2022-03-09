@@ -5532,6 +5532,39 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
+def error_inputs_cov(op_info, device, **kwargs):
+    a = torch.rand(S, device=device)
+    error_inputs = []
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.rand(S,S, device=device)})),
+        error_type=RuntimeError, error_regex="expected input to have two or fewer dimensions")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.rand(S,S, device=device)})),
+        error_type=RuntimeError, error_regex="expected fweights to have one of fewer dimensions")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.rand(S,S, device=device)})),
+        error_type=RuntimeError, error_regex="expected aweights to have one of fewer dimensions")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.rand(S, device=device)})),
+        error_type=RuntimeError, error_regex="expected fweights to have integral dtype")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.tensor([1,1], device=device)})),
+        error_type=RuntimeError, error_regex="expected aweights to have floating point dtype")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.tensor([1], device=device)})),
+        error_type=RuntimeError, error_regex="expected fweights to have the same numel")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.rand(1, device=device)})),
+        error_type=RuntimeError, error_regex="expected aweights to have the same numel")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.tensor([-1, -2], device=device)})),
+        error_type=RuntimeError, error_regex="fweights cannot be negative")
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.tensor([-1., -2.], device=device)})),
+        error_type=RuntimeError, error_regex="aweights cannot be negative")
+    return error_inputs
+
+
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -9087,6 +9120,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=all_types_and_complex_and(torch.half, *[torch.bfloat16]
                                                            if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_cov,
+           error_inputs_func=error_inputs_cov,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
