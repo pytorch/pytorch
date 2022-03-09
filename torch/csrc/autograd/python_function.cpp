@@ -167,7 +167,7 @@ auto PyNode::is_traceable() -> bool {
 }
 
 auto PyNode::release_variables() -> void {
-  // This function is called as part of the Noe destructor!
+  // This function is called as part of the Node destructor!
   // Since this object might be kept alive by C++, it is possible
   // that the python interpreter is already dead here. In that case
   // we just leak the saved objects.
