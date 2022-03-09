@@ -957,7 +957,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # Test aten export of op with symbolic for aten
         x = torch.randn(100, 128)
         y = torch.randn(100, 128)
-        model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+        model = torch.nn.PairwiseDistance(p=2, eps=1e-6)
 
         graph, _, __ = self._model_to_graph(model, (x, y),
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
@@ -966,7 +966,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "aten::pairwise_distance")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
