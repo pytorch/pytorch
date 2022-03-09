@@ -7,16 +7,7 @@ from .partitioners import draw_graph, min_cut_rematerialization_partition
 import time
 
 
-def _canonicalize(fx_g):
-    for node in fx_g.graph.nodes:
-        if node.target == torch.ops.aten._s_where:
-            node.target = torch.ops.aten.where
-    fx_g.recompile()
-    return fx_g
-
-
 def ts_compile(fx_g, _):
-    fx_g = _canonicalize(fx_g)
     for node in fx_g.graph.nodes:
         if node.target in (torch.ops.aten.new_zeros, torch.ops.aten.new_empty):
             if node.args[1] == []:
@@ -218,7 +209,6 @@ def nop(f, _):
 
 
 def simple_ts_compile(fx_g, _):
-    fx_g = _canonicalize(fx_g)
     f = torch.jit.script(fx_g)
     f = torch.jit.freeze(f.eval())
     return f
