@@ -22,7 +22,8 @@ onnx_dir = pytorch_dir / "third_party" / "onnx"
 os.chdir(onnx_dir)
 
 date = datetime.datetime.now() - datetime.timedelta(days=18 * 30)
-onnx_commit = subprocess.check_output(("git", "log", f"--until={date}", "--max-count=1", "--format=%H"), encoding="utf-8").strip()
+onnx_commit = subprocess.check_output(("git", "log", f"--until={date}", "--max-count=1", "--format=%H"),
+                                      encoding="utf-8").strip()
 onnx_tags = subprocess.check_output(("git", "tag", "--list", f"--contains={onnx_commit}"), encoding="utf-8")
 tag_tups = []
 semver_pat = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
@@ -36,7 +37,8 @@ version_str = "{}.{}.{}".format(*min_tup)
 
 print("Using ONNX release", version_str)
 
-head_commit = subprocess.check_output(("git", "log", "--max-count=1", "--format=%H", "HEAD"), encoding="utf-8").strip()
+head_commit = subprocess.check_output(("git", "log", "--max-count=1", "--format=%H", "HEAD"),
+                                      encoding="utf-8").strip()
 
 new_default = None
 
@@ -66,3 +68,9 @@ def read_sub_write(path: str, prefix_pat: str) -> None:
 
 read_sub_write("torch/onnx/symbolic_helper.py", r"(_default_onnx_opset_version = )\d+")
 read_sub_write("torch/onnx/__init__.py", r"(opset_version \(int, default )\d+")
+
+print("Updating operator .expect files")
+subprocess.check_call(("python", "setup.py", "develop"),
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.check_call(("python", "test/onnx/test_operators.py", "--accept"),
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
