@@ -13,6 +13,69 @@
 #include <ATen/native/quantized/packed_params.h>
 #include <c10/core/QScheme.h>
 
+struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
+  PackedLinearWeightCudnn(
+      at::Tensor orig_weight,
+      c10::optional<at::Tensor> bias,
+      c10::QScheme q_scheme)
+      : orig_weight(std::move(orig_weight)),
+        bias_(std::move(bias)),
+        q_scheme(std::move(q_scheme)) {}
+
+  at::Tensor apply(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+  at::Tensor apply_relu(
+      at::Tensor input,
+      double output_scale,
+      int64_t output_zero_point) override;
+
+  at::Tensor& apply_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
+  at::Tensor& apply_relu_out(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point,
+      at::Tensor& output) override;
+
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false)
+      override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
+      override;
+
+  std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
+
+  c10::optional<at::Tensor> bias() override {
+    return bias_;
+  }
+
+  static c10::intrusive_ptr<LinearPackedParamsBase> prepack(
+      at::Tensor weight,
+      c10::optional<at::Tensor> bias);
+
+ private:
+  at::Tensor orig_weight;
+  c10::optional<at::Tensor> bias_;
+  c10::QScheme q_scheme;
+
+  template <bool ReluFused>
+  at::Tensor apply_impl(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
+
+  template <bool ReluFused>
+  void apply_impl_helper(
+      const at::Tensor& quantized_output,
+      const at::Tensor& input,
+      double output_scale);
+};
+
 template <int kSpatialDim = 2>
 struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   PackedConvWeightCudnn(
