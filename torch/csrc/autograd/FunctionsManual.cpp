@@ -4861,6 +4861,9 @@ Tensor batch_norm_jvp(
     TORCH_INTERNAL_ASSERT(
         running_mean.has_value() && running_var.has_value(),
         "Expect running_mean and running_var to have value when train=false");
+    TORCH_CHECK(
+        !running_mean.value()._fw_grad(/*level=*/0).defined() && !running_var.value()._fw_grad(/*level=*/0).defined(),
+        "batch_norm is not differentiable wrt running_mean and running_var, they cannot have forward grad defined");
     mean_p = running_mean.value().view(view_size);
     invstd_p = (1 / at::sqrt(running_var.value() + at::Scalar(eps))).view(view_size);
     result_t = input_t * invstd_p;
@@ -5194,6 +5197,25 @@ Tensor lu_factor_ex_jvp(
       auto dLU2 = at::linalg_solve_triangular(U1, PdA2, /*upper=*/true, /*left=*/false) - L2.matmul(dK.triu());
       return at::cat({dLU1, dLU2}, /*dim=*/-2);
     }
+  }
+}
+
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  // NB: for simplicitly, we recompute some values that can be reused from forward
+  auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  // NB: it's OK for logsumexp_jvp to be reused for formulas like softmax/log_softmax
+  //     that only have one differentiable input, because that means self_t are never zerotensors
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).sum(dim, keepdim);
+    result /= sumexp_p;
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
   }
 }
 
