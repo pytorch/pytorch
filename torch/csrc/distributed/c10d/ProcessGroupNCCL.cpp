@@ -1606,7 +1606,7 @@ std::vector<at::Tensor> extractCudaTensors(const std::vector<at::Tensor>& inputs
   cudaInputs.reserve(inputs.size());
   for (auto& input : inputs) {
     cudaInputs.push_back(
-        dynamic_cast<torch_lazy_tensors::compiler::TSData*>(torch::lazy::GetLtcTensor(input).GetDataHandle().get())->data());
+        dynamic_cast<torch_lazy_tensors::compiler::TSData*>(torch::lazy::GetLtcTensor(input)->GetDataHandle().get())->data());
   }
 
   return cudaInputs;
