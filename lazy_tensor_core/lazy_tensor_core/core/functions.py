@@ -1,5 +1,4 @@
 import torch
-import lazy_tensor_core
 import lazy_tensor_core.core.lazy_model as ltm
 
 
@@ -82,29 +81,6 @@ def all_gather(value, dim=0):
       participating replicas.
     """
     return AllGather.apply(value, dim)
-
-
-def nms(boxes, scores, score_threshold, iou_threshold, output_size):
-    """Performs a Non Maximal Suppression operation.
-
-    Args:
-      boxes (torch.Tensor): A `torch.Tensor` of shape `[N, 4]` listing the boxes
-        coordinates in `(y0, x0, y1, x1)` form.
-      scores (torch.Tensor): A `torch.Tensor` of shape `[N]` listing the scores
-        of each box.
-      score_threshold (torch.Tensor): The minimum score for a box to qualify as
-        valid.
-      iou_threshold (torch.Tensor): The minimum IOU (Intersection Over Union)
-        score to trigger overlap logic.
-      output_size (int): The maximum number of returned indices (must be lower or
-        equal to N).
-
-    Returns:
-      A tuple of `torch.Tensor` with the first element being the selected box
-      indices, and the second element being the number of valid boxes.
-    """
-    return lazy_tensor_core._LAZYC._ltc_nms(boxes, scores, score_threshold, iou_threshold,
-                                            output_size)
 
 
 def distributed_mm(w, x, split=1):

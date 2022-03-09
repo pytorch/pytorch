@@ -47,21 +47,12 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
     const torch::lazy::LazyTensorPtr& save_invstd, bool training, double eps,
     c10::ArrayRef<bool> output_mask);
 
-std::pair<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> nms(const torch::lazy::LazyTensorPtr& boxes,
-                                      const torch::lazy::LazyTensorPtr& scores,
-                                      const torch::lazy::LazyTensorPtr& score_threshold,
-                                      const torch::lazy::LazyTensorPtr& iou_threshold,
-                                      int64_t output_size);
-
 // Permute the dimensions of this tensor according to the given permutation.
 torch::lazy::LazyTensorPtr permute(const torch::lazy::LazyTensorPtr& input, c10::ArrayRef<int64_t> dims);
 
 // Repeats the input tensor along each dimension by the given number of
 // repeats.
 torch::lazy::LazyTensorPtr repeat(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> repeats);
-
-torch::lazy::LazyTensorPtr rsub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
-                const at::Scalar& alpha);
 
 void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src);
 
@@ -81,10 +72,6 @@ torch::lazy::LazyTensorPtr squeeze(const torch::lazy::LazyTensorPtr& input, int6
 void squeeze_(torch::lazy::LazyTensorPtr& input);
 void squeeze_(torch::lazy::LazyTensorPtr& input, int64_t dim);
 
-torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& other,
-               const at::Scalar& alpha);
-torch::lazy::LazyTensorPtr sub(const torch::lazy::LazyTensorPtr& input, const at::Scalar& other,
-               const at::Scalar& alpha);
 
 std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> svd(
     const torch::lazy::LazyTensorPtr& input,
