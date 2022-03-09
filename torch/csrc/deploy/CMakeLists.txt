@@ -62,6 +62,7 @@ target_link_libraries(interactive_embedded_interpreter PUBLIC "-Wl,--no-as-neede
 
 if(INSTALL_TEST)
   install(TARGETS test_deploy DESTINATION bin)
+  install(TARGETS test_deploy_gpu DESTINATION bin)
 endif()
 
 install(TARGETS torch_deploy DESTINATION lib)
