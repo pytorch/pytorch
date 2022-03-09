@@ -6342,7 +6342,7 @@ for shape in [(1,), ()]:
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
     def test_pynode_destruction_deadlock(self):
-        script = f"""
+        script = """
 import torch
 
 class Foo(torch.autograd.Function):
