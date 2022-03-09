@@ -1,9 +1,10 @@
+#include <exception>
 using namespace std;
 
 #ifndef MULTIPY_EXCEPTION_H
 #define MULTIPY_INTERNAL_ASSERT_WITH_MESSAGE(condition, message)                 \
    if (!(condition)){                                               \
-      throw ("Internal Assertion failed: (" + std::string(#condition) + "), "    \
+      throw std::runtime_error("Internal Assertion failed: (" + std::string(#condition) + "), "    \
       + "function " + __FUNCTION__                                \
       + ", file " + __FILE__                                      \
       + ", line " + std::to_string(__LINE__) + ".\n"                               \
@@ -22,7 +23,7 @@ using namespace std;
 
 #define MULTIPY_CHECK(condition, message)                 \
    if (!(condition)){                                               \
-      throw ("Check failed: (" + std::string(#condition) + "), "    \
+      throw std::runtime_error("Check failed: (" + std::string(#condition) + "), "    \
       + "function " + __FUNCTION__                                \
       + ", file " + __FILE__                                      \
       + ", line " + std::to_string(__LINE__) + ".\n"                               \
