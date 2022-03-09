@@ -287,6 +287,10 @@ class TestOperators(TestCase):
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
     }))
+    @opsToleranceOverride('TestOperators', 'test_grad', (
+        tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+    ))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
@@ -370,6 +374,8 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
+        tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
@@ -402,6 +408,8 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_vjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
+        tol1('nn.functional.binary_cross_entropy_with_logits',
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
     ))
     def test_vjp(self, device, dtype, op):
         if not op.supports_autograd:
