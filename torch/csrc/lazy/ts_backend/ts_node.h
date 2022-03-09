@@ -13,11 +13,6 @@ namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-// Helper that makes it easy to access the TsNode::shape() method
-// from an torch::lazy::Output* that holds a Node* that points to a TsNode
-// TODO(whc) remove these once migrating to codegen and cleaning up Shape use
-TORCH_API const Shape& GetShapeFromTsOutput(const Output& output);
-TORCH_API const Shape& GetShapeFromTsValue(const Value& value);
 TORCH_API void TsNodeSetShapeDeferred(
     NodePtr node, const std::function<Shape()>& shape_fn);
 

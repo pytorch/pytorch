@@ -17,7 +17,7 @@ Random::Random(const torch::lazy::Value& input,
                const c10::optional<int64_t>& to)
     : torch::lazy::TsNode(
           torch::lazy::OpKind(c10::Symbol::fromQualString("aten::random_")),
-          {input}, {torch::lazy::GetShapeFromTsValue(input)}),
+          {input}, {input.shape()}),
       from(from),
       to(to) {}
 

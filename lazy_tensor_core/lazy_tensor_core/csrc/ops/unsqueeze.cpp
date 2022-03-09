@@ -17,7 +17,7 @@ std::vector<int64_t> BuildUnsqueezeDimensions(c10::ArrayRef<int64_t> dimensions,
 namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input, int dim) {
-  const torch::lazy::Shape& shape = torch::lazy::GetShapeFromTsValue(input);
+  const torch::lazy::Shape& shape = input.shape();
   auto dimensions = BuildUnsqueezeDimensions(shape.sizes(), dim);
   return torch::lazy::Shape(shape.scalar_type(), dimensions);
 }

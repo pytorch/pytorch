@@ -50,6 +50,10 @@ struct TORCH_API Output {
     return !operator==(rhs);
   }
 
+  const Shape& shape() const {
+    return node->shape(index);
+  }
+
   std::string ToString() const;
 
   // The node providing the output.
@@ -82,6 +86,10 @@ struct TORCH_API Value {
 
   operator Output() const {
     return Output(node.get(), index);
+  }
+
+  const Shape& shape() const {
+    return node->shape(index);
   }
 
   Node* operator->() const {
