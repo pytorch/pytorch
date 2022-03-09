@@ -25,7 +25,7 @@ the following interfaces:
 
 * `NodeLowering`, which provides a way to lower PyTorch tensor operations to code
   for the accelerator.
-* `ComputationClient`, which defines tensor transfers to and from the accelerator
+* `Computation`, which defines tensor transfers to and from the accelerator
   memory and launching computations.
 * `LoweringContext`, which provides state tracking to be used by code generation.
 
