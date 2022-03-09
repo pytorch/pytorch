@@ -196,14 +196,18 @@ add_custom_command(
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
+    "${TORCH_SRC_DIR}/utils/data/datapipe.pyi"
     COMMAND
-    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
-      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
-      --deprecated-functions-path "tools/autograd/deprecated.yaml"
+      "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
+        --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+        --deprecated-functions-path "tools/autograd/deprecated.yaml"
+    COMMAND
+      "${PYTHON_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
+    "${TORCH_SRC_DIR}/utils/data/datapipe.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${TORCH_ROOT}/tools/autograd/deprecated.yaml"

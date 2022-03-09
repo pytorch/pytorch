@@ -202,4 +202,4 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()  # TODO: Run this script automatically within the build and CI process
+    main()

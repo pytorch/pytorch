@@ -1,5 +1,5 @@
 # This base template ("datapipe.pyi.in") is generated from mypy stubgen with minimal editing for code injection
-# The output file will be "datapipe.pyi".
+# The output file will be "datapipe.pyi". This is executed as part of torch/CMakeLists.txt
 # Note that, for mypy, .pyi file takes precedent over .py file, such that we must define the interface for other
 # classes/objects here, even though we are not injecting extra code into them at the moment.
 
