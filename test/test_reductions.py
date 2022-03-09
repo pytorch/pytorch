@@ -3134,13 +3134,13 @@ as the input tensor excluding its innermost dimension'):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         test_functions = [
-            ('amax', torch.amax, {'dtype': torch.int64}),
-            ('amin', torch.amin, {'dtype': torch.int64})
+            (torch.amax, {'dtype': torch.int64}),
+            (torch.amin, {'dtype': torch.int64})
         ]
 
         err_msg = "Specify the reduction dim with the 'dim' argument."
 
-        for name, fn, dtype in test_functions:
+        for fn, dtype in test_functions:
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(master_input)
 
