@@ -101,6 +101,7 @@ full_codegen:
   - relu
   - relu_
   - remainder.Tensor
+  - repeat
   - rsqrt
   - scatter_add
   - sgn
@@ -155,7 +156,6 @@ supported:
   - random_
   - random_.from
   - random_.to
-  - repeat
   - select.int
   - slice.Tensor
   - squeeze
