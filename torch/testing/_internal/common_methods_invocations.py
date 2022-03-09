@@ -3150,11 +3150,18 @@ def error_inputs_lstsq(op_info, device, **kwargs):
 def error_inputs_eig(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
 
-    yield ErrorInput(SampleInput(zero_d, args=(False)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(False,)), error_type=RuntimeError,
+                     error_regex="input should be 2 dimensional")
 
-    yield ErrorInput(SampleInput(zero_d, args=(True)), error_type=TypeError,
-                     error_regex="iteration over a 0-d tensor")
+    yield ErrorInput(SampleInput(zero_d, args=(True,)), error_type=RuntimeError,
+                     error_regex="input should be 2 dimensional")
+
+def error_inputs_ormqr(op_info, device, **kwargs):
+    # this is only implemented on cpu
+    if (torch.device(device).type == 'cpu'):
+        zero_d = torch.randn((), device=device)
+        yield ErrorInput(SampleInput(zero_d, args=(zero_d, zero_d)), error_type=RuntimeError,
+                         error_regex="input must have at least 2 dimensions")
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
@@ -11995,6 +12002,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_ormqr,
+           error_inputs_func=error_inputs_ormqr,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     OpInfo('permute',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
