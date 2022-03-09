@@ -759,7 +759,7 @@ class TestAutogradFunctional(TestCase):
         self._check_jacobian_vectorize_correctness(h, (x, y))
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    @base_and_logging_tensor
+    @FIXME_base_and_xfail_logging_tensor
     def test_jacobian_vectorize_correctness_different_devices(self, ctors):
         def f(x, y):
             return x * y, (x * y).cuda()
