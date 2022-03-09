@@ -109,7 +109,6 @@ Tensor mkldnn_convolution(
   TORCH_CHECK(!stride_is_nonpos, "non-positive stride is not supported");
   TORCH_CHECK(!dilation_is_nonpos, "non-positive dilation is not supported");
   TORCH_CHECK(groups > 0, "non-positive groups is not supported");
-
   auto weight_sizes = weight.sizes();
   int64_t weight_dim = weight_sizes.size();
   TORCH_CHECK(weight_dim == k,
@@ -123,9 +122,19 @@ Tensor mkldnn_convolution(
            "Given groups=", groups, ", expected weight to be divisible by ",
            groups, " at dimension 0, but got weight of size [", weight_sizes,
            "] instead");
+  TORCH_CHECK(input.size(1) == (weight_sizes[1] * groups),
+           "Given groups=", groups, ", weight of size ", weight_sizes,
+           ", expected input", input.sizes(), " to have ",
+           (weight_sizes[1] * groups), " channels, but got ", input.size(1),
+           " channels instead");
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
+
+  TORCH_CHECK(!bias.defined() || (bias.ndimension() == 1 && bias.size(0) == weight_sizes[0]),
+           "Given weight of size ", weight_sizes,
+           ", expected bias to be 1-dimensional with ", weight_sizes[0], " elements",
+           ", but got bias of size ", bias.sizes(), " instead");
 
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
