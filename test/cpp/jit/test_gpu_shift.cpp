@@ -2033,38 +2033,6 @@ TEST_F(NVFuserTest, FusionShiftSyncPlacement2_CUDA) {
   testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionShiftSyncPlacement3_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto tv0 = makeSymbolicTensor(1);
-  fusion.addInput(tv0);
-  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
-  auto tv2 = add(tv1, IrBuilder::create<Double>(2));
-  auto tv3 = shift(tv2, {1});
-  fusion.addOutput(tv3);
-
-  // This doesn't work. syncthreads is needed between tv1 and tv2, but
-  // both the loop extent of both tv1 and tv2 has halo, so the loop is
-  // not eliminated even though it is parallelized. Moving syncthreads
-  // out of the loop would make it placed before tv1, which would make
-  // it meaningless.
-  // Ideally, an exception should be thrown at this computeAt, but at
-  // this point, the fusion is not yet parallelized, nor memory type
-  // is set, so this computeAt itself is not an error yet.
-  tv1->computeAt(tv2, -1);
-
-  tv1->setMemoryType(MemoryType::Shared);
-  tv2->setMemoryType(MemoryType::Shared);
-
-  tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
-
-  // The error should be detected when the fusion is lowered.
-  ASSERT_ANY_THROW(fusion.printKernel());
-}
-
 // Based on original CUDA provided by Vishal Mehta.
 // Major differences with the original version:
 // - The original version uses additional 2 warps to load the halos

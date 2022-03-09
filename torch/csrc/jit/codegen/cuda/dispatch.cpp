@@ -133,8 +133,11 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
-    case ExprType::Sync:
-      ptr(handler)->handle(expr->as<kir::Sync>());
+    case ExprType::BlockSync:
+      ptr(handler)->handle(expr->as<kir::BlockSync>());
+      return;
+    case ExprType::GridSync:
+      ptr(handler)->handle(expr->as<kir::GridSync>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -265,8 +268,11 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::Allocate:
       ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
-    case ExprType::Sync:
-      ptr(handler)->handle(expr->as<kir::Sync>());
+    case ExprType::BlockSync:
+      ptr(handler)->handle(expr->as<kir::BlockSync>());
+      return;
+    case ExprType::GridSync:
+      ptr(handler)->handle(expr->as<kir::GridSync>());
       return;
     case ExprType::InitMagicZero:
       ptr(handler)->handle(expr->as<kir::InitMagicZero>());
@@ -408,8 +414,11 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
     case ExprType::Allocate:
       ptr(mutator)->mutate(expr->as<kir::Allocate>());
       return;
-    case ExprType::Sync:
-      ptr(mutator)->mutate(expr->as<kir::Sync>());
+    case ExprType::BlockSync:
+      ptr(mutator)->mutate(expr->as<kir::BlockSync>());
+      return;
+    case ExprType::GridSync:
+      ptr(mutator)->mutate(expr->as<kir::GridSync>());
       return;
     case ExprType::InitMagicZero:
       ptr(mutator)->mutate(expr->as<kir::InitMagicZero>());
@@ -616,7 +625,10 @@ void OptOutConstDispatch::handle(const ViewOp* stmt) {
 void OptOutConstDispatch::handle(const kir::Allocate* stmt) {
   unhandled(stmt);
 }
-void OptOutConstDispatch::handle(const kir::Sync* stmt) {
+void OptOutConstDispatch::handle(const kir::BlockSync* stmt) {
+  unhandled(stmt);
+}
+void OptOutConstDispatch::handle(const kir::GridSync* stmt) {
   unhandled(stmt);
 }
 void OptOutConstDispatch::handle(const kir::InitMagicZero* stmt) {
@@ -721,7 +733,10 @@ void OptOutDispatch::handle(ViewOp* stmt) {
 void OptOutDispatch::handle(kir::Allocate* stmt) {
   unhandled(stmt);
 }
-void OptOutDispatch::handle(kir::Sync* stmt) {
+void OptOutDispatch::handle(kir::BlockSync* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::GridSync* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::InitMagicZero* stmt) {

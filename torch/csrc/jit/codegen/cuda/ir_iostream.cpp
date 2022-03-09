@@ -560,9 +560,15 @@ void IrPrinter::handle(const kir::Allocate* node) {
   }
 }
 
-void IrPrinter::handle(const kir::Sync* node) {
-  indent() << "SYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
+void IrPrinter::handle(const kir::BlockSync* node) {
+  indent() << "BLOCKSYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
            << ")\n";
+}
+
+void IrPrinter::handle(const kir::GridSync* node) {
+  indent() << "GRIDSYNC(" << node->syncDims().toString() << ", ";
+  handle(node->syncBuffer());
+  os_ << ")\n";
 }
 
 void IrPrinter::handle(const kir::ForLoop* node) {

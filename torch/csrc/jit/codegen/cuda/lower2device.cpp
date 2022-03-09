@@ -265,12 +265,13 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 
-  // Depends on thread_pred_map_
-  validateParallelize(fusion_);
-
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
   haloInfo().build(fusion_);
+
+  // Depends on thread_pred_map_, validates parallelization collects which
+  // tensor views need WAR or RAW syncs
+  sync_map_.build(fusion_);
 
   partialSplitMap().build(fusion_);
 
@@ -344,9 +345,10 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   const auto exprs_cleaned_up_loops =
       KIRCleaner::cleanUp(exprs_register_adjusted);
 
-  // We now have the lowered expressions, finalize the kernel IR, add the
-  // vectorized entry to it manually as it's already populated in GpuLower
-  kernel_->finalize(exprs_cleaned_up_loops, vectorized_accesses_);
+  // We now have the lowered expressions, finalize the kernel IR. This function
+  // will also copy over some relevant information for code generation from
+  // GpuLower.
+  kernel_->finalize(exprs_cleaned_up_loops);
 }
 
 kir::Kernel* GpuLower::kernel() const {

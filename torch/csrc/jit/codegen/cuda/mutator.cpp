@@ -359,7 +359,10 @@ void OptOutMutator::mutate(Merge* m) {
 void OptOutMutator::mutate(kir::Allocate*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
-void OptOutMutator::mutate(kir::Sync*) {
+void OptOutMutator::mutate(kir::BlockSync*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::GridSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::InitMagicZero*) {

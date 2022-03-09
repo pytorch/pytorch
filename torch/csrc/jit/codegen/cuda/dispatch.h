@@ -89,7 +89,8 @@ class Predicate;
 class TensorIndex;
 
 class Allocate;
-class Sync;
+class BlockSync;
+class GridSync;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
@@ -141,7 +142,8 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const ViewOp* stmt);
 
   virtual void handle(const kir::Allocate*);
-  virtual void handle(const kir::Sync*);
+  virtual void handle(const kir::BlockSync*);
+  virtual void handle(const kir::GridSync*);
   virtual void handle(const kir::InitMagicZero*);
   virtual void handle(const kir::UpdateMagicZero*);
   virtual void handle(const kir::ForLoop*);
@@ -191,7 +193,8 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(ViewOp* stmt);
 
   virtual void handle(kir::Allocate* stmt);
-  virtual void handle(kir::Sync* stmt);
+  virtual void handle(kir::BlockSync* stmt);
+  virtual void handle(kir::GridSync* stmt);
   virtual void handle(kir::InitMagicZero* stmt);
   virtual void handle(kir::UpdateMagicZero* stmt);
   virtual void handle(kir::ForLoop* stmt);
@@ -282,7 +285,8 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(ViewOp*);
 
   virtual void mutate(kir::Allocate*);
-  virtual void mutate(kir::Sync*);
+  virtual void mutate(kir::BlockSync*);
+  virtual void mutate(kir::GridSync*);
   virtual void mutate(kir::InitMagicZero*);
   virtual void mutate(kir::UpdateMagicZero*);
   virtual void mutate(kir::ForLoop*);

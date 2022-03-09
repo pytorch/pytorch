@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_index_hoist.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
@@ -23,6 +24,7 @@
 #include <memory>
 #include <ostream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -138,6 +140,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return vectorized_accesses_;
   }
 
+  const SyncMap& syncMap() const {
+    return sync_map_;
+  }
+
  private:
   void lower(Fusion* fusion, DataType index_type);
 
@@ -168,6 +174,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   NonDivisibleSplitInfo non_divisible_split_info_;
   DoubleBufferInfo double_buffer_info_;
   CommonIndexMap common_index_map_;
+  SyncMap sync_map_;
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size

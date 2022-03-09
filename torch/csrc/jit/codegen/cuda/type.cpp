@@ -224,8 +224,10 @@ static const char* expr_type2string(ExprType t) {
       return "Merge";
     case ExprType::Allocate:
       return "Allocate";
-    case ExprType::Sync:
-      return "Sync";
+    case ExprType::BlockSync:
+      return "BlockSync";
+    case ExprType::GridSync:
+      return "GridSync";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:

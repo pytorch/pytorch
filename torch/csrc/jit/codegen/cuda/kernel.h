@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -82,6 +83,8 @@ struct KernelSummary {
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size
   std::unordered_map<TensorView*, int> vectorized_accesses;
+
+  SyncMap sync_map;
 };
 
 class KernelInternalProxy;
@@ -112,13 +115,9 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   //! Finalize a kernel definition
   //!
   //! At this point we have a complete kernel definition and we can
-  //! run analysis passes to build a KernelSummary. Manually send in vectorized
-  //! info so it doesn't have to be rebuilt.
-  //!
+  //! run analysis passes to build a KernelSummary.
 
-  void finalize(
-      std::vector<Expr*> top_level_exprs,
-      const std::unordered_map<TensorView*, int>& vectorized_info);
+  void finalize(std::vector<Expr*> top_level_exprs);
 
   const std::vector<Expr*>& topLevelExprs() const {
     return top_level_exprs_;

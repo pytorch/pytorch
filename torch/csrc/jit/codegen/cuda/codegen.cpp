@@ -323,24 +323,27 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const kir::TensorIndex* ti) final {
-    code_ << varName(ti->view()) << "[";
-
     bool first = true;
+    std::stringstream index;
     for (auto* ind : ti->indices()) {
       if (!ind->isZeroInt()) {
         if (!first) {
-          code_ << " + ";
+          index << " + ";
         }
-        code_ << genInline(ind);
+        index << genInline(ind);
         first = false;
       }
     }
 
     if (first) {
-      code_ << "0";
+      index << "0";
     }
-
-    code_ << "]";
+    bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
+        kernel_->summary().sync_map.needsRawSync(ti->view()).hasBID();
+    if (is_volatile) {
+      code_ << "*(volatile " << ti->getDataType().value() << "*)&";
+    }
+    code_ << varName(ti->view()) << "[" << index.str() << "]";
   }
 
   void handle(const IterDomain*) final {
@@ -435,18 +438,40 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           bool globalToLocal = out_tv->getMemoryType() == MemoryType::Local &&
               in_tv->getMemoryType() == MemoryType::Global;
 
+          bool globalToGlobal = out_tv->getMemoryType() == MemoryType::Global &&
+              in_tv->getMemoryType() == MemoryType::Global;
+
+          bool is_volatile_to = out_tv->getMemoryType() == MemoryType::Global &&
+              kernel_->summary().sync_map.needsRawSync(out_tv).hasBID();
+
+          bool is_volatile_from =
+              in_tv->getMemoryType() == MemoryType::Global &&
+              kernel_->summary().sync_map.needsRawSync(in_tv).hasBID();
+
           if (localToGlobal) {
             indent() << "loadLocalToGlobal<" << uop->out()->dtype() << ", "
-                     << vector_word_size << ">(&" << gen(uop->out()) << ", &"
-                     << gen(uop->in()) << ");\n";
+                     << vector_word_size << ", "
+                     << (is_volatile_to ? "true" : "false") << ">(";
+            code_ << " &" << gen(uop->out()) << ", &" << gen(uop->in())
+                  << ");\n";
           } else if (globalToLocal) {
             indent() << "loadGlobalToLocal<" << uop->out()->dtype() << ", "
-                     << vector_word_size << ">(&" << gen(uop->out()) << ", &"
-                     << gen(uop->in()) << ");\n";
+                     << vector_word_size << ", "
+                     << (is_volatile_from ? "true" : "false") << ">(&"
+                     << gen(uop->out()) << ", ";
+            code_ << " &" << gen(uop->in()) << ");\n";
+          } else if (globalToGlobal) {
+            indent() << "loadGlobalToGlobal<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ", "
+                     << (is_volatile_to ? "true" : "false") << ", "
+                     << (is_volatile_from ? "true" : "false") << ">(";
+            code_ << " &" << gen(uop->out()) << ", ";
+            code_ << " &" << gen(uop->in()) << ");\n";
           } else {
             indent() << "loadGeneric<" << uop->out()->dtype() << ", "
-                     << vector_word_size << ">(&" << gen(uop->out()) << ", &"
-                     << gen(uop->in()) << ");\n";
+                     << vector_word_size << ">(";
+            code_ << " &" << gen(uop->out()) << ", ";
+            code_ << " &" << gen(uop->in()) << ");\n";
           }
         }
         return;
@@ -1321,7 +1346,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                   << genInline(size) << "];\n";
           } else {
             // Align Offset Position
-            indent() << "offset = alignBufferSize(offset,"
+            indent() << "offset = alignBufferSize(offset, "
                      << dataTypeSize(buffer_dtype) << ");\n";
             // Shared Memory Pointer
             indent() << buffer_dtype << "* " << varName(tv)
@@ -1348,13 +1373,38 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::Sync*) final {
+  void handle(const kir::BlockSync*) final {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
     } else {
       indent() << "__barrier_sync(0);\n";
     }
+  }
+
+  void handle(const kir::GridSync* sync) final {
+    // Use a custom synchronization method if enabled
+    bool bidx = sync->syncDims().get(ParallelType::BIDx);
+    bool bidy = sync->syncDims().get(ParallelType::BIDy);
+    bool bidz = sync->syncDims().get(ParallelType::BIDz);
+    auto bool2str = [](bool b) { return (b ? "true" : "false"); };
+    std::stringstream sync_str;
+    sync_str << bool2str(bidx) << ", " << bool2str(bidy) << ", "
+             << bool2str(bidz);
+
+    std::stringstream sync_segment_size;
+    sync_segment_size << "index_utils::maskedSize<" << sync_str.str()
+                      << ">(gridDim)";
+
+    std::stringstream sync_idx;
+    sync_idx << "index_utils::maskedOffset<" << bool2str(!bidx) << ", "
+             << bool2str(!bidy) << ", " << bool2str(!bidz)
+             << ">(gridDim, blockDim)";
+
+    indent() << "grid_sync::sync<" << sync_str.str() << ", true>(\n";
+    indent() << "  " << varName(sync->syncBuffer()) << "[" << sync_idx.str()
+             << "],\n";
+    indent() << "  " << sync_segment_size.str() << ");\n";
   }
 
   void handle(const kir::InitMagicZero*) final {

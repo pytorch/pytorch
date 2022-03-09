@@ -423,9 +423,14 @@ void IndexLowering::handle(const kir::Allocate* allocate) {
   pushBack(const_cast<kir::Allocate*>(allocate)); // NOLINT
 }
 
-void IndexLowering::handle(const kir::Sync* sync) {
+void IndexLowering::handle(const kir::BlockSync* sync) {
   // TODO(kir): remove the need for const_cast
-  pushBack(const_cast<kir::Sync*>(sync)); // NOLINT
+  pushBack(const_cast<kir::BlockSync*>(sync)); // NOLINT
+}
+
+void IndexLowering::handle(const kir::GridSync* sync) {
+  // TODO(kir): remove the need for const_cast
+  pushBack(const_cast<kir::GridSync*>(sync)); // NOLINT
 }
 
 void IndexLowering::generate(const std::vector<Expr*>& exprs) {

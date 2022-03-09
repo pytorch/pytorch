@@ -52,7 +52,8 @@ class TensorIndex;
 
 // Expressions
 class Allocate;
-class Sync;
+class BlockSync;
+class GridSync;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
@@ -240,9 +241,9 @@ class TORCH_CUDA_CU_API Allocate final : public Expr {
 //
 // TODO(kir): change name to SyncThreads as we could have other barriers.
 //
-class TORCH_CUDA_CU_API Sync final : public Expr {
+class TORCH_CUDA_CU_API BlockSync final : public Expr {
  public:
-  explicit Sync(IrBuilderPasskey passkey, bool war_sync = false);
+  explicit BlockSync(IrBuilderPasskey passkey, bool war_sync = false);
 
   bool isWarHazardSync() const {
     return war_sync_;
@@ -251,6 +252,28 @@ class TORCH_CUDA_CU_API Sync final : public Expr {
  private:
   // TODO: war_sync_ is only used for testing/validation purposes.
   bool war_sync_ = false;
+};
+
+// Synchronize all blocks in device, implies cooperative group launch is
+// required.
+class TORCH_CUDA_CU_API GridSync final : public Expr {
+ public:
+  explicit GridSync(
+      IrBuilderPasskey passkey,
+      ParallelTypeBitmap sync_dims,
+      Val* sync_buffer);
+
+  ParallelTypeBitmap syncDims() const {
+    return sync_dims_;
+  }
+
+  Val* syncBuffer() const {
+    return sync_buffer_;
+  }
+
+ private:
+  ParallelTypeBitmap sync_dims_;
+  Val* sync_buffer_ = nullptr;
 };
 
 // Simply prints "DEFINE_MAGIC_ZERO" in the code in accordance with magic_zero

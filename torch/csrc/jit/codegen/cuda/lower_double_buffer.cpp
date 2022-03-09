@@ -407,7 +407,7 @@ class DoubleBufferInserter : private kir::ExprMutator {
     // RAW sync is not inserted for double buffered tensors. The only
     // exception is the prologue load.
     if (write_to_smem) {
-      auto sync = IrBuilder::create<kir::Sync>();
+      auto sync = IrBuilder::create<kir::BlockSync>();
       registerInsertBefore(double_buffer_loop, sync);
     }
 

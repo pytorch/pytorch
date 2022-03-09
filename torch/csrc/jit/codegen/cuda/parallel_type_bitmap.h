@@ -160,6 +160,20 @@ class ParallelTypeBitmap {
     *this |= ParallelTypeBitmap(kBIDBits);
   }
 
+  //! Clear all of the TID flags
+  void clearAllTID() {
+    auto tid_bits = ParallelTypeBitmap(kTIDBits);
+    auto not_tid_bits = ~tid_bits;
+    *this &= not_tid_bits;
+  }
+
+  //! Clear all of the BID flags
+  void clearAllBID() {
+    auto bid_bits = ParallelTypeBitmap(kBIDBits);
+    auto not_bid_bits = ~bid_bits;
+    *this &= not_bid_bits;
+  }
+
   //! Get an iterator to traverse set types
   Iterator begin() const {
     return Iterator::begin(*this);

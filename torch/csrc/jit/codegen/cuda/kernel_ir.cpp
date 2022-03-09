@@ -78,12 +78,20 @@ TensorIndex::TensorIndex(
   }
 }
 
-Sync::Sync(IrBuilderPasskey passkey, bool war_sync)
-    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {
+BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync)
+    : Expr(passkey, ExprType::BlockSync), war_sync_(war_sync) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
 }
+
+GridSync::GridSync(
+    IrBuilderPasskey passkey,
+    ParallelTypeBitmap sync_dims,
+    Val* sync_buffer)
+    : Expr(passkey, ExprType::GridSync),
+      sync_dims_(sync_dims),
+      sync_buffer_(sync_buffer) {}
 
 InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
     : Expr(passkey, ExprType::InitMagicZero) {
