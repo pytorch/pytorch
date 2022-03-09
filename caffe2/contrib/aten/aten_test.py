@@ -1,9 +1,3 @@
-
-
-
-
-
-from caffe2.python import core, dyndep
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -19,7 +13,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ["X", "Y"],
             ["Z"],
-            operator="add")
+            operator_name="add")
 
         def ref(X, Y):
             return [X + Y]
@@ -31,7 +25,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ["X", "Y"],
             ["Z"],
-            operator="add")
+            operator_name="add")
 
         def ref(X, Y):
             return [X + Y]
@@ -43,7 +37,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ["S"],
             ["Z"],
-            operator="pow", exponent=2.0)
+            operator_name="pow", exponent=2.0)
 
         def ref(X):
             return [np.square(X)]
@@ -57,7 +51,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ["S"],
             ["Z", "I"],
-            operator="sort")
+            operator_name="sort")
 
         def ref(X):
             return [np.sort(X), np.argsort(X)]
@@ -69,7 +63,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ["S"],
             ["Z"],
-            operator="sum")
+            operator_name="sum")
 
         def ref(X):
             return [np.sum(X)]
@@ -83,7 +77,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ['self', 'mask'],
             ["Z"],
-            operator="index")
+            operator_name="index")
 
         def ref(self, mask):
             return (self[mask.astype(np.bool_)],)
@@ -99,7 +93,7 @@ class TestATen(hu.HypothesisTestCase):
             "ATen",
             ['self', 'indices', 'values'],
             ["Z"],
-            operator="index_put")
+            operator_name="index_put")
 
         def ref(self, indices, values):
             self[indices] = values
@@ -120,7 +114,7 @@ class TestATen(hu.HypothesisTestCase):
             sorted=True,
             return_inverse=True,
             # return_counts=False,
-            operator="_unique")
+            operator_name="_unique")
 
         def ref(self):
             index, _ = np.unique(self, return_index=False, return_inverse=True, return_counts=False)

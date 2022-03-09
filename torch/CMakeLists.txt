@@ -356,6 +356,12 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+if(DEFINED ENV{BUILD_CAFFE2})
+  string(TOUPPER "$ENV{BUILD_CAFFE2}" BUILD_CAFFE2_STR)
+  if("${BUILD_CAFFE2_STR}" STREQUAL "1" OR "${BUILD_CAFFE2_STR}" STREQUAL "ON" OR "${BUILD_CAFFE2_STR}" STREQUAL "TRUE")
+    string(APPEND CMAKE_CXX_FLAGS " -DBUILD_CAFFE2")
+  endif()
+endif()
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
   target_link_libraries(torch_python PRIVATE numpy::numpy)

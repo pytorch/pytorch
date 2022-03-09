@@ -6,10 +6,9 @@ graph {
     input: "x"
     input: "x"
     output: "1"
-    name: "ATen_0"
     op_type: "ATen"
     attribute {
-      name: "operator"
+      name: "operator_name"
       s: "add"
       type: STRING
     }
@@ -18,6 +17,7 @@ graph {
       s: ""
       type: STRING
     }
+    domain: "org.pytorch.aten"
   }
   name: "torch_jit"
   input {
@@ -43,10 +43,10 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 3
+            dim_param: "ATen1_dim_0"
           }
           dim {
-            dim_value: 4
+            dim_param: "ATen1_dim_1"
           }
         }
       }
@@ -55,4 +55,8 @@ graph {
 }
 opset_import {
   version: 13
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
 }

@@ -6,36 +6,37 @@ graph {
     input: "emb.weight"
     input: "input_1"
     output: "onnx::Add_3"
-    name: "ATenOp_0"
-    op_type: "ATenOp"
+    op_type: "ATen"
     attribute {
       name: "custom_attributes_json"
       s: "{\"padding_idx\":-1,\"scale_grad_by_freq\":false,\"sparse\":false}"
       type: STRING
     }
     attribute {
-      name: "name"
-      s: "aten::embedding"
+      name: "operator_name"
+      s: "embedding"
       type: STRING
     }
-    domain: "com.microsoft"
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    domain: "org.pytorch.aten"
   }
   node {
     input: "onnx::Add_3"
     input: "input_2"
     output: "onnx::Shape_4"
-    name: "Add_1"
     op_type: "Add"
   }
   node {
     input: "onnx::Shape_4"
     output: "onnx::Gather_5"
-    name: "Shape_2"
     op_type: "Shape"
   }
   node {
     output: "onnx::Gather_6"
-    name: "Constant_3"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -50,7 +51,6 @@ graph {
     input: "onnx::Gather_5"
     input: "onnx::Gather_6"
     output: "onnx::Unsqueeze_7"
-    name: "Gather_4"
     op_type: "Gather"
     attribute {
       name: "axis"
@@ -61,7 +61,6 @@ graph {
   node {
     input: "onnx::Unsqueeze_7"
     output: "onnx::Concat_8"
-    name: "Unsqueeze_5"
     op_type: "Unsqueeze"
     attribute {
       name: "axes"
@@ -72,7 +71,6 @@ graph {
   node {
     input: "onnx::Concat_8"
     output: "onnx::ConstantOfShape_9"
-    name: "Concat_6"
     op_type: "Concat"
     attribute {
       name: "axis"
@@ -83,7 +81,6 @@ graph {
   node {
     input: "onnx::ConstantOfShape_9"
     output: "10"
-    name: "ConstantOfShape_7"
     op_type: "ConstantOfShape"
     attribute {
       name: "value"
@@ -132,6 +129,22 @@ graph {
       }
     }
   }
+  input {
+    name: "emb.weight"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 8
+          }
+        }
+      }
+    }
+  }
   output {
     name: "10"
     type {
@@ -152,10 +165,10 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "ATenOponnx::Add_3_dim_0"
+            dim_param: "ATenonnx::Add_3_dim_0"
           }
           dim {
-            dim_param: "ATenOponnx::Add_3_dim_1"
+            dim_param: "ATenonnx::Add_3_dim_1"
           }
         }
       }
@@ -166,6 +179,6 @@ opset_import {
   version: 12
 }
 opset_import {
-  domain: "com.microsoft"
+  domain: "org.pytorch.aten"
   version: 1
 }

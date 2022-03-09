@@ -25,7 +25,7 @@ graph {
       type: INTS
     }
     attribute {
-      name: "operator"
+      name: "operator_name"
       s: "layer_norm"
       type: STRING
     }
@@ -34,6 +34,7 @@ graph {
       s: ""
       type: STRING
     }
+    domain: "org.pytorch.aten"
   }
   name: "torch_jit"
   initializer {
@@ -111,16 +112,16 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 20
+            dim_param: "ATen3_dim_0"
           }
           dim {
-            dim_value: 5
+            dim_param: "ATen3_dim_1"
           }
           dim {
-            dim_value: 10
+            dim_param: "ATen3_dim_2"
           }
           dim {
-            dim_value: 10
+            dim_param: "ATen3_dim_3"
           }
         }
       }
@@ -129,4 +130,8 @@ graph {
 }
 opset_import {
   version: 13
+}
+opset_import {
+  domain: "org.pytorch.aten"
+  version: 1
 }

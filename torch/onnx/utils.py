@@ -983,7 +983,7 @@ def _newNode(g, opname, outputs, *args, **kwargs):
         aten = False
         ns_opname = opname
     else:
-        aten = kwargs.pop("aten", False)
+        aten = kwargs.pop("aten", False) or opname == "ATen"
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
     n = g.create(ns_opname, args, outputs)
@@ -1055,7 +1055,7 @@ def _block_op(b, opname, *args, **kwargs):
         aten = False
         ns_opname = opname
     else:
-        aten = kwargs.pop("aten", False)
+        aten = kwargs.pop("aten", False) or opname == "ATen"
         ns = "aten" if aten else "onnx"
         ns_opname = ns + "::" + opname
     n = b.addNode(ns_opname, list(args))
@@ -1165,7 +1165,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return g.at(op_name, *inputs, aten=True, **attrs)
+            return g.at(g, op_name, *inputs, **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
@@ -1180,8 +1180,9 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 
 # Generate an ONNX ATen op node.
-def _aten_op(g, operator, *args, overload_name="", **kwargs):
-    return g.op("ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs)
+def _aten_op(g, operator_name, *args, overload_name="", **kwargs):
+    kwargs["aten"] = True
+    return g.op("ATen", *args, operator_name_s=operator_name, overload_name_s=overload_name, **kwargs)
 
 
 # This helper function can create either constant tensor or constant scalar.
@@ -1315,7 +1316,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 
 
 torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
-torch._C.Graph.at = _aten_op  # type: ignore[attr-defined]
+torch._C.Graph.at = _aten_op   # type: ignore[attr-defined]
 torch._C.Block.op = _block_op  # type: ignore[attr-defined]
 torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
 torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]

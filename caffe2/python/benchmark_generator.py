@@ -34,7 +34,7 @@ def main(args):
 
     model = ModelHelper(name=args.benchmark_name)
 
-    op_type = args.operator  # assumes a brew type op name
+    op_type = args.operator_name  # assumes a brew type op name
     input_name = args.input_name
     output_name = args.output_name
 
@@ -85,7 +85,7 @@ def main(args):
 
     # Handle manual rewrite
     if args.context.upper() == "OPENGL":
-        old_ops = [op for op in predict_net.op]
+        old_ops = list(op for op in predict_net.op)
         del predict_net.op[:]
         for op in old_ops:
             op.type = 'OpenGL{}'.format(op.type)
@@ -106,8 +106,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Utilitity to generate Caffe2 benchmark models.")
-    parser.add_argument("operator", help="Caffe2 operator to benchmark.")
+        description="Utility to generate Caffe2 benchmark models.")
+    parser.add_argument("operator_name", help="Caffe2 operator to benchmark.")
     parser.add_argument("-b", "--blob",
                         help="Instantiate a blob --blob name=dim1,dim2,dim3",
                         action='append')
