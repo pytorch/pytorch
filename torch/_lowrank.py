@@ -129,19 +129,15 @@ def svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
             return handle_torch_function(svd_lowrank, tensor_ops, A, q=q, niter=niter, M=M)
     return _svd_lowrank(A, q=q, niter=niter, M=M)
 
+
 def _svd_lowrank(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
                  M: Optional[Tensor] = None) -> Tuple[Tensor, Tensor, Tensor]:
+    # See #73614. TF32 should be disabled for svd_lowrank.
+    # However, if an exception occurred during this computation and is catched,
+    # the TF32 behavior will NOT be restored automatically when the program resumes.
     _orig_cublas_matmul_flag = torch.backends.cuda.matmul.allow_tf32
-    try:
-        torch.backends.cuda.matmul.allow_tf32 = False
-        res = _svd_lowrank_impl(A, q, niter, M)
-    finally:
-        torch.backends.cuda.matmul.allow_tf32 = _orig_cublas_matmul_flag
+    torch.backends.cuda.matmul.allow_tf32 = False
 
-    return res
-
-def _svd_lowrank_impl(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
-                      M: Optional[Tensor] = None) -> Tuple[Tensor, Tensor, Tensor]:
     q = 6 if q is None else q
     m, n = A.shape[-2:]
     matmul = _utils.matmul
@@ -184,6 +180,7 @@ def _svd_lowrank_impl(A: Tensor, q: Optional[int] = 6, niter: Optional[int] = 2,
         V = Vh.mH
         U = Q.matmul(U)
 
+    torch.backends.cuda.matmul.allow_tf32 = _orig_cublas_matmul_flag
     return U, S, V
 
 
