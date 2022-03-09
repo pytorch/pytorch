@@ -513,13 +513,6 @@ at::Tensor& LazyNativeFunctions::random_(
   return self;
 }
 
-at::Tensor LazyNativeFunctions::repeat(const at::Tensor& self,
-                                       at::IntArrayRef repeats) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return torch::lazy::CreateAtenFromLtcTensor(lazy_tensor_aten_ops::repeat(
-      torch::lazy::TryGetLtcTensor(self), torch::lazy::ToI64Vector(repeats)));
-}
-
 at::Tensor LazyNativeFunctions::select(const at::Tensor& self, int64_t dim,
                                        int64_t index) {
   TORCH_LAZY_FN_COUNTER("lazy::");

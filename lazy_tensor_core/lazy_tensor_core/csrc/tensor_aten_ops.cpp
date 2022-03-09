@@ -19,7 +19,6 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
-#include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
@@ -246,11 +245,6 @@ torch::lazy::LazyTensorPtr permute(const torch::lazy::LazyTensorPtr& input, c10:
       torch::lazy::ViewInfo::Type::kPermute, input_shape,
       torch::lazy::GetCanonicalDimensionIndices(dims, input_shape.Get().dim()));
   return input->CreateViewTensor(std::move(view_info));
-}
-
-torch::lazy::LazyTensorPtr repeat(const torch::lazy::LazyTensorPtr& input, std::vector<int64_t> repeats) {
-  return torch::lazy::LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Repeat>(
-      input->GetIrValue(), std::move(repeats)), input->GetDevice());
 }
 
 void copy_(torch::lazy::LazyTensorPtr& input, torch::lazy::LazyTensorPtr& src) {

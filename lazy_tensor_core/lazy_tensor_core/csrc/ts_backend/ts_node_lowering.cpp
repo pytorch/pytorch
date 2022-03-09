@@ -22,7 +22,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 
-#include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
@@ -125,11 +124,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     if (node->op().op == at::aten::permute) {
       return LowerPermute(torch::lazy::NodeCast<torch::lazy::Permute>(
           node, torch::lazy::OpKind(at::aten::permute)));
-    }
-    if (node->op().op == at::aten::repeat) {
-      return LowerRepeat(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Repeat>(
-              node, torch::lazy::OpKind(at::aten::repeat)));
     }
     if (node->op().op == at::aten::select) {
       return LowerSelect(torch::lazy::NodeCast<torch::lazy::Select>(
@@ -295,13 +289,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.push_back(node->dims());
-    return LowerBuiltin(node, arguments);
-  }
-
-  TSOpVector LowerRepeat(const torch_lazy_tensors::ir::ops::Repeat* node) {
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-    arguments.push_back(node->repeats());
     return LowerBuiltin(node, arguments);
   }
 
