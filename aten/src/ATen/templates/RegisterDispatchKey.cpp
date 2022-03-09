@@ -45,6 +45,15 @@ $external_backend_headers
 $dispatch_headers
 $ops_headers
 
+#ifndef EAGER_REGISTRATION
+#define EAGER_REGISTRATION 1
+#endif
+
+namespace ${cpp_namespace} {
+
+std::function<void(void)> Register${BackendName}${DispatchKey}Modules;
+
+} // namespace ${cpp_namespace}
 
 namespace at {
 
@@ -58,7 +67,15 @@ ${dispatch_helpers}
 ${dispatch_anonymous_definitions}
 
 TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {
-  ${dispatch_registrations}
+  ${cpp_namespace}::Register${BackendName}${DispatchKey}Modules = [&]() {
+
+    ${dispatch_registrations}
+
+  };
+
+  #if EAGER_REGISTRATION
+  ${cpp_namespace}::Register${BackendName}${DispatchKey}Modules();
+  #endif
 }
 
 } // anonymous namespace

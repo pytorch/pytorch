@@ -4,6 +4,8 @@
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
+#include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
+#include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
@@ -234,6 +236,14 @@ void InitTorchScriptBackend() {
   static std::unique_ptr<torch::lazy::BackendRegistrar> s_registrar;
   s_registrar.reset(
       new torch::lazy::BackendRegistrar(compiler::GetTSBackendImpl()));
+
+  #if !EAGER_REGISTRATION
+    CHECK(RegisterTorchScriptLazyModules);
+    RegisterTorchScriptLazyModules();
+    CHECK(register_ts_ltc_eager_fallback);
+    register_ts_ltc_eager_fallback();
+  #endif
 }
+
 };  // namespace compiler
 }  // namespace torch_lazy_tensors

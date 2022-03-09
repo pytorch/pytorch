@@ -55,8 +55,12 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
                  torch::lazy::getBackend()->EagerFallbackDeviceType());
 }
 
+std::function<void(void)> register_ts_ltc_eager_fallback;
+
 TORCH_LIBRARY_IMPL(_, Lazy, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
+  register_ts_ltc_eager_fallback = [&]() {
+    m.fallback(torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
+  };
 }
 
 }  // namespace torch_lazy_tensors
