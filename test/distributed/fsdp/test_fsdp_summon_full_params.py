@@ -280,7 +280,7 @@ class TestSummonFullParams(FSDPTest):
             else list(local_model.parameters())
         )
 
-        with model.summon_full_params(recurse=True, rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
+        with model.summon_full_params(recurse=True, rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             # Below sleep causes failures without stream synchronization in
             # summon_full_params fix.
             torch.cuda._sleep(1000000)
@@ -322,7 +322,7 @@ class TestSummonFullParams(FSDPTest):
         # now lets repeat it with summon done in between
 
         output = model(torch.zeros(5).cuda(self.rank))
-        with model.summon_full_params(rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
+        with model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(
             outer_full_param_size, outer_param._full_param_padded.storage().size()
@@ -330,7 +330,7 @@ class TestSummonFullParams(FSDPTest):
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
 
         output.backward()
-        with model.summon_full_params(rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
+        with model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             pass
         self.assertEqual(0, outer_param._full_param_padded.storage().size())
         self.assertEqual(0, inner_param._full_param_padded.storage().size())
@@ -349,7 +349,7 @@ class TestSummonFullParams(FSDPTest):
         flattened_param = _get_flat_param()
         self.assertEqual(layer_shape[0] * layer_shape[1] / 2, flattened_param.numel())
 
-        with fsdp_model.summon_full_params(rank0_only=rank0_only, offload_to_cpu=offload_to_cpu):
+        with fsdp_model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only, offload_to_cpu=offload_to_cpu):
             if self.rank == 0 or not rank0_only:
                 self.assertEqual(fsdp_model.weight.shape, model.weight.shape)
                 expected_device = (
@@ -393,7 +393,7 @@ class TestSummonFullParams(FSDPTest):
             if not rank0_only or self.rank == 0 else
             list(p.clone() for p in fsdp_model.parameters())
         )
-        with fsdp_model.summon_full_params(rank0_only=rank0_only):
+        with fsdp_model.summon_full_params(rank0_only=rank0_only, writeback=not rank0_only):
             for p1, p2 in itertools.zip_longest(
                 fsdp_model.parameters(), params_to_compare
             ):
