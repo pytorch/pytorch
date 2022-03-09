@@ -75,9 +75,11 @@ class TestCommunication(FSDPTest):
         # Count the number of all-gathers and reduce-scatters by mocking
         # `_all_gather_base()` and `_reducer_scatter_base()`
         # Both with and without `no_sync()`:
-        #   Forward: `num_fsdp` all-gathers
+        #   Forward: `num_fsdp` all-gathers; when no_sync mode, root will
+        #   not free full parameters, thus there will be `num_fsdp-1`
+        #   all-gathers.
         #   Backward: `num_fsdp` - 1 all-gathers (only excluding the root)
-        expected_num_all_gather_no_sync = num_fsdp + (num_fsdp - 1)
+        expected_num_all_gather_no_sync = (num_fsdp - 1) + (num_fsdp - 1)
         expected_num_all_gather_sync = num_fsdp + (num_fsdp - 1)
         expected_num_reduce_scatter_no_sync = 0
         expected_num_reduce_scatter_sync = num_fsdp

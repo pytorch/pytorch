@@ -51,7 +51,7 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 class ShardingStrategy(Enum):
     """
     Specify which sharding strategy will be used for the distributed training.
-    FULL_SHARD: Shard parameters, gradients and optimizer states, this algorithm
+    FULL_SHARD: if Shard parameters, gradients and optimizer states, this algorithm
                 inserts all_gather before forward and backward computation to gather
                 parameters, also inserts reduce_scatter after backward computation for
                 synchronizing and sharding gradients. Sharded optimizer states are
@@ -61,17 +61,24 @@ class ShardingStrategy(Enum):
                    GPU memory until backward computation is done. It inserts reduce_scater
                    after backward computation for synchronizing and sharding gradients.
                    Sharded optimizer states are updated locally.
-    NO_SHARD(future support): Parameters, gradients and optimizer states are replicated
+    SHARD_OP(future support): Shard optimizer states only, this algorithm inserts all_gather
+                              or broadcast before forward computation and keeps the full
+                              parameters in GPU memory until backward computation is done. It
+                              inserts all_reduce after backward computation for synchronizing
+                              gradients. Sharded optimizer states are updated locally.
+    NO_SHARD(future support): This is similar to PyTorch `DistributedDataParallel` API.
+                              Parameters, gradients and optimizer states are replicated
                               among ranks, all_reduce is inserted after backward computation
                               is done for synchronizing gradients. Full optimizer states
                               are updated in each rank.
-    HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intrad node and
+    HYBRID_SHARD(future support): apply FULL_SHARD algorithm in the intra node and
                                   apply NO_SHARD algorithm in the inter nodes.
 
     """
     FULL_SHARD = auto()
     SHARD_GRAD_OP = auto()
     # TODO
+    # SHARD_OP = auto()
     # NO_SHARD = auto()
     # HYBRID_SHARD = auto()
 
@@ -201,6 +208,10 @@ class FullyShardedDataParallel(nn.Module):
             module to be wrapped with FSDP.
         process_group (Optional[ProcessGroup]):
             process group for sharding
+        sharding_strategy (Optional[ShardingStrategy]):
+            Config sharding algorithm, different sharding algorithm has trade off
+            between memory saving and communication overhead. 'FULL_SHARD' will
+            be chose if sharding_strategy is not specified.
         cpu_offload (Optional [CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
