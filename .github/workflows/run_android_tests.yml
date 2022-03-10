@@ -25,7 +25,7 @@ defaults:
 
 jobs:
 
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
     env:
       JOB_BASE_NAME: ubuntu-latest-android-tests
