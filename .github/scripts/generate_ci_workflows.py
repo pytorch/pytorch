@@ -652,8 +652,19 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
         test_runner_type=LINUX_ROCM_TEST_RUNNER,
         num_test_shards=2,
+        enable_distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-bionic-rocm4.5-py3.7-distributed",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-rocm4.5-py3.7",
+        test_runner_type=LINUX_ROCM_TEST_RUNNER,
+        enable_default_test=False,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_ROCM]),
         ),
     ),
     CIWorkflow(
