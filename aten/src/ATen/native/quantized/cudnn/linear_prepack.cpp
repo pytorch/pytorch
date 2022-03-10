@@ -27,13 +27,13 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightCudnn::prepack(
     TORCH_CHECK(
         bias.value().size(0) == output_channels,
         "bias should have K elements: " + std::to_string(output_channels));
-    // TODO: we create a broadcasted_bias tensor later so I think we don't need to make this contiguous here.
-    // we will revisit this when nvidia adds proper support for broadcasting
-    // bias_contig = bias->contiguous();
   }
 
   auto ret_ptr = c10::make_intrusive<PackedLinearWeightCudnn>(
-          weight.contiguous(c10::MemoryFormat::ChannelsLast),
+          // cudnn's expects tensors to be at least 3D. our weight tensor is [out_channels, in_channels]
+          // so we must prepend an additional dummy dimension so it becomes [1, out_channels, in_channels]
+          // note we store the transposed weight here
+          transpose(weight, 0, 1).unsqueeze(0),
           bias,
           qtype);
   return ret_ptr;

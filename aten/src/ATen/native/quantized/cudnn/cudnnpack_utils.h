@@ -31,22 +31,28 @@ struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor& apply_out(
-      const at::Tensor& input,
-      double output_scale,
-      int64_t output_zero_point,
-      at::Tensor& output) override;
+  // at::Tensor& apply_out(
+  //     const at::Tensor& input,
+  //     double output_scale,
+  //     int64_t output_zero_point,
+  //     at::Tensor& output) override;
 
-  at::Tensor& apply_relu_out(
-      const at::Tensor& input,
-      double output_scale,
-      int64_t output_zero_point,
-      at::Tensor& output) override;
+  // at::Tensor& apply_relu_out(
+  //     const at::Tensor& input,
+  //     double output_scale,
+  //     int64_t output_zero_point,
+  //     at::Tensor& output) override;
 
-  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false)
-      override;
-  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
-      override;
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false) override {
+    throw std::runtime_error(
+    "apply_relu_out is not implemented for this packed "
+    "parameter type");
+  }
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false) override {
+    throw std::runtime_error(
+    "apply_relu_out is not implemented for this packed "
+    "parameter type");
+  }
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
@@ -59,6 +65,8 @@ struct TORCH_API PackedLinearWeightCudnn : public LinearPackedParamsBase {
       c10::optional<at::Tensor> bias);
 
  private:
+  // note the orig_weight we store is the transposed weight and thus has dimensions [1, in_channels, out_channels]
+  // a 1 is prepended to be compatible with cudnn
   at::Tensor orig_weight;
   c10::optional<at::Tensor> bias_;
   c10::QScheme q_scheme;
