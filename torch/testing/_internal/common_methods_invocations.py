@@ -3168,6 +3168,17 @@ def error_inputs_diag(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
                      error_regex="iteration over a 0-d tensor")
 
+def error_inputs_embedding(op_info, device, **kwargs):
+    indices = torch.rand(2, 2, device=device).long()
+    weights = [
+        torch.tensor(1.0, device=device),
+        torch.tensor(1.0, device=device).reshape(1, 1, 1),
+    ]
+
+    for weight in weights:
+        yield ErrorInput(SampleInput(weight, args=(indices,)), error_type=RuntimeError,
+                         error_regex="'weight' must be 2-D")
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -14831,6 +14842,7 @@ op_db: List[OpInfo] = [
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding(idx, weight, **kwargs),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_embedding,
+        error_inputs_func=error_inputs_embedding,
         skips=(
             # Does not work with lambda
             # Raises : JIT Test does not execute any logic

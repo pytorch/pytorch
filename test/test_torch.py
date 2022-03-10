@@ -1385,16 +1385,6 @@ else:
 
         backward_func(self, device)
 
-    def test_embedding_scalar_weight_error(self, device):
-        indices = torch.rand(2, 2, device=device).long()
-        weights = [
-            torch.tensor(1.0, device=device),
-            torch.tensor(1.0, device=device).reshape(1, 1, 1),
-        ]
-        for weight in weights:
-            with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
-                torch.embedding(weight, indices)
-
     def test_dist(self, device):
         def run_test(x, y):
             for p in [0, 1, 2, 3, 4, inf, -inf]:
