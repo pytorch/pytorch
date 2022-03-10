@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
+#include <ATen/ScalarOps.h>
+
 namespace torch {
 namespace jit {
 

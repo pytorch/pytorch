@@ -146,14 +146,18 @@ class C10_API intrusive_ptr_target {
   // intrusive_ptr_target supports copy and move: but refcount and weakcount
   // don't participate (since they are intrinsic properties of the memory
   // location)
-  intrusive_ptr_target(intrusive_ptr_target&& other) noexcept
+  intrusive_ptr_target(intrusive_ptr_target&& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(intrusive_ptr_target&& other) noexcept {
+
+  intrusive_ptr_target& operator=(intrusive_ptr_target&& /*other*/) noexcept {
     return *this;
   }
-  intrusive_ptr_target(const intrusive_ptr_target& other) noexcept
+
+  intrusive_ptr_target(const intrusive_ptr_target& /*other*/) noexcept
       : intrusive_ptr_target() {}
-  intrusive_ptr_target& operator=(const intrusive_ptr_target& other) noexcept {
+
+  intrusive_ptr_target& operator=(
+      const intrusive_ptr_target& /*other*/) noexcept {
     return *this;
   }
 
@@ -624,78 +628,8 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
-  }
-};
-
-template <typename T>
-struct ExclusivelyOwnedTraits<c10::intrusive_ptr<T>> {
-  using repr_type = T*;
-  using pointer_type = T*;
-  // You can still have non-const access to the T in the const methods
-  // because it's not stored by value.
-  using const_pointer_type = T*;
-
-  static constexpr repr_type nullRepr() {
-    return nullptr;
-  }
-
-  template <class... Args>
-  static repr_type createInPlace(Args&&... args) {
-    return new T(std::forward<Args>(args)...);
-  }
-
-  static repr_type moveToRepr(c10::intrusive_ptr<T>&& x) {
-    return x.release();
-  }
-
-  static void destroyOwned(repr_type x) {
-    if (!x) {
-      return;
-    }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->refcount_ == 1,
-        "ExclusivelyOwned<intrusive_ptr<T>> destroyed with refcount other than 1!");
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->weakcount_ == 1,
-        "ExclusivelyOwned<intrusive_ptr<T>> destroyed with weakcount other than 1!");
-    const_cast<std::remove_const_t<T>*>(x)->release_resources();
-#ifndef NDEBUG
-    // Needed to pass the debug assertions in ~intrusive_ptr_target.
-    x->refcount_ = 0;
-    x->weakcount_ = 0;
-#endif
-    x->release_resources();
-    delete x;
-  }
-
-  static c10::intrusive_ptr<T> take(repr_type& x) {
-    // May need to do reference count initialization, so use the regular
-    // intrusive_ptr ctor.
-
-    // Refcount would be zero if the ExclusivelyOwned was created
-    // in-place (so that the underlying T was never owned by an
-    // intrusive_ptr), and it would be 1 if it was created as an
-    // intrusive_ptr<T> and then moved into the ExclusivelyOwned.
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->refcount_ == 1 || x->refcount_ == 0,
-        "take() from ExclusivelyOwned<intrusive_ptr<T>> with refcount other than 0 or 1!");
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        x->weakcount_ == 1 || x->weakcount_ == 0,
-        "take() from ExclusivelyOwned<intrusive_ptr<T>> with weakcount other than 0 or 1!");
-#ifndef NDEBUG
-    // Needed to pass the debug assertions in ~intrusive_ptr_target.
-    x->refcount_ = 0;
-    x->weakcount_ = 0;
-#endif
-    auto result = c10::intrusive_ptr<T>(x);
-    x = nullptr;
-    return result;
-  }
-
-  static pointer_type getImpl(repr_type x) {
-    return x;
   }
 };
 

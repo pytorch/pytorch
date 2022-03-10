@@ -1,7 +1,10 @@
-#include <ATen/native/ScatterGatherChecks.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
@@ -132,6 +135,10 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = self_dim_size;
 
+    // since the index dimension is squashed, need to alter the grain size according
+    // to keep equal granularity in parallelism.
+    int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_scalar_cpu", [&] {
@@ -143,10 +150,8 @@ struct cpu_scatter_gather_base_kernel {
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension and/or
-          // whether `n` is smaller than `index_dim_size`
-
-          if ((dim== self.dim() - 1) || (n < index_dim_size)) {
+          // whether dim is the last dimension
+          if (dim== self.dim() - 1) {
             for (const auto nelem : c10::irange(n)) {
               (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
@@ -184,7 +189,7 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
         };
-        iter.for_each(loop);
+        iter.for_each(loop, grain_size);
       }
     );
   }
@@ -215,6 +220,8 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
+    int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_tensor_cpu", [&] {
@@ -227,9 +234,8 @@ struct cpu_scatter_gather_base_kernel {
           auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension and/or
-          // whether `n` is smaller than `index_dim_size`
-          if ((dim== self.dim() - 1) || (n < index_dim_size)) {
+          // whether dim is the last dimension
+          if (dim== self.dim() - 1) {
             for (const auto nelem : c10::irange(n)) {
               (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
@@ -273,7 +279,7 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
         };
-        iter.for_each(loop);
+        iter.for_each(loop, grain_size);
       }
     );
   }

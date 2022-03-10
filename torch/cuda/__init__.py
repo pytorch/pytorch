@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
 from .graphs import CUDAGraph, graph_pool_handle, graph, make_graphed_callables
-from .streams import Stream, Event
+from .streams import ExternalStream, Stream, Event
 from .. import device as _device
 import torch._C
 
@@ -674,72 +674,72 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import TypedStorage
+from torch.storage import _TypedStorage
 
-class UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
+class _UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     pass
 
-class ByteStorage(TypedStorage):
+class ByteStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(TypedStorage):
+class DoubleStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(TypedStorage):
+class FloatStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(TypedStorage):
+class HalfStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(TypedStorage):
+class LongStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(TypedStorage):
+class IntStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(TypedStorage):
+class ShortStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(TypedStorage):
+class CharStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(TypedStorage):
+class BoolStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(TypedStorage):
+class BFloat16Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(TypedStorage):
+class ComplexDoubleStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(TypedStorage):
+class ComplexFloatStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-torch._storage_classes.add(UntypedStorage)
+torch._storage_classes.add(_UntypedStorage)
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)

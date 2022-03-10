@@ -14,6 +14,11 @@
 #include <string>
 #include <vector>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace torch {
 namespace jit {
 
@@ -286,6 +291,7 @@ struct TORCH_API SharedParserData {
     switch (kind) {
       case '?':
       case TK_POW:
+      case TK_IF:
         return true;
       default:
         return false;
@@ -541,3 +547,5 @@ struct Lexer {
 };
 } // namespace jit
 } // namespace torch
+
+C10_CLANG_DIAGNOSTIC_POP()

@@ -5,6 +5,7 @@ from collections import namedtuple
 import itertools
 
 import torch
+from torch._C import _add_docstr
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -102,11 +103,41 @@ def broadcast_shapes(*shapes):
     """
     # This wrapper exists to support variadic args.
     # TODO Movie this to C++ once the jit has better support for torch.Size.
-    with torch.no_grad():
-        scalar = torch.zeros((), device="cpu")
-        tensors = [scalar.expand(shape) for shape in shapes]
-        tensors = broadcast_tensors(*tensors)
-        return tensors[0].shape
+    if not torch.jit.is_tracing():
+        max_len = 0
+        for shape in shapes:
+            if isinstance(shape, int):
+                if max_len < 1:
+                    max_len = 1
+            elif isinstance(shape, tuple) or isinstance(shape, list):
+                s = len(shape)
+                if max_len < s:
+                    max_len = s
+        result = [1] * max_len
+        for shape in shapes:
+            if isinstance(shape, int):
+                shape = (shape,)
+            if isinstance(shape, tuple) or isinstance(shape, list):
+                for i in range(-1, -1 - len(shape), -1):
+                    if shape[i] < 0:
+                        raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
+                                           .format(shape[i], shape[i]))
+                    if shape[i] == 1 or shape[i] == result[i]:
+                        continue
+                    if result[i] != 1:
+                        raise RuntimeError("Shape mismatch: objects cannot be broadcast to a single shape")
+                    result[i] = shape[i]
+            else:
+                raise RuntimeError("Input shapes should be of type ints, a tuple of ints, or a list of ints, got ", shape)
+        return torch.Size(result)
+    else:
+        # with implementation above, torch.jit.trace hardcodes the sizes which makes subsequent replays fail
+        with torch.no_grad():
+            scalar = torch.zeros((), device="cpu")
+            tensors = [scalar.expand(shape) for shape in shapes]
+            tensors = broadcast_tensors(*tensors)
+            return tensors[0].shape
+
 
 
 def split(tensor, split_size_or_sections, dim=0):
@@ -586,7 +617,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
-    time. The interface of this function is modeled after the librosa_ stft function.
+    time. The interface of this function is modeled after (but *not* a drop-in
+    replacement for) librosa_ stft function.
 
     .. _librosa: https://librosa.org/doc/latest/generated/librosa.stft.html
 
@@ -695,80 +727,74 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore[attr-defined]
                     normalized, onesided, return_complex)
 
-def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
-          win_length: Optional[int] = None, window: Optional[Tensor] = None,
-          center: bool = True, normalized: bool = False,
-          onesided: Optional[bool] = None, length: Optional[int] = None,
-          return_complex: bool = False) -> Tensor:
-    r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
-    It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
-    least squares estimation of the original signal. The algorithm will check using the NOLA condition (
-    nonzero overlap).
 
-    Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
-    created by the summation of all the windows is never zero at certain point in time. Specifically,
-    :math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
+istft = _add_docstr(
+    torch.istft,
+    "istft(input, n_fft, hop_length=None, win_length=None, window=None, center=True, "
+    "normalized=False, onesided=None, length=None, return_complex=False) -> Tensor:\n"
+    r"""
+Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
 
-    Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
-    ``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
-    since the signal isn't padded). If `length` is given in the arguments and is longer than expected,
-    ``istft`` will pad zeros to the end of the returned signal.
+It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
+least squares estimation of the original signal. The algorithm will check using the NOLA condition (
+nonzero overlap).
 
-    If :attr:`center` is ``True``, then there will be padding e.g. ``'constant'``, ``'reflect'``, etc.
-    Left padding can be trimmed off exactly because they can be calculated but right padding cannot be
-    calculated without additional information.
+Important consideration in the parameters :attr:`window` and :attr:`center` so that the envelop
+created by the summation of all the windows is never zero at certain point in time. Specifically,
+:math:`\sum_{t=-\infty}^{\infty} |w|^2[n-t\times hop\_length] \cancel{=} 0`.
 
-    Example: Suppose the last window is:
-    ``[17, 18, 0, 0, 0]`` vs ``[18, 0, 0, 0, 0]``
+Since :func:`~torch.stft` discards elements at the end of the signal if they do not fit in a frame,
+``istft`` may return a shorter signal than the original signal (can occur if :attr:`center` is False
+since the signal isn't padded). If `length` is given in the arguments and is longer than expected,
+``istft`` will pad zeros to the end of the returned signal.
 
-    The :attr:`n_fft`, :attr:`hop_length`, :attr:`win_length` are all the same which prevents the calculation
-    of right padding. These additional values could be zeros or a reflection of the signal so providing
-    :attr:`length` could be useful. If :attr:`length` is ``None`` then padding will be aggressively removed
-    (some loss of signal).
+If :attr:`center` is ``True``, then there will be padding e.g. ``'constant'``, ``'reflect'``, etc.
+Left padding can be trimmed off exactly because they can be calculated but right padding cannot be
+calculated without additional information.
 
-    [1] D. W. Griffin and J. S. Lim, "Signal estimation from modified short-time Fourier transform,"
-    IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
+Example: Suppose the last window is:
+``[17, 18, 0, 0, 0]`` vs ``[18, 0, 0, 0, 0]``
 
-    Args:
-        input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
-            can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
-            (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
-            dimension is optional.
+The :attr:`n_fft`, :attr:`hop_length`, :attr:`win_length` are all the same which prevents the calculation
+of right padding. These additional values could be zeros or a reflection of the signal so providing
+:attr:`length` could be useful. If :attr:`length` is ``None`` then padding will be aggressively removed
+(some loss of signal).
 
-            .. deprecated:: 1.8.0
-               Real input is deprecated, use complex inputs as returned by
-               ``stft(..., return_complex=True)`` instead.
-        n_fft (int): Size of Fourier transform
-        hop_length (Optional[int]): The distance between neighboring sliding window frames.
-            (Default: ``n_fft // 4``)
-        win_length (Optional[int]): The size of window frame and STFT filter. (Default: ``n_fft``)
-        window (Optional[torch.Tensor]): The optional window function.
-            (Default: ``torch.ones(win_length)``)
-        center (bool): Whether :attr:`input` was padded on both sides so that the :math:`t`-th frame is
-            centered at time :math:`t \times \text{hop\_length}`.
-            (Default: ``True``)
-        normalized (bool): Whether the STFT was normalized. (Default: ``False``)
-        onesided (Optional[bool]): Whether the STFT was onesided.
-            (Default: ``True`` if ``n_fft != fft_size`` in the input size)
-        length (Optional[int]): The amount to trim the signal by (i.e. the
-            original signal length). (Default: whole signal)
-        return_complex (Optional[bool]):
-            Whether the output should be complex, or if the input should be
-            assumed to derive from a real signal and window.
-            Note that this is incompatible with ``onesided=True``.
-            (Default: ``False``)
+[1] D. W. Griffin and J. S. Lim, "Signal estimation from modified short-time Fourier transform,"
+IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
-    Returns:
-        Tensor: Least squares estimation of the original signal of size (..., signal_length)
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            istft, (input,), input, n_fft, hop_length=hop_length, win_length=win_length,
-            window=window, center=center, normalized=normalized, onesided=onesided,
-            length=length, return_complex=return_complex)
+Args:
+    input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
+        can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
+        (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
+        dimension is optional.
 
-    return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore[attr-defined]
-                     normalized, onesided, length, return_complex)
+        .. deprecated:: 1.8.0
+            Real input is deprecated, use complex inputs as returned by
+            ``stft(..., return_complex=True)`` instead.
+    n_fft (int): Size of Fourier transform
+    hop_length (Optional[int]): The distance between neighboring sliding window frames.
+        (Default: ``n_fft // 4``)
+    win_length (Optional[int]): The size of window frame and STFT filter. (Default: ``n_fft``)
+    window (Optional[torch.Tensor]): The optional window function.
+        (Default: ``torch.ones(win_length)``)
+    center (bool): Whether :attr:`input` was padded on both sides so that the :math:`t`-th frame is
+        centered at time :math:`t \times \text{hop\_length}`.
+        (Default: ``True``)
+    normalized (bool): Whether the STFT was normalized. (Default: ``False``)
+    onesided (Optional[bool]): Whether the STFT was onesided.
+        (Default: ``True`` if ``n_fft != fft_size`` in the input size)
+    length (Optional[int]): The amount to trim the signal by (i.e. the
+        original signal length). (Default: whole signal)
+    return_complex (Optional[bool]):
+        Whether the output should be complex, or if the input should be
+        assumed to derive from a real signal and window.
+        Note that this is incompatible with ``onesided=True``.
+        (Default: ``False``)
+
+Returns:
+    Tensor: Least squares estimation of the original signal of size (..., signal_length)
+""")
 
 
 if TYPE_CHECKING:
@@ -1648,9 +1674,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     ``True``.
 
     .. note::
-        * The pivots returned by the function are 1-indexed. If :attr:`pivot`
-          is ``False``, then the returned pivots is a tensor filled with
-          zeros of the appropriate size.
+        * The returned permutation matrix for every matrix in the batch is
+          represented by a 1-indexed vector of size ``min(A.shape[-2], A.shape[-1])``.
+          ``pivots[i] == j`` represents that in the ``i``-th step of the algorithm,
+          the ``i``-th row was permuted with the ``j-1``-th row.
         * LU factorization with :attr:`pivot` = ``False`` is not available
           for CPU, and attempting to do so will throw an error. However,
           LU factorization with :attr:`pivot` = ``False`` is available for

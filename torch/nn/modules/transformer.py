@@ -98,14 +98,16 @@ class Transformer(Module):
             memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
 
         Shape:
-            - src: :math:`(S, N, E)`, `(N, S, E)` if batch_first.
-            - tgt: :math:`(T, N, E)`, `(N, T, E)` if batch_first.
+            - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
+              `(N, S, E)` if `batch_first=True`.
+            - tgt: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
+              `(N, T, E)` if `batch_first=True`.
             - src_mask: :math:`(S, S)`.
             - tgt_mask: :math:`(T, T)`.
             - memory_mask: :math:`(T, S)`.
-            - src_key_padding_mask: :math:`(N, S)`.
-            - tgt_key_padding_mask: :math:`(N, T)`.
-            - memory_key_padding_mask: :math:`(N, S)`.
+            - src_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
+            - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
+            - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
             Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
             positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
@@ -117,7 +119,8 @@ class Transformer(Module):
             positions will be unchanged. If a BoolTensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
-            - output: :math:`(T, N, E)`, `(N, T, E)` if batch_first.
+            - output: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
+              `(N, T, E)` if `batch_first=True`.
 
             Note: Due to the multi-head attention architecture in the transformer model,
             the output sequence length of a transformer is same as the input sequence

@@ -141,7 +141,7 @@ def rrelu(input: Tensor, lower: float = ..., upper: float = ..., training: bool 
           inplace: bool = ...) -> Tensor: ...
 
 
-def gelu(input: Any): ...
+def gelu(input: Any, approximate: str = ...): ...
 
 
 def hardshrink(input: Tensor, lambd: float = ...) -> Tensor: ...
@@ -305,7 +305,8 @@ def upsample(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] 
 
 
 def interpolate(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] = ..., mode: str = ...,
-                align_corners: Optional[Any] = ..., recompute_scale_factor: Optional[Any] = ...): ...
+                align_corners: Optional[Any] = ..., recompute_scale_factor: Optional[Any] = ...,
+                antialias: bool = ...): ...
 
 
 def upsample_nearest(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] = ...): ...
@@ -374,7 +375,8 @@ def multi_head_attention_forward(query: Tensor,
                                  k_proj_weight: Optional[Tensor] = None,
                                  v_proj_weight: Optional[Tensor] = None,
                                  static_k: Optional[Tensor] = None,
-                                 static_v: Optional[Tensor] = None
+                                 static_v: Optional[Tensor] = None,
+                                 average_attn_weights: bool = True
                                  ) -> Tuple[Tensor, Optional[Tensor]]: ...
 
 

@@ -3,6 +3,7 @@
 
 C10_DECLARE_bool(torch_lazy_ir_debug);
 C10_DECLARE_bool(torch_lazy_param_aliasing);
+C10_DECLARE_bool(torch_lazy_use_thread_pool);
 
 C10_DECLARE_int(torch_lazy_compilation_cache_size);
 C10_DECLARE_int(torch_lazy_device_data_cache_size);
