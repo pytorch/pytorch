@@ -231,7 +231,7 @@ __global__ void distribution_binary_elementwise_kernel(
 }
 
 template <typename func_t>
-void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_args, const func_t &f) {
+void distribution_binary_kernel(TensorIteratorBase &iter, PhiloxCudaState philox_args, const func_t &f) {
   static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;

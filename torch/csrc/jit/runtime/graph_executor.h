@@ -18,12 +18,8 @@ struct Code;
 
 struct ExecutionPlan {
   ExecutionPlan() = default;
-  ExecutionPlan(
-      std::shared_ptr<Graph> graph,
-      std::string function_name,
-      size_t remaining_bailout_depth = 0)
-      : code(graph, std::move(function_name), remaining_bailout_depth),
-        graph(std::move(graph)) {}
+  ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
+      : code(graph, std::move(function_name)), graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -34,8 +30,8 @@ struct ExecutionPlan {
 };
 
 // Notice that those structs don't manage lifetime of their members.
-// They is only valid only right after you call getDebugState() and should never
-// be used again once another GraphExecutor function is called.
+// They are only valid only right after you call getDebugState() and should
+// never be used again once another GraphExecutor function is called.
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct GraphExecutorState {
@@ -50,7 +46,7 @@ struct TORCH_API EnableProfilingGuard {
 
  private:
   bool old_executor_mode = false;
-  bool old_profiling_mode = false;
+  bool old_get_optimize = false;
 };
 
 struct GraphExecutorImplBase;
@@ -72,12 +68,12 @@ struct TORCH_API GraphExecutor {
   // profiled information whenever a bailout check is failed/triggered, a new
   // `GraphExecutor` will be created. This new `GraphExecutor`'s
   // remaining_bailout_depth will be reduced by 1.
+  // If no bailout depth is passed, the depth will be initialized from the
+  // current global fusion strategy settings.
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
-      size_t remaining_bailout_depth);
+      c10::optional<size_t> remaining_bailout_depth = c10::nullopt);
   GraphExecutorState getDebugState();
-
-  static size_t getDefaultNumBailOuts();
 
   void debugFlushCompilationCache();
 

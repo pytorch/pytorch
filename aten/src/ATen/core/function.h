@@ -48,8 +48,9 @@ struct TORCH_API Function {
   virtual void run(Stack& stack) = 0;
 
   virtual c10::intrusive_ptr<c10::ivalue::Future> runAsync(
-      Stack& stack,
+      Stack& /*stack*/,
       TaskLauncher taskLauncher = at::launch) {
+    (void)taskLauncher; // Suppress unused variable warning
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return {};
   }
@@ -89,7 +90,7 @@ struct TORCH_API Function {
   // call() returns false.
 
   // Overload for server interpreter, a bailout size is needed for graph executor.
-  virtual bool call(Stack&, size_t, c10::function_ref<void(const Code&)>) {
+  virtual bool call(Stack&, c10::optional<size_t>, c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }
