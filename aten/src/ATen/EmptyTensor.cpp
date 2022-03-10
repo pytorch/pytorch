@@ -36,7 +36,7 @@ size_t computeStorageNbytesContiguous(
   // Ignore overflow checks on mobile
 #ifndef C10_MOBILE
   uint64_t size = 1;
-  bool overflowed = c10::safe_multiplies_u64(sizes.begin(), sizes.end(), &size);
+  bool overflowed = c10::safe_multiplies_u64(sizes, &size);
   overflowed |= c10::add_overflows(size, storage_offset, &size);
   overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
   overflowed |= size > storage_max();
@@ -44,7 +44,7 @@ size_t computeStorageNbytesContiguous(
               "Storage size calculation overflowed with sizes=", sizes);
   return static_cast<size_t>(size);
 #else
-  const auto numel = c10::multiply_integers(sizes.begin(), sizes.end());
+  const auto numel = c10::multiply_integers(sizes);
   return itemsize_bytes * (storage_offset + numel);
 #endif
 }

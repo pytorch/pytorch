@@ -40,7 +40,7 @@ C10_ALWAYS_INLINE bool mul_overflows(uint64_t a, uint64_t b, uint64_t* out) {
 }
 
 template <typename It>
-bool safe_multiplies_u64(It first, It last, uint64_t *out) {
+bool safe_multiplies_u64(It first, It last, uint64_t* out) {
 #if C10_HAS_BUILTIN_OVERFLOW()
   uint64_t prod = 1;
   bool overflow = false;
@@ -52,15 +52,23 @@ bool safe_multiplies_u64(It first, It last, uint64_t *out) {
 #else
   uint64_t prod = 1;
   uint64_t prod_log2 = 0;
+  bool is_zero = false;
   for (; first != last; ++first) {
     auto x = static_cast<uint64_t>(*first);
     prod *= x;
+    // log2(0) isn't valid, so need to track it specially
+    is_zero |= (x == 0);
     prod_log2 += c10::llvm::Log2_64_Ceil(x);
   }
   *out = prod;
   // This test isnt exact, but avoids doing integer division
-  return (prod_log2 >= 64);
+  return !is_zero && (prod_log2 >= 64);
 #endif
+}
+
+template <typename Container>
+bool safe_multiplies_u64(const Container& c, uint64_t* out) {
+  return safe_multiplies_u64(c.begin(), c.end(), out);
 }
 
 } // namespace c10
