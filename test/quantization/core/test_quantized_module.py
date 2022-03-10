@@ -1545,22 +1545,6 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
         hidden_size = 7
         num_layers = 2
         bias = True
-        # weight_keys = []
-        # bias_keys = []
-        # for bidirectional in [True, False]:
-        #     num_directions = 2 if bidirectional else 1
-        #     for layer in range(num_layers):
-        #         for direction in range(num_directions):
-        #             suffix = '_reverse' if direction == 1 else ''
-        #             key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-        #             key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-        #             weight_keys.append(key_name1)
-        #             weight_keys.append(key_name2)
-        #             key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-        #             key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-        #             bias_keys.append(key_name1)
-        #             bias_keys.append(key_name2)
-
         x = torch.randn(seq_len, batch, input_size)
         h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
         c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)

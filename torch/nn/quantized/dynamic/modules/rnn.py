@@ -224,6 +224,7 @@ class RNNBase(torch.nn.Module):
             return weight_name, bias_name
 
         num_directions = 2 if self.bidirectional else 1
+        # TODO: dedup with __init__ of RNNBase
         _all_weight_values = []
         for layer in range(self.num_layers):
             for direction in range(num_directions):
@@ -824,8 +825,8 @@ class RNNCellBase(torch.nn.Module):
             raise NotImplementedError('Only LSTMCell, GRUCell and RNNCell \
             are supported for QuantizedRNN for now')
 
-
         assert mod.bias
+
         def _observe_and_quantize_weight(weight):
             if dtype == torch.qint8:
                 weight_observer = weight_observer_method()
@@ -893,14 +894,19 @@ class RNNCellBase(torch.nn.Module):
     def set_weight_bias(self, weight_bias_dict):
         # TODO: these can be simplified to one level? e.g. using weight_ih as key
         # directly
-        self._packed_weight_ih = pack_weight_bias(weight_bias_dict["weight"]["weight_ih"], weight_bias_dict["bias"]["bias_ih"], self.weight_dtype)
-        self._packed_weight_hh = pack_weight_bias(weight_bias_dict["weight"]["weight_hh"], weight_bias_dict["bias"]["bias_hh"], self.weight_dtype)
+        self._packed_weight_ih = pack_weight_bias(
+            weight_bias_dict["weight"]["weight_ih"],
+            weight_bias_dict["bias"]["bias_ih"],
+            self.weight_dtype)
+        self._packed_weight_hh = pack_weight_bias(
+            weight_bias_dict["weight"]["weight_hh"],
+            weight_bias_dict["bias"]["bias_hh"],
+            self.weight_dtype)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(RNNCellBase, self)._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + '_packed_weight_ih'] = self._packed_weight_ih
         destination[prefix + '_packed_weight_hh'] = self._packed_weight_hh
-
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):

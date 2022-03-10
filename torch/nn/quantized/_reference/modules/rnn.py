@@ -6,7 +6,6 @@ from .utils import _quantize_weight
 from typing import Optional, Dict, Any, Tuple
 from torch import _VF
 from torch.nn.utils.rnn import PackedSequence
-import copy
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)

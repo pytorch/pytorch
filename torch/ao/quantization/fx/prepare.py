@@ -480,7 +480,9 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
         arg_as_output_target_dtype = get_arg_target_dtype_as_output(arg, modules, node_name_to_target_dtype)
         arg_as_input_target_dtype = get_arg_target_dtype_as_input_to_node(arg, node, modules, node_name_to_target_dtype)
-        arg_as_input_target_compute_dtype = get_arg_target_compute_dtype_as_input_to_node(arg, node, modules, node_name_to_target_dtype)
+        arg_as_input_target_compute_dtype = \
+            get_arg_target_compute_dtype_as_input_to_node(
+                arg, node, modules, node_name_to_target_dtype)
         needs_obs = (
             # if the dtypes are different, we need an observer
             (arg_as_output_target_dtype != arg_as_input_target_dtype) and

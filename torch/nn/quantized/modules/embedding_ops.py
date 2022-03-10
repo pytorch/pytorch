@@ -4,7 +4,6 @@ from torch import Tensor  # noqa: F401
 from torch._jit_internal import Optional, List  # noqa: F401
 from torch.nn.quantized.modules.utils import hide_packed_params_repr
 from torch.nn.quantized.modules.utils import _quantize_weight
-from torch.nn.quantized.modules.utils import WeightedQuantizedModule
 
 class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
