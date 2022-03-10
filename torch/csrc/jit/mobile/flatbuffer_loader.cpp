@@ -225,7 +225,10 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
   }
 
-  AT_ASSERT(unsupported_op_names.empty());
+  TORCH_CHECK(
+      unsupported_op_names.empty(),
+      "Unsupported ops: ",
+      c10::Join(", ", unsupported_op_names));
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
