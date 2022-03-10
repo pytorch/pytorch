@@ -510,7 +510,7 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> Quant
         # with output_scale, output_zero_point in from_reference, we may want to
         # relax that, or rename this
         # TODO: maybe define a WeightedWeightOnlyQuantizedModule
-        q_module = q_class.from_reference(ref_module) # type: ignore[union-attr]
+        q_module = q_class.from_reference(ref_module)  # type: ignore[union-attr]
 
         # replace reference moduel with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)

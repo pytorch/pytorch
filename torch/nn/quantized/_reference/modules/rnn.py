@@ -284,7 +284,7 @@ class RNNBase(nn.RNNBase):
             }
             weight_qparams_dict = dict()
             for wn in self._flat_weights_names:
-                if wn.startwsith("weight"):
+                if wn.startswith("weight"):
                     weight_qparams_dict[wn] = weight_qparams
         self._init_weight_qparams_dict(weight_qparams_dict, device)
 
