@@ -1135,7 +1135,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
     case ConvBackend::Mkldnn:
     case ConvBackend::MkldnnTranspose:
       if (mkldnn_conv_use_channels_last(input, weight)) {
-        backend_memory_format = (k == 5) ? at::MemoryFormat::Contiguous /*at::MemoryFormat::ChannelsLast3d*/ : at::MemoryFormat::ChannelsLast;
+        backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;
     case ConvBackend::Slow2d:

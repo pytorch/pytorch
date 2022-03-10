@@ -126,7 +126,9 @@ Tensor mkldnn_convolution(
         "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  bool is_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const auto memory_format = input.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+      memory_format == at::MemoryFormat::ChannelsLast3d;
 
   auto output_sizes = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
   auto output = at::empty({0}, input.options());
@@ -170,7 +172,6 @@ Tensor mkldnn_convolution(
   } else if (!is_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
   }
 }
@@ -179,7 +180,9 @@ Tensor mkldnn_convolution_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
-  bool is_channels_last = grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const auto memory_format = grad_output.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+      memory_format == at::MemoryFormat::ChannelsLast3d;
   auto grad_input = at::empty({0}, grad_output.options());
 
   auto grad_y = itensor_from_tensor(grad_output);
@@ -206,7 +209,6 @@ Tensor mkldnn_convolution_backward_input(
   } else if (!is_channels_last){
     return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(grad_x.get_desc().is_nhwc());
     return grad_input;
   }
 }
@@ -215,7 +217,9 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     IntArrayRef weight_size, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
-  bool is_channels_last = grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const auto memory_format = grad_output.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+      memory_format == at::MemoryFormat::ChannelsLast3d;
 
   const ideep::tensor grad_y = itensor_from_tensor(grad_output);
   const ideep::tensor x = itensor_from_tensor(input);
@@ -252,7 +256,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
         mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
   } else {
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(at::MemoryFormat::ChannelsLast),
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
         mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
   }
 }
@@ -273,7 +277,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
     std::tie(grad_weight, grad_bias) = mkldnn_convolution_backward_weights(
       weight.sizes(), grad_output, input, padding, stride, dilation, groups, output_mask[2]);
   }
-
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
@@ -313,7 +316,9 @@ Tensor mkldnn_convolution_transpose(
         "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
-  bool is_channels_last = input.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const auto memory_format = input.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+      memory_format == at::MemoryFormat::ChannelsLast3d;
 
   auto output_sizes = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
   auto output = at::empty({0}, input.options());
@@ -360,7 +365,6 @@ Tensor mkldnn_convolution_transpose(
   } else if (!is_channels_last) {
     return mkldnn_to_dense(MKLDNNTensor(y, input.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
   }
 }
@@ -371,7 +375,9 @@ Tensor mkldnn_convolution_transpose_backward_input(
     int64_t groups, bool bias_defined)
 {
   auto grad_input = at::empty({0}, grad_output.options());
-  bool is_channels_last = grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const auto memory_format = grad_output.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+      memory_format == at::MemoryFormat::ChannelsLast3d;
 
   auto grad_y = itensor_from_tensor(grad_output);
   auto w = itensor_view_from_dense(weight).transpose_(0, 1);
@@ -397,7 +403,6 @@ Tensor mkldnn_convolution_transpose_backward_input(
   } else if (!is_channels_last){
     return mkldnn_to_dense(MKLDNNTensor(grad_x, grad_output.options()));
   } else {
-    TORCH_INTERNAL_ASSERT(grad_x.get_desc().is_nhwc());
     return grad_input;
   }
 }
@@ -407,7 +412,9 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups, bool bias_defined)
 {
-  bool is_channels_last = grad_output.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const auto memory_format = grad_output.suggest_memory_format();
+  bool is_channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
+      memory_format == at::MemoryFormat::ChannelsLast3d;
 
   auto grad_y = itensor_from_tensor(grad_output);
   auto x = itensor_from_tensor(input);
@@ -444,7 +451,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
   } else {
     return std::make_tuple(
-        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(at::MemoryFormat::ChannelsLast),
+        mkldnn_to_dense(MKLDNNTensor(grad_w, grad_output.options())).to(memory_format),
         mkldnn_to_dense(MKLDNNTensor(grad_b, grad_output.options())));
   }
 }
