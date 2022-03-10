@@ -451,10 +451,6 @@ def convert_custom_module(
         assert activation_post_process is not None
         observed_custom_module.activation_post_process = activation_post_process
 
-        # remove the following observer node and insert a dequantize node
-        # remove_observer_for_node(node, graph, modules)
-        # insert_dequantize_node(node, graph)
-
     # swap the observed custom module to quantized custom module
     quantized_custom_module_class = get_swapped_custom_module_class(
         observed_custom_module, custom_module_class_mapping, qconfig)

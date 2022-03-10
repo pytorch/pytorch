@@ -966,11 +966,14 @@ def _lower_to_native_backend(
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
     """
+    # TODO: these transformations are just inplace modification of graphs, we don't
+    # need to return a model
     model = _lower_static_weighted_ref_module(model)
     model = _lower_dynamic_weighted_ref_module(model)
     model = _lower_weight_only_weighted_ref_module(model)
     model = _lower_static_weighted_ref_functional(model, qconfig_map)
     model = _lower_dynamic_weighted_ref_functional(model, qconfig_map)
+    # TODO: remove this
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
     _lower_quantized_binary_op(model, qconfig_map)
