@@ -866,9 +866,15 @@ class TestDistributions(TestCase):
         torch_samples = torch_samples.cpu().numpy()
         unique, counts = np.unique(torch_samples, return_counts=True)
         pmf = ref_dist.pmf(unique)
+        pmf = pmf / pmf.sum()  # renormalize to 1.0 for chisq test
         msk = (counts > 5) & ((pmf * num_samples) > 5)
         self.assertGreater(pmf[msk].sum(), 0.9, "Distribution is too sparse for test; try increasing num_samples")
-        chisq, p = scipy.stats.chisquare(counts[msk], pmf[msk] * num_samples)
+        # Add a remainder bucket that combines counts for all values
+        # below threshold, if such values exist (i.e. mask has False entries).
+        if not msk.all():
+            counts = np.concatenate([counts[msk], np.sum(counts[~msk], keepdims=True)])
+            pmf = np.concatenate([pmf[msk], np.sum(pmf[~msk], keepdims=True)])
+        chisq, p = scipy.stats.chisquare(counts, pmf * num_samples)
         self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):

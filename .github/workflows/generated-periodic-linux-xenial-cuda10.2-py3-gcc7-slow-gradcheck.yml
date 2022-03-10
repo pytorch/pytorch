@@ -159,8 +159,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -253,7 +254,7 @@ jobs:
     name: test (default, 1, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 390
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-test
@@ -322,10 +323,15 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -349,8 +355,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -503,7 +510,7 @@ jobs:
     name: test (default, 2, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
+    timeout-minutes: 390
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck-test
@@ -572,10 +579,15 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -599,8 +611,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
