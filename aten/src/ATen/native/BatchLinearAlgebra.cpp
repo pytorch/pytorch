@@ -1982,7 +1982,7 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
   TORCH_WARN_ONCE(
     "torch.lu_solve is deprecated in favor of torch.linalg.lu_solve",
     "and will be removed in a future PyTorch release.\n",
-    "Note that torch.linalg.solve has its arguments reversed.\n",
+    "Note that torch.linalg.lu_solve has its arguments reversed.\n",
     "X = torch.lu_solve(B, LU, pivots)\n",
     "should be replaced with\n",
     "X = torch.linalg.lu_solve(LU, pivots, B)"
