@@ -1,13 +1,28 @@
 import torch
+import torch.fx as fx
+import torch.nn as nn
 from functools import partial
-from typing import Iterable
+from typing import Callable, Iterable, Optional, Tuple, Union
 from .aot_autograd import aot_function, aot_module
 from .decompositions import decomposition_table
 from .partitioners import draw_graph, min_cut_rematerialization_partition
 import time
 
 
-def ts_compile(fx_g, _):
+def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
+    """
+    Compiles the :attr:`fx_g` with Torchscript compiler.
+
+    .. warning::
+        This API is experimental and likely to change.
+
+    Args:
+        fx_g(fx.GraphModule): The input Fx graph module to be compiled.
+
+    Returns:
+        Torch scripted model.
+    """
+
     for node in fx_g.graph.nodes:
         if node.target in (torch.ops.aten.new_zeros, torch.ops.aten.new_empty):
             if node.args[1] == []:
@@ -34,7 +49,7 @@ def ts_compile(fx_g, _):
     # print(set([i.target for i in fx_g.graph.nodes if i.op == 'call_function']))
     # Works around this NVFuser issue: https://github.com/csarofeen/pytorch/issues/1311
     for i in range(1000):
-        attr = f'_tensor_constant{i}'
+        attr = f"_tensor_constant{i}"
         if hasattr(fx_g, attr):
             setattr(fx_g, attr, getattr(fx_g, attr).cuda())
         else:
@@ -51,7 +66,7 @@ def ts_compile(fx_g, _):
     return f
 
 
-def tensorexpr_compile(fx_module, flat_args):
+def tensorexpr_compile(fx_module: fx.GraphModule, flat_args) -> Callable:
     """Compiles the given fx_module using TensorExpr Kernel"""
     inp_devices = set([i.device for i in flat_args if isinstance(i, torch.Tensor)])
     assert len(inp_devices) == 1
@@ -201,11 +216,24 @@ def _tvm_compile(
 
 
 def tvm_compile(target, tuning_logfile=None, use_ansor_tuning=False):
-    return partial(_tvm_compile, target=target, tuning_logfile=tuning_logfile, use_ansor_tuning=use_ansor_tuning)
+    return partial(
+        _tvm_compile,
+        target=target,
+        tuning_logfile=tuning_logfile,
+        use_ansor_tuning=use_ansor_tuning,
+    )
 
 
-def nop(f, _):
-    return f
+def nop(fx_g: fx.GraphModule, _) -> Callable:
+    """
+    Returns the :attr:`fx_g` Fx graph module as it is. This is a no-op compiler
+    and can be used to check accuracy.
+
+    .. warning::
+        This API is experimental and likely to change.
+
+    """
+    return fx_g
 
 
 def simple_ts_compile(fx_g, _):
@@ -219,20 +247,24 @@ def nnc_jit(f, static_argnums=None):
 
 
 aten = torch.ops.aten
-default_decompositions = set([
-    aten.detach,
-    aten.gelu_backward,
-    aten._log_softmax_backward_data,
-    aten.leaky_relu_backward,
-    aten.sigmoid_backward,
-    aten.threshold_backward,
-    aten.hardtanh_backward,
-    aten.hardsigmoid_backward,
-    aten.hardswish_backward,
-    aten.tanh_backward,
-    aten.silu_backward,
-])
-default_decompositions = {k: v for k, v in decomposition_table.items() if k in default_decompositions}
+default_decompositions = set(
+    [
+        aten.detach,
+        aten.gelu_backward,
+        aten._log_softmax_backward_data,
+        aten.leaky_relu_backward,
+        aten.sigmoid_backward,
+        aten.threshold_backward,
+        aten.hardtanh_backward,
+        aten.hardsigmoid_backward,
+        aten.hardswish_backward,
+        aten.tanh_backward,
+        aten.silu_backward,
+    ]
+)
+default_decompositions = {
+    k: v for k, v in decomposition_table.items() if k in default_decompositions
+}
 
 
 def print_compile(fx_g, _):
@@ -240,18 +272,39 @@ def print_compile(fx_g, _):
     return fx_g
 
 
-def memory_efficient_fusion(fn, static_argnums=None):
+def memory_efficient_fusion(
+    fn: Union[Callable, nn.Module], static_argnums: Optional[Tuple[int]] = None
+):
     """
-    Recomputes the fwd pass in the bwd pass to perform memory efficient fusion.
-    Uses NVFuser as the backend compiler.
+    Wrapper function over :func:`aot_function` and :func:`aot_module` to perform
+    memory efficient fusion. It uses the
+    :func:`min_cut_rematerialization_partition` partitioner to perform efficient
+    recomputation. It uses NVFuser to compile the generated forward and backward
+    graphs.
+
+    .. warning::
+        This API is experimental and likely to change.
+
+    Args:
+        fn (Union[Callable, nn.Module]): A Python function or a ``nn.Module``
+            that takes one ore more arguments. Must return one or more Tensors.
+        static_argnums (Optional[Tuple[Int]]): An option tuple of ints to mark
+            the arguments of the function as static.
+
+    Returns:
+        Returns a ``Callable``  or ``nn.Module`` that retains the eager behavior
+        of the original :attr:`fn`, but whose forward and backward graphs have
+        gone through recomputation optimizations, and the graphs have been
+        compiled with nvfuser.
+
     """
     config = {
-        'fw_compiler': ts_compile,
-        'bw_compiler': ts_compile,
-        'partition_fn': min_cut_rematerialization_partition,
-        'hasher_type': "StaticShapeHasher",
-        'decompositions': default_decompositions,
-        'static_argnums': static_argnums
+        "fw_compiler": ts_compile,
+        "bw_compiler": ts_compile,
+        "partition_fn": min_cut_rematerialization_partition,
+        "hasher_type": "StaticShapeHasher",
+        "decompositions": default_decompositions,
+        "static_argnums": static_argnums,
     }
     if isinstance(fn, torch.nn.Module):
         return aot_module(fn, **config)
@@ -260,8 +313,9 @@ def memory_efficient_fusion(fn, static_argnums=None):
 
 
 def debug_compile(fx_g, inps):
-    fx_g.to_folder('foo')
-    print(f"""
+    fx_g.to_folder("foo")
+    print(
+        f"""
 ##############################################################
 # To minimize FX graph, copy and paste the below and run it  #
 ##############################################################
@@ -277,8 +331,10 @@ mod = FxModule().cuda()
 
 with torch.jit.fuser("fuser2"):
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
-""")
+"""
+    )
     from foo import FxModule
+
     FxModule().cuda()(*inps)
 
     return ts_compile(fx_g, inps)

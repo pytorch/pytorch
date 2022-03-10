@@ -272,13 +272,13 @@ def aot_function(
     static_argnums: Optional[Tuple[int]] = None,
 ) -> Callable:
     """
-    Returns a function that behaves like the original :attr:`func`, but
-    internally its forward graph is compiled via :attr:`fw_compiler` and
-    backward graph is compiled via :attr:`bw_compiler`.
+    Traces the forward and backward graph of :attr:`fn` using torch dispatch
+    mechanism, and then compiles the generated forward and backward graphs
+    through :attr:`fw_compiler` and :attr:`bw_compiler`.
 
     :func:`aot_function` traces the forward and backward graph ahead of time,
     and generates a joint forward and backward graph.  :attr:`partition_fn` is
-    then used to generate separate forward and backward graphs. The partitioner
+    then used to separate out forward and backward graphs. The partitioner
     function can be used to perform optimizations such as recomputation. One can
     set `decompositions` dictionary to decompose the operators into a sequence
     of core or simpler operators supported by the backend compilers.
@@ -292,6 +292,9 @@ def aot_function(
     :attr:`fn` as static. This is useful when an argument is a non-tensor, e.g.,
     ``int`` or ``bool``. A change in the actual value of static arg causes
     recompilation.
+
+    .. warning::
+        This API is experimental and likely to change.
 
     Args:
         fn (Callable): A Python function that takes one ore more arguments. Must
@@ -318,6 +321,7 @@ def aot_function(
 
     A simple example usage of :func:`aot_function` is as follows. This example
     will print the forward and backward graphs of the function ``fn``
+
         >>> fn = lambda x : x.sin().cos()
         >>> def print_compile_fn(fx_module, args):
         >>>     print(fx_module)
@@ -329,12 +333,14 @@ def aot_function(
     The static argnums are used to mark the non-tensor arguments as static. An
     example is as follows where the dropout probability is as argument to the
     original function.
+
         >>> def fn(input, bias, residual, p: float):
         >>>     a = torch.add(input, bias)
         >>>     b = torch.nn.functional.dropout(a, p, training=True)
         >>>     c = b + residual
         >>>     return c
         >>> aot_fn = aot_function(fn, print_compile_fn, static_argnums=(3,))
+
     """
     global compile_cache
     if compile_cache is None:
@@ -417,12 +423,14 @@ def aot_function(
                             is_known_type = True
                             break
                     if not is_known_type:
-                        raise RuntimeError(f"Found {type(i)} in output, which is not a known type. "
-                                           "If this type holds tensors, you need to register a pytree for it. "
-                                           "See https://github.com/pytorch/functorch/issues/475 for a brief "
-                                           "explanation why. If you don't need to register a pytree, please "
-                                           "leave a comment explaining your use case and we'll make this more "
-                                           "ergonomic to deal with")
+                        raise RuntimeError(
+                            f"Found {type(i)} in output, which is not a known type. "
+                            "If this type holds tensors, you need to register a pytree for it. "
+                            "See https://github.com/pytorch/functorch/issues/475 for a brief "
+                            "explanation why. If you don't need to register a pytree, please "
+                            "leave a comment explaining your use case and we'll make this more "
+                            "ergonomic to deal with"
+                        )
                 out_spec.set(spec)
                 return flat_out
 
@@ -475,7 +483,29 @@ def clear_compile_cache():
         compile_cache = None
 
 
-def aot_module(mod, *args, **kwargs):
+def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
+    """
+    Traces the forward and backward graph of :attr:`mod` using torch dispatch
+    tracing mechanism. It is wrapper function, that underneath uses
+    :func:`aot_function` to perform tracing and compilation.
+
+    :func:`aot_module` lifts the parameters and buffers of ``nn.Module`` as inputs
+    to a new callable which is then compiled through :func:`aot_function`.
+
+    .. warning::
+        This API is experimental and likely to change.
+
+    Args:
+        mod (Callable): A ``nn.Module`` module.
+        args : args to be passed to :func:`aot_function`
+        kwargs : kwargs to be passed to :func:`aot_function`
+
+    Returns:
+        Returns a ``nn.Module`` that retains the eager behavior of the original
+        :attr:`mod`, but with forward and backward graph compiled.
+
+    """
+
     def functional_call(named_params, named_buffers, *args, **kwargs):
         params_and_buffers = {**named_params, **named_buffers}
         return _stateless.functional_call(mod, params_and_buffers, args, kwargs)
