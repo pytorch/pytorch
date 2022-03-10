@@ -3789,6 +3789,23 @@ class TestVmapOperatorsOpInfo(TestCase):
             op(passed, vmaped_value)
             assert torch.allclose(unvmaped_value, passed)
 
+    def test_unsupported_random(self, device):
+        x = torch.randn(3, device=device)
+        y = x.abs()
+        z = x.abs()
+        with self.assertRaisesRegex(RuntimeError, "calling out variants"):
+            def f(x):
+                return torch.randn(3, device=device, out=y)
+            vmap(f, randomness='same')(x)
+        with self.assertRaisesRegex(RuntimeError, "calling out variants"):
+            def f(x0, x1):
+                return torch.normal(x, y, out=x)
+            vmap(f, randomness='same')(z, z)
+        with self.assertRaisesRegex(RuntimeError, "do not yet support"):
+            def f(z):
+                return torch.rrelu(x)
+            vmap(f, randomness='same')(z)
+
     @parametrize('randomness', ['same', 'different', 'error'])
     @parametrize('use_generator', [True, False])
     @parametrize('batched_input', [True, False])
