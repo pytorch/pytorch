@@ -179,32 +179,6 @@ std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, dou
   return std::make_tuple(output, mask);
 }
 
-template <typename F, F NativeFunc>
-Tensor dropout_unsqueeze(const Tensor& input, double p, bool train) {
-  // with out of place dropout, if the input is not batched and the randomness is on different, we need to
-  // expand the input to appear like a batched input. Otherwise we just decompose it to the corresponding
-  // native op
-
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  const auto cur_level = maybe_layer->layerId();
-  RandomnessType randomness = maybe_layer->randomness();
-
-  Tensor input_value;
-  optional<int64_t> input_bdim;
-  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
-
-  if (!input_bdim && randomness == RandomnessType::Different) {
-    VmapDimVector shapeVec(1, maybe_layer->batchSize());
-    auto shape = input.sizes();
-    shapeVec.reserve(input_value.dim() + 1);
-    shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-    input_value = input_value.unsqueeze(0).expand(shapeVec);
-    return NativeFunc(makeBatched(input_value, 0, cur_level), p, train);
-  } else {
-    return NativeFunc(input, p, train);
-  }
-}
-
 template <typename A, A a, typename C>
 struct RandomBatchRuleHelper;
 
@@ -311,7 +285,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     m.impl(#op"."#overload, SINGLE_ARG(\
       RandomInplaceBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                             c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
-  
+
   RANDOM_INPLACE_BATCH_RULE2(bernoulli_, float);
 
   #undef RANDOM_INPLACE_BATCH_RULE2
@@ -327,7 +301,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
     m.impl(#op"."#overload, SINGLE_ARG(\
       RandomBatchRuleHelper<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                             c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
-  
+
   #define RANDOM_INPLACE_BATCH_RULE(op) \
     m.impl(#op, SINGLE_ARG(\
       RandomInplaceBatchRuleHelper<decltype(&ATEN_FN(op)), &ATEN_FN(op), \
@@ -371,14 +345,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
     m.impl(#op"."#overload, SINGLE_ARG(\
       UnaryPointwiseRandomBatchRule<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                                     c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
-  
+
   #define UNARY_POINTWISE_RANDOM_LEADING_FLOAT(op, overload) \
     m.impl(#op"."#overload, SINGLE_ARG(\
       UnaryPointwiseRandomLeadingFloatBatchRule<decltype(&ATEN_FN2(op, overload)), &ATEN_FN2(op, overload), \
                                                 c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
-
-  #define DROPOUT_UNSQUEEZE(op)\
-    m.impl(#op, SINGLE_ARG(dropout_unsqueeze<decltype(&native::op), &native::op>))
 
   RANDOM_BATCH_RULE(randn);
   RANDOM_BATCH_RULE2(randn, generator);
@@ -424,11 +395,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM(multinomial);
   UNARY_POINTWISE_RANDOM(poisson);
   UNARY_POINTWISE_RANDOM(bernoulli);
-
-  DROPOUT_UNSQUEEZE(dropout);
-  DROPOUT_UNSQUEEZE(feature_dropout);
-  DROPOUT_UNSQUEEZE(alpha_dropout);
-  DROPOUT_UNSQUEEZE(feature_alpha_dropout);
 
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
