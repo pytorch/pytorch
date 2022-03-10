@@ -3147,7 +3147,7 @@ as the input tensor excluding its innermost dimension'):
             # Cases that raises error (i.e. if dim arg is not provided)
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(master_input)
- 
+
             # Tests to check if reduction happens along the specified dim.
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
             self.assertEqual(numpy_fn(numpy_input, axis=2),
