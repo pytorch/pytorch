@@ -4,12 +4,22 @@ Install functorch
 pip
 ---
 
-(Coming soon)
+To install functorch via pip, please first install
+`PyTorch 1.11 <https://pytorch.org/get-started/locally/>`_
+and then run the following command:
+
+::
+
+  pip install functorch
+
+We currently support manylinux and MacOS, please reach out on
+`GitHub <https://github.com/pytorch/functorch>`_ for other platforms.
 
 Colab
 -----
 
-(Coming soon)
+Please see `this colab for instructions. <https://colab.research.google.com/drive/1GNfb01W_xf8JRu78ZKoNnLqiwcrJrbYG#scrollTo=HJ1srOGeNCGA>`_
+
 
 Building from source
 --------------------
