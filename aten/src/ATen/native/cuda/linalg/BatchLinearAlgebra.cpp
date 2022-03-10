@@ -1873,12 +1873,14 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   auto n = input.size(-1);
 
 
+  bool magma_batched_buggy = false;
 #if AT_MAGMA_ENABLED()
   // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
   // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
   std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
   magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
-  const bool magma_batched_buggy = version < std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2);
+  magma_batched_buggy = version < std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2);
+#endif
 
   const auto lu_factor_magma = [batch_size, magma_batched_buggy](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
     if (batch_size == 1 || magma_batched_buggy) {
@@ -1887,7 +1889,6 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
       lu_factor_batched_magma(input, pivots, infos, compute_pivots);
     }
   };
-#endif
 
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_CUSOLVER
