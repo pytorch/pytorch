@@ -5172,6 +5172,799 @@
       }
     }
   },
+  "query_sha=76fca34884943c13ef26627313351150493a60836a8aa03291b38470f83b761f name=pytorch number=73969 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": false,
+          "isCrossRepository": true,
+          "author": {
+            "login": "malfet"
+          },
+          "title": "Dummy change",
+          "body": "Test Plan: None at all\n\nDifferential Revision: D34753911\n\n",
+          "headRefName": "export-D34753911",
+          "headRepository": {
+            "nameWithOwner": "malfet/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nshulga@fb.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "4746da707a9912356f5179625da89616b228dc21",
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-vulkan-bionic-py3.7-clang9"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbRQMQ=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2aM=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-bionic-rocm4.5-py3.7"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (distributed, 1, 1, linux.rocm.gpu)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbTiXw=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "win-vs2019-cuda11.3-py3"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (force_on_cpu, 1, 1, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, windows.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, windows.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbY_vU=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build-and-test",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2ao=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-docs"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "build-docs (cpp)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "build-docs (python)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbRIt0=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3.7-gcc7"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbRFm4=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3-clang5-mobile-build"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2aw=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "shellcheck",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "clang-tidy",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "clang-format",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "cmakelint",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "toc",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "py2-setup-validate-errormsg",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "flake8-py3",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "mypy",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO4Es=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build-and-test",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2b0=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2c8=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Test tools"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "test",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2as=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-cuda11.3-py3.7-gcc7"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, linux.4xlarge.nvidia.gpu)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbUkMA=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3.7-gcc7-no-ops"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2d8=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "win-vs2019-cpu-py3"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, windows.4xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbWDX8=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build-and-test",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2aQ=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3.7-clang7-asan"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 3, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 3, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbSD-k=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "Facebook CLA Check",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Meta Internal-Only Changes Check",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO574=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pytorch-xla-linux-bionic-py3.7-clang8"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (xla, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbSGAM=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3.7-gcc5.4"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (backwards_compat, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (distributed, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (docs_test, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (jit_legacy, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbRlJs=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-bionic-py3.7-clang9"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (noarch, 1, 1, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbRN_c=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3.7-clang7-onnx"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 2, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "test (default, 1, 2, linux.2xlarge)",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbRySo=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "linux-xenial-py3-clang5-mobile-custom-build-static"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "build",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAUbO2d0=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      }
+                    ],
+                    "pageInfo": {
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAU2F-UI=",
+                      "hasNextPage": false
+                    }
+                  }
+                }
+              }
+            ],
+            "totalCount": 1
+          },
+          "changedFiles": 1,
+          "files": {
+            "nodes": [
+              {
+                "path": "tools/build_variables.bzl"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [],
+            "totalCount": 0
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "This pull request was exported from Phabricator. Differential Revision: D34753911",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
   "query_sha=76fca34884943c13ef26627313351150493a60836a8aa03291b38470f83b761f name=pytorch number=73099 owner=pytorch": {
     "data": {
       "repository": {
