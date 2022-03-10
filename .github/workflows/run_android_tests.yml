@@ -15,6 +15,10 @@ on:
       - release/*
   workflow_dispatch:
 
+concurrency:
+  group: run-android-tests-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash -e -l {0}
