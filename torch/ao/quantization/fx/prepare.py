@@ -162,6 +162,18 @@ def is_output_dtype_supported_by_backend(
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
+def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
+    """ Check if observer in same graph
+    when the node output is not fp32 and input is 'placeholder'
+    the input is assumed to be quantized, so it is observed
+    in a different place rather than not observed.
+    """
+    node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
+    if isinstance(node.args[0], Node):
+        if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
+            return False
+    return True
+
 def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_nodes: Optional[List[Node]],
@@ -1165,10 +1177,13 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
+                            is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
+
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if is_general_tensor_value_op or is_general_tensor_shape_op or is_reuse_input_qconfig_:
+                            if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
+                                    is_general_tensor_shape_op or is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
@@ -1198,6 +1213,7 @@ def insert_observers_for_model(
 
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
+    is_qat: bool,
     modules: Dict[str, torch.nn.Module],
     matches: Any,
     prepare_custom_config_dict: Dict[str, Any],
@@ -1228,6 +1244,7 @@ def run_prepare_fx_on_standalone_modules(
             prepare(
                 standalone_module,
                 sm_qconfig_dict,
+                is_qat,
                 sm_prepare_config_dict,
                 backend_config_dict=sm_backend_config_dict)
         preserved_attributes = \
@@ -1264,12 +1281,12 @@ def save_state(
 def prepare(
         model: GraphModule,
         qconfig_dict: Any,
+        is_qat: bool,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
-        is_standalone_module: bool = False,
-        is_qat: bool = False) -> ObservedGraphModule:
+        is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -1388,7 +1405,7 @@ def prepare(
         "output_quantized_idxs", [])
 
     run_prepare_fx_on_standalone_modules(
-        model, modules, matches, prepare_custom_config_dict, backend_config_dict)
+        model, is_qat, modules, matches, prepare_custom_config_dict, backend_config_dict)
 
     # record names for the set of observed node, so that in convert step
     # we know whether we need to convert a floating point module to reference

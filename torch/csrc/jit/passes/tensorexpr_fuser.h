@@ -16,7 +16,8 @@ struct Graph;
 TORCH_API void FuseTensorExprs(
     std::shared_ptr<Graph>& graph,
     size_t min_group_size = 2,
-    bool add_composed_op = false);
+    bool add_composed_op = false,
+    bool fuse_to_dynamic_shapes = false);
 
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
@@ -59,6 +60,13 @@ TORCH_API Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db);
 
 namespace tensorexpr {
 TORCH_API bool isSupported(Node* node);
+
+// These functions are used in test_profiler.py to make sure
+// that tensor type specializations are available in the
+// CustomPasses.
+TORCH_API void addTensorTypeSpecializationDetectionPass();
+TORCH_API void removeTensorTypeSpecializationDetectionPass();
+TORCH_API bool passDetectedSpecializedTensors();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

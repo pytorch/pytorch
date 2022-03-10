@@ -127,6 +127,24 @@ class TestProfiler(JitTestCase):
         # other outputs should not be specialized
         FileCheck().check("Tensor = prim::If").run(g)
 
+    def test_specialized_types_in_post_pass(self):
+        torch._C._jit_texpr_add_specialiazation_detection_pass()
+        try:
+            @torch.jit.script
+            def test_fuse(a, b):
+                c = a * b
+                d = c * b
+                return d
+
+            x = torch.tensor([.5])
+            for _ in range(3):
+                test_fuse(x, x)
+
+            self.assertTrue(torch._C._jit_texpr_detected_specialiazed_tensors())
+
+        finally:
+            torch._C._jit_texpr_remove_specialiazation_detection_pass()
+
     def test_aliasing_merge(self):
         @torch.jit.script
         def foo(a, b):
@@ -231,6 +249,24 @@ class TestProfiler(JitTestCase):
         self.assertEqual(foo_script(x, x), foo(x, x))
         g = torch.jit.last_executed_optimized_graph()
         FileCheck().check_count("aten::add", 2, exactly=True).run(g)
+
+    def test_local_fusion_strategy(self):
+        @torch.jit.script
+        def foo(x):
+            return x + x + x
+
+        torch.jit.set_fusion_strategy([("STATIC", 1)])
+        for _ in range(3):
+            foo(torch.rand([10]))
+
+        torch.jit.set_fusion_strategy([("STATIC", 10)])
+
+        for i in range(10):
+            foo(torch.rand([i]))
+            foo(torch.rand([i]))
+
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_count(":TensorExprGroup", 2, exactly=True).run(g)
 
     def test_iterative_fusion(self):
         @torch.jit.script
