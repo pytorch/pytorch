@@ -119,8 +119,9 @@ void initONNXBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_unpack_quantized_weights",
           [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            UnpackQuantizedWeights(graph, paramsDict);
+             std::map<std::string, IValue>& paramsDict,
+             bool caffe2) {
+            UnpackQuantizedWeights(graph, paramsDict, caffe2);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -147,12 +148,19 @@ void initONNXBindings(PyObject* module) {
             DeduplicateInitializers(graph, params_dict, is_train);
             return params_dict;
           },
-          pybind11::return_value_policy::move);
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_clear_scope_records",
+          &torch::jit::onnx::ONNXClearScopeRecords)
+      .def(
+          "_jit_pass_onnx_track_scope_attributes",
+          &torch::jit::onnx::ONNXTrackScopeAttributes);
 
   m.def(
       "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
+      [](const std::string& proto_string, bool full_check) { check_onnx_proto(proto_string, full_check); },
+      py::arg("proto_string"),
+      py::arg("full_check") = false);
 
   auto onnx = m.def_submodule("_onnx");
   py::enum_<::ONNX_NAMESPACE::TensorProto_DataType>(onnx, "TensorProtoDataType")

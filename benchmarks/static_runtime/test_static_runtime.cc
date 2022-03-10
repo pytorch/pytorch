@@ -172,6 +172,108 @@ TEST(StaticRuntime, Clamp) {
   testStaticRuntime(clamp_script_2, {a, min_t, max_t}, {b, max_t1, min_t1});
 }
 
+TEST(StaticRuntime, LenWithTuple) {
+  const auto src = R"IR(
+    graph(%input : int[]):
+        %res : int = aten::len(%input)
+        return (%res)
+  )IR";
+
+  testStaticRuntime(src, {c10::List<int64_t>(4)});
+}
+
+TEST(StaticRuntime, LenWithTensor) {
+  const auto src = R"IR(
+    graph(%input : Tensor):
+        %res : int = aten::len(%input)
+        return (%res)
+  )IR";
+
+  testStaticRuntime(src, {at::randn({2, 2, 2})});
+}
+
+TEST(StaticRuntime, LenWithStr) {
+  const auto src = R"IR(
+    graph(%input : str):
+        %res : int = aten::len(%input)
+        return (%res)
+  )IR";
+
+  testStaticRuntime(src, {"static_runtime"});
+}
+
+TEST(StaticRuntime, LenWithDict_str) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[str, str]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<std::string, std::string> dict;
+  dict.insert("abc", "123");
+  dict.insert("def", "456");
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_int) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[int, int]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<int64_t, int64_t> dict;
+  dict.insert(0, 1);
+  dict.insert(2, 3);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_bool) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[bool, bool]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<bool, bool> dict;
+  dict.insert(true, false);
+  dict.insert(false, true);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_float) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[float, float]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<double, double> dict;
+  dict.insert(0.1, 0.9);
+  dict.insert(0.8, 0.18);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_complex) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[complex, complex]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<c10::complex<double>, c10::complex<double>> dict;
+  dict.insert(0.1, 0.4);
+  dict.insert(0.9, 0.45);
+  testStaticRuntime(script, {dict});
+}
+
+TEST(StaticRuntime, LenWithDict_Tensor) {
+  const auto script = R"JIT(
+    def forward(self, input: Dict[Tensor, Tensor]):
+        return len(input)
+  )JIT";
+
+  c10::Dict<at::Tensor, at::Tensor> dict;
+  dict.insert(at::randn({1, 2}), at::randn({1, 2}));
+  dict.insert(at::randn({1, 2}), at::randn({1, 2}));
+  testStaticRuntime(script, {dict});
+}
+
 TEST(StaticRuntime, Logit) {
   // no nnc
   const auto logit_script_1 = R"JIT(
@@ -1212,6 +1314,32 @@ TEST(StaticRuntime, FullLike) {
   testStaticRuntime(full_like_script, args, args2);
 }
 
+TEST(StaticRuntime, Ones) {
+  const auto script = R"JIT(
+    def forward(self,
+                size: List[int],
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool]):
+        a = torch.ones(size,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       pin_memory=pin_memory)
+        return (a.clone())
+  )JIT";
+
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{2, 5};
+  std::vector<IValue> args{size0, dtype, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{size1, dtype, at::kStrided, cpu, false};
+  testStaticRuntime(script, args);
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, Linear) {
   const auto linear_script = R"JIT(
     def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
@@ -2159,21 +2287,30 @@ TEST(StaticRuntime, Where) {
         return torch.where(x > 0, x, y).clone()
   )JIT";
 
-  std::vector<IValue> args1_fallback = {at::randn({2, 2}), at::randn({2, 2})};
-  std::vector<IValue> args2_fallback = {at::randn({3, 6}), at::randn({3, 6})};
+  std::vector<IValue> args1 = {at::randn({2, 2}), at::randn({2, 2})};
+  std::vector<IValue> args2 = {at::randn({8, 10}), at::randn({8, 10})};
 
-  std::vector<IValue> args1_nnc = {
-      at::randint(-10, 10, {2, 2}, at::kLong),
-      at::randint(-10, 10, {2, 2}, at::kLong)};
-  std::vector<IValue> args2_nnc = {
-      at::randint(-10, 10, {3, 6}, at::kLong),
-      at::randint(-10, 10, {3, 6}, at::kLong)};
+  testStaticRuntime(where_script, args1);
+  testStaticRuntime(where_script, args1, args2);
+}
 
-  testStaticRuntime(where_script, args1_fallback);
-  testStaticRuntime(where_script, args1_fallback, args2_fallback);
+TEST(StaticRuntime, WhereBroadcast) {
+  const auto where_script = R"JIT(
+    def forward(self, cond_1d, x, y):
+        shape = [-1] + [1] * (x.dim() - 1)
+        cond = cond_1d.view(shape)
+        return torch.where(cond, x, y).clone()
+  )JIT";
 
-  testStaticRuntime(where_script, args1_nnc);
-  testStaticRuntime(where_script, args1_nnc, args2_nnc);
+  std::vector<IValue> args1 = {
+      at::tensor({0, 1}).to(at::kBool), at::randn({2, 2}), at::randn({2, 2})};
+  std::vector<IValue> args2 = {
+      at::tensor({1, 0, 0}).to(at::kBool),
+      at::randn({3, 6}),
+      at::randn({3, 6})};
+
+  testStaticRuntime(where_script, args1);
+  testStaticRuntime(where_script, args1, args2);
 }
 
 TEST(StaticRuntime, View) {
@@ -2719,4 +2856,48 @@ TEST(StaticRuntime, ToList) {
           return (%ret)
   )JIT";
   testStaticRuntime(src, {at::randn({2, 2})});
+}
+
+TEST(StaticRuntime, IfThenElse) {
+  const auto src = R"IR(
+    graph(%cond: bool, %a: Tensor, %b: Tensor):
+        %none: NoneType = prim::Constant()
+        %c: Tensor = prim::IfThenElse(%cond, %a, %b)
+        %d: Tensor = aten::clone(%c, %none)
+        return (%d)
+  )IR";
+
+  std::vector<IValue> args1{true, at::randn({1}), at::randn({1})};
+  std::vector<IValue> args2{false, at::randn({1}), at::randn({1})};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args2);
+}
+
+TEST(StaticRuntime, StackEmpty) {
+  const auto src = R"JIT(
+    def forward(self):
+        x = torch.stack([])
+        return x
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_THROW(smod({}), c10::Error);
+}
+
+TEST(StaticRuntime, ConcatEmpty) {
+  const auto src = R"JIT(
+    def forward(self):
+        x = torch.concat([])
+        return x
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+
+  torch::jit::StaticModule smod(mod);
+  EXPECT_THROW(smod({}), c10::Error);
 }

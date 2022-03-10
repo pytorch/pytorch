@@ -619,8 +619,6 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 //
 // ---------------------------------------------------------------------
 
-#if !HAS_CUDNN_V8()
-
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
@@ -666,14 +664,17 @@ void raw_cudnn_convolution_forward_out_32bit(
   );
 }
 
+
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_forward_out(
+#else
+void raw_cudnn_convolution_forward_out_v7(
+#endif
     const Tensor& output, const Tensor& input, const Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
-
-#endif // !HAS_CUDNN_V8()
 
 // ---------------------------------------------------------------------
 //
@@ -726,7 +727,11 @@ void raw_cudnn_convolution_backward_input_out_32bit(
   );
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_backward_input_out(
+#else
+void raw_cudnn_convolution_backward_input_out_v7(
+#endif
     const at::Tensor& grad_input,
     const at::Tensor& grad_output,
     const at::Tensor& weight,
@@ -785,7 +790,11 @@ void raw_cudnn_convolution_backward_weight_out_32bit(
   );
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_backward_weight_out(
+#else
+void raw_cudnn_convolution_backward_weight_out_v7(
+#endif
     const Tensor& grad_weight, const Tensor& grad_output, const Tensor& input,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     bool benchmark, bool deterministic, bool allow_tf32) {
@@ -837,7 +846,12 @@ void raw_cudnn_convolution_backward_weight_out(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_add_relu_out(
+#else
+void raw_cudnn_convolution_add_relu_out_v7(
+#endif
+
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,

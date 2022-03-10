@@ -95,7 +95,7 @@ graph {
       type: TENSOR
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 4
     dims: 8
