@@ -86,13 +86,14 @@ class TestClipGradNorm(FSDPTest):
 class TestCalcuGradNorm(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("norm_type", [2.0, inf])
-    def test_fsdp_calc_grad_norm(self, norm_type):
+    @parametrize("nested_fsdp", [True, False])
+    def test_fsdp_calc_grad_norm(self, norm_type, nested_fsdp):
         """Test grad norm cal API."""
-        model = DeterministicModel(False)
+        model = FSDP(DeterministicModel(nested_fsdp))
         input = torch.rand(15, 2, device=self.rank)
         out = model(input)
         out.sum().backward()
-        total_norm = _calc_grad_norm(model.parameters(), norm_type)
+        total_norm = _calc_grad_norm(model.params_with_grad, norm_type)
         total_norm_expected = _collect_total_grad_norm_local(model, norm_type)
         self.assertEqual(total_norm, total_norm_expected)
 

@@ -1758,6 +1758,11 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 m._require_backward_grad_sync = old_flag
 
+    @property
+    def params_with_grad(self) -> List[Parameter]:
+        """[p for p in self.parameters() if p.grad is not None]"""
+        return [p for p in self.parameters() if p.grad is not None]
+
     @torch.no_grad()
     def clip_grad_norm_(
         self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
@@ -1793,7 +1798,7 @@ class FullyShardedDataParallel(nn.Module):
         max_norm = float(max_norm)
         norm_type = float(norm_type)
         # Computes the max norm for this shard's gradients and sync's across workers
-        local_norm = _calc_grad_norm(self.parameters(), norm_type).cuda()  # type: ignore[arg-type]
+        local_norm = _calc_grad_norm(self.params_with_grad, norm_type).cuda()  # type: ignore[arg-type]
         if norm_type == inf:
             total_norm = local_norm
             dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group)
@@ -1808,9 +1813,9 @@ class FullyShardedDataParallel(nn.Module):
         clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
         if clip_coef < 1:
             # multiply by clip_coef, aka, (max_norm/total_norm).
-            for p in self.parameters():
+            for p in self.params_with_grad:
                 assert p.grad is not None
-                p.grad = p.grad.mul_(clip_coef.to(p.grad.device))
+                p.grad.detach().mul_(clip_coef.to(p.grad.device))
 
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
