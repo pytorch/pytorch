@@ -105,7 +105,8 @@ class LazyIR(ABC):
         node_ctor_args = ", ".join([f"const {i.cpp_type()}& {i.name}" for i in all_types])
         scalar_initializers = ",\n        ".join([f"{t.name}({t.name})" for t in scalar_types])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
-        scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name};" for t in scalar_types])
+        scalar_decls = "\n  ".join([f"std::string {t.name};" if t.cpp_type() == "c10::string_view" else f"{t.cpp_type()} {t.name};"
+                                    for t in scalar_types])
         scalar_hashes = ", ".join([f"{f.name}" for f in scalar_types])
         base_ctor_value_args_list = []
         optional_values = []
