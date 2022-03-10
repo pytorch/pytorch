@@ -320,6 +320,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/interpreter/preprocess_graph.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",
     "torch/csrc/jit/runtime/logging.cpp",
+    "torch/csrc/jit/runtime/simple_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_graph_executor_impl.cpp",
     "torch/csrc/jit/runtime/profiling_record.cpp",
     "torch/csrc/jit/runtime/script_profile.cpp",

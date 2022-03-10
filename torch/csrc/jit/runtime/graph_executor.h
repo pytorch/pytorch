@@ -16,6 +16,11 @@ namespace jit {
 struct GraphExecutorState;
 struct Code;
 
+enum ExecutorExecutionMode {
+  SIMPLE,
+  PROFILING,
+};
+
 struct ExecutionPlan {
   ExecutionPlan() = default;
   ExecutionPlan(std::shared_ptr<Graph> graph, std::string function_name)
@@ -53,6 +58,11 @@ struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(const std::shared_ptr<Graph>& graph, std::string function_name);
+
+  GraphExecutor(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name,
+      ExecutorExecutionMode executor_mode);
 
   void run(Stack& inputs);
   c10::intrusive_ptr<Future> runAsync(

@@ -52,6 +52,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "jit/runtime/simple_graph_executor_impl.h"
 
 namespace torch {
 namespace jit {
@@ -769,6 +770,21 @@ GraphExecutor::GraphExecutor(
                         std::move(function_name)))
               : dynamic_cast<GraphExecutorImplBase*>(
                     new GraphExecutorImpl(graph, std::move(function_name)))) {}
+
+GraphExecutor::GraphExecutor(
+    const std::shared_ptr<Graph>& graph,
+    std::string function_name,
+    ExecutorExecutionMode executor_mode)
+    : pImpl(
+          executor_mode == ExecutorExecutionMode::SIMPLE
+              ? dynamic_cast<GraphExecutorImplBase*>(
+                    new SimpleGraphExecutorImpl(
+                        graph,
+                        std::move(function_name)))
+              : dynamic_cast<GraphExecutorImplBase*>(
+                    new ProfilingGraphExecutorImpl(
+                        graph,
+                        std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);

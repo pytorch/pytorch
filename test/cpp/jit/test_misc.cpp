@@ -2913,6 +2913,44 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }
 
+TEST(TestFunctionExecutor, SimpleExecutorTest) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph);
+  {
+    auto func = torch::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+  {
+    auto func = torch::make_unique<GraphFunction>(
+        "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
+    auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+    Stack stack = {a};
+    func->run(stack);
+    auto g = func->getDebugState().graph;
+    testing::FileCheck()
+        .check_not("prim::profile")
+        ->check("aten::add")
+        ->check("aten::relu")
+        ->run(*g);
+  }
+}
+
 // TODO: move to test_kernel when global settings are explicit
 // fusion parameters
 class Composed : public ::testing::Test {
