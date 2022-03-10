@@ -28,7 +28,7 @@ static inline at::DeviceType DefaultDevice() {
 }
 
 static bool inline init_backend(){
-  InitTorchScriptBackend();
+  compiler::InitTorchScriptBackend();
   return true;
 }
 static const bool backend_initialized = init_backend();
