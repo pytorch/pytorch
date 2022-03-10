@@ -2050,7 +2050,9 @@ class TestBinaryUfuncs(TestCase):
     def test_sub(self, device, dtype):
         if dtype in get_all_int_dtypes():
             # Before Python 3.10, floats were implicitly converted to ints, but with
-            # DeprecationWarning: an integer is required (got type float).  Implicit conversion to integers using __int__ is deprecated, and may be removed in a future version of Python.
+            #   DeprecationWarning: an integer is required (got type float).
+            #   Implicit conversion to integers using __int__ is deprecated,
+            #   and may be removed in a future version of Python.
             # Since Python 3.10, that attempt gives an error.
             m1 = torch.tensor([2, 4], dtype=dtype, device=device)
             m2 = torch.tensor([1, 2], dtype=dtype, device=device)
