@@ -347,9 +347,9 @@ def match_differentiability_info(
                     # If there is a need, we can relax (2) to allow any op that has an in-place variant
                     # We can also avoid hard coding self_t, if there is a need, but that is more work.
                     is_single_method_on_self_t = False
-                    matches = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
-                    if matches:
-                        op_name, between_parens = matches.group(1), matches.group(2)
+                    match = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
+                    if match:
+                        op_name, between_parens = match.group(1), match.group(2)
                         # We want to...
                         #   Match: self_t.op1(other_p.op2(arg))
                         #   Avoid: self_ self_t.op1(args) + self_t.op2(args)
@@ -358,7 +358,7 @@ def match_differentiability_info(
                     directly_do_inplace = is_single_method_on_self_t and op_name == info.name
 
                     if directly_do_inplace:
-                        formula = f"self_t_raw.defined() ? self_t_raw.{matches.group(1)}_({matches.group(2)}) : {formula}"
+                        formula = f"self_t_raw.defined() ? self_t_raw.{op_name}_({between_parens}) : {formula}"
                     else:
                         # Make sure that the forward grad is modified inplace when the original formula
                         # is out of place
