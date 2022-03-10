@@ -12,6 +12,8 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
     and dequantize the weight before running the floating point functional
     linear operator.
     """
+    _IS_REFERENCE = True
+
     def __init__(
             self,
             in_features: int,
@@ -37,8 +39,8 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         x -- quant --- *dequant --  *F.linear --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized linear
         """
-        weight_dequant = self.get_weight()
-        result = F.linear(x, weight_dequant, self.bias)
+        weight_quant_dequant = self.get_weight()
+        result = F.linear(x, weight_quant_dequant, self.bias)
         return result
 
     @classmethod

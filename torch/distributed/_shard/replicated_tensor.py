@@ -8,7 +8,7 @@ from torch.distributed import distributed_c10d
 
 class ReplicatedTensor(torch.Tensor):
     """
-    ReplicatedTensor represents a tensor which is replicated across the world_size and
+    ReplicatedTensor represents a tensor which is replicated across the `world_size` and
     has the same value on each rank.
 
     ReplicatedTensor is a :class:`~torch.Tensor` subclass, and it could be used together
