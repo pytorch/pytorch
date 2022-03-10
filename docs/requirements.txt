@@ -1,5 +1,6 @@
-sphinx==4.3.2
+sphinx==4.5.0
 Jinja2==3.0.*
+>>>>>>> 87350510ea (Bump sphinx version)
 docutils==0.16
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
 sphinxcontrib.katex
