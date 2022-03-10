@@ -250,7 +250,9 @@ def vmap(
             vmap should be the same or different across batches. If 'different',
             the randomness for each batch will be different. If 'same', the
             randomness will be the same across batches. If 'error', any calls to
-            random functions will error. Default: 'error'.
+            random functions will error. Default: 'error'. WARNING: this flag
+            only applies to random PyTorch operations and does not apply to
+            Python's random module or numpy randomness.
 
     Returns:
         Returns a new "batched" function. It takes the same inputs as
