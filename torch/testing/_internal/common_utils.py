@@ -1649,6 +1649,16 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 
+class CWatchdog():
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        torch._C._set_watchdog(self.name, 600)
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        torch._C._set_watchdog(self.name, 0)
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
     # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for
@@ -1765,6 +1775,16 @@ class TestCase(expecttest.TestCase):
     def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
         if num_runs_left == 0:
             return
+        return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
+
+    def wrap_method_with_c_watchdog(self, method):
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            with CWatchdog(method.__name__):
+                method(*args, *kwargs)
+        return types.MethodType(wrapper, self)
+
+    def setUp(self):
 
         using_unittest = isinstance(result, unittest.TestResult)
 
