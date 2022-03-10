@@ -335,9 +335,35 @@ def match_differentiability_info(
                     required_primals = required_primals + ("self",) if required_primals else ("self",)
 
                 if not is_exact_match:
-                    # Make sure that the forward grad is modified inplace when the original formula
-                    # is out of place
-                    formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
+                    # NOTE [In-place forward AD formula Optimization]
+                    #
+                    # This optimization transforms the formula to directly do inplace, i.e.
+                    # instead of self_t.copy_(self_t.op()) we do self_t.op_() when the following are met:
+                    #
+                    # 1) the formula satisfies the pattern: "self_t.op(*args)"
+                    # 2) "op" in (1) needs to be the same as the op the derivative is for
+                    #
+                    # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
+                    # If there is a need, we can relax (2) to allow any op that has an in-place variant
+                    # We can also avoid hard coding self_t, if there is a need, but that is more work.
+                    is_single_method_on_self_t = False
+                    matches = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
+                    if matches:
+                        op_name, between_parens = matches.group(1), matches.group(2)
+                        # NB: The below check isn't necessary, currently
+                        # We want to...
+                        #   Match: self_t.op1(other_p.op2(arg))
+                        #   Avoid: self_ self_t.op1(args) + self_t.op2(args)
+                        # We check this by making sure the first parens in second group is not a closing parens
+                        is_single_method_on_self_t = not re.fullmatch(r'[^\()]*\).*', between_parens)
+                    directly_do_inplace = is_single_method_on_self_t and op_name == info.name
+
+                    if directly_do_inplace:
+                        formula = f"self_t_raw.defined() ? self_t_raw.{matches.group(1)}_({matches.group(2)}) : {formula}"
+                    else:
+                        # Make sure that the forward grad is modified inplace when the original formula
+                        # is out of place
+                        formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
                 required_original_self_value = bool(re.search(IDENT_REGEX.format("original_self_p"), formula))
 
