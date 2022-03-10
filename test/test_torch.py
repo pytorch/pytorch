@@ -2030,37 +2030,6 @@ else:
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
-    def test_multinomial_constraints(self, device):
-        x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "prob_dist must be 1 or 2 dim",
-            lambda: torch.multinomial(x, 2))
-        x = torch.empty(1, 2, dtype=torch.long, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "multinomial only supports floating-point dtypes for input",
-            lambda: torch.multinomial(x, 2))
-        x = torch.empty(1, 2, dtype=torch.double, device=device)
-        y = torch.empty(1, 2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "multinomial expects Long tensor out",
-            lambda: torch.multinomial(x, 2, out=y))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample <= 0 samples",
-            lambda: torch.multinomial(x, 0))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample <= 0 samples",
-            lambda: torch.multinomial(x, -1))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample > prob_dist",
-            lambda: torch.multinomial(x, 3, False))
-        x = torch.empty(16777217, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "number of categories cannot exceed",
-            lambda: torch.multinomial(x, 3))
-
     def test_cumsum(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumsum(x, 1)

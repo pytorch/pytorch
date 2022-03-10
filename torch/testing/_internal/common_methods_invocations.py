@@ -3200,6 +3200,36 @@ def error_inputs_cov(op_info, device, **kwargs):
 
     return error_inputs
 
+def error_inputs_multinomial(op_info, device, **kwargs):
+    x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
+                     error_regex="prob_dist must be 1 or 2 dim")
+
+    x = torch.empty(1, 2, dtype=torch.long, device=device)
+    yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
+                     error_regex="multinomial only supports floating-point dtypes for input")
+
+    x = torch.empty(1, 2, dtype=torch.double, device=device)
+    y = torch.empty(1, 2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(2,), kwargs=dict(out=y)), error_type=RuntimeError,
+                     error_regex="multinomial expects Long tensor out")
+
+    x = torch.empty(2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(0,)), error_type=RuntimeError,
+                     error_regex="cannot sample n_sample <= 0 samples")
+
+    x = torch.empty(2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(-1,)), error_type=RuntimeError,
+                     error_regex="cannot sample n_sample <= 0 samples")
+
+    x = torch.empty(2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(3, False,)), error_type=RuntimeError,
+                     error_regex="cannot sample n_sample > prob_dist")
+
+    x = torch.empty(16777217, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(3,)), error_type=RuntimeError,
+                     error_regex="number of categories cannot exceed")
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -13862,6 +13892,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_multinomial,
+           error_inputs_func=error_inputs_multinomial,
            skips=(
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
