@@ -94,6 +94,8 @@ ALL_MODULES = {
     TestVersionedLinspaceOutV7(): "aten::linspace.out",
     TestVersionedLogspaceV8(): "aten::logspace",
     TestVersionedLogspaceOutV8(): "aten::logspace.out",
+    TestVersionedGeluV9(): "aten::gelu",
+    TestVersionedGeluOutV9(): "aten::gelu.out",
 }
 
 """
@@ -163,9 +165,16 @@ likely this script is running with the commit to make the change.
 def generate_models(model_directory_path: Path):
     all_models = get_all_models(model_directory_path)
     for a_module, expect_operator in ALL_MODULES.items():
-        print(a_module, expect_operator)
         # For example: TestVersionedDivTensorExampleV7
         torch_module_name = type(a_module).__name__
+
+        if not isinstance(a_module, torch.nn.Module):
+            logger.error(
+                f"The module {torch_module_name} "
+                f"is not a torch.nn.module instance. "
+                f"Please ensure it's a subclass of torch.nn.module in fixtures_src.py"
+                f"and it's registered as an instance in ALL_MODULES in generated_models.py")
+
 
         # The corresponding model name is: test_versioned_div_tensor_example_v4
         model_name = ''.join([

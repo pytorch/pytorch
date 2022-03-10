@@ -23,8 +23,8 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     Store,
-    _DistributedDebugLevel,
-    _get_debug_mode,
+    DebugLevel,
+    get_debug_level,
 )
 from torch._six import string_classes
 
@@ -703,7 +703,7 @@ def _new_process_group_helper(
             pg = ProcessGroupGloo(prefix_store, rank, world_size, timeout=timeout)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
-            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+            if get_debug_level() == DebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
                     logger.info(
                         """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
@@ -738,7 +738,7 @@ def _new_process_group_helper(
             pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
-            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+            if get_debug_level() == DebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
                     logger.info(
                         """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
@@ -1566,10 +1566,12 @@ def _tensor_to_object(tensor, tensor_size):
 
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
-    # It is not expected for PG to be wrapped many times, but support it just
-    # in case
-    while isinstance(pg, _ProcessGroupWrapper):
-        pg = pg.wrapped_pg
+    # Gate PG wrapper check on Gloo availability.
+    if _GLOO_AVAILABLE:
+        # It is not expected for PG to be wrapped many times, but support it just
+        # in case
+        while isinstance(pg, _ProcessGroupWrapper):
+            pg = pg.wrapped_pg
 
     return (
         is_nccl_available() and
@@ -3229,6 +3231,6 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logging.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups

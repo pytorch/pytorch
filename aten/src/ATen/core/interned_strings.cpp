@@ -1,3 +1,6 @@
+// aten_interned_strings.h includes the names of all operators
+#undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/core/interned_strings.h>
 #include <cstdint>
 #include <cstring>

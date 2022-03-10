@@ -1,9 +1,10 @@
 // Basic functions on sparse tensors
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
@@ -13,6 +14,53 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce.h>
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_coalesced_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_dimI_native.h>
+#include <ATen/ops/_dimV_native.h>
+#include <ATen/ops/_indices_native.h>
+#include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
+#include <ATen/ops/_sparse_mask_helper_native.h>
+#include <ATen/ops/_validate_sparse_coo_tensor_args_native.h>
+#include <ATen/ops/_values_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/coalesce_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/copy_sparse_to_sparse_native.h>
+#include <ATen/ops/dense_dim_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/indices_native.h>
+#include <ATen/ops/is_coalesced_native.h>
+#include <ATen/ops/resize_as_sparse.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
+#include <ATen/ops/sparse_coo_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
+#include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/sparse_resize_and_clear_native.h>
+#include <ATen/ops/sparse_resize_native.h>
+#include <ATen/ops/to_dense_native.h>
+#include <ATen/ops/to_sparse_native.h>
+#include <ATen/ops/unique_dim.h>
+#include <ATen/ops/values_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
@@ -496,6 +544,29 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   return sparse._coalesced_(true);
 }
 
+SparseTensor sparse_csr_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
+  TORCH_CHECK(sparse_dim <= 2,
+              "sparse_dim must be less than or equal to 2");
+  if (sparse_dim == 2) {
+    auto sizes = self.sizes();
+    Tensor crow_indices = self.crow_indices();
+    Tensor col_indices = self.col_indices();
+    Tensor values = self.values();
+    Tensor indices = at::_convert_indices_from_csr_to_coo(crow_indices, col_indices, false, false);
+    return at::native::_sparse_coo_tensor_unsafe(indices, values, sizes)._coalesced_(true);
+  } else {
+    TORCH_CHECK(false, "sparse dim 1 is not supported by sparse_csr_to_dense");
+    // TODO: implement coo.to_sparse(sparse_dim) and then use
+    // return self.to_sparse().to_sparse(sparse_dim);
+  }
+}
+
+SparseTensor sparse_csr_to_sparse(const Tensor& self) {
+  return sparse_csr_to_sparse(self, 2);
+}
+
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(
@@ -593,7 +664,8 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(values.scalar_type(), "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, values.scalar_type(),
+                                        "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();

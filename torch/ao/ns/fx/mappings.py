@@ -74,12 +74,14 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Linear,
             nnq.Linear,
             nni.LinearReLU,
+            nni.LinearBn1d,
             nniq.LinearReLU,
             nniqd.LinearReLU,
             nnqat.Linear,
             nnqatd.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
+            nniqat.LinearBn1d,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
@@ -383,6 +385,11 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             F.dropout,
             toq.dropout,
         ]),
+        # matmul
+        set([
+            torch.matmul,
+            toq.matmul,
+        ]),
     ]
 
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
@@ -555,6 +562,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nni.ConvReLU2d,
         nni.ConvReLU3d,
         nni.LinearReLU,
+        nni.LinearBn1d,
         nni.ConvBn1d,
         nni.ConvBn2d,
         nni.ConvBn3d,
@@ -567,6 +575,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqat.LinearBn1d,
         nniqd.LinearReLU,
     ])
 
