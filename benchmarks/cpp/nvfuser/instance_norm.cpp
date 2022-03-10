@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
@@ -39,8 +40,8 @@ static void setupInstanceNorm(Fusion* fusion, DataType dtype) {
   const bool kTraining = true;
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
-  auto momentum_ptr = new Double(kMomentum);
-  auto eps_ptr = new Double(kEps);
+  auto momentum_ptr = IrBuilder::create<Double>(kMomentum);
+  auto eps_ptr = IrBuilder::create<Double>(kEps);
 
   auto norm = instance_norm(
       input,
@@ -135,6 +136,7 @@ static void Baseline_InstanceNorm(
   auto ato_running_mean = c10::optional<at::Tensor>(at_mean);
   auto ato_running_var = c10::optional<at::Tensor>(at_var);
 
+  clearL2Cache();
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
@@ -182,38 +184,38 @@ static void Baseline_InstanceNorm_fp16(benchmark::State& benchmark_state) {
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_fp32_InstanceNorm,
+    NvFuserScheduler_InstanceNorm_fp32,
     setupInstanceNorm,
     NvFuserScheduler_InstanceNorm,
     DataType::Float);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp32_InstanceNorm)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_fp16_InstanceNorm,
+    NvFuserScheduler_InstanceNorm_fp16,
     setupInstanceNorm,
     NvFuserScheduler_InstanceNorm,
     DataType::Half);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp16_InstanceNorm)
-    ->RangeMultiplier(2)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp16)
+    // ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 //------------------------------------------------------------------------------
 
 BENCHMARK(Baseline_InstanceNorm_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_InstanceNorm_fp16)
-    ->RangeMultiplier(2)
+    // ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

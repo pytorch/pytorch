@@ -699,7 +699,7 @@ When specifying actions, you can pass multiple patterns, e.g.
 
 A module will match against this action if it matches any of the patterns.
 
-You can also specify patterns to exlcude, e.g.
+You can also specify patterns to exclude, e.g.
 
 
 ::

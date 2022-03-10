@@ -88,6 +88,7 @@ add_library(torch_python_static STATIC $<TARGET_OBJECTS:torch_python_obj>)
 set(INTERPRETER_LIB_SOURCES
   ${INTERPRETER_DIR}/interpreter_impl.cpp
   ${INTERPRETER_DIR}/builtin_registry.cpp
+  ${INTERPRETER_DIR}/register_frozenpython.cpp
   ${INTERPRETER_DIR}/import_find_sharedfuncptr.cpp
   ${FROZEN_FILES}
   ${LINKER_SCRIPT}
@@ -107,3 +108,4 @@ target_include_directories(torch_deployinterpreter BEFORE PUBLIC ${PYTHON_INC_DI
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a)
+target_link_libraries(torch_deployinterpreter PRIVATE pybind::pybind11)

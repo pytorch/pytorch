@@ -9,12 +9,12 @@ namespace cuda {
 
 void LaunchParams::assertValid() {
   TORCH_INTERNAL_ASSERT(
-      bdimx() * bdimz() * bdimz() > 0 &&
-          bdimx() * bdimz() * bdimz() <=
+      bdimx() * bdimy() * bdimz() > 0 &&
+          bdimx() * bdimy() * bdimz() <=
               (int64_t)at::cuda::getCurrentDeviceProperties()
                   ->maxThreadsPerMultiProcessor,
       "Selected invalid number of threads for cuda: ",
-      bdimx() * bdimz() * bdimz());
+      bdimx() * bdimy() * bdimz());
   TORCH_INTERNAL_ASSERT(
       gdimx() > 0 && gdimx() < (std::int64_t(1) << 32) - 1,
       "Invalid number of blocks in x direction: ",
@@ -117,13 +117,13 @@ void LaunchParams::print() const {
 
 std::string LaunchParams::toString() const {
   std::stringstream ss;
-  ss << "Launch Parameters \n"
-     << "BlockDim.x = " << bdimx() << "\n"
-     << "BlockDim.y = " << bdimy() << "\n"
-     << "BlockDim.z = " << bdimz() << "\n"
-     << "GridDim.x = " << gdimx() << "\n"
-     << "GridDim.y = " << gdimy() << "\n"
-     << "GridDim.z = " << gdimz() << "\n"
+  ss << "Launch Parameters: "
+     << "BlockDim.x = " << (bdimx_ == UNINITIALIZED_VAL ? -1 : bdimx_) << ", "
+     << "BlockDim.y = " << (bdimy_ == UNINITIALIZED_VAL ? -1 : bdimy_) << ", "
+     << "BlockDim.z = " << (bdimz_ == UNINITIALIZED_VAL ? -1 : bdimz_) << ", "
+     << "GridDim.x = " << (gdimx_ == UNINITIALIZED_VAL ? -1 : gdimx_) << ", "
+     << "GridDim.y = " << (gdimy_ == UNINITIALIZED_VAL ? -1 : gdimy_) << ", "
+     << "GridDim.z = " << (gdimz_ == UNINITIALIZED_VAL ? -1 : gdimz_) << ", "
      << "Smem Size = " << smem() << "\n";
   return ss.str();
 }

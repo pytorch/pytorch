@@ -51,7 +51,7 @@ Tensor copy_to_host(const Tensor& input) {
 }
 
 TORCH_LIBRARY_IMPL(metal, Metal, m) {
-  m.impl("copy_to_host", TORCH_FN(copy_to_host));
+  m.impl(TORCH_SELECTIVE_NAME("metal::copy_to_host"), TORCH_FN(copy_to_host));
 };
 
 }

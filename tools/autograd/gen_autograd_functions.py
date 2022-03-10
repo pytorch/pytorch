@@ -15,7 +15,7 @@ from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT,
                                      doubleT, scalarT, stringT, boolT, intArrayRefT,
                                      tensorListT, MutRefCType, ListCType, ArrayRefCType)
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import FileManager
+from tools.codegen.utils import FileManager
 from tools.codegen.model import Argument
 
 FUNCTION_DECLARATION = CodeTemplate("""\

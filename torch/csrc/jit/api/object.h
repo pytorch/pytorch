@@ -31,7 +31,10 @@ struct TORCH_API Object {
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
 
-  ObjectPtr _ivalue() const;
+  ObjectPtr _ivalue() const {
+    TORCH_INTERNAL_ASSERT(_ivalue_);
+    return _ivalue_;
+  }
 
   c10::ClassTypePtr type() const {
     return _ivalue()->type();

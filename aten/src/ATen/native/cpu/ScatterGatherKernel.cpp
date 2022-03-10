@@ -1,8 +1,12 @@
-#include <ATen/native/ScatterGatherChecks.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -52,7 +56,7 @@ struct _cpu_scatter_gather_dim_loop {
     func_t& f
   ) {
 
-    for (int64_t i = 0; i < index_dim_size; ++i) {
+    for (const auto i : c10::irange(index_dim_size)) {
       int64_t idx_dim = index_data[i * index_dim_stride];
       // we are not putting idx_dim in the error message because it disables
       // loop optimization in clang-7
@@ -79,7 +83,7 @@ struct _cpu_scatter_gather_dim_loop {
     func_t& f
   ) {
 
-    for (int64_t i = 0; i < index_dim_size; ++i) {
+    for (const auto i : c10::irange(index_dim_size)) {
       int64_t idx_dim = index_data[i * index_dim_stride];
       // we are not putting idx_dim in the error message because it disables
       // loop optimization in clang-7
@@ -131,6 +135,10 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = self_dim_size;
 
+    // since the index dimension is squashed, need to alter the grain size according
+    // to keep equal granularity in parallelism.
+    int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_scalar_cpu", [&] {
@@ -142,11 +150,10 @@ struct cpu_scatter_gather_base_kernel {
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension and/or
-          // whether `n` is smaller than `index_dim_size`
-
-          if ((dim== self.dim() - 1) || (n < index_dim_size)) {
-            for (int64_t nelem = 0; nelem < n; ++nelem) {
+          // whether dim is the last dimension
+          if (dim== self.dim() - 1) {
+            for (const auto nelem : c10::irange(n)) {
+              (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -160,10 +167,11 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
           else {
-            for (int64_t i = 0; i < index_dim_size; ++i) {
+            for (const auto i : c10::irange(index_dim_size)) {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              for (int64_t nelem = 0; nelem < n; ++nelem) {
+              for (const auto nelem : c10::irange(n)) {
+                (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -181,7 +189,7 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
         };
-        iter.for_each(loop);
+        iter.for_each(loop, grain_size);
       }
     );
   }
@@ -212,6 +220,8 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_upper_bound = is_scatter_like ? self_dim_size : src_dim_size;
 
+    int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_gather_tensor_cpu", [&] {
@@ -224,10 +234,10 @@ struct cpu_scatter_gather_base_kernel {
           auto* src_data_bytes = data[SRC_ITER_STRIDE_IDX];
           // we change the order of TensorIterator-dim loop
           // vs dim-TensorIterator loop order depending on
-          // whether dim is the last dimension and/or
-          // whether `n` is smaller than `index_dim_size`
-          if ((dim== self.dim() - 1) || (n < index_dim_size)) {
-            for (int64_t nelem = 0; nelem < n; ++nelem) {
+          // whether dim is the last dimension
+          if (dim== self.dim() - 1) {
+            for (const auto nelem : c10::irange(n)) {
+              (void)nelem; //Suppress unused variable warning
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -244,11 +254,12 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
           else {
-            for (int64_t i = 0; i < index_dim_size; ++i) {
+            for (const auto i : c10::irange(index_dim_size)) {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (int64_t nelem = 0; nelem < n; ++nelem) {
+              for (const auto nelem : c10::irange(n)) {
+                (void)nelem; //Suppress unused variable warning
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -268,7 +279,7 @@ struct cpu_scatter_gather_base_kernel {
             }
           }
         };
-        iter.for_each(loop);
+        iter.for_each(loop, grain_size);
       }
     );
   }

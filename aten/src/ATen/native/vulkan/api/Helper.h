@@ -18,7 +18,8 @@ void copy_texture_to_texture(
     api::Command::Buffer& command_buffer,
     api::Resource::Image::Object& src_image,
     api::Resource::Image::Object& dst_image,
-    api::utils::uvec3 src_extents,
+    api::utils::uvec3 copy_extents,
+    api::utils::uvec3 src_offset,
     api::utils::uvec3 dst_offset);
 
 } // namespace utils

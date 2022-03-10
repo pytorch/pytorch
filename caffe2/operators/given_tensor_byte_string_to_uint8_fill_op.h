@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -60,8 +61,7 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
         {static_cast<int64_t>(str.size())},
         at::dtype<uint8_t>().device(CPU));
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < str.size(); i++) {
+    for (const auto i : c10::irange(str.size())) {
       values_data[i] = static_cast<uint8_t>(str[i]);
     }
   }

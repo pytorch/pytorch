@@ -3,8 +3,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -31,6 +32,8 @@ enum class ValType {
   TensorView,
   Scalar,
   NamedScalar,
+  Predicate,
+  TensorIndex,
 };
 
 // Manual - The user provides the Bool value. Predicate generation is bypassed.
@@ -51,7 +54,7 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
+enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -69,8 +72,18 @@ enum class ExprType {
   TransposeOp,
   ShiftOp,
   GatherOp,
+  ViewOp,
   Split,
   Merge,
+  Allocate,
+  Sync,
+  InitMagicZero,
+  UpdateMagicZero,
+  ForLoop,
+  IfThenElse,
+  GridReduction,
+  GridBroadcast,
+  GridWelford,
 };
 
 enum class UnaryOpType {
@@ -169,9 +182,6 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
-//! Operations that have tricky behaviors with all integer inputs
-bool noFullIntegerSupport(const BinaryOpType bopt);
-
 enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {
@@ -188,6 +198,24 @@ enum class ParallelType {
   Serial
 };
 
+static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz,
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
+
+static constexpr std::array<ParallelType, 3> kParallelTypeBIDs = {
+    ParallelType::BIDx,
+    ParallelType::BIDy,
+    ParallelType::BIDz};
+
+static constexpr std::array<ParallelType, 3> kParallelTypeTIDs = {
+    ParallelType::TIDx,
+    ParallelType::TIDy,
+    ParallelType::TIDz};
+
 enum class MemoryType { Local, Shared, Global };
 
 // sometimes broadcasted tensors may be inputed in the kernel with an explicit 1
@@ -203,7 +231,8 @@ enum class IterType {
   Reduction,
   BroadcastWithStride,
   BroadcastWithoutStride,
-  Gather
+  Gather,
+  Stride
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };
@@ -239,8 +268,11 @@ std::string stringifyThread(const ParallelType);
 std::string typePrefix(const DataType);
 
 // TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
+// Returns if parallel type is TID[x, y, z]
 TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
+// Returns if parallel type is BID[x, y, z]
 TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
+// Returns if parallel type is a grid or block parallelization dimension
 TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
 
 TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
@@ -264,6 +296,8 @@ enum class LaunchConfigType {
   TIDy,
   TIDx
 };
+
+const char* const kMagicZeroName = "nvfuser_zero";
 
 } // namespace cuda
 } // namespace fuser

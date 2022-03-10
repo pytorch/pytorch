@@ -2,7 +2,6 @@ import cimodel.data.simple.util.branch_filters as branch_filters
 from cimodel.data.simple.util.docker_constants import (
     DOCKER_IMAGE_NDK, DOCKER_REQUIREMENT_NDK
 )
-import cimodel.lib.miniutils as miniutils
 
 
 class AndroidJob:
@@ -90,21 +89,6 @@ WORKFLOW_DATA = [
         ["pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_32_build"],
         is_master_only=False,
         is_pr_only=True),
-    AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
-        "pytorch_android_gradle_custom_build_single",
-        [DOCKER_REQUIREMENT_NDK],
-        is_master_only=False,
-        is_pr_only=True),
-    AndroidGradleJob(
-        "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
-        "pytorch_android_gradle_custom_build_single",
-        [DOCKER_REQUIREMENT_NDK],
-        is_master_only=False,
-        is_pr_only=True,
-        extra_props=tuple({
-            "lite_interpreter": miniutils.quote(str(int(False)))
-        }.items())),
     AndroidGradleJob(
         "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build",
         "pytorch_android_gradle_build",

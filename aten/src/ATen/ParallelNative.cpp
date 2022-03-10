@@ -6,6 +6,7 @@
 
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
+#include <c10/util/irange.h>
 #else
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #endif // C10_MOBILE
@@ -16,7 +17,7 @@
 #include <omp.h>
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -87,7 +88,7 @@ TaskThreadPoolBase& _get_intraop_pool() {
 // `fn` will be called with params: (thread_pool_task_id, task_id).
 void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
 #ifndef C10_MOBILE
-  for (size_t i = 1; i < range; ++i) {
+  for (const auto i : c10::irange(1, range)) {
     _get_intraop_pool().run([fn, i]() { fn((int)i, i); });
   }
   // Run the first task on the current thread directly.
@@ -199,7 +200,7 @@ void init_num_threads() {
   omp_set_num_threads(1);
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   mkl_set_num_threads(1);
 #endif
 
@@ -307,7 +308,7 @@ c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
 #else
   // TODO: caffe2::PThreadPool only provides a data-parallel API.
   // Task parallelism is not currently supported.
-  auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
+  auto future = c10::make_intrusive<c10::ivalue::Future>(c10::dynT<NoneType>());
   func();
   future->markCompleted();
   return future;

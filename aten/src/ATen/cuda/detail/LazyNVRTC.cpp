@@ -188,6 +188,36 @@ CUresult CUDAAPI cuLaunchKernel(CUfunction f,
             sharedMemBytes, hStream, kernelParams, extra);
 }
 
+// Irregularly shaped functions
+CUresult CUDAAPI cuLaunchCooperativeKernel(
+    CUfunction f,
+    unsigned int gridDimX,
+    unsigned int gridDimY,
+    unsigned int gridDimZ,
+    unsigned int blockDimX,
+    unsigned int blockDimY,
+    unsigned int blockDimZ,
+    unsigned int sharedMemBytes,
+    CUstream hStream,
+    void** kernelParams) {
+  auto fn = reinterpret_cast<decltype(&cuLaunchCooperativeKernel)>(
+      getCUDALibrary().sym(__func__));
+  if (!fn)
+    throw std::runtime_error("Can't get cuLaunchCooperativeKernel");
+  lazyNVRTC.cuLaunchCooperativeKernel = fn;
+  return fn(
+      f,
+      gridDimX,
+      gridDimY,
+      gridDimZ,
+      blockDimX,
+      blockDimY,
+      blockDimZ,
+      sharedMemBytes,
+      hStream,
+      kernelParams);
+}
+
 CUresult CUDAAPI cuModuleLoadDataEx(CUmodule *module,
                                     const void *image,
                                     unsigned int numOptions,

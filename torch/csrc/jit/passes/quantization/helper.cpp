@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 
 namespace torch {
@@ -533,9 +534,9 @@ bool useQuantizable(const Use& use, QuantType quant_type) {
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
   auto* func_node = n->input(0)->node();
   auto func = func_node->output()->type()->expectRef<FunctionType>().function();
-  TORCH_CHECK(
-      func->isGraphFunction(), "Quantization only works for graph function");
-  return func->graph();
+  auto graphFunc = tryToGraphFunction(*func);
+  TORCH_CHECK(graphFunc, "Quantization only works for graph function");
+  return graphFunc->graph();
 }
 
 // Block helper functions
@@ -706,12 +707,6 @@ bool is_relu_module(
     const std::unordered_map<std::string, Value*>& vmap) {
   return is_module(
       match, vmap, "relu", "__torch__.torch.nn.modules.activation.ReLU");
-}
-
-bool is_functional_linear(
-    const Match& match,
-    const std::unordered_map<std::string, Value*>& vmap) {
-  return is_functional(match, vmap, "linear", "linear");
 }
 
 bool is_linear_module(

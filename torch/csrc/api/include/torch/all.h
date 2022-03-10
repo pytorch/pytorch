@@ -13,6 +13,7 @@
 #include <torch/nn.h>
 #include <torch/optim.h>
 #include <torch/serialize.h>
+#include <torch/sparse.h>
 #include <torch/special.h>
 #include <torch/types.h>
 #include <torch/utils.h>

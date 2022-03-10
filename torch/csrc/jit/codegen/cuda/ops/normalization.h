@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -33,8 +33,7 @@ TORCH_CUDA_CU_API TensorView* softmax(TensorView* x, int dim);
 TORCH_CUDA_CU_API TensorView* softmax_backward(
     TensorView* dy,
     TensorView* y,
-    const int dim,
-    TensorView* x);
+    const int dim);
 
 TORCH_CUDA_CU_API ForwardNormResult layer_norm(
     TensorView* x,
@@ -68,7 +67,8 @@ TORCH_CUDA_CU_API ForwardNormResult batch_norm(
     TensorView* running_var,
     const bool kTraining,
     Val* momentum,
-    Val* eps);
+    Val* eps,
+    bool channels_last = false);
 
 TORCH_CUDA_CU_API BackwardNormResult batch_norm_backward(
     TensorView* x,
@@ -80,7 +80,8 @@ TORCH_CUDA_CU_API BackwardNormResult batch_norm_backward(
     TensorView* save_invstd,
     const bool kTraining,
     Val* eps,
-    const std::vector<bool>& output_mask);
+    const std::vector<bool>& output_mask,
+    bool channels_last = false);
 
 TORCH_CUDA_CU_API ForwardNormResult instance_norm(
     TensorView* x,

@@ -61,6 +61,11 @@ bool trySimplifyAddOrSub(Node& node) {
     return false;
   }
 
+  if (constant == 0) {
+    node.output()->replaceAllUsesWith(node.input(0));
+    return true;
+  }
+
   auto& dep = *node.inputs()[0]->node();
   if (dep.kind() != aten::add && dep.kind() != aten::sub) {
     return false;
@@ -142,6 +147,24 @@ struct PeepholeOptimizeNonTensorImpl {
                 n.cond()->debugName());
             n.outputs().at(i)->replaceAllUsesWith(n.cond());
             changed = true;
+          }
+        }
+
+        // check for types that can be refined
+        for (size_t i = 0; i < n.outputs().size(); ++i) {
+          // common case of optional for now
+          bool inputs_non_optional =
+              !n.thenOutputs().at(i)->type()->cast<OptionalType>() &&
+              !n.elseOutputs().at(i)->type()->cast<OptionalType>();
+          auto output_optional =
+              n.outputs().at(i)->type()->cast<OptionalType>();
+          if (inputs_non_optional && output_optional) {
+            if (auto unif = unifyTypes(
+                    n.thenOutputs().at(i)->type(),
+                    n.elseOutputs().at(i)->type())) {
+              n.outputs().at(i)->setType(*unif);
+              changed = true;
+            }
           }
         }
       } else if (

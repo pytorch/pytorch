@@ -48,14 +48,17 @@ static void NvFuserScheduler_Softmax(
     const int reduction_axis) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
-  std::vector<int64_t> input_shape{
-      benchmark_state.range(1), benchmark_state.range(0)};
-
-  // inputs
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
-  at::Tensor aten_input = at::randn(input_shape, options);
+
+  auto reduction_size = benchmark_state.range(0);
+  auto iter_size = benchmark_state.range(1);
+
+  at::Tensor aten_input =
+      (reduction_axis ? at::randn({iter_size, reduction_size}, options)
+                      : at::randn({reduction_size, iter_size}, options));
+
   std::vector<c10::IValue> aten_inputs({aten_input});
 
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
@@ -65,207 +68,165 @@ static void NvFuserScheduler_Softmax(
       (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
 }
 
-//------------------------------------------------------------------------------
-
-static void Baseline_Softmax(
-    benchmark::State& benchmark_state,
-    DataType dtype) {
+// Warp softmax comparison
+static void Softmax_WarpReduceReference(benchmark::State& benchmark_state) {
+  auto dtype = DataType::Float;
   std::vector<int64_t> input_shape{
-      benchmark_state.range(1), benchmark_state.range(0)};
-  const int kReductionAxis = benchmark_state.range(2);
+      benchmark_state.range(0), benchmark_state.range(1)};
+
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+  setupSoftmax(fusion, dtype, 1);
 
   // inputs
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn(input_shape, options);
+  std::vector<c10::IValue> aten_inputs({aten_input});
 
-  cudaDeviceSynchronize();
+  // Schedule through magic scheduler:
+  auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
+  TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
+      ScheduleHeuristic::Persistent, fusion, runtime_info));
+  auto scheduler = SchedulerEntry::makeEntry(
+      ScheduleHeuristic::Persistent, fusion, runtime_info);
+  scheduler->schedule(fusion);
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  fe.setMeasureKernelTimeFlag(true);
+
+  // Sync everything up before we start
   for (auto _ : benchmark_state) {
-    CudaKernelTimer timer;
-    auto output = at::_softmax(aten_input, kReductionAxis, false);
-    benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
     clearL2Cache();
-    cudaDeviceSynchronize();
+    auto outputs = fe.runFusion(aten_inputs);
+    benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
   }
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
+  cudaDeviceSynchronize();
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
       (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
 }
 
-static void Baseline_Softmax_fp32(benchmark::State& benchmark_state) {
-  Baseline_Softmax(benchmark_state, DataType::Float);
-}
+static void Softmax_WarpReduce(benchmark::State& benchmark_state) {
+  auto dtype = DataType::Float;
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0), benchmark_state.range(1)};
 
-static void Baseline_Softmax_fp16(benchmark::State& benchmark_state) {
-  Baseline_Softmax(benchmark_state, DataType::Half);
-}
-
-//------------------------------------------------------------------------------
-
-static void setupSoftmaxDropout(
-    Fusion* fusion,
-    DataType dtype,
-    const int kReductionAxis) {
-  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
-
+  auto fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
-
-  constexpr int kHiddenSize = 768;
-  constexpr int kNumAttentionHeads = 12;
-  constexpr int kAttentionHeadSize = kHiddenSize / kNumAttentionHeads;
-  constexpr float kDropoutProbability = 0.9;
-  constexpr float kScale = 1.0f / kDropoutProbability;
-
-  // setup fusion
-  auto attention_scores = makeContigTensor(4, dtype);
-  auto attention_mask = makeContigTensor(4, dtype);
-
-  Double* divisor = new Double();
-
-  fusion->addInput(attention_scores);
-  fusion->addInput(attention_mask);
-  fusion->addInput(divisor);
-
-  if (dtype == DataType::Half) {
-    attention_scores = castOp(DataType::Float, attention_scores);
-    attention_mask = castOp(DataType::Float, attention_mask);
-  }
-
-  attention_scores = div(attention_scores, divisor);
-  attention_scores = add(attention_scores, attention_mask);
-  auto attention_probs = softmax(attention_scores, kReductionAxis);
-  auto prob = new Double(kDropoutProbability);
-  auto scale = new Double(kScale);
-  auto dropout_results = dropout(attention_probs, prob, scale);
-  auto output = dropout_results.output;
-
-  if (dtype == DataType::Half) {
-    attention_scores = castOp(DataType::Half, attention_scores);
-    attention_probs = castOp(DataType::Half, attention_probs);
-    output = castOp(DataType::Half, output);
-  }
-
-  fusion->addOutput(attention_scores);
-  fusion->addOutput(attention_probs);
-  fusion->addOutput(output);
-
-  fusion->addOutput(dropout_results.mask);
-}
-
-static void NvFuserScheduler_SoftmaxDropout(
-    benchmark::State& benchmark_state,
-    FusionExecutorCache* fusion_executor_cache,
-    DataType dtype,
-    const int kReductionAxis) {
-  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
-
-  // reduce across 1, [256, 12, 100, 8]
-  std::vector<int64_t> input_shape{256, 12, 100, benchmark_state.range(0)};
-
-  constexpr int kHiddenSize = 768;
-  constexpr int kNumAttentionHeads = 12;
-  constexpr int kAttentionHeadSize = kHiddenSize / kNumAttentionHeads;
-  constexpr float kDropoutProbability = 0.9;
-  constexpr float kScale = 1.0f / kDropoutProbability;
+  setupSoftmax(fusion, dtype, 1);
 
   // inputs
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
-  at::Tensor at_scores = at::randn(input_shape, options);
-  at::Tensor at_mask = at::randn(input_shape, options);
-  std::vector<c10::IValue> aten_inputs(
-      {at_scores, at_mask, sqrt(kAttentionHeadSize)});
+  at::Tensor aten_input = at::randn(input_shape, options);
+  std::vector<c10::IValue> aten_inputs({aten_input});
 
-  runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
+  // Schedule through magic scheduler:
+  auto runtime_info = SchedulerRuntimeInfo(fusion, aten_inputs, true);
+  TORCH_INTERNAL_ASSERT(SchedulerEntry::canSchedule(
+      ScheduleHeuristic::Persistent, fusion, runtime_info));
+  auto scheduler = SchedulerEntry::makeEntry(
+      ScheduleHeuristic::Persistent, fusion, runtime_info);
+  scheduler->schedule(fusion);
 
-  // 5 dtype: attention_scores + attention_mask + attention_scores_out +
-  // attention_probs_out + output
-  // 1 bool: dropout_results.mask
-  // All the same size
-  benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) * 5 * at_scores.numel() *
-          int64_t(dataTypeSize(dtype)) +
-      // bool mask
-      int64_t(benchmark_state.iterations()) * at_scores.numel() *
-          int64_t(dataTypeSize(DataType::Bool)));
-}
+  // Modify the schedule to use warp reduction
+  auto used_vals = fusion->usedMathVals();
+  for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
+    for (IterDomain* id : tv->domain()->domain()) {
+      if (id->getParallelType() == ParallelType::TIDx) {
+        id->padToMultipleOfWarp();
+      }
+    }
+  }
 
-//------------------------------------------------------------------------------
+  FusionExecutor fe;
+  fe.compileFusion(fusion);
+  auto outputs = fe.runFusion(aten_inputs);
+  fe.setMeasureKernelTimeFlag(true);
 
-static void Baseline_Softmax_Dropout(
-    benchmark::State& benchmark_state,
-    const int kReductionAxis,
-    DataType dtype) {
-  std::vector<int64_t> input_shape{256, 12, 100, benchmark_state.range(0)};
-
-  constexpr int kHiddenSize = 768;
-  constexpr int kNumAttentionHeads = 12;
-  constexpr float kDropoutProbability = 0.1;
-  constexpr int kAttentionHeadSize = kHiddenSize / kNumAttentionHeads;
-
-  // inputs
-  at::manual_seed(0);
-  auto options =
-      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
-  at::Tensor attention_scores = at::randn(input_shape, options);
-  at::Tensor at_y = at::randn(input_shape, options);
-
+  // Sync everything up before we start
+  for (auto _ : benchmark_state) {
+    clearL2Cache();
+    auto outputs = fe.runFusion(aten_inputs);
+    benchmark_state.SetIterationTime(fe.kernelTimeMs() / 1000.0);
+  }
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
   cudaDeviceSynchronize();
 
-  for (auto _ : benchmark_state) {
-    // Create
-    CudaKernelTimer timer;
-
-    // Run
-    attention_scores = attention_scores / sqrt(kAttentionHeadSize);
-    attention_scores = attention_scores + at_y;
-    auto attention_probs =
-        at::_softmax(attention_scores, kReductionAxis, false);
-    attention_probs = at::dropout(attention_probs, kDropoutProbability, true);
-
-    // Record
-    benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
-    clearL2Cache();
-    cudaDeviceSynchronize();
-  }
-
-  // 5 dtype: attention_scores + attention_mask + attention_scores_out +
-  // attention_probs_out + output
-  // 1 bool: dropout_results.mask
-  // All the same size
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) * 5 * attention_scores.numel() *
-          int64_t(dataTypeSize(dtype)) +
-      // bool mask
-      int64_t(benchmark_state.iterations()) * attention_scores.numel() *
-          int64_t(dataTypeSize(DataType::Bool)));
+      int64_t(benchmark_state.iterations()) *
+      (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
 }
+
+BENCHMARK(Softmax_WarpReduce)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Softmax_WarpReduceReference)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {16 * 197, 16 * 197}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
 
 //------------------------------------------------------------------------------
 
-static void Baseline_Softmax_Dropout_Inner_fp32(
-    benchmark::State& benchmark_state) {
-  Baseline_Softmax_Dropout(benchmark_state, 3, DataType::Float);
+static void Baseline_Softmax(
+    benchmark::State& benchmark_state,
+    DataType dtype,
+    const int reduction_axis) {
+  at::manual_seed(0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
+
+  auto reduction_size = benchmark_state.range(0);
+  auto iter_size = benchmark_state.range(1);
+
+  at::Tensor aten_input =
+      (reduction_axis ? at::randn({iter_size, reduction_size}, options)
+                      : at::randn({reduction_size, iter_size}, options));
+
+  for (auto _ : benchmark_state) {
+    clearL2Cache();
+    CudaKernelTimer timer;
+    auto output = at::_softmax(aten_input, reduction_axis, false);
+    benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
+  }
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
+  cudaDeviceSynchronize();
+
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) *
+      (2 * aten_input.numel() * int64_t(dataTypeSize(dtype))));
 }
 
-static void Baseline_Softmax_Dropout_Outer_fp32(
-    benchmark::State& benchmark_state) {
-  Baseline_Softmax_Dropout(benchmark_state, 1, DataType::Float);
+static void Baseline_Softmax_Outer_fp32(benchmark::State& benchmark_state) {
+  Baseline_Softmax(benchmark_state, DataType::Float, 0);
 }
 
-static void Baseline_Softmax_Dropout_Inner_fp16(
-    benchmark::State& benchmark_state) {
-  Baseline_Softmax_Dropout(benchmark_state, 3, DataType::Half);
+static void Baseline_Softmax_Inner_fp32(benchmark::State& benchmark_state) {
+  Baseline_Softmax(benchmark_state, DataType::Float, 1);
 }
 
-static void Baseline_Softmax_Dropout_Outer_fp16(
-    benchmark::State& benchmark_state) {
-  Baseline_Softmax_Dropout(benchmark_state, 1, DataType::Half);
+static void Baseline_Softmax_Outer_fp16(benchmark::State& benchmark_state) {
+  Baseline_Softmax(benchmark_state, DataType::Half, 0);
+}
+
+static void Baseline_Softmax_Inner_fp16(benchmark::State& benchmark_state) {
+  Baseline_Softmax(benchmark_state, DataType::Half, 1);
 }
 
 //------------------------------------------------------------------------------
@@ -277,24 +238,12 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Float,
     0);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
 NVFUSER_BENCHMARK_DEFINE(
     NvFuserScheduler_Softmax_Inner_fp32,
     setupSoftmax,
     NvFuserScheduler_Softmax,
     DataType::Float,
     1);
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
 
 NVFUSER_BENCHMARK_DEFINE(
     NvFuserScheduler_Softmax_Outer_fp16,
@@ -303,12 +252,6 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Half,
     0);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
 NVFUSER_BENCHMARK_DEFINE(
     NvFuserScheduler_Softmax_Inner_fp16,
     setupSoftmax,
@@ -316,210 +259,196 @@ NVFUSER_BENCHMARK_DEFINE(
     DataType::Half,
     1);
 
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_Softmax_Dropout_Inner_fp32,
-    setupSoftmaxDropout,
-    NvFuserScheduler_SoftmaxDropout,
-    DataType::Float,
-    3);
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Dropout_Inner_fp32)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_Softmax_Dropout_Outer_fp32,
-    setupSoftmaxDropout,
-    NvFuserScheduler_SoftmaxDropout,
-    DataType::Float,
-    1);
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Dropout_Outer_fp32)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_Softmax_Dropout_Inner_fp16,
-    setupSoftmaxDropout,
-    NvFuserScheduler_SoftmaxDropout,
-    DataType::Half,
-    3);
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Dropout_Inner_fp16)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_Softmax_Dropout_Outer_fp16,
-    setupSoftmaxDropout,
-    NvFuserScheduler_SoftmaxDropout,
-    DataType::Half,
-    1);
-
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Dropout_Outer_fp16)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 //------------------------------------------------------------------------------
 
-BENCHMARK(Baseline_Softmax_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}, {0, 1}})
+BENCHMARK(Baseline_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_Softmax_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{656, 656}, {8, 8 << 12}, {0, 1}})
+BENCHMARK(Baseline_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_Softmax_Dropout_Inner_fp32)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+BENCHMARK(Baseline_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_Softmax_Dropout_Outer_fp32)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+BENCHMARK(Baseline_Softmax_Outer_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_Softmax_Dropout_Inner_fp16)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+BENCHMARK(Baseline_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(Baseline_Softmax_Dropout_Outer_fp16)
-    ->Arg(8)
-    ->Arg(16)
-    ->Arg(24)
-    ->Arg(32)
-    ->Arg(40)
-    ->Arg(48)
-    ->Arg(56)
-    ->Arg(64)
-    ->Arg(72)
-    ->Arg(80)
-    ->Arg(88)
-    ->Arg(96)
-    ->Arg(104)
-    ->Arg(112)
-    ->Arg(120)
-    ->Arg(128)
+BENCHMARK(Baseline_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Outer_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{1, 1024 * 1024}, {160, 320}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_Softmax_Inner_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

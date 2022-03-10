@@ -20,8 +20,8 @@ namespace at {
  * included in this file when code-gen is ready.
  */
 inline constexpr bool should_include_kernel_dtype(
-  const char *kernel_tag_str,
-  at::ScalarType scalar_type
+  const char* /*kernel_tag_str*/,
+  at::ScalarType /*scalar_type*/
 ) {
   return true;
 }
@@ -76,11 +76,11 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
 // attribute in the type aliasing context. Keep name long and verbose to avoid
 // macro collisions.
-#if defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10100
+#if defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10010
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND
 #else
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
-#endif // defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10100
+#endif // defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10010
 
 #if defined __cpp_if_constexpr
 #define AT_QINT_PRIVATE_CASE_TYPE(                                           \
@@ -133,9 +133,9 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type;      \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =             \
         toUnderlying(enum_type);                                                  \
-    int bit_width = bitwidth;                                                     \
-    int64_t quant_min = qmin;                                                     \
-    int64_t quant_max = qmax;                                                     \
+    C10_UNUSED int bit_width = bitwidth;                                          \
+    C10_UNUSED int64_t quant_min = qmin;                                          \
+    C10_UNUSED int64_t quant_max = qmax;                                          \
     (void)bit_width; /* Suppress unused variable warning */                       \
     (void)quant_min; /* Suppress unused variable warning */                       \
     (void)quant_max; /* Suppress unused variable warning */                       \

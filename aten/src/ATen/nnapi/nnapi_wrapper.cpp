@@ -336,6 +336,8 @@ int check_Execution_getOutputOperandDimensions(ANeuralNetworksExecution* executi
 void nnapi_wrapper_load(struct nnapi_wrapper** nnapi, struct nnapi_wrapper** check_nnapi) {
 #ifdef _WIN32
   TORCH_CHECK(false, "Running NNAPI models is not supported on Windows.");
+#elif __XROS__
+  TORCH_CHECK(false, "Running NNAPI models is not supported on XROS.");
 #else
   if (!loaded) {
     // Clear error flag.

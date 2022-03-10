@@ -124,11 +124,18 @@ static_assert(
 #ifndef NDEBUG
 // Debug only version of CHECK
 #define DCHECK(condition) FATAL_IF(condition) << "Check failed: " #condition " "
-#else
+#define DLOG(severity) LOG(severity)
+#else // NDEBUG
 // Optimized version - generates no code.
 #define DCHECK(condition) \
   while (false)           \
   CHECK(condition)
+
+#define DLOG(n)                                                            \
+  true ? (void)0                                                           \
+       : ::c10::LoggerVoidify() &                                          \
+          ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n) \
+              .stream()
 #endif // NDEBUG
 
 #define CHECK_OP(val1, val2, op)                                              \

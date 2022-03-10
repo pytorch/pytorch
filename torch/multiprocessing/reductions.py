@@ -123,7 +123,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
     t = torch._utils._rebuild_tensor(
-        torch.storage.TypedStorage(wrap_storage=storage._untyped(), dtype=dtype),
+        torch.storage._TypedStorage(wrap_storage=storage._untyped(), dtype=dtype),
         tensor_offset, tensor_size, tensor_stride)
 
     if tensor_cls == torch.nn.parameter.Parameter:
@@ -317,16 +317,16 @@ def rebuild_storage_empty(cls):
     return cls()
 
 def rebuild_typed_storage(storage, dtype):
-    return torch.storage.TypedStorage(wrap_storage=storage, dtype=dtype)
+    return torch.storage._TypedStorage(wrap_storage=storage, dtype=dtype)
 
-# Use for torch.storage.TypedStorage
+# Use for torch.storage._TypedStorage
 def reduce_typed_storage(storage):
     return (rebuild_typed_storage, (storage._storage, storage.dtype))
 
 def rebuild_typed_storage_child(storage, storage_type):
     return storage_type(wrap_storage=storage)
 
-# Use for child classes of torch.storage.TypedStorage, like torch.FloatStorage
+# Use for child classes of torch.storage._TypedStorage, like torch.FloatStorage
 def reduce_typed_storage_child(storage):
     return (rebuild_typed_storage_child, (storage._storage, type(storage)))
 
@@ -358,12 +358,12 @@ def init_reductions():
     ForkingPickler.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
-        if t.__name__ == 'UntypedStorage':
+        if t.__name__ == '_UntypedStorage':
             ForkingPickler.register(t, reduce_storage)
         else:
             ForkingPickler.register(t, reduce_typed_storage_child)
 
-    ForkingPickler.register(torch.storage.TypedStorage, reduce_typed_storage)
+    ForkingPickler.register(torch.storage._TypedStorage, reduce_typed_storage)
 
     for t in torch._tensor_classes:
         ForkingPickler.register(t, reduce_tensor)

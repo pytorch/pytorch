@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/functional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <ATen/ATen.h>
 #include <utility>
 #include <c10/core/TensorOptions.h>

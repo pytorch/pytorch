@@ -1,7 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
@@ -9,6 +10,15 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <algorithm>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#endif
 
 #include <cuda_runtime.h>
 #include <type_traits>
@@ -25,6 +35,7 @@
 
 #include <thrust/device_ptr.h>
 #include <thrust/execution_policy.h>
+#include <thrust/fill.h>
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
@@ -67,78 +78,45 @@ void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& in
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+template <typename input_t, typename output_t>
+__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows) {
+  int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+  if (tid < nrows) {
+    for (int64_t i = data_in[tid]; i < data_in[tid + 1]; i++)
+      data_out[i] = static_cast<output_t>(tid);
+  }
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    indices.zero_();
+    return;
+  }
+
+  auto crow_indices_ = crow_indices.expect_contiguous();
+  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
+  auto row0 = indices.select(0, transpose?1:0);
+  auto row1 = indices.select(0, transpose?0:1);
+  output_t* data_out = row0.data_ptr<output_t>();
+
+  // Run nrows threads...
+  int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  int64_t BLOCKS = (nrows + THREADS) / THREADS;
+  at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+  row1.copy_(*col_indices.expect_contiguous());
+  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 } // namespace
 
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
-
-Tensor& addmm_out_sparse_csr_dense_cuda(
-    const Tensor& self,
-    const SparseCsrTensor& mat1,
-    const Tensor& mat2,
-    const Scalar& beta,
-    const Scalar& alpha,
-    Tensor& result) {
-
-  TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
-
-  // All the checks are from addmm_out_cuda_impl at ATen/native/cuda/Blas.cpp
-  // TODO: remove code duplication and unify code
-  // There were undefined symbol problems,
-  // when using same function for CUDA and SparseCsrCUDA dispatch keys
-  TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
-
-  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
-  checkAllSameGPU(__func__, args);
-
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
-  IntArrayRef self__sizes;
-  c10::MaybeOwned<Tensor> self_;
-  if (&result != &self) {
-    self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
-    self__sizes = self_->sizes();
-  } else {
-    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-    self__sizes = self_->sizes();
-    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
-    TORCH_CHECK(self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
-    TORCH_CHECK(self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
-  }
-
-  if (&result != &self) {
-    at::native::resize_output(result, self__sizes);
-    if (beta.toComplexDouble() != 0.0) {
-      at::native::copy_(result, *self_);
-    }
-  }
-
-  IntArrayRef result_sizes = result.sizes();
-  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
-    return result;
-  }
-
-  if (mat1._nnz() == 0) {
-    // By definition, when beta==0, values in self should be ignored. nans and infs
-    // should not propagate
-    if (beta.toComplexDouble() == 0.) {
-      return result.zero_();
-    }
-    return at::mul_out(
-        result,
-        self,
-        at::native::scalar_tensor(
-            beta,
-            self.scalar_type(),
-            c10::nullopt /* layout */,
-            at::kCPU,
-            c10::nullopt /* pin_memory */));
-  }
-
-  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
-  return result;
-}
 
 Tensor& add_out_dense_sparse_csr_cuda(
     Tensor& output,
@@ -255,11 +233,16 @@ Tensor& add_out_sparse_csr_cuda(
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    return add_out_dense_sparse_csr_cuda(out, self, other, alpha);
+    add_out_dense_sparse_csr_cuda(out, self, other, alpha);
   } else {
     TORCH_CHECK(
-        false,
-        "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }
   return out;
 }
@@ -274,6 +257,20 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
       convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
+    });
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cuda) (
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const bool transpose, const Tensor& result
+) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int32_t>(result, crow_indices, col_indices, transpose);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cuda", [&] {
+      convert_indices_from_csr_to_coo_cuda<scalar_t, int64_t>(result, crow_indices, col_indices, transpose);
     });
   }
 }

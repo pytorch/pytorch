@@ -1,9 +1,9 @@
-ir_version: 7
+ir_version: 6
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "onnx::DepthToSpace_0"
     output: "1"
     name: "DepthToSpace_0"
     op_type: "DepthToSpace"
@@ -18,9 +18,9 @@ graph {
       type: STRING
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::DepthToSpace_0"
     type {
       tensor_type {
         elem_type: 1

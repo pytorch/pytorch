@@ -76,7 +76,7 @@ class Test_PT_ONNX_TRT(unittest.TestCase):
 
     def _test_model(self, model_name, input_shape = (3, 224, 224), normalization_hint = 0):
 
-        model = getattr(models, model_name)(pretrained=False)
+        model = getattr(models, model_name)(pretrained=True)
 
         shape = (1,) + input_shape
         dummy_input  = (torch.randn(shape),)

@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
@@ -8,6 +9,7 @@ namespace native {
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
                                 const Scalar& /*negval_*/);
+using qgelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, GeluType /* approximate */);
 using qsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, double output_scale, int64_t output_zero_point);
 using qhardsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qclamp_fn = void (*)(
@@ -36,6 +38,11 @@ using qbinary_fn =
 using qadd_scalar_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Scalar& other /*other*/);
 using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
+using qdropout_fn = void(*)(
+    const at::Tensor& /*qx*/,
+    const Scalar& /*p*/,
+    bool training /*training*/,
+    at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
     int64_t iC, // input/output channels
@@ -55,7 +62,7 @@ using qmaxpool_2d_fn = void (*)(
 using qadaptive_avg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t sizeB,
     int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
@@ -68,7 +75,7 @@ using qadaptive_avg_pool2d_fn = void (*)(
 using qadaptive_avg_pool3d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t sizeB,
     int64_t sizeC,
     int64_t isizeD,
     int64_t isizeH,
@@ -84,7 +91,7 @@ using qadaptive_avg_pool3d_fn = void (*)(
 using qavg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -102,7 +109,7 @@ using qavg_pool2d_fn = void (*)(
 using qavg_pool3d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -176,11 +183,12 @@ DECLARE_DISPATCH(qclamp_minmax_fn, qclamp_max_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
+DECLARE_DISPATCH(qdropout_fn, qdropout_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
-DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
+DECLARE_DISPATCH(qgelu_fn, qgelu_stub);
 DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);
 DECLARE_DISPATCH(qtanh_fn, qtanh_stub);
 DECLARE_DISPATCH(qthreshold_fn, qthreshold_stub);

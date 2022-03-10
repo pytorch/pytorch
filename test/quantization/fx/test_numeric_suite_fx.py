@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import copy
 import math
 import operator
@@ -1903,6 +1905,13 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         extend_logger_results_with_comparison(
             act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
 
+    def test_fp16_shadows_fp32(self):
+        m = LinearReluFunctional().eval()
+        qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
+        mp = prepare_fx(copy.deepcopy(m), qconfig_dict)
+        mq = convert_fx(mp, is_reference=True)
+        mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """
@@ -2044,7 +2053,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_resnet18(self):
         import torchvision
-        m = torchvision.models.quantization.resnet18(pretrained=True, quantize=False).eval()
+        m = torchvision.models.quantization.resnet18(pretrained=False, quantize=False).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
         self._test_match_shadow_activations(
             m, (torch.randn(1, 3, 224, 224),),
@@ -2056,7 +2065,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     @unittest.skip("TODO: broken by https://github.com/pytorch/pytorch/pull/61687, will enable later")
     def test_mobilenet_v2(self):
         import torchvision
-        m = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False).eval()
+        m = torchvision.models.quantization.mobilenet_v2(pretrained=False, quantize=False).eval()
         qconfig_dict = {'': torch.ao.quantization.default_qconfig}
         self._test_match_shadow_activations(
             m, (torch.randn(1, 3, 224, 224),),

@@ -30,11 +30,11 @@ const OptionalScalarRef max) {
     TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
   }
 
-  build_unary_op(maybe_get_output(), self);
+  build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
-  const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert
+  const Tensor& elements, const Tensor& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
@@ -42,7 +42,7 @@ TORCH_META_FUNC2(isin, Tensor_Tensor) (
 }
 
 TORCH_META_FUNC2(isin, Tensor_Scalar) (
-  const Tensor& elements, const c10::Scalar& test_elements, bool assume_unique, bool invert
+  const Tensor& elements, const c10::Scalar& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.type());
@@ -50,7 +50,7 @@ TORCH_META_FUNC2(isin, Tensor_Scalar) (
 }
 
 TORCH_META_FUNC2(isin, Scalar_Tensor) (
-  const c10::Scalar& elements, const Tensor& test_elements, bool assume_unique, bool invert
+  const c10::Scalar& elements, const Tensor& test_elements, bool /*assume_unique*/, bool /*invert*/
 ) {
   check_for_unsupported_isin_dtype(elements.type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
@@ -61,14 +61,14 @@ TORCH_META_FUNC(isposinf) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isposinf does not support non-boolean outputs.");
-  build_unary_force_boolean_op(maybe_get_output(), self);
+  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(isneginf) (const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "isneginf does not support non-boolean outputs.");
-  build_unary_force_boolean_op(maybe_get_output(), self);
+  build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
 }
 
 static void check_unsupported_complex(const char* name, const Tensor& self) {
@@ -228,24 +228,6 @@ Tensor isfinite(const Tensor& self) {
   });
 }
 
-bool is_nonzero(const Tensor& self) {
-  auto n = self.numel();
-  TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
-  TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");
-
-  Scalar localScalar = self.item();
-  if (localScalar.isFloatingPoint()) {
-    return localScalar.to<double>() != 0;
-  } else if (localScalar.isComplex()) {
-     return localScalar.to<c10::complex<double>>() != c10::complex<double>(0.0, 0.0);
-  } else if (localScalar.isIntegral(false)){
-    return localScalar.to<int64_t>() != 0;
-  } else if (localScalar.isBoolean()) {
-    return localScalar.to<bool>();
-  }
-  TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
-}
-
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
@@ -342,20 +324,25 @@ static void isin_sorting(
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
-              "Expected condition, x and y to be on the same device, but condition is on ",
-              condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
-              " respectively");
+  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
 
   if (condition.scalar_type() == ScalarType::Byte) {
   TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-} else {
+  } else {
   TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
-}
+  }
+  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+  Tensor ret = at::empty({0}, self.options());
+  auto iter = at::TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(ret)
+    .add_input(cond_bool)
+    .add_input(self)
+    .add_input(other)
+    .build();
+  where_kernel(iter.device_type(), iter);
+  return ret;
 
-  c10::MaybeOwned<Tensor> b_condition, b_self, b_other;
-  std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
-  return at::_s_where(*b_condition, *b_self, *b_other);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
@@ -375,20 +362,6 @@ Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
 
 std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
-}
-
-Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-  Tensor ret = at::empty(self.sizes(), self.options());
-  auto iter = at::TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(ret)
-    .add_input(condition)
-    .add_input(self)
-    .add_input(other)
-    .build();
-  where_kernel(iter.device_type(), iter, condition.scalar_type());
-  return ret;
 }
 
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
@@ -494,21 +467,24 @@ std::tuple<Tensor, Tensor> qmin(const Tensor& self, int64_t dim, bool keepdim) {
 
 // DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_WARN_ONCE("_aminmax is deprecated as of PyTorch 1.11 and will be removed in a future release. Use aminmax instead."
+                  " This warning will only appear once per process.");
   return at::aminmax(self, dim, keepdim);
 }
 
 TORCH_IMPL_FUNC(clamp_out)
 (
- const Tensor& self,
+ const Tensor& /*self*/,
  const OptionalScalarRef min,
  const OptionalScalarRef max,
- const Tensor& result) {
+ const Tensor& /*result*/) {
+  using at::native::detail::ClampLimits;
   if (min && max) {
     clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
+    clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
-    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
+    clamp_min_scalar_stub(device_type(), *this, min.get());
   }
 }
 
@@ -659,13 +635,13 @@ std::tuple<Tensor, Tensor> max(const Tensor& self, Dimname dim, bool keepdim) {
 std::tuple<Tensor&, Tensor&> max_out(const Tensor& self, Dimname dim, bool keepdim, Tensor& max, Tensor& max_indices) {
   return at::max_out(max, max_indices, self, dimname_to_position(self, dim), keepdim);
 }
-Tensor argmax(const Tensor& self, Dimname dim, bool keepdim) {
+Tensor argmax(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmax");
 }
-Tensor argmin(const Tensor& self, Dimname dim, bool keepdim) {
+Tensor argmin(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argmin");
 }
-Tensor argsort(const Tensor& self, Dimname dim, bool keepdim) {
+Tensor argsort(const Tensor& /*self*/, Dimname /*dim*/, bool /*keepdim*/) {
   reportNYIDimnameOverload("argsort");
 }
 std::tuple<Tensor, Tensor> mode(const Tensor& self, Dimname dim, bool keepdim) {

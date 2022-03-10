@@ -22,6 +22,7 @@ class _FunctionalAdadelta(object):
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0.0,
+        foreach: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -30,6 +31,7 @@ class _FunctionalAdadelta(object):
             "eps": eps,
             "weight_decay": weight_decay,
         }
+        self.foreach = foreach
 
         if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
@@ -82,4 +84,5 @@ class _FunctionalAdadelta(object):
                        lr=lr,
                        rho=rho,
                        eps=eps,
-                       weight_decay=weight_decay)
+                       weight_decay=weight_decay,
+                       foreach=self.foreach)
