@@ -41,6 +41,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
         orig_weight(std::move(orig_weight)),
         bias_(at::native::mobile::allocate_padded_contiguous_if_needed(
             bias, bias.suggest_memory_format())),
+        per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
         input_scale(std::move(input_scale)),
         w_scales(w_scales),
         w_zero_points(std::move(w_zps)) {}
@@ -48,6 +49,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
   at::Tensor bias_;
+  bool per_channel_;
   c10::optional<double> input_scale;
   at::Tensor w_scales;
   std::vector<uint8_t> w_zero_points;
@@ -75,8 +77,23 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       at::Tensor weight,
       c10::optional<at::Tensor> bias);
 
+  bool per_channel() const {
+    return per_channel_;
+  }
+
  private:
   std::mutex qnnp_mutex_;
+
+#ifdef USE_XNNPACK
+  xnnpack_operator xnnp_linear_op;
+
+  template <typename scalar_t, bool kReluFused>
+  at::Tensor apply_impl_xnnp(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
+#endif // USE_XNNPACK
+
   template <bool ReluFused>
   at::Tensor apply_impl(
       at::Tensor input,

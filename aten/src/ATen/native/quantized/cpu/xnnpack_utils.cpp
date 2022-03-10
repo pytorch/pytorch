@@ -31,11 +31,15 @@ std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
 }
 
 template <typename PT>
-void q8_conv_weight_copy_and_add_offset(const at::Tensor& in, at::Tensor& out) {
+void q8_copy_int8_weight_and_add_offset(const at::Tensor& in, at::Tensor& out) {
   using T = typename PT::underlying;
-
   static constexpr auto offset = std::is_same<T, uint8_t>::value ? 128 : 0;
-
+  TORCH_CHECK(
+      in.scalar_type() == c10::kQInt8,
+      "q8_copy_int8_weight_and_add_offset: Expected input weight data type ",
+      toString(c10::kQInt8),
+      " but got ",
+      toString(in.scalar_type()))
   const int8_t* in_ptr =
       reinterpret_cast<const int8_t*>(in.data_ptr<c10::qint8>());
   T* out_ptr = reinterpret_cast<T*>(out.data_ptr<PT>());
@@ -45,10 +49,10 @@ void q8_conv_weight_copy_and_add_offset(const at::Tensor& in, at::Tensor& out) {
   }
 }
 
-template void q8_conv_weight_copy_and_add_offset<c10::quint8>(
+template void q8_copy_int8_weight_and_add_offset<c10::quint8>(
     const at::Tensor& in,
     at::Tensor& out);
-template void q8_conv_weight_copy_and_add_offset<c10::qint8>(
+template void q8_copy_int8_weight_and_add_offset<c10::qint8>(
     const at::Tensor& in,
     at::Tensor& out);
 
