@@ -4,7 +4,7 @@
 
 #define JITERATOR_HOST_DEVICE C10_HOST_DEVICE
 #if defined(_MSC_VER) && defined(__CUDACC__)
-// NVRTC on Windows errors if __host__ attribute is
+// NVRTC on Windows errors if __host__ __device__ attribute is
 // present on kernel.
 // error: attribute "__host__" does not apply here
 // error: attribute "__device__" does not apply here
@@ -15,11 +15,11 @@
 // and generate code string for `jiterator` (only when compiling for CUDA).
 // Usage :
 //      jiterator_code_stringify(
-//          code(template <typename T> T identity(T x) { return x; }),
+//          jiterator_code(template <typename T> T identity(T x) { return x; }),
 //          identity_string);
-// This will define the function `identity` as present in code and
-// also define `std::string identity_string` if this is being compiled
-// for CUDA.
+// This will define the template `identity` as present in code and
+// also define `std::string identity_string` with the code as the string
+// if this is being compiled for CUDA.
 
 // `jiterator_code` macro is to deal with `,` in the kernel code.
 // These `,`s confuse the preprocessor into thinking we are passing
