@@ -39,12 +39,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 
-// Marks a lambda as executable on both the host and device. The __host__
-// attribute is important so that we can access static type information from
-// the host, even if the function is typically only executed on the device.
-#ifndef GPU_LAMBDA
-#define GPU_LAMBDA __host__ __device__
-#endif
 
 #ifdef __NVCC__
 #define ASSERT_HOST_DEVICE_LAMBDA(type) \
@@ -228,7 +222,7 @@ struct has_same_arg_types<func_t, -1> {
 }  // namespace detail
 
 template<typename func_t, typename array_t>
-C10_LAUNCH_BOUNDS_1(num_threads)
+C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   // Assumption:
   // 1. all arguments of `f` have the same type, which could be different from the return type of `f`
@@ -245,7 +239,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   constexpr int nargs = traits::arity == 0 ? 1 : traits::arity;
 
   int tid = threadIdx.x;
-  int idx = block_work_size * blockIdx.x + tid;
+  int idx = block_work_size() * blockIdx.x + tid;
 
   // compute base pointers
   return_t *result_base = reinterpret_cast<return_t *>(data[0]) + idx;
@@ -256,31 +250,31 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
   }
 
   // fetch data
-  return_t results[thread_work_size];
-  arg_t args[thread_work_size][nargs];
+  return_t results[thread_work_size()];
+  arg_t args[thread_work_size()][nargs];
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
+  for (int i = 0; i < thread_work_size(); i++) {
+    if (idx + num_threads() * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * num_threads);
+        args[i][j] = *(args_base[j] + i * num_threads());
       }
     }
   }
 
   // compute
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
+  for (int i = 0; i < thread_work_size(); i++) {
+    if (idx + num_threads() * i < N) {
       results[i] = detail::invoke_with_array<func_t, arg_t[nargs]>(f, args[i]);
     }
   }
 
   // store data
   #pragma unroll
-  for (int i = 0; i < thread_work_size; i++) {
-    if (idx + num_threads * i < N) {
-      *(result_base + i * num_threads) = results[i];
+  for (int i = 0; i < thread_work_size(); i++) {
+    if (idx + num_threads() * i < N) {
+      *(result_base + i * num_threads()) = results[i];
     }
   }
 }
@@ -292,9 +286,9 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   if (N == 0) {
     return;
   }
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<func_t, array_t><<<grid, num_threads, 0, stream>>>(N, f, data);
+  elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

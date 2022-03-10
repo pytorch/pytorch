@@ -4,6 +4,6 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(
     Add,
-    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>);
+    BinaryElementwiseOp<NumericTypes, CPUContext, AddFunctor<CPUContext>>);
 
 } // namespace caffe2

@@ -1,10 +1,18 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/LinearAlgebra.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/Loops.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/imag.h>
+#endif
 
 namespace at { namespace native { namespace {
 
@@ -19,7 +27,7 @@ void addr_kernel(TensorIterator &iter,
     // nans and infs in self should not propagate.
     if (beta_val == false) {
       cpu_kernel(iter,
-        [=](scalar_t self_val,
+        [=](scalar_t /*self_val*/,
             scalar_t vec1_val,
             scalar_t vec2_val) __ubsan_ignore_undefined__ -> scalar_t {
           return alpha_val && vec1_val && vec2_val;
@@ -52,12 +60,12 @@ void addr_kernel(TensorIterator &iter,
       // nans and infs in self should not propagate.
       if (beta_val == zero_val) {
         cpu_kernel_vec(iter,
-          [=](scalar_t self_val,
+          [=](scalar_t /*self_val*/,
               scalar_t vec1_val,
               scalar_t vec2_val) __ubsan_ignore_undefined__ -> scalar_t {
             return alpha_val * vec1_val * vec2_val;
           },
-          [=](Vec self_vec,
+          [=](Vec /*self_vec*/,
               Vec vec1_vec,
               Vec vec2_vec) __ubsan_ignore_undefined__ {
             return alpha_vec * vec1_vec * vec2_vec;
@@ -135,13 +143,14 @@ void unpack_pivots_cpu_kernel(
     auto* unpacked_pivots_ptr = data[0];
     const auto* pivots_ptr = data[1];
 
-    for (int64_t elem = 0; elem < nelems; ++elem) {
+    for (const auto elem : c10::irange(nelems)) {
+      (void)elem; //Suppress unused variable warning
       // WARNING: torch.lu returns int32 pivots,
       // this behavior could change in the future.
       auto* unpacked_pivots_data = reinterpret_cast<int32_t*>(unpacked_pivots_ptr);
       auto* pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
 
-      for (int64_t i = 0; i < dim_size; ++i) {
+      for (const auto i : c10::irange(dim_size)) {
         std::swap(
           unpacked_pivots_data[i],
           unpacked_pivots_data[pivots_data[i]]

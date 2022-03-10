@@ -2,11 +2,12 @@
 
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -68,6 +69,10 @@ class ComputeAt {
   // call.
   void setCommonConsumer();
 
+  // Iterate through all TVs and collect the dimensions of each TV that don't
+  // map to all its consumer TVs.
+  void buildUnmappableDims();
+
   // Propagate backward from consumer to producer, check if it increase
   // computeAt position on tensors, if so take it!
   void traverseBackward();
@@ -105,6 +110,9 @@ class ComputeAt {
 
   // Producer use chains set in, used in a few spots.
   std::deque<std::deque<TensorView*>> producer_use_chains_;
+
+  // Root domains in producer that's unmappable to any of its consumers
+  std::unordered_set<IterDomain*> unmappable_dims_;
 
   ComputeAt(
       TensorView* _producer,

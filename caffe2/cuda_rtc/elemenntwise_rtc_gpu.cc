@@ -5,8 +5,7 @@
 
 namespace caffe2 {
 namespace {
-class ElementwiseRTCFunction
-    : public CudaRTCFunction<ElementwiseRTCFunction> {
+class ElementwiseRTCFunction : public CudaRTCFunction<ElementwiseRTCFunction> {
  public:
   ElementwiseRTCFunction() : CudaRTCFunction(), name_(GetUniqueName()) {}
 
@@ -22,22 +21,21 @@ class ElementwiseRTCFunction
   string name_;
 };
 
-template<>
+template <>
 string ElementwiseRTCFunction::GetSource(
-    int input_size, int output_size,
+    int input_size,
+    int output_size,
     const string command_string) {
   std::stringstream ss;
-  ss << "extern \"C\" __global__ void " << name_ <<
-        "(const size_t nthreads, \n";
+  ss << "extern \"C\" __global__ void " << name_
+     << "(const size_t nthreads, \n";
   // Insert the parameter list.
   int remain_params = input_size + output_size;
   for (int i = 0; i < input_size; ++i) {
-    ss << "const float* in" << i
-       << ((remain_params--) ? ", \n" : "");
+    ss << "const float* in" << i << ((remain_params--) ? ", \n" : "");
   }
   for (int i = 0; i < output_size; ++i) {
-    ss << "float* out" << i
-       << ((remain_params--) ? ", \n" : "");
+    ss << "float* out" << i << ((remain_params--) ? ", \n" : "");
   }
   ss << ") {\n"
         "for (int index = blockIdx.x * blockDim.x + threadIdx.x;\n"
@@ -46,7 +44,7 @@ string ElementwiseRTCFunction::GetSource(
      << "}\n}";
   return ss.str();
 }
-}  // namespace
+} // namespace
 
 /**
  * A GPU operator that can generate limited elementwise operations.
@@ -75,17 +73,17 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
  public:
   ElementwiseRTCOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CUDAContext>(operator_def, ws) {
-    const string src = OperatorBase::GetSingleArgument<string>(
-        "rtc_src", "");
+    const string src = OperatorBase::GetSingleArgument<string>("rtc_src", "");
     CAFFE_ENFORCE(src.size(), "Op should have a non-zero source code size.");
     func_.Compile(InputSize(), OutputSize(), src);
   }
   ~ElementwiseRTCOp() override {}
 
   bool RunOnDevice() override {
-    static_assert(sizeof(void*) == sizeof(size_t),
-                  "The argbuffer relies on the assumption that void* and "
-                  "size_t have the same size.");
+    static_assert(
+        sizeof(void*) == sizeof(size_t),
+        "The argbuffer relies on the assumption that void* and "
+        "size_t have the same size.");
     vector<size_t> argBuffer_vec(InputSize() + OutputSize() + 1);
     size_t* argBuffer = argBuffer_vec.data();
     CAFFE_ENFORCE(
@@ -102,10 +100,11 @@ class ElementwiseRTCOp final : public Operator<CUDAContext> {
     }
     size_t argBufferSize = sizeof(argBuffer);
     void* config[] = {
-      CU_LAUNCH_PARAM_BUFFER_POINTER, argBuffer,
-      CU_LAUNCH_PARAM_BUFFER_SIZE, &argBufferSize,
-      CU_LAUNCH_PARAM_END
-    };
+        CU_LAUNCH_PARAM_BUFFER_POINTER,
+        argBuffer,
+        CU_LAUNCH_PARAM_BUFFER_SIZE,
+        &argBufferSize,
+        CU_LAUNCH_PARAM_END};
     func_.LaunchEx(
         CAFFE_GET_BLOCKS(Input(0).numel()),
         1,
@@ -127,4 +126,4 @@ namespace {
 REGISTER_CUDA_OPERATOR_WITH_ENGINE(ElementwiseRTC, NVRTC, ElementwiseRTCOp);
 }
 
-}  // namespace caffe2
+} // namespace caffe2

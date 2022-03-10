@@ -464,31 +464,6 @@ kernel void reflection_pad2d(texture2d_array<half, access::read> in_arr[[texture
   }
 }
 
-constant bool resize_is_arr = (ushort_arg_4 > 1 || ushort_arg_5 > 4);
-constant bool resize_is_tex = !resize_is_arr;
-kernel void resize_nearest(texture2d_array<half, access::sample> in_arr[[texture(0), function_constant(resize_is_arr)]],
-                           texture2d<half, access::sample> in_tex[[texture(0), function_constant(resize_is_tex)]],
-                           texture2d_array<half, access::write> out_arr[[texture(1), function_constant(resize_is_arr)]],
-                           texture2d<half, access::write> out_tex[[texture(1), function_constant(resize_is_tex)]],
-                           ushort3 gid[[thread_position_in_grid]]) {
-    const ushort oH = ushort_arg_0;
-    const ushort oW = ushort_arg_1;
-    if (gid.x >= oW || gid.y >= oH) {
-        return;
-    }
-    const float height_scale = float(ushort_arg_2) / 10000;
-    const float width_scale = float(ushort_arg_3) / 10000;
-    constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::nearest);
-    const int in_y = (int)(gid.y / height_scale);
-    const int in_x = (int)(gid.x / width_scale);
-    if(resize_is_arr) {
-        out_arr.write(in_arr.sample(s, float2(in_x, in_y), gid.z), gid.xy, gid.z);
-    } else {
-        out_tex.write(in_tex.sample(s, float2(in_x, in_y)), gid.xy);
-    }
-}
-
-
 constant bool reshape_out_is_arr = (ushort_arg_3 > 1 || ushort_arg_2 > 4);
 constant bool reshape_out_is_tex = !reshape_out_is_arr;
 constant bool reshape_in_is_arr = (ushort_arg_7 > 1 || ushort_arg_6 > 4);

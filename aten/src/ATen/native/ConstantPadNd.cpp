@@ -47,7 +47,7 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
         new_shape.emplace_back(input_sizes[i]);
     }
 
-    for (size_t i = 0; i < (size_t)l_pad; i++) {
+    for (const auto i : c10::irange((size_t)l_pad)) {
         auto pad_idx = pad.size() - ((i + 1) * 2);
         auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
         TORCH_CHECK(new_dim > 0, "The input size ", input_sizes[l_diff + i], ", plus negative padding ",

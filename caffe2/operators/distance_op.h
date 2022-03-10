@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -37,7 +38,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
     int N = X.dim() > 0 ? X.dim32(0) : 1;
     int D = N > 0 ? X.numel() / N : 0;
     CAFFE_ENFORCE(X.dim() == Y.dim());
-    for (int i = 0; i < X.dim(); ++i) {
+    for (const auto i : c10::irange(X.dim())) {
       CAFFE_ENFORCE(X.dim32(i) == Y.dim32(i));
     }
     CAFFE_ENFORCE(dDistance.dim() == 1);
@@ -50,7 +51,7 @@ class SquaredL2DistanceGradientOp final : public Operator<Context> {
         Y.template data<T>(),
         dX->template mutable_data<T>(),
         &context_);
-    for (int i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       math::Scale<T, T, Context>(
           D,
           dDistance.template data<T>() + i,
@@ -227,7 +228,7 @@ class DotProductWithPaddingGradientOp final : public Operator<Context> {
     const auto* dDot_data = dDot.template data<T>();
     auto* dX_data = dX->template mutable_data<T>();
     auto* dY_data = dY->template mutable_data<T>();
-    for (int i = 0; i < N; ++i) { // TODO: multithreading
+    for (const auto i : c10::irange(N)) { // TODO: multithreading
       auto offsetX = i * DX;
       auto offsetY = i * DY;
       if (replicate_) {

@@ -1,6 +1,17 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/VariableHooksInterface.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/FunctionalTensorWrapper.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/MethodOperators.h>
+#else
+#include <ATen/ops/contiguous_ops.h>
+#include <ATen/ops/fill_ops.h>
+#include <ATen/ops/to_ops.h>
+#include <ATen/ops/zero_ops.h>
+#endif
 
 #include <iostream>
 
@@ -27,6 +38,18 @@ const TensorBase& TensorBase::zero_() const {
   return *this;
 }
 
+TensorBase TensorBase::to(
+    at::TensorOptions options,
+    bool non_blocking,
+    bool copy,
+    c10::optional<at::MemoryFormat> memory_format) const {
+  Tensor self(*this);
+  return at::_ops::to_dtype_layout::call(
+      self, optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(), options.device_opt(),
+      options.pinned_memory_opt(), non_blocking, copy, memory_format);
+}
+
 void TensorBase::enforce_invariants() {
   if (impl_.get() == nullptr) {
     throw std::runtime_error("TensorImpl with nullptr is not supported");
@@ -42,7 +65,7 @@ void TensorBase::enforce_invariants() {
         !impl_->is_sparse(),
         "Sparse Tensors are supported by Tensor, but invariant checking isn't implemented.  Please file a bug.");
     TORCH_INTERNAL_ASSERT(
-        impl_->storage_initialized(),
+        !impl_->has_storage() || impl_->is_meta() || impl_->storage_initialized(),
         "Partially-initialized tensor not supported by Tensor");
   }
 }
@@ -113,7 +136,7 @@ const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
   return *this;
 }
 
-// View Variables
+// View Methods
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool TensorBase::is_view() const {

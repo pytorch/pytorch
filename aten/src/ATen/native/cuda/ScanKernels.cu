@@ -1,24 +1,17 @@
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/core/TensorBase.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/TensorUtils.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/ReduceOps.h>
 #include <c10/util/accumulate.h>
 
 #include <ATen/cuda/cub.cuh>
 
+#include <ATen/native/cuda/ScanKernels.h>
 
 namespace at { namespace native {
-
-static c10::MaybeOwned<Tensor> contiguous_out_arg(const Tensor &tensor) {
-  if (tensor.is_contiguous()) {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
-  }
-  return c10::MaybeOwned<Tensor>::owned(at::empty(tensor.sizes(), tensor.options()));
-}
 
 template <typename integer>
 constexpr inline integer ceil_div(integer n, integer m) {
@@ -172,7 +165,7 @@ void check_fits_in_unsigned(int64_t val, const char* name) {
 
 template<typename scalar_t, class BinaryFunction>
 __host__ void scan_outer_dim_with_indices(
-    const Tensor& self, const Tensor& values, const Tensor& indices,
+    const TensorBase& self, const TensorBase& values, const TensorBase& indices,
     int dim, scalar_t init, BinaryFunction binary_op) {
   int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
@@ -200,7 +193,7 @@ __host__ void scan_outer_dim_with_indices(
 
 template <typename scalar_t, class BinaryFunction>
 __host__ void scan_innermost_dim_with_indices(
-    const Tensor& self, const Tensor& values, const Tensor& indices,
+    const TensorBase& self, const TensorBase& values, const TensorBase& indices,
     scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
@@ -217,30 +210,19 @@ __host__ void scan_innermost_dim_with_indices(
 }
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices, //int64_t dim) {
+void scan_dim_with_indices(const TensorBase& self, const TensorBase& values, const TensorBase& indices, //int64_t dim) {
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   auto self_ = self.expect_contiguous();
-  auto values_ = contiguous_out_arg(values);
-  auto indices_ = contiguous_out_arg(indices);
+  TORCH_INTERNAL_ASSERT(values.is_contiguous() && indices.is_contiguous());
   if (dim == ndim - 1) {
-    scan_innermost_dim_with_indices<scalar_t>(*self_, *values_, *indices_, init, binary_op);
+    scan_innermost_dim_with_indices<scalar_t>(*self_, values, indices, init, binary_op);
   } else {
-    scan_outer_dim_with_indices<scalar_t>(*self_, *values_, *indices_, dim, init, binary_op);
-  }
-  if (!values.is_same(*values_)) {
-    values.copy_(*values_);
-  }
-  if (!indices.is_same(*indices_)) {
-    indices.copy_(*indices_);
+    scan_outer_dim_with_indices<scalar_t>(*self_, values, indices, dim, init, binary_op);
   }
 }
 
-void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  TensorArg output_arg{ values, "output", 1 };
-  TensorArg indices_arg{ indices, "indices", 2 };
-  TensorArg input_arg{ self, "input", 3 };
-  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
+void launch_cummax_cuda_kernel(const TensorBase& self, const TensorBase& values, const TensorBase& indices, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummax_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? (-1*std::numeric_limits<scalar_t>::infinity()) : std::numeric_limits<scalar_t>::lowest();
@@ -248,11 +230,7 @@ void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   });
 }
 
-void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  TensorArg output_arg{ values, "output", 1 };
-  TensorArg indices_arg{ indices, "indices", 2 };
-  TensorArg input_arg{ self, "input", 3 };
-  checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
+void launch_cummin_cuda_kernel(const TensorBase& self, const TensorBase& values, const TensorBase& indices, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
     self.scalar_type(), "cummin_cuda", [&]() {
     scalar_t init = self.is_floating_point() ? std::numeric_limits<scalar_t>::infinity() : std::numeric_limits<scalar_t>::max();
@@ -426,7 +404,7 @@ tensor_kernel_scan_innermost_dim(
 
 
 template<typename scalar_t, class BinaryFunction>
-__host__ void scan_outer_dim(const Tensor& self, const Tensor& result,
+__host__ void scan_outer_dim(const TensorBase& self, const TensorBase& result,
                              int dim, scalar_t init, BinaryFunction binary_op) {
   const int64_t row_size = self.size(dim);
   auto sizes = self.sizes();
@@ -452,7 +430,7 @@ __host__ void scan_outer_dim(const Tensor& self, const Tensor& result,
 }
 
 template <typename scalar_t, class BinaryFunction>
-void scan_innermost_dim(const Tensor& self, const Tensor& result,
+void scan_innermost_dim(const TensorBase& self, const TensorBase& result,
                         scalar_t init, BinaryFunction binary_op) {
   int64_t ndim = self.dim();
   // Treat all outer dimensions as a single dimension.
@@ -473,40 +451,23 @@ void scan_innermost_dim(const Tensor& self, const Tensor& result,
 }
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_dim(const Tensor& self, const Tensor& result,
+void scan_dim(const TensorBase& self, const TensorBase& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   auto self_ = self.expect_contiguous();
-  auto result_ = contiguous_out_arg(result);
+  TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   if (self.numel() == self.size(dim)) {
-    cuda::cub::inclusive_scan(self_->data_ptr<scalar_t>(), result_->data_ptr<scalar_t>(), binary_op, self.numel());
+    cuda::cub::inclusive_scan(self_->data_ptr<scalar_t>(), result.data_ptr<scalar_t>(), binary_op, self.numel());
   } else if (dim == ndim - 1) {
-    scan_innermost_dim<scalar_t>(*self_, *result_, init, binary_op);
+    scan_innermost_dim<scalar_t>(*self_, result, init, binary_op);
   } else {
-    scan_outer_dim<scalar_t>(*self_, *result_, dim, init, binary_op);
-  }
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
+    scan_outer_dim<scalar_t>(*self_, result, dim, init, binary_op);
   }
 }
 
-Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
-  result.resize_(self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
-  TensorArg output_arg{ result, "output", 1 };
-  TensorArg input_arg{ self, "input", 2 };
-  checkAllSameGPU(__func__, {output_arg, input_arg});
-
+void launch_logcumsumexp_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
+  const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "logcumsumexp_cuda",
@@ -526,16 +487,9 @@ Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) 
         };
         scan_dim<scalar_t>(self, result, wrap_dim, init, log_add_exp);
       });
-
-  return result;
 }
 
-Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return _logcumsumexp_out_cuda(self, dim, result);
-}
-
-void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void launch_cumsum_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "cumsum_cuda",
@@ -550,7 +504,7 @@ void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
       });
 }
 
-void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void launch_cumprod_cuda_kernel(const TensorBase& result, const TensorBase& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_cuda", [&]() {
         scalar_t init = 1;
@@ -562,8 +516,5 @@ void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) 
             std::multiplies<scalar_t>());
       });
 }
-
-REGISTER_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
-REGISTER_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
 
 }} // namespace at::native

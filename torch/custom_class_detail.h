@@ -8,6 +8,29 @@
 
 namespace torch {
 
+namespace detail {
+/**
+ * In the Facebook internal build (using BUCK), this macro is enabled by
+ * passing in -c pt.enable_record_kernel_dtype=1 when building the tracer
+ * binary.
+ */
+#if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
+TORCH_API void record_custom_class(std::string name);
+
+/**
+ * Record an instance of a custom class being loaded
+ * grab portion of string after final '.' from qualified name
+ * as this seemingly aligns with how users name their custom classes
+ * example: __torch__.torch.classes.xnnpack.Conv2dOpContext
+ */
+#define RECORD_CUSTOM_CLASS(NAME) \
+  auto name = std::string(NAME);  \
+  detail::record_custom_class(name.substr(name.find_last_of(".") + 1));
+#else
+#define RECORD_CUSTOM_CLASS(NAME)
+#endif
+} // namespace detail
+
 /// This struct is used to represent default values for arguments
 /// when registering methods for custom classes.
 ///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
@@ -23,7 +46,8 @@ struct arg {
   }
 
   // Explicit constructor.
-  explicit arg(std::string name) : name_(std::move(name)), value_(c10::nullopt) {}
+  explicit arg(std::string name)
+      : name_(std::move(name)), value_(c10::nullopt) {}
   // Assignment operator. This enables the pybind-like syntax of
   // torch::arg("name") = value.
   arg& operator=(const c10::IValue& rhs) {
@@ -34,8 +58,8 @@ struct arg {
   // The name of the argument. This is copied to the schema; argument
   // names cannot be extracted from the C++ declaration.
   std::string name_;
-  // IValue's default constructor makes it None, which is not distinguishable from
-  // an actual, user-provided default value that is None. This boolean
+  // IValue's default constructor makes it None, which is not distinguishable
+  // from an actual, user-provided default value that is None. This boolean
   // helps distinguish between the two cases.
   c10::optional<c10::IValue> value_;
 };
@@ -110,13 +134,15 @@ call_torchbind_method_from_stack(
 
   using IValueArgTypes =
       typename c10::guts::infer_function_traits_t<Functor>::parameter_types;
-  // TODO We shouldn't use c10::impl stuff directly here. We should use the KernelFunction API instead.
+  // TODO We shouldn't use c10::impl stuff directly here. We should use the
+  // KernelFunction API instead.
   return (functor)(c10::impl::ivalue_to_arg<
                    typename c10::impl::decay_if_not_tensor<
                        c10::guts::typelist::
                            element_t<ivalue_arg_indices, IValueArgTypes>>::type,
-                   AllowDeprecatedTypes>::call(
-      torch::jit::peek(stack, ivalue_arg_indices, num_ivalue_args))...);
+                   AllowDeprecatedTypes>::
+                       call(torch::jit::peek(
+                           stack, ivalue_arg_indices, num_ivalue_args))...);
 }
 
 template <class Functor, bool AllowDeprecatedTypes>
@@ -157,13 +183,17 @@ inline bool validIdent(size_t i, char n) {
   return isalpha(n) || n == '_' || (i > 0 && isdigit(n));
 }
 
-inline void checkValidIdent(const std::string& str, const char *type) {
+inline void checkValidIdent(const std::string& str, const char* type) {
   for (const auto i : c10::irange(str.size())) {
-    TORCH_CHECK(validIdent(i, str[i]),
-      type,
-      " must be a valid Python/C++ identifier."
-      " Character '", str[i], "' at index ",
-      i, " is illegal.");
+    TORCH_CHECK(
+        validIdent(i, str[i]),
+        type,
+        " must be a valid Python/C++ identifier."
+        " Character '",
+        str[i],
+        "' at index ",
+        i,
+        " is illegal.");
   }
 }
 
@@ -204,6 +234,6 @@ TORCH_API std::vector<c10::FunctionSchema> customClassSchemasForBCCheck();
 namespace jit {
 using ::torch::registerCustomClass;
 using ::torch::registerCustomClassMethod;
-}
+} // namespace jit
 
 } // namespace torch

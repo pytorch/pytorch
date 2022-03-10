@@ -4,12 +4,14 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
+#include <ATen/ScalarOps.h>
+
 namespace torch {
 namespace jit {
 
 void SetNumTypeToTensorType(Value* v) {
   if (v->type()->isSubtypeOf(*NumberType::get())) {
-    v->setType(TensorType::fromNumberType(v->type()));
+    v->setType(TensorType::fromNumberType(*v->type()));
   } else if (v->type()->isSubtypeOf(*BoolType::get())) {
     v->setType(TensorType::fromBoolType());
   }
@@ -40,6 +42,7 @@ void EraseNumberTypesOnBlock(Block* block) {
           WithInsertPoint guard(*it);
           Value* r = block->owningGraph()->insertConstant(
               scalar_to_tensor(s), c10::nullopt, it->scope());
+          r->copyMetadata(it->output());
           it->output()->replaceAllUsesWith(r);
           it.destroyCurrent();
         }

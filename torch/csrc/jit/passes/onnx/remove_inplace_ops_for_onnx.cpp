@@ -177,11 +177,12 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
       graph->insert(aten::expand_as, {node->input(1), node->input(0)});
   expanded_value->node()->setSourceRange(node->sourceRange());
   expanded_value->copyMetadata(node->input(1));
+  expanded_value->node()->copyMetadata(node);
 
   auto index_put = graph->insert(
       aten::index_put_,
       {node->input(0), dummy_list, expanded_value, node->input(2)});
-  index_put->node()->setSourceRange(node->sourceRange());
+  index_put->node()->copyMetadata(node);
   index_put->copyMetadata(node->output());
   node->output()->replaceAllUsesWith(index_put);
 
@@ -193,6 +194,7 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
 auto PrepareSetForONNX(Node* n) {
   TORCH_INTERNAL_ASSERT(n->kind() == aten::set_);
   auto clone_n = addDummyClone(n->owningGraph(), n->input(1), true, n);
+  TORCH_INTERNAL_ASSERT(nullptr != clone_n);
   clone_n->copyMetadata(n);
 
   auto orig_input = n->input(0);
@@ -221,7 +223,7 @@ std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
   }
   new_node->output()->setType(node->output()->type());
   new_node->insertBefore(node);
-  new_node->setSourceRange(node->sourceRange());
+  new_node->copyMetadata(node);
   node->replaceAllUsesWith(new_node);
   node->destroy();
 
@@ -235,7 +237,7 @@ std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
     new_copy->addInput(new_node->output());
     new_copy->addInput(false_val_);
     new_copy->insertAfter(new_node);
-    new_copy->setSourceRange(new_node->sourceRange());
+    new_copy->copyMetadata(new_node);
 
     return PrepareCopyForONNX(new_copy);
   } else {
@@ -260,6 +262,7 @@ static std::pair<Value*, Value*> PrepareListPopForONNX(Node* n) {
       n->owningGraph()->create(aten::__getitem__, {n->inputs()});
   getitem_node->output()->setType(n->output()->type());
   getitem_node->insertBefore(n);
+  getitem_node->copyMetadata(n);
   n->output()->replaceAllUsesWith(getitem_node->output());
   n->output()->setType(n->inputs().at(0)->type());
 
@@ -337,6 +340,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
           Node* newNode =
               addDummyClone(b->owningGraph(), input, false, b->return_node());
           TORCH_INTERNAL_ASSERT(nullptr != newNode);
+          newNode->copyMetadata(node);
           node->replaceInput(index, newNode->output());
           input->replaceAllUsesAfterNodeWith(node, newNode->output());
           needsRestart = true;

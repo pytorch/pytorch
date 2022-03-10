@@ -68,5 +68,5 @@ tensor per component.
     .Arg(
         "num_elements",
         "Number of elements to dequeue. By default we dequeue one element.");
-}
-}
+} // namespace
+} // namespace caffe2

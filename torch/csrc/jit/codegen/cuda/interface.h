@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
@@ -19,6 +19,11 @@ namespace cuda {
 
 TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
 
+C10_EXPORT bool getSingletonFusion();
+C10_EXPORT bool setSingletonFusion(bool value);
+C10_EXPORT bool getHorizontalFusion();
+C10_EXPORT bool setHorizontalFusion(bool value);
+
 // dummy struct to allow API registration
 struct CudaFuserInterface {
   void (*fn_compile_n)(Node*) = nullptr;
@@ -26,6 +31,7 @@ struct CudaFuserInterface {
   void (*fn_fuse_graph)(std::shared_ptr<Graph>&) = nullptr;
   bool (*fn_can_fuse_n)(const Node*) = nullptr;
   void (*fn_insert_profile_inodes)(ProfilingRecord* pr) = nullptr;
+  bool (*fn_profile_n)(const Node*) = nullptr;
 };
 
 // Get interface, this is used by registration and user facing API internally
@@ -36,6 +42,7 @@ C10_EXPORT void runFusionGroup(const Node* fusion_node, Stack& stack);
 C10_EXPORT void fuseGraph(std::shared_ptr<Graph>&);
 C10_EXPORT bool canFuseNode(const Node* node);
 C10_EXPORT void InsertProfileNodesForCUDAFuser(ProfilingRecord* pr);
+C10_EXPORT bool profileNode(const Node* node);
 
 C10_EXPORT bool complyWith(
     const at::Tensor& tensor,

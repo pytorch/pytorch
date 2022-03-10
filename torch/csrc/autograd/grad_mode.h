@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/grad_mode.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch { namespace autograd {
 

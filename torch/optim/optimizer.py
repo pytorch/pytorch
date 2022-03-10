@@ -201,8 +201,12 @@ class Optimizer(object):
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
+        foreach = self.defaults.get('foreach', False)
+
         if not hasattr(self, "_zero_grad_profile_name"):
             self._hook_for_profile()
+        if foreach:
+            per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         with torch.autograd.profiler.record_function(self._zero_grad_profile_name):
             for group in self.param_groups:
                 for p in group['params']:
@@ -214,7 +218,14 @@ class Optimizer(object):
                                 p.grad.detach_()
                             else:
                                 p.grad.requires_grad_(False)
-                            p.grad.zero_()
+                            if (not foreach or p.grad.is_sparse):
+                                p.grad.zero_()
+                            else:
+                                per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+            if foreach:
+                for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                    for grads in per_dtype_grads.values():
+                        torch._foreach_zero_(grads)
 
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
@@ -237,7 +248,7 @@ class Optimizer(object):
 
         Args:
             param_group (dict): Specifies what Tensors should be optimized along with group
-            specific optimization options.
+                specific optimization options.
         """
         assert isinstance(param_group, dict), "param group must be a dict"
 

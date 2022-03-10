@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 import unittest
@@ -50,8 +52,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with disable_autodiff_subgraph_inlining():
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
-                self.assertAutodiffNode(func.graph_for(input), True, ['prim::ConstantChunk'], [])
-
+                FileCheck().check_not("prim::DifferentiableGraph").run(func.graph_for(input))
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
     def test_diff_graph_inline_threshold(self):
@@ -370,3 +371,115 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
             .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+
+    def test_aliased_outputs(self):
+
+        with enable_profiling_mode_for_profiling_tests():
+
+
+            # Case 1: aliasing between relu and t
+            # is within a DifferentiableGraph. It should be valid
+            # to merge both split_with_sizes in relu in one graph
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %2 : Tensor = aten::t(%b)
+        return (%2)
+    """
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu").check("aten::t") \
+                .run(graph)
+
+            # Case 2: aliasing between relu and split_with_sizes
+            # are both outputs of a Diff graph. It should be invalid
+            # to merge both split_with_sizes in relu in one graph
+            # i.e. relu and split_with_sizes should be in different
+            # differentiable graphs
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        %3 : (Tensor[], Tensor[]) = prim::TupleConstruct(%b, %2)
+        return (%3)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::split_with_sizes") \
+                .run(graph)
+
+            # Case 3: two aliased nodes in a graph.
+            # Both `split_with_sizes` should be unfused
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %s1 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %s2 : int[] = prim::Constant[value=[3, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %s1, %1)
+        %3 : Tensor[] = aten::split_with_sizes(%b, %s2, %1)
+        %4 : (Tensor, Tensor[]) = prim::TupleConstruct(%b, %2, %3)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::split_with_sizes") \
+                .run(graph)
+
+            # Case 4: the aliased output has a descendant
+            # Both should be unfused. Note, %3 comes before %2
+            # to test that we unfuse in the reverse topo order
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor = aten::t(%b)
+        %3 : Tensor = aten::relu(%2)
+        %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %3, %2)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::t") \
+                .run(graph)
+
+            # Case 5: multiple aliased groups
+            # Both should be unfused. Note, %3 comes before %2
+            # to test that we unfuse in the reverse topo order
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %c : Tensor = aten::abs(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %d : Tensor = aten::t(%c)
+        %2 : Tensor = aten::t(%b)
+        %3 : Tensor = aten::relu(%2)
+        %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%3, %2, %d, %b, %c, %b)
+        return (%4)
+"""
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("Tensor = prim::DifferentiableGraph") \
+                .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
+                .check_not("aten::t") \
+                .run(graph)

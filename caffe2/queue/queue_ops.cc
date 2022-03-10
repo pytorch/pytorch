@@ -96,4 +96,4 @@ NO_GRADIENT(SafeEnqueueBlobs);
 NO_GRADIENT(SafeDequeueBlobs);
 NO_GRADIENT(WeightedSampleDequeueBlobs);
 
-}
+} // namespace caffe2

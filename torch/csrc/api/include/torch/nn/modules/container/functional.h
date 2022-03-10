@@ -4,7 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <functional>
 #include <utility>

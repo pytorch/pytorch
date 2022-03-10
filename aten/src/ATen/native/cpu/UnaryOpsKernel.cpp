@@ -18,6 +18,7 @@
 
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -26,7 +27,7 @@
 namespace at {
 namespace native {
 
-namespace CPU_CAPABILITY {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -103,7 +104,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
   T* Y_data = static_cast<T*>(it->data_ptr(0));
   if (eps < T(0)) {
     at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-      for (int64_t i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         Y_data[i] = X_data[i] == T(1) ? std::numeric_limits<T>::infinity()
                                       : X_data[i] / (T(1) - X_data[i]);
       }
@@ -113,7 +114,7 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
     const T lo = eps;
     const T hi = T(1) - eps;
     at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
-      for (int64_t i = begin; i < end; ++i) {
+      for (const auto i : c10::irange(begin, end)) {
         const T x = X_data[i] < lo ? lo : (X_data[i] > hi ? hi : X_data[i]);
         Y_data[i] =
             x == T(1) ? std::numeric_limits<T>::infinity() : (x / (T(1) - x));
@@ -209,7 +210,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-static void conj_kernel(TensorIteratorBase& iter) {
+void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
@@ -411,7 +412,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
-          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(a, n); });
     });
   }
 }
@@ -536,6 +537,23 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   });
 }
 
+void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, iter.dtype(), "round_cpu", [&]() {
+        bool neg_flag = false;
+        scalar_t ten_pow_decimals;
+        if (decimals < 0) {
+          decimals = -decimals;
+          neg_flag = true;
+        }
+        ten_pow_decimals = static_cast<scalar_t>(std::pow(10, decimals));
+        cpu_kernel(iter, [ten_pow_decimals, neg_flag](scalar_t a) -> scalar_t {
+          return neg_flag ? std::nearbyint(a / ten_pow_decimals) * ten_pow_decimals
+                          : std::nearbyint(a * ten_pow_decimals) / ten_pow_decimals;
+        });
+      });
+}
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -552,17 +570,17 @@ static void erfcx_kernel(TensorIteratorBase& iter){
                 scalar_t buffer[WIDTH];                                       \
                 int64_t width = WIDTH;                                        \
                 width = std::min(width, n - i);                               \
-                for (int64_t j = 0; j < width; j++)                           \
+                for (const auto j : c10::irange(width))\
                   buffer[j] = in_data[in_stride * (i + j)];                   \
                 vml::v##op(buffer, buffer, width);                            \
-                for (int64_t j = 0; j < width; j++)                           \
+                for (const auto j : c10::irange(width))\
                   out_data[out_stride * (i + j)] = buffer[j];                 \
               }                                                               \
             }                                                                 \
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
-  namespace CPU_CAPABILITY {                                                        \
+  inline namespace CPU_CAPABILITY {                                                 \
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
@@ -576,7 +594,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
-  namespace CPU_CAPABILITY {                                                                     \
+  inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
@@ -626,6 +644,7 @@ REGISTER_DISPATCH(special_ndtri_stub, &CPU_CAPABILITY::ndtri_kernel);
 REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
+REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
 
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
