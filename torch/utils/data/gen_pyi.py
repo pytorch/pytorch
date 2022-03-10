@@ -1,7 +1,29 @@
 import os
 import pathlib
 from typing import Dict, List, Set, Tuple, Union
-from tools.codegen.gen import FileManager
+
+
+def materialize_lines(lines: List[str], indentation: int = 4) -> str:
+    output = ""
+    new_line_with_indent = "\n" + " " * indentation
+    for i, line in enumerate(lines):
+        if i != 0:
+            output += new_line_with_indent
+        output += line.replace('\n', new_line_with_indent)
+    return output
+
+
+def gen_from_template(dir: str, template_name: str, output_name: str, replacements: Dict):
+
+    template_path = os.path.join(dir, template_name)
+    output_path = os.path.join(dir, output_name)
+
+    with open(template_path, "r") as f:
+        content = f.read()
+    for placeholder, lines in replacements.items():
+        with open(output_path, "w") as f:
+            content = content.replace(placeholder, materialize_lines(lines))
+            f.write(content)
 
 
 def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str]:
@@ -194,11 +216,10 @@ def main() -> None:
     map_method_definitions = get_method_definitions(mapDP_file_path, mapDP_files_to_exclude, mapDP_deprecated_files,
                                                     "MapDataPipe", mapDP_method_to_special_output_type)
 
-    fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
-    fm.write_with_template(filename="datapipe.pyi",
-                           template_fn="datapipe.pyi.in",
-                           env_callable=lambda: {'IterDataPipeMethods': iter_method_definitions,
-                                                 'MapDataPipeMethods': map_method_definitions})
+    path = pathlib.Path(__file__).parent.resolve()
+    replacements = {'${IterDataPipeMethods}': iter_method_definitions,
+                    '${MapDataPipeMethods}': map_method_definitions}
+    gen_from_template(dir=path, template_name="datapipe.pyi.in", output_name="datapipe.pyi", replacements=replacements)
 
 
 if __name__ == '__main__':
