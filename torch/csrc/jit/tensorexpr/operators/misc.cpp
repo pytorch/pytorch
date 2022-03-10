@@ -14,7 +14,7 @@ int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   }
 
   if (idx < 0 || idx >= list_size) {
-    AT_ERROR("Invalid index ", idx, " for list_size", list_size);
+    AT_ERROR("Invalid index ", idx, " for list_size ", list_size);
   }
   return idx;
 }
@@ -643,9 +643,9 @@ Tensor computeCat(
 }
 
 static bool checkStackInputShape(const std::vector<BufHandle>& bufList) {
-  if (bufList.size() == 0) {
-    throw std::runtime_error("Empty input list is passed to aten::stack");
-  }
+  TORCH_INTERNAL_ASSERT(
+      bufList.size() != 0,
+      buildErrorMessage("Empty input list is passed to aten::stack"));
 
   auto buf0 = bufList.at(0);
   TORCH_INTERNAL_ASSERT(
@@ -665,14 +665,14 @@ static bool checkStackInputShape(const std::vector<BufHandle>& bufList) {
     auto buf = bufList.at(i);
     TORCH_INTERNAL_ASSERT(
         buf.node()->dims().size() == dims.size(),
-        buildErrorMessage("aten::stack inputs have different sizes"));
+        buildErrorMessage("aten::stack inputs are with different sizes"));
     auto dims_to_cmp = buf.dims();
     for (int k = 0; k < dims.size(); k++) {
       auto diff = IRSimplifier::simplify(
           alloc<Sub>(dims_to_cmp.at(k).node(), dims.at(k).node()));
       TORCH_INTERNAL_ASSERT(
           diff->isConstant() && immediateAs<int>(diff) == 0,
-          buildErrorMessage("different aten::stack inputs dims"));
+          buildErrorMessage("aten::stack inputs are with different sizes"));
     }
   }
 
@@ -720,13 +720,12 @@ Tensor computeStack(
 
         for (size_t ii = 1; ii < inputList.size(); ++ii) {
           auto input = inputList[ii];
-          load = ifThenElse(
-              CompareSelect::make(
-                  axes.at(dim),
-                  Cast::make(axes.at(dim).dtype(), int64_t(ii)),
-                  kEQ),
+          load = CompareSelect::make(
+              axes.at(dim),
+              Cast::make(axes.at(dim).dtype(), int64_t(ii)),
               promoteToDtype(tensorOrConstant(input, newAxes), highType),
-              load);
+              load,
+              kEQ);
         }
 
         return load;
