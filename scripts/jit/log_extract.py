@@ -123,15 +123,17 @@ def run_nvfuser(ir, inputs) -> float:
 
 
 def test_nvfuser(graphs: List[str], baseline_fn, nvfuser_fn):
+    print("Graph no, baseline ms, nvfuser ms, improvement percentage")
     for i, ir in enumerate(graphs):
         _, inputs = load_graph_and_inputs(ir)
         try:
             baseline = baseline_fn(ir, inputs)
             nvfuser = nvfuser_fn(ir, inputs)
             improvement = (baseline / nvfuser - 1) * 100
-            print(f"  Graph {i}; baseline: {baseline:.2f} ms; nvfuser: {nvfuser:.2f} ms; improvement: {improvement:.2f}%")
+            print(f"{i}, {baseline:.2f}, {nvfuser:.2f}, {improvement:.2f}%")
         except RuntimeError:
-            print(f"  Graph {i} failed:", traceback.format_exc())
+            print("fail fail fail")
+            print(f"{i}, failed :", traceback.format_exc())
 
 
 def run():
