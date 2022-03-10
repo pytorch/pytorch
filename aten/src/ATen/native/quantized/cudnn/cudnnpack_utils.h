@@ -26,7 +26,7 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
       bool transpose,
       c10::QScheme q_scheme)
       : orig_weight(std::move(orig_weight)),
-        bias(std::move(bias)),
+        bias_(std::move(bias)),
         stride_(std::move(stride)),
         padding_(std::move(padding)),
         output_padding_(std::move(output_padding)),
@@ -97,7 +97,7 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
 
  private:
   at::Tensor orig_weight;
-  c10::optional<at::Tensor> bias;
+  c10::optional<at::Tensor> bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
   torch::List<int64_t> output_padding_;
