@@ -1890,12 +1890,12 @@ add_docstr_all('index_put_',
                r"""
 index_put_(indices, values, accumulate=False) -> Tensor
 
-Puts values from the tensor :attr:`values` into the tensor :attr:`self` using
-the indices specified in :attr:`indices` (which is a tuple of Tensors). The
+Puts values from the tensor ``values`` into the tensor :attr:`self` using
+the indices specified in ``indices`` (which is a tuple of Tensors). The
 expression ``tensor.index_put_(indices, values)`` is equivalent to
 ``tensor[indices] = values``. Returns :attr:`self`.
 
-If :attr:`accumulate` is ``True``, the elements in :attr:`values` are added to
+If :attr:`accumulate` is ``True``, the elements in ``values`` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
 contain duplicate elements.
 
@@ -1903,6 +1903,119 @@ Args:
     indices (tuple of LongTensor): tensors used to index into `self`.
     values (Tensor): tensor of same dtype as `self`.
     accumulate (bool): whether to accumulate into self
+
+Details:
+
+Each of the tensors in ``indices`` is a set of coordinates into :attr:`self`.
+The first tensor contains coordinates into the first dimension, the second
+contains coordinates into the second dimension, etc. The number of tensors in
+``indices`` is the number of dimensions that each individual coordinate has.
+The tensors must either all have the same shape or their shapes must be
+broadcastable into a common shape (see :ref:`broadcasting-semantics`). One set
+of corresponding elements within the broadcasted index tensors represents one
+index coordinate. For instance::
+
+    indices = [
+        tensor([0, 4, 3, 2]),
+        tensor([5, 6, 8, 9])
+    ]
+
+In this example, ``indices`` contains four 2-D coordinates, (0, 5), (4, 6),
+(3, 8), and (2, 9).
+
+Here is an example with broadcasting::
+
+    indices = [
+        tensor([[2], [5]]),
+        tensor([3, 5, 0])
+    ]
+
+``indices[0].shape`` is (2, 1), and ``indices[1].shape`` is (3,). These shapes
+are broadcastable into the shape (2, 3). When the tensors are expanded into
+this shape, they become::
+
+    indices = [
+        tensor([[2, 2, 2], [5, 5, 5]]),
+        tensor([[3, 5, 0], [3, 5, 0]])
+    ]
+
+Now we can see that ``indices`` in this example represents six 2-D
+coordinates, and they are grouped into two sets of three. The first set is
+(2, 3), (2, 5), (2, 0), and the second set is (5, 3), (5, 5), (5, 0).
+
+If ``self`` has more dimensions than the number of tensors in ``indices``, then
+more index tensors will be logically appended to ``indices``, and the existing
+ones will be further expanded, so that all indices into the remaining
+dimensions are included. We'll refer to this further expanded list of index
+tensors as the "fully expanded indices". If ``self`` has the same number of
+dimensions as the number of tensors in ``indices``, then the broadcasted
+indices are the same as the fully expanded indices, and we don't need to expand
+them further or add any more index tensors.
+
+Consider an example using the ``indices`` argument discussed in the previous
+example with a ``self`` tensor of shape (6, 6, 2). Since the size of the third
+dimension of ``self`` is 2, we will append a third dimension of size 2 to each
+of the broadcasted index tensors, so that they have the shape (2, 3, 2). Then,
+we'll append a third index tensor, also with shape (2, 3, 2), containing all
+the indices of the third dimension. The fully expanded indices are::
+
+    indices = [
+        tensor([[[2, 2], [2, 2], [2, 2]], [[5, 5], [5, 5], [5, 5]]]),
+        tensor([[[3, 3], [5, 5], [0, 0]], [[3, 3], [5, 5], [0, 0]]]),
+        tensor([[[0, 1], [0, 1], [0, 1]], [[0, 1], [0, 1], [0, 1]]])
+    ]
+
+Notice that each 2-D index was expanded into two 3-D indices, since the size of
+the third dimension of ``self`` is 2. The index (2, 3) was expanded into (2, 3,
+0) and (2, 3, 1), (2, 5) was expanded into (2, 5, 0) and (2, 5, 1), etc. If we
+had used a ``self`` tensor whose third dimension is size 3, then each of the
+broadcasted ``indices`` would have been expanded to three indices. For
+instance, the index (2, 3) would have been expanded into (2, 3, 0), (2, 3, 1),
+and (2, 3, 2). If ``self`` had four dimensions, another index tensor would have
+been appended, and all the tensors would be expanded further, using the same
+process.
+
+Note that all tensors in the fully expanded indices have the same shape. We'll
+refer to this shape as the "fully expanded index-value shape". In the above
+example, the fully expanded index-value shape is (2, 3, 2).
+
+Finally, we can now consider the actual values that will be written to each of
+the indices. The ``values`` tensor will be expanded to match the fully expanded
+index-value shape, if it doesn't already. For this to be possible, the
+following conditions must be true:
+
+    * The number of dimensions in ``values`` must be less than or equal to the
+      number of dimensions of the fully expanded index-value shape.
+
+    * Starting from the rightmost dimension, the size of each dimension of
+      ``values`` must be either 1 or equal to the corresponding dimension of
+      the fully expanded index-value shape.
+
+For example, still using the same ``indices`` argument from above, and with
+a ``self`` of shape (6, 6, 2), let's say we have::
+
+    indices = [
+        tensor([[2], [5]]),
+        tensor([3, 5, 0])
+    ]
+    values = tensor([[1.], [2.], [3.]])
+
+
+``values`` has the shape (3, 1). Recall that the fully expanded index-value
+shape was (2, 3, 2). ``values`` can be expanded into this shape, and the fully
+expanded ``values`` and ``indices`` are::
+
+    indices = [
+        tensor([[[2, 2], [2, 2], [2, 2]], [[5, 5], [5, 5], [5, 5]]]),
+        tensor([[[3, 3], [5, 5], [0, 0]], [[3, 3], [5, 5], [0, 0]]]),
+        tensor([[[0, 1], [0, 1], [0, 1]], [[0, 1], [0, 1], [0, 1]]])
+    ]
+    values = tensor([[[1., 1.], [2., 2.], [3., 3.]], [[1., 1.], [2., 2.], [3., 3.]]])
+
+Now we can visually match up each element of the expanded ``values`` with the
+corresponding index in the expanded ``indices`` to see that the value ``1.``
+will be written to ``self`` at the index (2, 3, 0), (2, 3, 1), (5, 3, 0),
+and (5, 3, 1). ``2.`` will be written to (2, 5, 0), (2, 5, 1), etc.
 """)
 
 add_docstr_all('index_put',
