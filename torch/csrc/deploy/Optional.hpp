@@ -7,6 +7,8 @@
 // The idea and interface is based on Boost.Optional library
 // authored by Fernando Luis Cacciola Carballal
 //
+// Source: https://github.com/akrzemi1/Optional
+
 # ifndef ___OPTIONAL_HPP___
 # define ___OPTIONAL_HPP___
 
