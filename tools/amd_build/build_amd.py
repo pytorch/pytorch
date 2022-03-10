@@ -9,8 +9,8 @@ sys.path.append(os.path.realpath(os.path.join(
     os.path.pardir,
     os.path.pardir,
     os.path.pardir,
-    'torch',
-    'utils')))
+    'third_party',
+    'hipify_torch')))
 
 from hipify import hipify_python  # type: ignore[import]
 
