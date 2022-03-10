@@ -1710,6 +1710,10 @@ class TestCase(expecttest.TestCase):
 
         test_method = getattr(self, method_name, None)
         if test_method is not None:
+            # Wrap method with CWatchdog
+            test_method = self.wrap_method_with_c_watchdog(test_method)
+            setattr(self, method_name, test_method)
+
             # Wraps the tested method if we should do CUDA memory check.
             if not TEST_SKIP_CUDA_MEM_LEAK_CHECK:
                 self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
@@ -1767,6 +1771,13 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
+    def wrap_method_with_c_watchdog(self, method):
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            with CWatchdog(method.__name__):
+                method(*args, *kwargs)
+        return types.MethodType(wrapper, self)
+
     # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
     # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
     # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
@@ -1775,16 +1786,6 @@ class TestCase(expecttest.TestCase):
     def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
         if num_runs_left == 0:
             return
-        return self.wrap_method_with_cuda_policy(method, self.assertLeaksNoCudaTensors)
-
-    def wrap_method_with_c_watchdog(self, method):
-        @wraps(method)
-        def wrapper(self, *args, **kwargs):
-            with CWatchdog(method.__name__):
-                method(*args, *kwargs)
-        return types.MethodType(wrapper, self)
-
-    def setUp(self):
 
         using_unittest = isinstance(result, unittest.TestResult)
 

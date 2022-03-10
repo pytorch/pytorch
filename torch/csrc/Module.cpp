@@ -19,7 +19,11 @@
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <cstdlib>
+#include <condition_variable>
+#include <chrono>
 #include <libshm.h>
+#include <thread>
+#include <unordered_map>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <unordered_map>
@@ -651,6 +655,59 @@ static PyObject * THPModule_are_vmap_fallback_warnings_enabled(PyObject* _unused
   END_HANDLE_TH_ERRORS
 }
 
+namespace {
+struct WatchdogThread {
+  WatchdogThread(std::string name_, int timeout): name(std::move(name_)), thrd([this, timeout] {
+      using namespace std::chrono_literals;
+      std::unique_lock<std::mutex> lock(mutex);
+      cv.wait_for(lock, timeout *1s, [this] { return exitFlag; });
+      if (!exitFlag) {
+        std::cerr << "Test " << name << " takes longer than " << timeout << " seconds" <<std::endl;
+        std::abort();
+      }
+      }) {}
+  ~WatchdogThread() {
+    {
+      std::lock_guard<std::mutex> guard(mutex);
+      exitFlag = true;
+    }
+    cv.notify_one();
+    if (thrd.joinable())
+      thrd.join();
+  }
+private:
+  std::string name;
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool exitFlag = false;
+  // Thread must be the last member, otherwise it will not get properly initialized
+  std::thread thrd;
+};
+}
+
+PyObject *THPModule_setWatchdog(PyObject *_unused, PyObject *args)
+{
+  static std::unordered_map<std::string, std::unique_ptr<WatchdogThread>> watchdogs;
+  char *cname = nullptr;
+  unsigned timeout = 0;
+  if (!PyArg_ParseTuple(args, "sI", &cname, &timeout)) {
+    return nullptr;
+  }
+  std::string name(cname);
+  auto it = watchdogs.find(name);
+  if (it != watchdogs.end()) {
+   if (timeout == 0) {
+     watchdogs.erase(it);
+     Py_RETURN_NONE;
+   }
+   std::cerr << " Attempting to re-define existing watchdog " << name << std::endl;
+   std::abort();
+  }
+  watchdogs[name] = std::make_unique<WatchdogThread>(name, timeout);
+  Py_RETURN_NONE;
+}
+
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, cppcoreguidelines-avoid-non-const-global-variables, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  THPModule_initExtension,   METH_O,       nullptr},
@@ -715,6 +772,7 @@ static PyMethodDef TorchMethods[] = {
   {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
   {"_has_torch_function_unary", THPModule_has_torch_function_unary, METH_O, nullptr},
   {"_has_torch_function_variadic", MAYBE_WRAP_FASTCALL(THPModule_has_torch_function_variadic), MAYBE_METH_FASTCALL, nullptr},
+  {"_set_watchdog", (PyCFunction)THPModule_setWatchdog, METH_VARARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 
