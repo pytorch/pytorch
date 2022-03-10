@@ -1,6 +1,6 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/div_rtn.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 
@@ -134,12 +134,10 @@ max_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
   const Tensor& indices,
-  int64_t nbatch,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format,
-  bool cuda=false)
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   pool2d_shape_check(
     input,
@@ -163,7 +161,7 @@ static inline void
 avg_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
-  int64_t nbatch,
+  int64_t /*nbatch*/,
   int kH, int kW, int dH, int dW, int padH, int padW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,

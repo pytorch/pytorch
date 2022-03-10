@@ -87,13 +87,6 @@ Tensor new_with_storage(c10::TensorOptions options, at::ScalarType scalar_type, 
   return tensor;
 }
 
-Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, const Tensor& other) {
-  options = options.dtype(scalar_type);
-  TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
-                   options, " (got ", other.options(), ")");
-  return other.alias();
-}
-
 std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
   bool is_storage = isStorage(seq);
   std::vector<int64_t> sizes;
@@ -266,7 +259,10 @@ Tensor internal_new_from_data(
   }
 #endif
 
+  auto device = device_opt.has_value() ? *device_opt : options.device();
+
   auto sizes = compute_sizes(data, scalar_type);
+
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
@@ -276,6 +272,7 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     c10::impl::ExcludeDispatchKeyGuard pythonmode_guard(c10::DispatchKey::Python);
+    c10::impl::ExcludeDispatchKeyGuard pythonmode_snapshot_guard(c10::DispatchKey::PythonTLSSnapshot);
     // functorch uses FuncTorchDynamicLayerBackMode as a mode key to wrap all
     // tensors returned from operators in special TensorWrapper tensor extension
     // The problem with this is that TensorWrapper does not have storage so
@@ -293,20 +290,26 @@ Tensor internal_new_from_data(
       Storage storage = createStorageGetType(data, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(!is_typed_storage || storage_scalar_type == scalar_type,
           "Expected a Storage of type ", scalar_type,
-          " or an UntypedStorage, but got ", storage_scalar_type);
+          " or an _UntypedStorage, but got ", storage_scalar_type);
       tensor = at::empty(sizes, at::initialTensorOptions().dtype(is_typed_storage ? storage_scalar_type : inferred_scalar_type).pinned_memory(pin_memory).device(storage.device()));
       tensor.set_(storage);
 
     } else {
-      tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
-      if (c10::multiply_integers(tensor.sizes()) !=0 ) {
+      TensorOptions opts = at::initialTensorOptions().dtype(inferred_scalar_type);
+
+      // If the device is Meta, take the shortcut. We don't want to allocate an
+      // empty CPU tensor which would break our contract for meta tensors.
+      if (device == at::kMeta) {
+        return at::empty(sizes, opts.device(device));
+      }
+      tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
+      if (c10::multiply_integers(tensor.sizes()) != 0) {
         recursive_store(
             (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
             inferred_scalar_type, tensor.dtype().itemsize(), data);
       }
     }
   }
-  auto device = device_opt.has_value() ? *device_opt : options.device();
   pybind11::gil_scoped_release no_gil;
   maybe_initialize_cuda(device);
   // However, it is VERY important that we trace the to() call here (even
@@ -389,7 +392,13 @@ void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Devic
   }
 }
 
-Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+enum class CtorOrNew {
+  BASE_CTOR,
+  CTOR,
+  NEW,
+};
+
+Tensor legacy_sparse_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs, CtorOrNew ctor_or_new) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   static PythonArgParser parser({
     "new(*, Device? device=None)",
@@ -398,6 +407,7 @@ Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType s
     "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
     "new(IntArrayRef size, *, Device? device=None)",
   });
+  if (ctor_or_new == CtorOrNew::NEW) check_base_legacy_new(dispatch_key, c10::kSparse);
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
@@ -408,11 +418,15 @@ Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType s
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(2);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
     return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 3) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
     auto deviceOptional = r.deviceOptional(3);
     check_legacy_ctor_device(dispatch_key, deviceOptional);
     at::OptionalDeviceGuard device_guard(deviceOptional);
@@ -424,61 +438,25 @@ Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType s
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
-      throw TypeError("torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
-                      "or construct a strided tensor and convert it to sparse via to_sparse.");
+      if (ctor_or_new == CtorOrNew::CTOR) {
+        throw TypeError("torch.SparseTensor(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
+                        "or construct a strided tensor and convert it to sparse via to_sparse.");
+      } else {
+        throw TypeError("SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
+                        "or construct a strided tensor and convert it to sparse via to_sparse.");
+      }
     }
     return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
   }
   throw std::runtime_error("new(): invalid arguments");
 }
 
+Tensor legacy_sparse_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::CTOR);
+}
+
 Tensor legacy_sparse_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  auto options = dispatchKeyToTensorOptions(dispatch_key);
-  static PythonArgParser parser({
-    "new(*, Device? device=None)",
-    "new(*, int64_t cdata)|hidden",
-    "new(Tensor indices, Tensor values, *, Device? device=None)",
-    "new(Tensor indices, Tensor values, IntArrayRef size, *, Device? device=None)",
-    "new(IntArrayRef size, *, Device? device=None)",
-  });
-  check_base_legacy_new(dispatch_key, c10::kSparse);
-  ParsedArgs<5> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::empty({0}, build_options(options, scalar_type));
-  } else if (r.idx == 1) {
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return at::unsafeTensorFromTH(cdata, true);
-  } else if (r.idx == 2) {
-    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
-    // have a device (we should infer it).
-    auto deviceOptional = r.deviceOptional(2);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1));
-  } else if (r.idx == 3) {
-    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
-    // have a device (we should infer it).
-    auto deviceOptional = r.deviceOptional(3);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
-  } else if (r.idx == 4) {
-    PyObject* arg = r.pyobject(0);
-    auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
-      // new(sequence) binds to this signature but should be treated differently
-      // unless the sequences is a torch.Size
-      throw TypeError("SparseTensor.new(sequence) only accepts sizes.  Please use torch.sparse_coo_tensor() " \
-                      "or construct a strided tensor and convert it to sparse via to_sparse.");
-    }
-    return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
-  }
-  throw std::runtime_error("new(): invalid arguments");
+  return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::NEW);
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
@@ -493,12 +471,14 @@ c10::TensorOptions typeIdWithDefault(PythonArgs& r, int64_t device_idx, c10::Dis
 
 } // namespace
 
-Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs, CtorOrNew ctor_or_new) {
   auto options = dispatchKeyToTensorOptions(dispatch_key);
   static PythonArgParser parser({
     "new(*, Device? device=None)",
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
+    // This constructor is no longer legacy, it will also be usable for
+    // subclass initialization
     "new(Tensor other)",
     "new(Tensor other, *, Device? device=None)|hidden",  // prevent Tensor matching with IntArrayRef, PyObject*
     "new(IntArrayRef size, *, Device? device=None)",
@@ -506,8 +486,10 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
   });
 
   if (isSparse(dispatchKeyToBackend(dispatch_key))) {
-    return legacy_sparse_tensor_ctor(dispatch_key, scalar_type, args, kwargs);
+    return legacy_sparse_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, ctor_or_new);
   }
+
+  if (ctor_or_new == CtorOrNew::NEW) check_base_legacy_new(dispatch_key, c10::kStrided);
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -524,7 +506,7 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
       TORCH_CHECK(
         storage_scalar_type == scalar_type,
         "Expected a Storage of type ", scalar_type,
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
     }
     return new_with_storage(options, scalar_type, storage);
@@ -532,10 +514,23 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
-    return new_with_tensor(options, scalar_type, r.tensor(0));
+    const auto& other = r.tensor(0);
+    // BASE_CTOR (aka torch.Tensor) is now relaxed to accept any
+    // dtype; previously it was "float" biased
+    if (ctor_or_new != CtorOrNew::BASE_CTOR) {
+      options = options.dtype(scalar_type);
+      TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
+                       options, " (got ", other.options(), ")");
+    }
+    return other.alias();
   } else if (r.idx == 4) {
-    TORCH_CHECK(false, "Legacy tensor constructor of the form torch.Tensor(tensor, device=device) " \
-                "is not supported.  Use torch.tensor(...) or torch.as_tensor(...) instead.");
+    if (ctor_or_new == CtorOrNew::CTOR || ctor_or_new == CtorOrNew::BASE_CTOR) {
+      TORCH_CHECK(false, "Legacy tensor constructor of the form torch.Tensor(tensor, device=device) " \
+                  "is not supported.  Use torch.tensor(...) or torch.as_tensor(...) instead.");
+    } else {
+      TORCH_CHECK(false, "Legacy tensor new of the form tensor.new(tensor, device=device) " \
+                  "is not supported.  Use torch.as_tensor(...) instead.");
+    }
   } else if (r.idx == 5) {
     PyObject* arg = r.pyobject(0);
     auto deviceOptional = r.deviceOptional(1);
@@ -554,66 +549,27 @@ Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_t
   throw std::runtime_error("new(): invalid arguments");
 }
 
+// Handles ONLY torch.Tensor
+// Unlike the legacy dtype/device specialized constructors, this one is
+// relaxed to accept any device/dtype input tensor (even if it doesn't
+// match the default)
+Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs) {
+  return legacy_tensor_generic_ctor_new(
+    torch::tensors::get_default_dispatch_key(),
+    torch::tensors::get_default_scalar_type(),
+    args, kwargs, CtorOrNew::BASE_CTOR
+  );
+}
+
+// Handles calls like torch.DoubleTensor, torch.cuda.FloatTensor,
+// torch.sparse.FloatTensor, etc.
+Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
+  return legacy_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::CTOR);
+}
+
+// Handles tensor.new(...)
 Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
-  auto options = dispatchKeyToTensorOptions(dispatch_key);
-  static PythonArgParser parser({
-    "new(*, Device? device=None)",
-    "new(Storage storage)",
-    "new(*, int64_t cdata)|hidden",
-    "new(Tensor other)",  // this doesn't have a dtype/device because it creates an alias.
-    "new(Tensor other, *, Device? device=None)|hidden",  // prevent Tensor matching with IntArrayRef, PyObject*
-    "new(IntArrayRef size, *, Device? device=None)",
-    "new(PyObject* data, *, Device? device=None)",
-  });
-
-  if (isSparse(dispatchKeyToBackend(dispatch_key))) {
-    return legacy_sparse_tensor_new(dispatch_key, scalar_type, args, kwargs);
-  }
-
-  check_base_legacy_new(dispatch_key, c10::kStrided);
-  ParsedArgs<3> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    auto deviceOptional = r.deviceOptional(0);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    at::OptionalDeviceGuard device_guard(deviceOptional);
-    return at::empty({0}, build_options(options, scalar_type));
-  } else if (r.idx == 1) {
-    at::ScalarType storage_scalar_type;
-    bool is_typed_storage = false;
-    at::Storage storage = r.storage(0, storage_scalar_type, is_typed_storage);
-    if (storage_scalar_type != at::ScalarType::Undefined && is_typed_storage) {
-      TORCH_CHECK(
-        storage_scalar_type == scalar_type,
-        "Expected a Storage of type ", scalar_type,
-        " or an UntypedStorage, but got type ", storage_scalar_type,
-        " for argument 1 'storage'");
-    }
-    return new_with_storage(options, scalar_type, storage);
-  } else if (r.idx == 2) {
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
-    return at::unsafeTensorFromTH(cdata, true);
-  } else if (r.idx == 3) {
-    return new_with_tensor(options, scalar_type, r.tensor(0));
-  } else if (r.idx == 4) {
-      TORCH_CHECK(false, "Legacy tensor new of the form tensor.new(tensor, device=device) " \
-                  "is not supported.  Use torch.as_tensor(...) instead.");
-  } else if (r.idx == 5) {
-    PyObject* arg = r.pyobject(0);
-    auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
-      // new(sequence) binds to this signature but should be treated differently
-      // unless the sequences is a torch.Size
-      return legacy_new_from_sequence(options, scalar_type, deviceOptional, r.pyobject(0));
-    }
-    return new_with_sizes(options, scalar_type, r.deviceOptional(1), r.intlist(0));
-  } else if (r.idx == 6) {
-    auto deviceOptional = r.deviceOptional(1);
-    check_legacy_ctor_device(dispatch_key, deviceOptional);
-    return legacy_new_from_sequence(options, scalar_type, r.deviceOptional(1), r.pyobject(0));
-  }
-  throw std::runtime_error("new(): invalid arguments");
+  return legacy_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::NEW);
 }
 
 Tensor indexing_tensor_from_data(
@@ -1162,9 +1118,11 @@ Tensor asarray(
 
     // Make tensor from sequence, inferring its type, and then convert
     // it to the desired type.
+    // Type inference is activated only if the dtype has not been specified.
+    // Otherwise, we force the unwrapped dtype.
     tensor = internal_new_from_data(
-        TensorOptions(), dtype_unwrapped, device, obj, false, false, true);
-    tensor = tensor.to(dtype_unwrapped);
+        TensorOptions(), dtype_unwrapped, device, obj,
+        /* copy_variables = */ false, /* copy_numpy = */ false, /* type_inference = */ !dtype.has_value());
     tensor.set_requires_grad(requires_grad);
   }
 

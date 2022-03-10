@@ -2,8 +2,6 @@
 
 #include <torch/csrc/autograd/variable.h>
 
-#include <ATen/ATen.h>
-
 namespace torch {
 namespace autograd {
 

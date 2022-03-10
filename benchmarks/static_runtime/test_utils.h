@@ -41,8 +41,10 @@ bool hasProcessedNodeWithName(
 at::Tensor getTensor(const at::IValue& ival);
 
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind);
+Node* getNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind);
 
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind);
+bool hasNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind);
 
 void compareResultsWithJIT(
     StaticRuntime& runtime,

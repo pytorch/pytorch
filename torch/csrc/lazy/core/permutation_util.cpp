@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 
 #include <algorithm>
@@ -10,7 +11,7 @@ std::vector<int64_t> InversePermutation(
     c10::ArrayRef<int64_t> input_permutation) {
   TORCH_CHECK(IsPermutation(input_permutation));
   std::vector<int64_t> output_permutation(input_permutation.size(), -1);
-  for (size_t i = 0; i < input_permutation.size(); ++i) {
+  for (const auto i : c10::irange(input_permutation.size())) {
     output_permutation.at(input_permutation.at(i)) = i;
   }
   return output_permutation;

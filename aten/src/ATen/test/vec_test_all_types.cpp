@@ -113,7 +113,7 @@ namespace {
             x = generator.get();
         }
         // test counted load stores
-#if defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR)
         for (int i = 1; i < 2 * vec::size(); i++) {
             vec v = vec::loadu(ref_storage, i);
             v.store(storage);
@@ -851,10 +851,11 @@ namespace {
     std::enable_if_t<(!is_complex<VT>::value && idx == N), bool>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     test_blendv(VT expected_val[vec::size()], VT a[vec::size()], VT b[vec::size()], VT mask[vec::size()]) {
+        using bit_rep = BitType<VT>;
         // generate expected_val
         for (int64_t i = 0; i < vec::size(); i++) {
-            int64_t hex_mask = 0;
-            std::memcpy(&hex_mask, &mask[i], sizeof(VT));
+            bit_rep hex_mask = 0;
+            hex_mask=bit_cast<bit_rep>(mask[i]);
             expected_val[i] = (hex_mask & 0x01) ? b[i] : a[i];
         }
         // test with blendv

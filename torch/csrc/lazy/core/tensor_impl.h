@@ -13,12 +13,13 @@ namespace lazy {
 // Its scope is just to handle an LazyTensor.
 class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
  public:
+  explicit LTCTensorImpl(const LazyTensorPtr& tensor);
   explicit LTCTensorImpl(const LazyTensor& tensor);
   explicit LTCTensorImpl(LazyTensor&& tensor);
 
-  LazyTensor& tensor() { return tensor_; }
+  LazyTensorPtr tensor() { return tensor_; }
 
-  void set_tensor(const LazyTensor& lazy_tensor);
+  void set_tensor(const LazyTensorPtr& lazy_tensor);
 
   void force_refresh_sizes() { generation_ = 0; }
 
@@ -34,8 +35,11 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   int64_t size(int64_t d) const override;
 
+  int64_t stride(int64_t d) const override;
+
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   at::IntArrayRef sizes() const override;
+  at::IntArrayRef strides() const override;
   int64_t dim() const override;
   int64_t numel() const override;
 
@@ -47,7 +51,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
  private:
   void setup_size_properties();
 
-  LazyTensor tensor_;
+  LazyTensorPtr tensor_;
   size_t generation_ {0};
 };
 
