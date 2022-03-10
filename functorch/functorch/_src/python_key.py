@@ -87,6 +87,7 @@ class PythonTensor(torch.Tensor):
         # Kind of a hacky way to test if an op is in-place or not
         if func.__name__[-1] == "_" and func.__name__[0] != "_":
             args[0].proxy = proxy_out
+            proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
         with no_dispatch():
             real_out = func(*args, **kwargs)
