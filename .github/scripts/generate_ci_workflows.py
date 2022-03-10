@@ -1006,17 +1006,15 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             isolated_workflow=True,
         ),
     ),
-    # NOTE: conda binaries are currently bugged on the installation step
-    #       See, https://github.com/pytorch/pytorch/pull/71484#issuecomment-1022617195
-    # BinaryBuildWorkflow(
-    #     os=OperatingSystem.WINDOWS,
-    #     package_type="conda",
-    #     build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.WINDOWS),
-    #     ciflow_config=CIFlowConfig(
-    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
-    #         isolated_workflow=True,
-    #     ),
-    # ),
+    BinaryBuildWorkflow(
+        os=OperatingSystem.WINDOWS,
+        package_type="conda",
+        build_configs=generate_binary_build_matrix.generate_conda_matrix(OperatingSystem.WINDOWS),
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+            isolated_workflow=True,
+        ),
+    ),
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
         package_type="libtorch",
