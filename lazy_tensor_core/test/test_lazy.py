@@ -1,4 +1,6 @@
+from typing import Sequence
 import torch
+import functools
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
@@ -23,14 +25,20 @@ def init_lists():
     yaml_ts = yaml.load(open(TS_NATIVE_FUNCTIONS_PATH), yaml.Loader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
     FALLBACK_LIST = set(["clamp"])
-    BAD_OPS_LIST = set([
+    SKIP_RUNTIME_ERROR_LIST = set([
         'index_select',  # Empty output_sizes is not supported
         'clone',  # is clone decomposed?
     ])
+    SKIP_INCORRECT_RESULTS_LIST = set([
+        'squeeze',  # Value out of range
+        't',  # Value out of range
+        'transpose',  # Value out of range
+        'bernoulli',  # incorrect results
+    ])
 
-    return (LAZY_OPS_LIST, FALLBACK_LIST, BAD_OPS_LIST)
+    return (LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST)
 
-(LAZY_OPS_LIST, FALLBACK_LIST, BAD_OPS_LIST) = init_lists()
+(LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST) = init_lists()
 
 torch.manual_seed(42)
 
@@ -67,7 +75,8 @@ class TestLazyTensor(JitTestCase):
         torch.testing.assert_allclose(inp_copy_grad.cpu(), inp_grad.cpu())
 
 class TestLazyOpInfo(TestCase):
-    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in BAD_OPS_LIST], allowed_dtypes=(torch.float,))
+
+    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST], allowed_dtypes=(torch.float,))
     def test_dispatched_to_lazy(self, device, dtype, op):
 
         def get_name(op):
@@ -98,6 +107,40 @@ class TestLazyOpInfo(TestCase):
                 if found:
                     break
         self.assertTrue(found)
+
+
+    @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950
+    def test_correctness(self, device, dtype, op):
+
+
+        test_device = 'cuda' if 'LTC_TS_CUDA' in os.environ else 'cpu'
+
+        def clone_to_device(input, dev):
+            if isinstance(input, torch.Tensor):
+                return input.detach().clone().to(device=dev)
+            if isinstance(input, Sequence) and not isinstance(input, str):
+                return tuple(map(functools.partial(clone_to_device, dev=dev), input))
+            return input
+
+        def assert_allclose_rec(t):
+            a, b = t
+            self.assertEqual(type(a), type(b))
+            if isinstance(a, torch.Tensor):
+                self.assertTrue(torch.allclose(clone_to_device(a, test_device), b, atol=1e-4))
+
+            if isinstance(a, Sequence):
+                map(assert_allclose_rec, zip(a, b))
+
+        samples = op.sample_inputs("lazy", dtype, requires_grad=False)
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            copy_args = clone_to_device(args, test_device)
+
+            r_exp = op(*copy_args, **kwargs)
+            r_actual = op(*args, **kwargs)
+
+            assert_allclose_rec((r_actual, r_exp))
 
 # TODO: after we move to master, add Lazy as a new Device here:
 # https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_device_type.py#L532
