@@ -6,10 +6,7 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import (
     ProcessGroup,
 )
-from torch.distributed._shard.sharding_spec import (
-    ShardingSpec,
-    ShardMetadata,
-)
+import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
@@ -18,6 +15,7 @@ from torch.distributed.nn.functional import (
     all_to_all,
     all_to_all_single,
 )
+from torch.distributed._shard.metadata import ShardMetadata
 
 from .shard import Shard
 
@@ -48,7 +46,7 @@ def get_idx_from_placements(placements, current_rank) -> int:
 
 def build_reshard_metadata(
     st_size: torch.Size,
-    sharding_spec: ShardingSpec,
+    sharding_spec: shard_spec.ShardingSpec,
     world_size: int,
 ) -> Tuple[List[ShardMetadata], List[int]]:
     """
@@ -89,8 +87,8 @@ def build_reshard_metadata(
 def reshuffle_local_shard(
     local_shard: torch.Tensor,
     st_size: torch.Size,
-    sharding_spec: ShardingSpec,
-    resharding_spec: ShardingSpec,
+    sharding_spec: shard_spec.ShardingSpec,
+    resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
 ) -> Tuple[List[Shard], List[ShardMetadata]]:
     """
@@ -156,8 +154,8 @@ def reshuffle_local_shard(
 def reshard_local_shard(
     local_tensor: torch.Tensor,
     st_size: torch.Size,
-    sharding_spec: ShardingSpec,
-    resharding_spec: ShardingSpec,
+    sharding_spec: shard_spec.ShardingSpec,
+    resharding_spec: shard_spec.ShardingSpec,
     pg: ProcessGroup,
 ) -> Tuple[List[Shard], List[ShardMetadata]]:
     """

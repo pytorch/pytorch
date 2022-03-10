@@ -29,6 +29,7 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -479,20 +480,24 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Logger::set_static_graph,
           py::call_guard<py::gil_scoped_release>());
 
-  py::enum_<::c10d::DistributedDebugLevel>(module, "_DistributedDebugLevel", R"(
-      An enum whose values correspond to different debug settings of the
-      torch.distributed package. Currently supporting settings are OFF, INFO,
-      and DETAIL, which can be set via the TORCH_DISTRIBUTED_DEBUG environment
-      variable.
+  py::enum_<::c10d::DebugLevel>(module, "DebugLevel", R"(
+      An enum whose values correspond to different debug levels of the
+      torch.distributed package. Currently supporting OFF, INFO, and DETAIL,
+      which can be set via the TORCH_DISTRIBUTED_DEBUG environment variable
+      or via ``set_debug_level()`` function.
   )")
-      .value("OFF", ::c10d::DistributedDebugLevel::OFF)
-      .value("INFO", ::c10d::DistributedDebugLevel::INFO)
-      .value("DETAIL", ::c10d::DistributedDebugLevel::DETAIL);
+      .value("OFF", ::c10d::DebugLevel::Off)
+      .value("INFO", ::c10d::DebugLevel::Info)
+      .value("DETAIL", ::c10d::DebugLevel::Detail);
 
-  module.def(
-      "_get_debug_mode",
-      &::c10d::parseDistDebugLevel,
-      py::call_guard<py::gil_scoped_release>());
+  module
+      .def("get_debug_level", ::c10d::debug_level,
+          R"(Gets the debug level of the torch.distributed package.)")
+      .def("set_debug_level", ::c10d::setDebugLevel,
+          R"(Sets the debug level of the torch.distributed package.)")
+      .def("set_debug_level_from_env", ::c10d::setDebugLevelFromEnvironment,
+          R"(Sets the debug level of the torch.distributed package from the
+          ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``AVG``,
