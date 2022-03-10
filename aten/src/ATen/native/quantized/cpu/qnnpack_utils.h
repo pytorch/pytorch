@@ -8,6 +8,7 @@
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/xnnpack_utils.h>
 #include <ATen/native/utils/Factory.h>
 
 #include <utility>
@@ -112,6 +113,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
+        is_per_channel_(is_per_channel),
         input_scale(input_scale),
         kernel_(std::move(kernel)),
         w_scales(w_scale),
@@ -200,7 +202,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     convolution->input_padding_height = padding_[kSpatialDim - 2];
     convolution->input_padding_width = padding_[kSpatialDim - 1];
     convolution->input_padding_depth = kSpatialDim == 3 ? padding_[0] : 0;
-    convolution->per_channel = is_per_channel;
+    convolution->per_channel = is_per_channel_;
     convolution->transpose = transpose_;
 
     const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
@@ -260,6 +262,9 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   }
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter> convolution_op;
+  #ifdef USE_XNNPACK
+  xnnpack_operator xnnp_convolution_op;
+  #endif  // USE_XNNPACK
   std::unique_ptr<qnnpack::PrePackConvWeights> w;
   at::Tensor orig_weight;
   at::Tensor bias;
@@ -269,6 +274,7 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
   torch::List<int64_t> dilation_;
   int64_t groups_;
   bool transpose_;
+  bool is_per_channel_;
   c10::optional<double> input_scale;
   std::vector<int64_t> kernel_;
   at::Tensor w_scales;
@@ -326,6 +332,10 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
     return transpose_;
   }
 
+  bool per_channel() const {
+    return is_per_channel_;
+  }
+
  private:
   std::mutex qnnp_mutex_;
   template <bool ReluFused>
@@ -333,6 +343,14 @@ struct PackedConvWeightsQnnp : public ConvPackedParamsBase<kSpatialDim> {
       const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point);
+
+#ifdef USE_XNNPACK
+  template <typename scalar_t, bool ReluFused>
+  at::Tensor apply_impl_xnnp(
+      const at::Tensor& input,
+      double output_scale,
+      int64_t output_zero_point);
+#endif // USE_XNNPACK
 };
 
 enum class Activation : uint8_t { NONE = 0, RELU = 1 };
