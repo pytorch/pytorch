@@ -22,6 +22,8 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/nan_to_num.h>
 #include <ATen/ops/ones.h>
+#include <ATen/ops/scalar_tensor.h>
+#include <ATen/ops/where.h>
 #include <ATen/ops/zeros.h>
 #endif
 
