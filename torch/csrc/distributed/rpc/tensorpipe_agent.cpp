@@ -1159,6 +1159,91 @@ std::vector<WorkerInfo> TensorPipeAgent::getWorkerInfos() const {
   return workerInfos;
 }
 
+void TensorPipeAgent::updateGroupMembership(
+    const WorkerInfo& workerInfo,
+    const std::vector<c10::Device> devices,
+    const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    bool isJoin = true) {
+  std::cout << "in updateGroupMembership" << std::endl;
+  std::cout << workerInfo.name_ << std::endl;
+
+  std::string name = workerInfo.name_;
+  worker_id_t id = workerInfo.id_;
+  /*
+  TODO: update
+  workerIdToInfo_
+  workerNameToInfo_
+  workerNameToURL_
+  devices_
+  reverseDeviceMaps_
+  */
+  // Rank with workerInfo is joining the group, update internal mappings
+  if (isJoin) {
+    std::cout << "in isJoin" << std::endl;
+    workerIdToInfo_.emplace(id, workerInfo);
+    workerNameToInfo_.emplace(name, workerInfo);
+
+    // TODO: we should get nodeAddrStr in the joining process, then pass in as
+    // an argument rather than getting from store each time
+    auto nodeAddrData = nameToAddressStore_.get(name);
+    auto nodeAddrStr =
+        std::string((const char*)nodeAddrData.data(), nodeAddrData.size());
+    workerNameToURL_.insert({name, nodeAddrStr});
+
+    // TODO: update so that these mappings are locked
+    // if (!reverseDeviceMap.empty()) {
+    //   reverseDeviceMaps_.emplace(name, reverseDeviceMap);
+    //   for (const auto it : reverseDeviceMap) {
+    //     // push back each device if it does not exist
+    //     if (std::find(devices_.begin(), devices_.end(), it.first) ==
+    //         devices_.end()) {
+    //       devices_.push_back(it.first);
+    //     }
+    //   }
+    // }
+    reverseDeviceMaps_ = reverseDeviceMaps;
+    /* TODO: cannot update devices when device is already initialized
+    (this has to do on send when the streams are already created? This means
+    that after a rank has already send() then the streams of existing devices
+    are allocated and we can't update? Need to investigate this issue to enable
+    CUDA RPC for dynamic RPC)
+
+    Stack Trace:
+
+    W0308 09:31:06.311205 305815 CUDAGuardImpl.h:45]
+    Warning: CUDA warning: driver shutting down (function uncheckedGetDevice)
+
+    W0308 09:31:06.311249 305815 CUDAGuardImpl.h:61] Warning: CUDA warning:
+    driver shutting down (function uncheckedSetDevice)
+
+    W0308 09:31:06.311280 305815 CUDAGuardImpl.h:45] Warning: CUDA warning:
+    driver shutting down (function uncheckedGetDevice)
+
+    W0308 09:31:06.311287 305815 CUDAGuardImpl.h:61] Warning: CUDA warning:
+    driver shutting down (function uncheckedSetDevice)
+
+    WARNING: Logging before
+    InitGoogleLogging() is written to STDERR W0308 09:31:13.816833 305898
+    tensorpipe_agent.cpp:929] RPC agent for worker1 encountered error when
+    reading incoming response from worker0: eof (this error originated at
+    tensorpipe/transport/shm/connection_impl.cc:259)
+    torch.multiprocessing.spawn.ProcessExitedException: process 0 terminated
+    with signal SIGSEGV
+    */
+    // add devices that have not been added yet
+    // for (const auto it : devices) {
+    //   if (std::find(devices_.begin(), devices_.end(), it) == devices_.end())
+    //   {
+    //     devices_.push_back(it);
+    //   }
+    // }
+    devices_ = devices;
+  }
+  // TODO: Rank with workerInfo is leaving, update internal mappings
+  else {
+  }
+}
+
 const std::string& TensorPipeAgent::findWorkerURL(
     const WorkerInfo& worker) const {
   const auto it = workerNameToURL_.find(worker.name_);
@@ -1327,6 +1412,10 @@ DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
     return {};
   }
   return it->second;
+}
+
+TensorPipeRpcBackendOptions TensorPipeAgent::getBackendOptions() const {
+  return opts_;
 }
 
 const std::vector<c10::Device>& TensorPipeAgent::getDevices() const {

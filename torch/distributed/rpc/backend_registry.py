@@ -224,13 +224,11 @@ def _tensorpipe_exchange_and_check_all_device_maps(
                 )
 
     # passed all checked, construct reverse mapping for return values
-    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
-    for node in all_names:
-        if my_name in all_device_maps[node]:
-            reverse_device_maps[node] = {
-                v: k for k, v in all_device_maps[node][my_name].items()
-            }
+    reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
+    my_devices = _create_device_list(my_devices, my_device_maps, reverse_device_maps)
+    return reverse_device_maps, my_devices
 
+def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
     if not my_devices:
         devices_set: Set[torch.device] = set()
         for _, map_ in my_device_maps.items():
@@ -240,8 +238,16 @@ def _tensorpipe_exchange_and_check_all_device_maps(
         devices_set.discard(torch.device("cpu"))
         my_devices = list(devices_set)
     my_devices = sorted(my_devices, key=lambda d: d.index)
+    return my_devices
 
-    return reverse_device_maps, my_devices
+def _create_reverse_mapping(my_name, all_names, all_device_maps):
+    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
+    for node in all_names:
+        if my_name in all_device_maps[node]:
+            reverse_device_maps[node] = {
+                v: k for k, v in all_device_maps[node][my_name].items()
+            }
+    return reverse_device_maps
 
 def _tensorpipe_check_local_device_maps(name, device_count, options):
     # Check local devices in device_maps and devices are all valid.
@@ -267,6 +273,56 @@ def _tensorpipe_check_local_device_maps(name, device_count, options):
             f"device_maps = {options.device_maps},\n"
             f"devices = {options.devices}"
         )
+    return local_devices
+
+def _update_group_membership(worker_info, my_devices, reverse_device_map):
+    agent = api._get_current_rpc_agent()
+    ret = agent._update_group_membership(worker_info, my_devices, reverse_device_map, True)
+    return "hi"
+
+def _get_device_infos():
+    if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+    else:
+        device_count = 0
+    agent = api._get_current_rpc_agent()
+    opts = agent._get_backend_options()
+    if torch.cuda.is_available():
+        device_count = torch.cuda.device_count()
+    else:
+        device_count = 0
+    return device_count, opts.device_maps, opts.devices
+
+def _set_devices_and_reverse_device_map(agent, my_rank, my_device_maps):
+    print(f"{my_rank}: _set_devices_and_reverse_device_map, {my_device_maps}")
+    my_worker_info = agent.get_worker_info()
+    my_name = my_worker_info.name
+    all_worker_infos = agent.get_worker_infos()
+    # one round to get device_maps of all workers and construct reverse device maps
+    all_device_counts, all_device_maps, all_devices, all_names = {}, {}, {}, []
+    for worker_info in all_worker_infos:
+        worker_name = worker_info.name
+        device_count, device_map, devices = api.rpc_sync(worker_name, _get_device_infos)
+        all_device_counts[worker_name] = device_count
+        all_device_maps[worker_name] = device_map
+        all_devices[worker_name] = devices
+        all_names.append(worker_name)
+
+    reverse_device_maps = _create_reverse_mapping(my_name, all_names, all_device_maps)
+
+    print(f"{my_rank}: {all_device_maps=}")
+    print(f"{my_rank}: {reverse_device_maps=}")
+    for worker_name in all_names:
+        # set device list for each worker
+        all_devices[worker_name] = _create_device_list(all_devices[worker_name],
+                                        all_device_maps[worker_name], reverse_device_maps)
+        # print(worker_name)
+        # print(worker_rank)
+        # print(device_maps)
+        # rpc call to all workers, including itself
+        print(f"{my_rank} : start rpc_sync, {my_rank} -> {worker_info.id}")
+        test = api.rpc_sync(worker_name, _update_group_membership, args=(my_worker_info, all_devices[worker_name], reverse_device_maps))
+        print(f"{my_rank} : finish rpc_sync")
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
@@ -337,7 +393,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     # initialization for dynamic rpc (ranks can join and leave)
     else:
         # Validate devices and device_maps locally for current rank
-        _tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options)
+        # local_devices = list(_tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options))
 
         token_key = "RpcGroupManagementToken"
         token_location = f"TokenOnWorker{rank}"
@@ -346,7 +402,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             returned = store.compare_set(token_key, "", token_location).decode()
             if returned == token_location:
                 # Construct TPAgent with empty reverse_device_map and devices
-                # these two properties will be updated after construction
+                # these properties will be updated after initialization
                 agent = TensorPipeAgent(
                     store,
                     name,
@@ -356,14 +412,16 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
                     {},
                     [],
                 )
+                api._init_rpc_states(agent)
 
                 try:
                     # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
                     # This is a synchronous operation that completes once all existing ranks are updated
                     # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
+                    _set_devices_and_reverse_device_map(agent, rank, rpc_backend_options.device_maps)
                     pass
                 except Exception:
-                    api.shutdown()
+                    # api.shutdown()
                     raise
 
                 # Finish initialization

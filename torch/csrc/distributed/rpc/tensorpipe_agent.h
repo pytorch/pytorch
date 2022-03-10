@@ -192,10 +192,17 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
+  void updateGroupMembership(
+      const WorkerInfo& workerInfo,
+      const std::vector<c10::Device> devices,
+      const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+      bool isJoin);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
+
+  TensorPipeRpcBackendOptions getBackendOptions() const;
 
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
@@ -311,11 +318,13 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
-  const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
+  // For dynamic RPC, the reverse device maps are updated whenever a new rank
+  // joins or leaves the group
+  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
   // Local devices used by this agent. If application didn't specify this
   // field, it will be initialized using corresponding local devices in
   // opts_.deviceMaps and reverseDeviceMaps_;
-  const std::vector<c10::Device> devices_;
+  std::vector<c10::Device> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
