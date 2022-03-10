@@ -17,6 +17,7 @@ import typing
 import types
 import warnings
 import unittest
+import torch.nn.utils._stateless as _stateless
 from math import sqrt
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
@@ -1095,6 +1096,24 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         out = gm(input)
         self.assertEqual(out, ref_out)
+
+    def test_torch_op_overloads(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.add.Tensor(a, a)
+                return b
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        gm.graph.lint()
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
+        for node in gm.graph.nodes:
+            if node.op == 'call_function':
+                assert isinstance(node.target, torch._ops.OpOverload)
+                assert node.target.__name__ == 'add.Tensor'
 
     def test_pickle_torch_custom_ops(self):
         class M(torch.nn.Module):
@@ -2916,6 +2935,35 @@ class TestFX(JitTestCase):
         gm2 = torch.fx.GraphModule(model, traced_graph)
         gm2.delete_all_unused_submodules()
         torch.testing.assert_allclose(gm2(inputs), model(inputs))
+
+    def test_fx_stateless(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(1, 1)
+                self.register_buffer('buffer', torch.ones(1))
+
+            def forward(self, x):
+                return self.l1(x) + self.buffer
+
+        module = MockModule()
+        x = torch.rand((1, 1))
+        weight = torch.tensor([[1.0]], requires_grad=True)
+        bias = torch.tensor([0.0], requires_grad=True)
+        buffer = torch.tensor([0.0])
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        fx_module = torch.fx.symbolic_trace(module)
+        res = _stateless.functional_call(fx_module, parameters, x)
+        res.backward()
+        self.assertIsNotNone(weight.grad)
+        self.assertIsNotNone(bias.grad)
+        self.assertIsNone(buffer.grad)
+        # Gradient was not calculated for the module stated and buffers
+        self.assertIsNone(module.l1.weight.grad)
+        self.assertIsNone(module.l1.bias.grad)
+        self.assertIsNone(module.buffer.grad)
 
     def test_tracing_graphmodules_as_leaf_submodules(self):
         class A(torch.nn.Module):

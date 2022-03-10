@@ -36,6 +36,7 @@ concurrency:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
 {%- endmacro -%}
 
 {%- macro parse_ref(pytorch_directory="") -%}
