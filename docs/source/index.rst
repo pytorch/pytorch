@@ -54,12 +54,10 @@ Features described in this documentation are classified by release status:
    tensors
    tensor_attributes
    tensor_view
-   torch.autocast <amp>
+   torch.amp <amp>
    torch.autograd <autograd>
    torch.backends <backends>
    cuda
-   torch.cuda.amp <cuda.amp>
-   torch.cpu.amp <cpu.amp>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
