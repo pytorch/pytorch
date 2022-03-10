@@ -687,6 +687,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         x.neg()
         self.assertEqual(called, [torch.ops.aten.neg.default])
 
+    def test_construct_int_tensor(self):
+        class SubTensor(torch.Tensor):
+            pass
+        # should not fail
+        SubTensor(torch.zeros(2, dtype=torch.int))
+
     def test_multiple_ops_subclass(self):
         # This is a Direct Subclass, don't do that!
         class MySubclass(torch.Tensor):
