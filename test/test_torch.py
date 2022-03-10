@@ -461,9 +461,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.min(one_d, zero_d).shape)
         self.assertEqual((1,), torch.min(zero_d, one_d).shape)
 
-        # diag
-        self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
-
         zero_d_int = torch.tensor(1, device=device)
         one_d_int = torch.tensor([1], device=device)
 
