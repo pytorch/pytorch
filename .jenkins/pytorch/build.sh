@@ -203,6 +203,7 @@ sccache nvcc --version
 which nvcc
 sccache --version
 #ls /opt/cache/lib
+export RUST_LOG=trace
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
