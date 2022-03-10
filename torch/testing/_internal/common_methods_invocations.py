@@ -623,6 +623,15 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
                  supports_expanded_weight=False,
+                 # FIXME: this should be changed to default to True
+                 # when all lambdas from torch/overrides have been ported to OpInfos
+                 # in order to throw errors that alert the user to fill in override_lambda
+                 supports_overrides=False,  # whether the op supports overriding
+                 override_lambda=None,  # a lambda function that has the same signature as the real function
+                                        # and returns -1. This must be set if supports_overrides=True
+                                        # Used to test API coverage for a type that defines ``__torch_function__``
+                                        # Optimally this would be generated with inspect.signature but that is blocked by
+                                        # Issue #28233.
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -785,6 +794,13 @@ class OpInfo(object):
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
         self.supports_expanded_weight = supports_expanded_weight
+
+        self.supports_overrides = supports_overrides or override_lambda
+        if supports_overrides:
+            assert not (override_lambda is None), (
+                "override_lambda= should be provided if supports_overrides=True, if this operator does not support "
+                "overriding please set supports_overrides=False")
+        self.override_lambda = override_lambda
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -8412,6 +8428,7 @@ op_db: List[OpInfo] = [
                     supports_inplace_autograd=False,
                     supports_fwgrad_bwgrad=True,
                     supports_forward_ad=True,
+                    override_lambda=lambda input, other, out=None: -1,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
@@ -8462,7 +8479,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_addmm),
+           sample_inputs_func=sample_inputs_addmm,
+           supports_overrides=True,
+           override_lambda=lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
            variant_test_name='decomposed',
@@ -8476,6 +8495,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            sample_inputs_func=partial(sample_inputs_addmm, alpha=1, beta=1),
+           override_lambda=lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
            skips=(
                # https://github.com/pytorch/pytorch/issues/71784
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',

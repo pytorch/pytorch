@@ -9,10 +9,15 @@ import pickle
 import collections
 
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_device_type import ops, OpDTypes, instantiate_device_type_tests
+from torch.testing._internal.generated.annotated_fn_args import annotated_args
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
     get_overridable_functions,
+    get_ignored_functions,
+    get_similar_functions_helper,
     get_testing_overrides,
     is_tensor_method_or_property
 )
@@ -316,10 +321,23 @@ def implements_tensor_like(torch_function):
         return func
     return decorator
 
+def generation_handled_by_opinfo():
+
+    handled = set()
+    for op in op_db:
+        if op.override_lambda is not None:
+            name = op.aten_name if op.aten_name else op.name
+            handled.update(get_similar_functions_helper(name))
+            if op.aliases:
+                for alias in op.aliases:
+                    handled.update(get_similar_functions_helper(alias.name))
+    return handled
+
 def generate_tensor_like_torch_implementations():
     torch_vars = vars(torch)
     untested_funcs = []
     testing_overrides = get_testing_overrides()
+    testing_overrides_opinfo = generation_handled_by_opinfo()
     # test/test_cpp_api_parity.py monkeypatches torch.nn to have a new
     # function sample_functional.  Depending on what order you run pytest
     # collection, this may trigger the error here.  This is a hack to fix
@@ -329,12 +347,16 @@ def generate_tensor_like_torch_implementations():
     testing_ignore = {"sample_functional"}
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
-            if func not in testing_overrides and func.__name__ not in testing_ignore:
+            if (func not in testing_overrides
+                    and func.__name__ not in testing_ignore
+                    and func.__name__ not in testing_overrides_opinfo):
                 untested_funcs.append("{}.{}".format(namespace, func.__name__))
     msg = (
         "The following functions are not tested for __torch_function__ "
-        "support, please ensure there is an entry in the dict returned by "
-        "torch._overrides.get_testing_overrides for this function or if a "
+        "support, if this function can be overriden and there is an OpInfo"
+        "for this function, please add an override_lambda to the OpInfo,"
+        "otherwise please ensure there is an entry in the dict returned by"
+        "torch._overrides.get_testing_overrides for this function. If a "
         "__torch_function__ override does not make sense, add an entry to "
         "the tuple returned by torch._overrides.get_ignored_functions.\n\n{}"
     )
@@ -556,7 +578,130 @@ class TestTorchFunctionOverride(TestCase):
         self.assertTrue(c._is_view())
         self.assertTrue(c._base is a)
 
+class TestTorchFunctionOverrideOpInfo(TestCase):
+    @ops(filter(lambda op: op.supports_overrides, op_db), dtypes=OpDTypes.none)
+    def test_tensor_like_overrides(self, device, op):
+        override = op.override_lambda
 
+        ignored = get_ignored_functions()
+        name = op.aten_name if op.aten_name else op.name
+        related_funcs = get_similar_functions_helper(name)
+
+        funcs = [op.op]
+        if op.aliases:
+            for alias in op.aliases:
+                if (alias.op not in ignored):
+                    funcs.append(alias.op)
+                    related_funcs += get_similar_functions_helper(alias.name)
+
+        for name in related_funcs:
+            func = getattr(Tensor, name, None)
+            if callable(func) and func not in ignored:
+                funcs.append(func)
+
+        for func in funcs:
+            is_method = is_tensor_method_or_property(func)
+
+            if is_method:
+                # Generate an instance by using SubTensor,
+                def instance_gen():
+                    return SubTensor([5])
+            else:
+                # Otherwise, TensorLike.
+                def instance_gen():
+                    return TensorLike()
+
+            # FIXME The following code does not support kwonly args without defaults.
+            # The fix is easy, as one just needs to save these args when generating the variable
+            # annotated_args. The problem is that, if one does so, one finds a number
+            # of functions that have problematic signatures in native_functions.yaml.
+            # Fixing these would be BC breaking, so hence this terrible hack
+            # https://github.com/pytorch/pytorch/issues/67008
+            kwargs = {}
+            if "linalg_solve_triangular" in op.name:
+                kwargs = {"upper": True}
+
+            func_args = []
+            if func in annotated_args:
+                for arg in annotated_args[func]:
+                    # Guess valid input to aten function based on type of argument
+                    t = arg['simple_type']
+                    if t.endswith('?'):
+                        t = t[:-1]
+                    if t == 'Tensor':
+                        if is_method and arg['name'] == 'self':
+                            # See "Note: properties and __get__"
+                            func = func.__get__(instance_gen())
+                            continue
+                        func_args.append(instance_gen())
+                    elif t == 'TensorList':
+                        func_args.append([instance_gen(), instance_gen()])
+                    elif t == 'c10::List<c10::optional<Tensor>>':
+                        func_args.append([instance_gen(), instance_gen()])
+                    elif t == 'IntArrayRef':
+                        size = arg.get('size', 2)
+                        if size == 1:
+                            func_args.append(1)
+                        else:
+                            func_args.append([1] * size)
+                    elif t == 'Scalar':
+                        func_args.append(3.5)
+                    elif t == 'bool':
+                        func_args.append(False)
+                    elif t.startswith('int') or t in {'Dimname', 'DimnameList'}:
+                        func_args.append(0)
+                    elif t in {'Stream'}:
+                        func_args.append(torch.Stream())
+                    elif t.startswith('float') or t == 'double':
+                        func_args.append(1.0)
+                    elif t in {'Generator', 'MemoryFormat', 'TensorOptions'}:
+                        func_args.append(None)
+                    elif t == 'ScalarType':
+                        func_args.append(torch.float32)
+                    elif t == 'c10::string_view':
+                        func_args.append('')
+                    else:
+                        raise RuntimeError(f"Unsupported argument type {t} for {arg['name']} of function {func}")
+            else:
+                args = inspect.getfullargspec(override)
+                try:
+                    func_args = inspect.getfullargspec(func)
+                    # Remove annotations from argspec
+                    func_args = type(func_args)(**{**func_args, 'annotations': None})
+                    if func_args != args:
+                        raise RuntimeError(f"Override for {func} doesn't match its argspec.\n"
+                                           + f"Original: {inspect.signature(func)}\n"
+                                           + f"Override: {inspect.signature(override)}")
+                except TypeError:
+                    pass
+                nargs = len(args.args)
+                if args.defaults is not None:
+                    nargs -= len(args.defaults)
+                func_args = [instance_gen() for _ in range(nargs)]
+                if args.varargs is not None:
+                    func_args += [instance_gen(), instance_gen()]
+
+            wrapped_triggered_func = triggered_wrapper(override)
+            if is_method:
+                implements_sub(func)(wrapped_triggered_func)
+            else:
+                implements_tensor_like(func)(wrapped_triggered_func)
+            ret = func(*func_args, **kwargs)
+            # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
+            # This is currently the best check but doesn't work for, for example,
+            # Tensor.__add__ because it redirects to Tensor.add.
+            # See note "_triggered wrapper"
+            if not is_method or ret is None:
+                self.assertTrue(wrapped_triggered_func._triggered)
+                return
+
+            self.assertEqual(ret, -1)
+
+
+# TODO: This function should be deleted when all override_lambdas have
+# been ported to OpInfos, currently, overridable functions that do not have
+# an OpInfo, or do not have their override_lambda ported to OpInfo must be
+# tested with the help of the below function
 def generate_tensor_like_override_tests(cls):
     from torch.testing._internal.generated.annotated_fn_args import annotated_args
 
@@ -1064,6 +1209,8 @@ class TestTorchFunctionWarning(TestCase):
         with self.assertWarnsRegex(DeprecationWarning, "as a plain method is deprecated"):
             # This needs to be a function that handle torch_function on the python side
             torch.split(a, (2))
+
+instantiate_device_type_tests(TestTorchFunctionOverrideOpInfo, globals())
 
 if __name__ == '__main__':
     run_tests()

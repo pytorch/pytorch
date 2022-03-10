@@ -42,6 +42,7 @@ __all__ = [
     "is_tensor_like",
     "is_tensor_method_or_property",
     "wrap_torch_function",
+    "get_similar_functions_helper"
 ]
 
 @functools.lru_cache(None)
@@ -272,6 +273,42 @@ def get_default_nowrap_functions() -> Set[Callable]:
         Tensor._grad.__get__,
     }
 
+def get_similar_functions_helper(name : str) -> List[str]:
+    """
+    Helper function for get_testing_overrides that takes in the name
+    of a function and returns a list of the names of the default, inplace,
+    dunder, inplace dunder and reverse dunder methods
+
+    Parameters
+    ----------
+    name : string
+        Name of function given by func.__name__
+
+    Returns
+    -------
+    names : list
+        names of default, inplace, dunder, inplace dunder and reverse dunder
+        methods
+    """
+    # Generate methods like __add__ and add_ by default from add
+    names = [
+        name,  # Default method
+        name + "_",  # Inplace variant
+        "__" + name + "__",  # Dunder method
+        "__i" + name + "__",  # Inplace dunder method
+        "__r" + name + "__",  # Reverse dunder method
+    ]
+
+    if name.startswith("bitwise_"):
+        # bitwise_<op> have dunder methods of the form __<op>__
+        # And so on.
+        subname = name[len("bitwise_"):]
+        names.extend([
+            "__" + subname + "__",
+            "__i" + subname + "__",
+            "__r" + subname + "__"
+        ])
+    return names
 
 @functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
@@ -310,11 +347,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.arccos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
         torch.arccosh: lambda input, out=None: -1,
-        torch.add: lambda input, other, out=None: -1,
         torch.addbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
         torch.addcdiv: lambda input, tensor1, tensor2, value=1, out=None: -1,
         torch.addcmul: lambda input, tensor1, tensor2, value=1, out=None: -1,
-        torch.addmm: lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
         torch.addmv: lambda input, mat, vec, beta=1, alpha=1, out=None: -1,
         torch.addr: lambda input, vec1, vec2, beta=1, alpha=1, out=None: -1,
         torch.affine_grid_generator: lambda theta, size, align_corners: -1,
@@ -1211,24 +1246,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     ignored = get_ignored_functions()
 
     for k, v in ret.items():
-        # Generate methods like __add__ and add_ by default from add
-        names = [
-            k.__name__,  # Default method
-            k.__name__ + "_",  # Inplace variant
-            "__" + k.__name__ + "__",  # Dunder method
-            "__i" + k.__name__ + "__",  # Inplace dunder method
-            "__r" + k.__name__ + "__",  # Reverse dunder method
-        ]
-
-        if k.__name__.startswith("bitwise_"):
-            # bitwise_<op> have dunder methods of the form __<op>__
-            # And so on.
-            subname = k.__name__[len("bitwise_"):]
-            names.extend([
-                "__" + subname + "__",
-                "__i" + subname + "__",
-                "__r" + subname + "__"
-            ])
+        names = get_similar_functions_helper(k.__name__)
 
         for name in names:
             func = getattr(Tensor, name, None)
