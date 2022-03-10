@@ -219,7 +219,10 @@ def main() -> None:
     path = pathlib.Path(__file__).parent.resolve()
     replacements = {'${IterDataPipeMethods}': iter_method_definitions,
                     '${MapDataPipeMethods}': map_method_definitions}
-    gen_from_template(dir=path, template_name="datapipe.pyi.in", output_name="datapipe.pyi", replacements=replacements)
+    gen_from_template(dir=str(path),
+                      template_name="datapipe.pyi.in",
+                      output_name="datapipe.pyi",
+                      replacements=replacements)
 
 
 if __name__ == '__main__':
