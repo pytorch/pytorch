@@ -3128,21 +3128,34 @@ as the input tensor excluding its innermost dimension'):
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
-    # Test to ensure that the reduction operators, amax and amix throws errors for zero-dim
+    # Tests to ensure that the reduction operators, amax and amix throws errors for zero-dim
     # tensors (i.e. empty tensors)
-    def test_amax_amin_no_dim_arg(self, device):
+    def test_amax_amin_zero_dim_tensors(self, device):
         shape = (2, 0, 4)
+
         master_input = torch.randn(shape, device=device)
+        numpy_input = np.empty(shape)
         test_functions = [
-            (torch.amax, {'dtype': torch.int64}),
-            (torch.amin, {'dtype': torch.int64})
+            (torch.amax, np.amax),
+            (torch.amin, np.amin)
         ]
 
-        err_msg = "Specify the reduction dim with the 'dim' argument."
+        err_msg = "Specify the reduction dim with the 'dim' argument"
 
-        for fn, dtype in test_functions:
+        for fn, numpy_fn in test_functions:
+
+            # Cases that raises error (i.e. if dim arg is not provided)
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 fn(master_input)
+ 
+            # Tests to check if reduction happens along the specified dim.
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
+            self.assertEqual(numpy_fn(numpy_input, axis=2),
+                             fn(master_input, dim=2).cpu().numpy(), exact_dtype=False)
+
+            self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1))
+            self.assertEqual(numpy_fn(numpy_input, axis=-1),
+                             fn(master_input, dim=-1).cpu().numpy(), exact_dtype=False)
 
     # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using comparison operators
     # raises an error if no `dim` parameter is specified. This exists separately from tests in
