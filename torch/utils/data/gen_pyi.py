@@ -1,9 +1,9 @@
 import os
 import pathlib
-from typing import Dict, List, Set, Tuple, Union
+from typing import Any, Dict, List, Set, Tuple, Union
 
 
-def materialize_lines(lines: List[str], indentation: int = 4) -> str:
+def materialize_lines(lines: List[str], indentation: int) -> str:
     output = ""
     new_line_with_indent = "\n" + " " * indentation
     for i, line in enumerate(lines):
@@ -13,16 +13,16 @@ def materialize_lines(lines: List[str], indentation: int = 4) -> str:
     return output
 
 
-def gen_from_template(dir: str, template_name: str, output_name: str, replacements: Dict):
+def gen_from_template(dir: str, template_name: str, output_name: str, replacements: List[Tuple[str, Any, int]]):
 
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
 
     with open(template_path, "r") as f:
         content = f.read()
-    for placeholder, lines in replacements.items():
+    for placeholder, lines, indentation in replacements:
         with open(output_path, "w") as f:
-            content = content.replace(placeholder, materialize_lines(lines))
+            content = content.replace(placeholder, materialize_lines(lines, indentation))
             f.write(content)
 
 
@@ -217,8 +217,8 @@ def main() -> None:
                                                     "MapDataPipe", mapDP_method_to_special_output_type)
 
     path = pathlib.Path(__file__).parent.resolve()
-    replacements = {'${IterDataPipeMethods}': iter_method_definitions,
-                    '${MapDataPipeMethods}': map_method_definitions}
+    replacements = [('${IterDataPipeMethods}', iter_method_definitions, 4),
+                    ('${MapDataPipeMethods}', map_method_definitions, 4)]
     gen_from_template(dir=str(path),
                       template_name="datapipe.pyi.in",
                       output_name="datapipe.pyi",
@@ -226,4 +226,5 @@ def main() -> None:
 
 
 if __name__ == '__main__':
+    print("Generating Python interface file 'datapipe.pyi'...")
     main()
