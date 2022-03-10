@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/deploy/ArrayRef.h>
+#include <torch/csrc/deploy/Optional.hpp>
 
 /* Torch Deploy intentionally embeds multiple copies of c++ libraries
    providing python bindings necessary for torch::deploy users in the same
@@ -129,7 +130,7 @@ struct InterpreterSessionImpl {
 struct InterpreterImpl {
   virtual InterpreterSessionImpl* acquireSession() = 0;
   virtual void setFindModule(
-      std::function<at::optional<std::string>(const std::string&)>
+      std::function<multipy::optional<std::string>(const std::string&)>
           find_module) = 0;
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };

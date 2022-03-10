@@ -1,5 +1,6 @@
 #include <torch/csrc/deploy/loader.h>
 #include <vector>
+#include <sstream>
 
 using torch::deploy::CustomLibrary;
 using torch::deploy::CustomLibraryPtr;

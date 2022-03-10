@@ -55,7 +55,7 @@ class ArrayRef final {
   void debugCheckNullptrInvariant() {
     MULTIPY_INTERNAL_ASSERT(
         Data != nullptr || Length == 0,
-        "created ArrayRef with nullptr and non-zero length! multipy::optional relies on this being illegal");
+        "created ArrayRef with nullptr and non-zero length! optional relies on this being illegal");
   }
 
  public:

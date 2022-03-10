@@ -53,8 +53,8 @@ static bool writeDeployInterpreter(FILE* dst) {
   std::ifstream("/proc/self/cmdline") >> exePath;
   ElfFile elfFile(exePath.c_str());
   for (const auto& s : pythonInterpreterSection) {
-    at::optional<Section> payloadSection = elfFile.findSection(s.sectionName);
-    if (payloadSection != at::nullopt) {
+    multipy::optional<Section> payloadSection = elfFile.findSection(s.sectionName);
+    if (payloadSection != multipy::nullopt) {
       payloadStart = payloadSection->start;
       customLoader = s.customLoader;
       size = payloadSection->len;
@@ -98,12 +98,12 @@ InterpreterManager::InterpreterManager(
     // can be used for balancing work across GPUs
     I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
     instances_.back().pImpl_->setFindModule(
-        [this](const std::string& name) -> at::optional<std::string> {
+        [this](const std::string& name) -> multipy::optional<std::string> {
           auto it = registeredModuleSource_.find(name);
           if (it != registeredModuleSource_.end()) {
             return it->second;
           } else {
-            return at::nullopt;
+            return multipy::nullopt;
           }
         });
   }

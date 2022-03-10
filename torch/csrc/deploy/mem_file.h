@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstdio>
+#include <string.h>
+#include <errno.h>
 
 namespace torch {
 namespace deploy {
