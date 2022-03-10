@@ -5692,7 +5692,7 @@ Examples::
 
     >>> A = torch.randn(2, 3, 3)
     >>> LU, pivots = torch.linalg.lu_factor(A)
-    >>> P, L, U = torch.lu_unpack(A_LU, pivots)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
     >>> # We can recover A from the factorization
     >>> A_ = P @ L @ U
     >>> torch.allclose(A, A_)
@@ -5701,7 +5701,7 @@ Examples::
     >>> # LU factorization of a rectangular matrix:
     >>> A = torch.randn(2, 3, 2)
     >>> LU, pivots = torch.linalg.lu_factor(A)
-    >>> P, L, U = torch.lu_unpack(A_LU, pivots)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
     >>> # P, L, U are the same as returned by linalg.lu
     >>> P_, L_, U_ = torch.linalg.lu(A)
     >>> torch.allclose(P, P_) and torch.allclose(L, L_) and torch.allclose(U, U_)
