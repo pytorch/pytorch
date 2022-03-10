@@ -98,10 +98,10 @@ functorch_version = str(functorch.__version__)
 #
 # The short X.Y version.
 # TODO: change to [:2] at v1.0
-version = 'main (' + functorch_version + ')'
+version = 'nightly (' + functorch_version + ')'
 # The full version, including alpha/beta/rc tags.
 # TODO: verify this works as expected
-release = 'preview'
+release = 'nightly'
 
 # Customized html_title here.
 # Default is " ".join(project, release, "documentation") if not set
