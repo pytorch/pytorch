@@ -371,6 +371,7 @@
 - name: clamp.Tensor(Tensor self, Tensor? min=None, Tensor? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
   min, max: clamp_backward_min_max(grad, self, min, max, grad_input_mask)
+  result: clamp_jvp(self_p, self_t, min_p, min_t, max_p, max_t)
 
 - name: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
   self: clamp_backward(grad, self, min, max)
@@ -383,7 +384,7 @@
 - name: clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
   self: where(self >= min, grad, at::scalar_tensor(0., grad.options()))
   min: where(self < min, grad, at::scalar_tensor(0., grad.options()))
-  result: where(self_p >= min_p, self_t, at::scalar_tensor(0., self_p.options())) + where(self_p < min_p, min_t, at::scalar_tensor(0., self_p.options()))
+  result: where(self_p >= min_p, self_t, min_t)
 
 - name: clamp_max(Tensor self, Scalar max) -> Tensor
   self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
@@ -392,7 +393,7 @@
 - name: clamp_max.Tensor(Tensor self, Tensor max) -> Tensor
   self: where(self <= max, grad, at::scalar_tensor(0., grad.options()))
   max: where(self > max, grad, at::scalar_tensor(0., grad.options()))
-  result: where(self_p <= max_p, self_t, at::scalar_tensor(0., self_p.options())) + where(self_p > max_p, max_t, at::scalar_tensor(0., self_p.options()))
+  result: where(self_p <= max_p, self_t, max_t)
 
 - name: clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor
   self: grad

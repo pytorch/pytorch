@@ -86,6 +86,11 @@ std::vector<at::Tensor> cat_tensors_backward(const at::Tensor & grad, const std:
 at::Tensor clamp_backward(const at::Tensor & grad, const at::Tensor &self, const optional<at::Scalar>& min, const optional<at::Scalar>& max);
 at::Tensor clamp_backward(const at::Tensor & grad, const at::Tensor &self, const at::Tensor& min, const at::Tensor& max);
 std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(const at::Tensor& grad, const at::Tensor& self, const at::Tensor& min, const at::Tensor& max, const std::array<bool, 2>&);
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+);
 at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & input_name);
 at::Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha);
 at::Tensor mm_mat2_backward(const at::Tensor & grad, const at::Tensor & mat1, at::IntArrayRef sizes, at::IntArrayRef strides, const at::Scalar & alpha);

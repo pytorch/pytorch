@@ -717,6 +717,57 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+) {
+  if (min_p.defined() && max_p.defined()) {
+    // We assume self_p is more likely to be tensor-subclass-like than max_p or min_p
+    const auto scalar_zero = at::scalar_tensor(0., self_p.options());
+
+    const auto self_gt_min = self_p > min_p;
+    const auto self_lt_max = self_p < max_p;
+
+    if (areAnyTensorSubclassLike({max_p})) {
+      const auto& pred_self = self_gt_min.logical_and(self_lt_max);
+
+      const auto self_lte_min = self_gt_min.logical_not();
+      const auto min_lte_max = min_p <= max_p;
+      const auto pred_min = self_lte_min.logical_and(min_lte_max);
+
+      const auto max_lt_min = min_lte_max.logical_not();
+      const auto self_gte_max = self_lt_max.logical_not();
+      const auto& pred_max = areAnyTensorSubclassLike({min_p}) ?
+        self_gte_max.logical_or(max_lt_min) :
+        self_gte_max.logical_or_(max_lt_min);
+
+      return where(pred_self, self_t, scalar_zero) + where(pred_min, min_t, scalar_zero) + where(pred_max, max_t, scalar_zero);
+    } else {
+      // Get the negation before we modify self_lt_max in-place
+      const auto self_lte_min = self_gt_min.logical_not();
+      const auto pred_self = self_gt_min.logical_and_(self_lt_max);
+
+      const auto min_lte_max = min_p <= max_p;
+      const auto pred_min = self_lte_min.logical_and_(min_lte_max);
+
+      const auto max_lt_min = min_lte_max.logical_not();
+      const auto self_gte_max = self_lt_max.logical_not();
+      const auto& pred_max = areAnyTensorSubclassLike({min_p}) ?
+        self_gte_max.logical_or(max_lt_min) :
+        self_gte_max.logical_or_(max_lt_min);
+
+      return where(pred_self, self_t, scalar_zero) + where(pred_min, min_t, scalar_zero) + where(pred_max, max_t, scalar_zero);
+    }
+  } else if (min_p.defined()) {
+    return where(self_p > min_p, self_t, min_t);
+  } else if (max_p.defined()) {
+    return where(self_p < max_p, self_t, max_t);
+  } else {
+    return self_t; // is this correct?
+  }
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
