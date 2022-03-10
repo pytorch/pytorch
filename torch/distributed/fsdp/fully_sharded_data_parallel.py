@@ -1760,7 +1760,9 @@ class FullyShardedDataParallel(nn.Module):
 
     @property
     def params_with_grad(self) -> List[Parameter]:
-        """[p for p in self.parameters() if p.grad is not None]"""
+        """
+        Recursively returns a list of all module parameters that have a gradient.
+        """
         return [p for p in self.parameters() if p.grad is not None]
 
     @torch.no_grad()
