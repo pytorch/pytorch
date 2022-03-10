@@ -42,10 +42,12 @@ CONFIG_TREE_DATA = OrderedDict(
         wheel=[
             "3.8",
             "3.9",
+            "3.10",
         ],
         conda=[
             "3.8",
             "3.9",
+            "3.10",
         ],
     )),
     windows=(
