@@ -1,5 +1,6 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/Normalization.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 
 #include <ATen/cpu/vec/vec.h>
