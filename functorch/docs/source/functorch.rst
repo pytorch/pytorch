@@ -1,5 +1,5 @@
-functorch API Reference
-=======================
+functorch
+=========
 
 .. currentmodule:: functorch
 

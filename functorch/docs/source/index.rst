@@ -52,6 +52,7 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
    :caption: API Reference and Notes
 
    functorch
+   aot_autograd
 
 .. toctree::
    :maxdepth: 1
