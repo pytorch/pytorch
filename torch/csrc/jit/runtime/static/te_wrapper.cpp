@@ -148,7 +148,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
-    return ifThenElse(a < zero, zero, a);
+    return CompareSelect::make(a, zero, zero, a, kLT);
   });
   wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);
@@ -220,29 +220,6 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   GRAPH_DEBUG("Final stmt: ", *ln.root_stmt());
   wrap = wrapTECompute(wrap, &ln, {output, A, N});
   updateNNCCache(signed_log1p_symbol, wrap);
-  return wrap;
-}
-
-std::shared_ptr<TEWrapper> createWhere() {
-  auto wrap = lookupNNCCache(aten::where);
-  if (wrap) {
-    return wrap;
-  }
-  wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kLong);
-  BufHandle cond("cond", {N}, kBool);
-  BufHandle x("x", {N}, kLong);
-  BufHandle y("y", {N}, kLong);
-
-  Tensor res = Compute("res", {N}, [&](const VarHandle& i) {
-    auto cond_i = cond.load(i);
-    auto x_i = x.load(i);
-    auto y_i = y.load(i);
-    return ifThenElse(cond_i, x_i, y_i);
-  });
-
-  wrap = wrapTECompute(wrap, res, {cond, x, y, N});
-  updateNNCCache(aten::where, wrap);
   return wrap;
 }
 

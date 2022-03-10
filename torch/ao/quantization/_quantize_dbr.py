@@ -30,6 +30,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
 
     Supported `prepare_custom_config_dict` keys:
       * `non_traceable_module_class` - same meaning as in prepare_fx
+      * `output_dtypes` - expected dtypes of model outputs, must match actual
+        output structure.
 
     TODO(future PR): better docblock
     """
@@ -71,6 +73,14 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
 
+            # Since we are reusing the auto_trace machinery to find fusion
+            # FQNs, we need to do some surgery to get qconfigs on modules
+            # after module fusion to be correct.
+            for _, child in model.named_modules():
+                if isinstance(child, torch.nn.intrinsic._FusedModule):
+                    if hasattr(child[0], 'qconfig'):
+                        child.qconfig = child[0].qconfig
+
         # delete all the DBR state from the model, so add_auto_observation
         # can start from a clean slate
         parents_to_delete_auto_quant_state = []
@@ -79,6 +89,15 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
                 parents_to_delete_auto_quant_state.append(v)
         for v in parents_to_delete_auto_quant_state:
             del v._auto_quant_state
+
+        del model._fqn_to_auto_quant_state_map
+
+        for p in model.parameters():
+            if hasattr(p, '_qtensor_info'):
+                del p._qtensor_info
+        for b in model.buffers():
+            if hasattr(b, '_qtensor_info'):
+                del b._qtensor_info
 
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types
@@ -100,11 +119,10 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
             child.qconfig = None  # type: ignore[assignment]
         elif isinstance(child, torch.nn.LSTM):
             # TODO: fix LSTM handling in eager mode static quant and remove this
-            child.qconfig = None
+            qconfig_dict['object_type'][torch.nn.LSTM] = None
 
-    model = torch.quantization.prepare(
-        model, inplace, allow_list, observer_non_leaf_module_list,
-        prepare_custom_config_dict)
+    # TODO(future PR): do the QAT module swap
+
     assert not inplace
     model = add_auto_observation(
         model, qconfig_dict, example_inputs,

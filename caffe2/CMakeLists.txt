@@ -765,6 +765,9 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+set_property(SOURCE ${ATen_CORE_SRCS} APPEND
+    PROPERTY COMPILE_DEFINITIONS "TORCH_ASSERT_ONLY_METHOD_OPERATORS")
+
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
@@ -897,6 +900,30 @@ elseif(USE_CUDA)
   elseif(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+  endif()
+  if(BUILD_LAZY_CUDA_LINALG)
+    add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
+    target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
+    # Library order is important during static linking
+    # `torch::magma` should be mentioned before other CUDA
+    # to transitively include all symbols present in torch_cuda/torch_cpu
+    if(USE_MAGMA)
+      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+      # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
+    endif()
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        torch_cpu
+        torch_cuda
+        ${CUDA_cusolver_LIBRARY}
+    )
+    # NS: TODO, is this really necessary?
+    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    endif()
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
+    install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   endif()
 
   if(USE_PRECOMPILED_HEADERS)
@@ -1052,7 +1079,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(ATen_CPU_INCLUDE
     ${TORCH_ROOT}/aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
-    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     ${CMAKE_BINARY_DIR}/aten/src)
 
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -1092,7 +1118,7 @@ endif()
     FILES_MATCHING PATTERN "*.h")
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
-    FILES_MATCHING PATTERN "*.hpp")
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   install(FILES
     "${TORCH_SRC_DIR}/script.h"
     "${TORCH_SRC_DIR}/extension.h"
@@ -1106,12 +1132,15 @@ endif()
       DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
   endif()
 
-
   if(BUILD_TEST)
     if(BUILD_LITE_INTERPRETER)
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/lightweight_dispatch
+        ${CMAKE_BINARY_DIR}/test_codegen_unboxing
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
@@ -1926,6 +1955,7 @@ if(BUILD_PYTHON)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
+    target_link_libraries(caffe2_pybind11_state  PRIVATE numpy::numpy)
   endif()
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -1937,11 +1967,10 @@ if(BUILD_PYTHON)
   target_include_directories(caffe2_pybind11_state PRIVATE $<INSTALL_INTERFACE:include>)
   target_include_directories(caffe2_pybind11_state PRIVATE ${Caffe2_CPU_INCLUDE})
 
-  target_link_libraries(
-      caffe2_pybind11_state torch_library)
+  target_link_libraries(caffe2_pybind11_state PRIVATE
+      torch_library python::python pybind::pybind11)
   if(WIN32)
-    target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
-    target_link_libraries(caffe2_pybind11_state onnx_proto)
+    target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)
 
   # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
@@ -1959,6 +1988,7 @@ if(BUILD_PYTHON)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
     if(USE_NUMPY)
       target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
+      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE numpy::numpy)
     endif()
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -1969,10 +1999,10 @@ if(BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_gpu PRIVATE ${Caffe2_CPU_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_gpu torch_library)
+    target_link_libraries(caffe2_pybind11_state_gpu PRIVATE
+        torch_library python::python pybind::pybind11)
     if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
-      target_link_libraries(caffe2_pybind11_state_gpu onnx_proto)
+      target_link_libraries(caffe2_pybind11_state_gpu PRIVATE onnx_proto)
     endif(WIN32)
 
     # Install with same rpath as non-gpu caffe2_pybind11_state
@@ -1990,6 +2020,7 @@ if(BUILD_PYTHON)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
     if(USE_NUMPY)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
+      target_link_libraries(caffe2_pybind11_state_hip PRIVATE numpy::numpy)
     endif()
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
@@ -2000,10 +2031,8 @@ if(BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
     target_include_directories(caffe2_pybind11_state_hip PRIVATE $<INSTALL_INTERFACE:include>)
     target_include_directories(caffe2_pybind11_state_hip PRIVATE ${Caffe2_CPU_INCLUDE} ${Caffe2_HIP_INCLUDE})
-    target_link_libraries(caffe2_pybind11_state_hip torch_library)
-    if(WIN32)
-      target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
-    endif(WIN32)
+    target_link_libraries(caffe2_pybind11_state_hip PRIVATE
+        torch_library python::python pybind::pybind11)
 
     # Install with same rpath as non-hip caffe2_pybind11_state
     set_target_properties(
