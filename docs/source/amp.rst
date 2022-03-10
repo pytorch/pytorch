@@ -60,6 +60,7 @@ Autocasting
 
 Gradient Scaling
 ^^^^^^^^^^^^^^^^
+
 If the forward pass for a particular op has ``float16`` inputs, the backward pass for
 that op will produce ``float16`` gradients.
 Gradient values with small magnitudes may not be representable in ``float16``.
@@ -82,6 +83,7 @@ updates the parameters, so the scale factor does not interfere with the learning
 
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^
+
 .. _autocast-eligibility:
 
 Op Eligibility
