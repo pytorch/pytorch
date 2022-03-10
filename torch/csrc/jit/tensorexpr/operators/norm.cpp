@@ -22,9 +22,7 @@ Tensor computeBatchNorm(
   }
 
   return Compute(
-      "aten_batch_norm",
-      c10::fmap<DimArg>(outputShape),
-      [&](const std::vector<VarHandle>& axes) {
+      "aten_batch_norm", outputShape, [&](const std::vector<VarHandle>& axes) {
         TORCH_INTERNAL_ASSERT(axes.size() >= 2);
         // axes: N, C, H, W
         std::vector<ExprHandle> indices(axes.begin(), axes.end());

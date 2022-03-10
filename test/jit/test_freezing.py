@@ -1944,7 +1944,7 @@ class TestFrozenOptimizations(JitTestCase):
         frozen_mod = torch.jit.freeze(mod)
         FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
 
-        input = torch.randn(2, 2)
+        input = torch.randn(2, 2, 1, 1)
         output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)

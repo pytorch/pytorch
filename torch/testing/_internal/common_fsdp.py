@@ -1,27 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
-from contextlib import suppress
-from enum import Enum
 import os
 import sys
+from contextlib import suppress
+from copy import deepcopy
+from enum import Enum
+from typing import Union
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._fsdp import FullyShardedDataParallel, CPUOffload
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
-    TrainingState_,
-)
+from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel
+from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
     TEST_SKIPS,
+    MultiProcessTestCase,
 )
-from torch.testing._internal.common_utils import (
-    FILE_SCHEMA,
-    get_cycles_per_ms,
-)
-
+from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
 
 
 class FSDPInitMode(Enum):
@@ -32,21 +28,32 @@ class FSDPInitMode(Enum):
     # Don't move model to CUDA at all.
     CUDA_NEVER = 3
 
+def _get_full_detached_param(fsdp_model: FullyShardedDataParallel):
+    with fsdp_model.summon_full_params():
+        params = list(p.clone().detach_() for p in fsdp_model.parameters())
+
+    return params
+
+def _zero_model(fsdp_model: FullyShardedDataParallel):
+    with fsdp_model.summon_full_params():
+        for param in fsdp_model.parameters():
+            with torch.no_grad():
+                param.zero_()
+
+def _get_state_dict(model, cpu_offload=False, half=False):
+    if not cpu_offload:
+        model = model.cuda()
+    if half:
+        model.half()
+
+    return model.state_dict()
+
 # get full params of a model recursively. Note that if CPU offloading, it will
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
 def get_full_params(model, recurse=True):
-    if recurse:
-        # get all params for any nested FSDP instances.
-        for module in model.modules():
-            if isinstance(module, FullyShardedDataParallel):
-                get_full_params(module, recurse=False)
-    else:
-        torch.cuda.synchronize()
-        model._rebuild_full_params()
-        torch.cuda.synchronize()
-        if model.module.flat_param is not None:
-            model.module._unflatten_params()
+    with model.summon_full_params(recurse=recurse):
+        return deepcopy(list(model.parameters()))
 
 def _maybe_cuda(model, move_to_cuda):
     return model.cuda() if move_to_cuda else model
@@ -68,6 +75,20 @@ class DummyProcessGroup:
     def size(self) -> int:
         return self._size
 
+class DeterministicModel(torch.nn.Module):
+    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
+        super().__init__()
+        # keep everything deterministic for model initialization
+        torch.manual_seed(0)
+        self.inner: Union[torch.nn.Linear, FullyShardedDataParallel] = \
+            torch.nn.Linear(2, 2).cuda()
+        if wrap_fsdp:
+            self.inner = FullyShardedDataParallel(self.inner, cpu_offload=cpu_offload)
+        self.outer = torch.nn.Linear(2, 2).cuda()
+
+    def forward(self, x):
+        y = self.inner(x)
+        return self.outer(y)
 
 class TransformerWithSharedParams(nn.Module):
     def __init__(
@@ -333,6 +354,9 @@ class FSDPTest(MultiProcessTestCase):
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)
 
+    def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
+        self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
+
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
         self = cls(test_name)
@@ -376,7 +400,9 @@ class FSDPTest(MultiProcessTestCase):
         dist.destroy_process_group()
         sys.exit(0)
 
-    def _train_for_several_steps(self, model, num_steps, autocast, lr=0.01, fsdp_cpu_offload=None):
+    def _train_for_several_steps(
+        self, model, num_steps, autocast, lr=0.01, fsdp_cpu_offload=None, save_model=False
+    ):
         cpu_offload_params = fsdp_cpu_offload and fsdp_cpu_offload.offload_params
 
         model_device = next(model.parameters()).device
@@ -409,6 +435,16 @@ class FSDPTest(MultiProcessTestCase):
                     # p._is_sharded=False
                     self.assertEqual(p.device, torch.device("cpu"))
             optim.step()
+            # if save_model, simulate save + load.
+
+            if save_model:
+                state_dict = {k: v.clone() for k, v in model.state_dict().items()}
+                # Zero params, if save/load state_dict did not work properly, this
+                # would break the parity test with DDP.
+                _zero_model(model)
+
+                model.load_state_dict(state_dict)
+
         if isinstance(model, FullyShardedDataParallel):
             model._assert_state(TrainingState_.IDLE)
         return loss.detach()
@@ -423,6 +459,7 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
+        save_model=True,
         **kwargs
     ):
         group = dist.distributed_c10d._get_default_group()
@@ -435,6 +472,8 @@ class FSDPTest(MultiProcessTestCase):
             )
         else:
             model = ref_ddp_fn(model)
+
+        # DDP training
         ref_loss = self._train_for_several_steps(
             model, num_steps, autocast=False, lr=lr, fsdp_cpu_offload=cpu_offload
         )
@@ -472,9 +511,10 @@ class FSDPTest(MultiProcessTestCase):
             if only_check_err else suppress()
         )
         with ctx:
+            # FSDP training
             shard_loss = self._train_for_several_steps(
                 model, num_steps, autocast=False, lr=lr,
-                fsdp_cpu_offload=cpu_offload,
+                fsdp_cpu_offload=cpu_offload, save_model=save_model,
             )
         # We only check for errors in the case we have the following setup:
         # model = FSDP(model, cpu_offload=True)
@@ -491,8 +531,7 @@ class FSDPTest(MultiProcessTestCase):
                 device_set,
                 f"Got device set {device_set}"
             )
-        get_full_params(model)
-        shard_full_params = list(model.parameters())
+        shard_full_params = get_full_params(model)
 
         if cpu_offload.offload_params:
             shard_loss = shard_loss.cuda()
@@ -505,14 +544,24 @@ class FSDPTest(MultiProcessTestCase):
         )
 
     def _get_wrapped_model(
-        self, group, cuda_first=False, **model_kwargs
+        self, group, cuda_first=False, config=None, **model_kwargs
     ) -> FullyShardedDataParallel:
+        if config is None:
+            config = {}
+        move_to_cuda = not (
+            "cpu_offload" in config and config["cpu_offload"].offload_params
+        )
         if cuda_first:
-            model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs).cuda(), group
-            )
+            transformer = TransformerWithSharedParams(group, **model_kwargs)
+            if move_to_cuda:
+                transformer = transformer.cuda()
+            model = FullyShardedDataParallel(transformer, group, **config)
         else:
             model = FullyShardedDataParallel(
-                TransformerWithSharedParams(group, **model_kwargs), group
-            ).cuda()
+                TransformerWithSharedParams(group, **model_kwargs),
+                group,
+                **config,
+            )
+            if move_to_cuda:
+                model = model.cuda()
         return model

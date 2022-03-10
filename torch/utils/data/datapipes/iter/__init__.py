@@ -1,3 +1,6 @@
+from torch.utils.data.datapipes.iter.utils import (
+    IterableWrapperIterDataPipe as IterableWrapper,
+)
 from torch.utils.data.datapipes.iter.callable import (
     CollatorIterDataPipe as Collator,
     MapperIterDataPipe as Mapper,
@@ -34,9 +37,6 @@ from torch.utils.data.datapipes.iter.selecting import (
 )
 from torch.utils.data.datapipes.iter.streamreader import (
     StreamReaderIterDataPipe as StreamReader,
-)
-from torch.utils.data.datapipes.iter.utils import (
-    IterableWrapperIterDataPipe as IterableWrapper,
 )
 
 __all__ = ['Batcher',

@@ -6,11 +6,28 @@
 
 #pragma once
 
+#include <cstring>
 #include <system_error>
 
 #include <fmt/format.h>
 
 namespace fmt {
+
+template <>
+struct formatter<std::error_category> {
+  constexpr decltype(auto) parse(format_parse_context& ctx) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  decltype(auto) format(const std::error_category& cat, FormatContext& ctx) {
+    if (std::strcmp(cat.name(), "generic") == 0) {
+      return format_to(ctx.out(), "errno");
+    } else {
+      return format_to(ctx.out(), "{} error", cat.name());
+    }
+  }
+};
 
 template <>
 struct formatter<std::error_code> {
@@ -20,11 +37,7 @@ struct formatter<std::error_code> {
 
   template <typename FormatContext>
   decltype(auto) format(const std::error_code& err, FormatContext& ctx) {
-    return format_to(ctx.out(),
-                     "({} error: {} - {})",
-                     err.category().name(),
-                     err.value(),
-                     err.message());
+    return format_to(ctx.out(), "({}: {} - {})", err.category(), err.value(), err.message());
   }
 };
 

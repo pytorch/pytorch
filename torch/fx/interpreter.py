@@ -171,7 +171,13 @@ class Interpreter:
             # remaining values from the args list.
             return list(self.args_iter)
         else:
-            return next(self.args_iter)
+            try:
+                return next(self.args_iter)
+            except StopIteration as si:
+                if len(args) > 0:
+                    return args[0]
+                else:
+                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!')
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:

@@ -14,6 +14,18 @@ NodeSet = Set[torch.fx.Node]
 Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
 
+
+@compatibility(is_backward_compatible=False)
+def get_acc_ops_name(k):
+    if isinstance(k, str):
+        return k
+    elif k.__module__ and "acc_ops" in k.__module__:
+        return f"acc_ops.{k.__name__}"
+    else:
+        module = k.__module__
+        return f"{module if module else ''}.{k.__name__}"
+
+
 @compatibility(is_backward_compatible=False)
 def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node) -> str:
     """
@@ -36,7 +48,9 @@ def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.No
 
     if node.op == "call_module":
         assert isinstance(node.target, str)
-        return torch.typename(submodules[node.target])
+        submod = submodules[node.target]
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        return get_acc_ops_name(submod_type)
     elif node.op == "call_function":
         target: Any = node.target
         return (
