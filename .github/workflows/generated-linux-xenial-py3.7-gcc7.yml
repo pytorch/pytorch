@@ -13,6 +13,7 @@ on:
       - 'ciflow/trunk/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -159,8 +160,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -253,7 +255,7 @@ jobs:
     name: test (distributed, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc7-test
@@ -345,8 +347,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -499,7 +502,7 @@ jobs:
     name: test (default, 1, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc7-test
@@ -591,8 +594,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -745,7 +749,7 @@ jobs:
     name: test (default, 2, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc7-test
@@ -837,8 +841,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
