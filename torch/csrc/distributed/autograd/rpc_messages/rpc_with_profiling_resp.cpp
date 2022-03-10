@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/serialization/pickle.h>
@@ -121,9 +122,9 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   int profiledEventsSize = tupleElements[2].toInt();
   std::vector<torch::autograd::profiler::LegacyEvent> remoteEvents;
   remoteEvents.reserve(profiledEventsSize);
-  for (int i = kProfileEventsStartIdx;
-       i < kProfileEventsStartIdx + profiledEventsSize;
-       ++i) {
+  for (const auto i : c10::irange(
+           kProfileEventsStartIdx,
+           kProfileEventsStartIdx + profiledEventsSize)) {
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(i < tupleElements.size());
     // Reconstruct remote event from the ivalues.
