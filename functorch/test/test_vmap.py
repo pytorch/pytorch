@@ -3566,43 +3566,157 @@ class TestVmapOperatorsOpInfo(TestCase):
             for i in range(B0):
                 assert torch.allclose(vmap_result[i], expected)
 
+    def _get_image(self, batched_input, batch_size, device):
+        if batched_input:
+            return torch.ones([batch_size, 3, 3, 14, 14], device=device)
+        return torch.ones([3, 3, 14, 14], device=device)
+
+    def _assert_all_slices_equal(self, tensor):
+        expected = tensor[0]
+        self.assertTrue((tensor == expected).all())
+
+    def _assert_all_slices_unique(self, tensor):
+        B0 = tensor.shape[0]
+        slices_equal = vmap(vmap(lambda x, y: (x == y).all(), (0, None)), (None, 0))(tensor, tensor)
+        assert slices_equal.shape == (B0, B0)
+        slices_equal.diagonal().zero_()
+        self.assertEqual(slices_equal, torch.zeros_like(slices_equal))
+
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', [True, False])
-    def test_feature_dropout(self, device, randomness, batched_input):
-        # special case because functional feature dropout expects a batch dimension, so it doesn't match the
-        # pattern for other randomness
+    def test_dropout(self, device, randomness, batched_input):
+        def op(t, ignored):
+            return torch.nn.functional.dropout(torch.ones_like(t), training=True)
 
-        seed = 1234567
-        supported_ops = [
-            lambda t, _: torch.nn.functional.dropout(torch.ones_like(t), training=True),
-            lambda t, _: torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True),
-            lambda t, _: torch.nn.functional.feature_alpha_dropout(t, training=True),
-            lambda t, _: torch.nn.functional.dropout2d(t, training=True),
-            lambda t, _: torch.nn.functional.dropout3d(t.unsqueeze(-1), training=True),
-        ]
         B0 = 4
+        always_batched = torch.randn((B0,))
+        passed = self._get_image(batched_input, B0, device)
+        in_dims = 0 if batched_input else (None, 0)
 
-        for op in supported_ops:
-            always_batched = torch.randn((B0,))
-            passed = torch.ones([B0, 3, 3, 3, 3], device=device) if batched_input else torch.ones([3, 3, 3, 3])
-            in_dims = 0 if batched_input else (None, 0)
-            if randomness == 'error':
-                with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
-                    vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
-                return
-            torch.manual_seed(seed)
-            vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
-            torch.manual_seed(seed)
-            if not batched_input:
-                passed = passed.unsqueeze(0).expand(B0, 3, 3, 3, 3)
-            if randomness == 'different':
-                expected = op(passed.flatten(0, 1), always_batched)  # (B0, B, ...) -> (B0 * B, ...)
-                expected = expected.reshape(passed.shape[0], passed.shape[1], *expected.shape[1:])
-                assert torch.allclose(vmap_result, expected)
-            else:
-                expected = op(passed[0], always_batched)
-                for i in range(4):
-                    assert torch.allclose(vmap_result[i], expected)
+        if randomness == 'error':
+            with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+            return
+
+        vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+
+        # Check that the randomness is within bounds...
+        # ideally this is close to 0.5
+        p_estimate = vmap_result.mean() / 2
+        self.assertTrue(p_estimate < 0.75)
+        self.assertTrue(p_estimate > 0.25)
+
+        if randomness == 'different':
+            self._assert_all_slices_unique(vmap_result)
+            return
+
+        assert randomness == 'same'
+        self._assert_all_slices_equal(vmap_result)
+
+    @parametrize('randomness', ['error', 'same', 'different'])
+    @parametrize('batched_input', [True, False])
+    def test_alpha_dropout(self, device, randomness, batched_input):
+        def op(t, ignored):
+            return torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True)
+
+        B0 = 4
+        always_batched = torch.randn((B0,))
+        passed = self._get_image(batched_input, B0, device)
+        in_dims = 0 if batched_input else (None, 0)
+
+        if randomness == 'error':
+            with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+            return
+
+        # I have no clue how to actually test corectness of alpha dropout because the docs
+        # seem wrong: https://github.com/pytorch/pytorch/issues/74004
+        vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+        if randomness == 'different':
+            self._assert_all_slices_unique(vmap_result)
+            return
+
+        assert randomness == 'same'
+        self._assert_all_slices_equal(vmap_result)
+
+    @parametrize('randomness', ['error', 'same', 'different'])
+    @parametrize('batched_input', [True, False])
+    @parametrize('dim', [2, 3])
+    def test_feature_dropout(self, device, randomness, batched_input, dim):
+        def op(t, ignored):
+            f = torch.nn.functional.dropout2d if dim == 2 else torch.nn.functional.dropout3d
+            return f(torch.ones_like(t), training=True)
+
+        B0 = 4
+        always_batched = torch.randn((B0,))
+        passed = self._get_image(batched_input, B0, device)
+        if dim == 3:
+            passed = passed.unsqueeze(-1)
+        in_dims = 0 if batched_input else (None, 0)
+
+        if randomness == 'error':
+            with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+            return
+
+        vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+
+        # Check that the randomness is within bounds...
+        # ideally this is close to 0.5
+        p_estimate = vmap_result.mean() / 2
+        self.assertTrue(p_estimate < 0.75)
+        self.assertTrue(p_estimate > 0.25)
+
+        # Check the "feature" pattern
+        dims = [-1, -2] if dim == 2 else [-1, -2, -3]
+        planes_numel = 2 * vmap_result.numel() / (vmap_result.shape[0] * vmap_result.shape[1] * vmap_result.shape[2])
+        planes = vmap_result.sum(dims)
+        result = (planes == 0) ^ (planes == planes_numel)
+        self.assertEqual(result, torch.ones_like(result, dtype=torch.bool))
+
+        if randomness == 'different':
+            self._assert_all_slices_unique(vmap_result)
+            return
+
+        assert randomness == 'same'
+        self._assert_all_slices_equal(vmap_result)
+
+    @parametrize('randomness', ['error', 'same', 'different'])
+    @parametrize('batched_input', [True, False])
+    def test_feature_alpha_dropout(self, device, randomness, batched_input):
+        def op(t, ignored):
+            return torch.nn.functional.feature_alpha_dropout(torch.ones_like(t), training=True)
+
+        B0 = 4
+        always_batched = torch.randn((B0,))
+        passed = self._get_image(batched_input, B0, device)
+        passed = passed.unsqueeze(-1)
+        in_dims = 0 if batched_input else (None, 0)
+
+        if randomness == 'error':
+            with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+            return
+
+        vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+
+        # I have no clue how to actually test corectness of alpha dropout because the docs
+        # seem wrong: https://github.com/pytorch/pytorch/issues/74004
+
+        # Check the "feature" pattern
+        dims = [-1, -2, -3]
+        planes = vmap_result.sum(dims)
+        max_elt = planes.max()
+        min_elt = planes.min()
+        result = (planes == min_elt) ^ (planes == max_elt)
+        self.assertEqual(result, torch.ones_like(result, dtype=torch.bool))
+
+        if randomness == 'different':
+            self._assert_all_slices_unique(vmap_result)
+            return
+
+        assert randomness == 'same'
+        self._assert_all_slices_equal(vmap_result)
 
     @parametrize('use_generator', [True, False])
     @parametrize('randomness', ['error', 'same', 'different'])
