@@ -1,5 +1,6 @@
 #include <ATen/native/vulkan/api/Helper.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <c10/util/irange.h>
 #include <torch/library.h>
 
 namespace at {
@@ -128,7 +129,7 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
         v_self.extents().data[1u],
         depth_slice};
 
-      for (int b = 0; b < tensor.sizes()[0]; ++b) {
+      for (const auto b : c10::irange(tensor.sizes()[0])) {
         src_offset.data[2u] = safe_downcast<uint32_t>(depth_slice * b);
         dst_offset.data[2u] = depth_size_allprior + safe_downcast<uint32_t>(depth_interval * b);
         api::helper::copy_texture_to_texture(command_buffer,
@@ -215,7 +216,7 @@ Tensor cat(
       is_mult4ch = false;
     }
 
-    for (int d = 0; d < 4; ++d) {
+    for (const auto d : c10::irange(4)) {
       if (d == dim) {
         continue;
       }

@@ -243,6 +243,14 @@ TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
         c = inp.reshape(shape)
         return (a, b, c)
   )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, cond: bool, x):
+        if cond:
+            y = x.reshape(x.shape)
+        else:
+            y = x.clone()
+        return y.clone()
+  )JIT");
 }
 
 TEST(
@@ -289,7 +297,6 @@ TEST(
         return (d)
   )JIT");
   ExpectNotToReplaceWithCopy(reshape_inplace_script);
-  ExpectNotToReplaceWithCopy(reshape_inplace_script_1);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -317,22 +324,34 @@ TEST(StaticRuntime, CanEnableStaticRuntime) {
             return a * a
   )JIT";
 
-  const auto is_script = R"JIT(
+  const auto is_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is b
   )JIT";
 
-  const auto is_not_script = R"JIT(
+  const auto is_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is None
+  )JIT";
+
+  const auto is_not_script_tensors = R"JIT(
     def forward(self, a: Tensor, b: Tensor):
         return a is not b
   )JIT";
 
+  const auto is_not_script_none = R"JIT(
+    def forward(self, a: Optional[Tensor]):
+        return a is not None
+  )JIT";
+
   EXPECT_TRUE(testCanEnableStaticRuntime(reshape_inplace_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(for_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(while_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(if_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_script));
-  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(for_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(while_script));
+  EXPECT_TRUE(testCanEnableStaticRuntime(if_script));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_script_none));
+  EXPECT_FALSE(testCanEnableStaticRuntime(is_not_script_tensors));
+  EXPECT_TRUE(testCanEnableStaticRuntime(is_not_script_none));
 }
 
 TEST(StaticRuntime, NestedOutput) {
@@ -548,6 +567,24 @@ TEST(StaticRuntime, KWargsAPI_2) {
       EXPECT_EQ(wide.getIntrusivePtr().use_count(), 1);
     }
   }
+}
+
+TEST(StaticRuntime, KWargsAPI_Optional) {
+  const auto src = R"JIT(
+    def forward(self, x, y, z: Optional[Tensor] = None):
+        return x + y
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+  torch::jit::StaticModule smod(mod);
+  const auto kwargs = std::unordered_map<std::string, IValue>{
+      {"x", at::randn({1})}, {"y", at::randn({1})}};
+
+  auto expected = mod.forward({}, kwargs).toTensor();
+  auto actual = smod({}, kwargs).toTensor();
+
+  EXPECT_TRUE(expected.equal(actual));
 }
 
 TEST(StaticRuntime, CleanUpMemory) {
@@ -870,8 +907,9 @@ TEST(
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 
   pnode.Output(0) = values[0];
@@ -889,8 +927,9 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -916,9 +955,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(
         list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
@@ -930,9 +970,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
@@ -1428,4 +1469,63 @@ TEST(StaticModule, NotEnoughArgs) {
         return x
   )JIT";
   testStaticModuleThrows(kwargs_src, {}, {});
+}
+
+TEST(CreateOwnedRefsForSpecialValues, TopLevel) {
+  const auto src = R"IR(
+    graph():
+        %c: int = prim::Constant[value=42]()
+        return (%c)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(CreateOwnedRefsForSpecialValues, ValueFromOuterScope) {
+  const auto src = R"IR(
+    graph(%cond: bool, %1: int):
+        %c: int = aten::add(%1, %1)
+        %x: int = prim::If(%c)
+          block0():
+            -> (%c)
+          block1():
+            -> (%c)
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefsForSpecialValues(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
+  const auto src = R"IR(
+    graph(%cond: bool):
+        %lst : int[] = prim::ListConstruct()
+        %1 : int = prim::Constant[value=1]()
+        %2 : int = prim::Constant[value=2]()
+        prim::If(%cond)
+          block0():
+            aten::append(%lst, %1)
+            -> ()
+          block1():
+            aten::append(%lst, %2)
+            -> ()
+        return (%lst)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    EXPECT_EQ(node->outputs().size(), 1);
+    for (auto* sub_block : node->blocks()) {
+      EXPECT_EQ(sub_block->outputs().size(), 1);
+    }
+  }
 }

@@ -5,16 +5,16 @@ import functools
 import os
 import tempfile
 import unittest
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._fsdp.fully_sharded_data_parallel import (
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel as FSDP,
     CPUOffload,
-    BackwardPrefetch_,
+    BackwardPrefetch,
 )
-from torch.distributed._fsdp.wrap import (
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
     default_auto_wrap_policy,
     enable_wrap,
     wrap,
@@ -66,6 +66,15 @@ class TestFSDPWrap(FSDPTest):
             if cuda:
                 sequential = sequential.cuda()
             return sequential
+
+        @staticmethod
+        def verify_model_all_wrapped(cls, model):
+            cls.assertTrue(isinstance(model, FSDP))
+            cls.assertTrue(isinstance(model.module[0], FSDP))
+            cls.assertTrue(isinstance(model.module[1], FSDP))
+            cls.assertTrue(isinstance(model.module[2], FSDP))
+            cls.assertTrue(isinstance(model.module[2].module[0], FSDP))
+            cls.assertTrue(isinstance(model.module[2].module[1], FSDP))
 
         @staticmethod
         def verify_model(cls, model):
@@ -132,7 +141,7 @@ class TestFSDPWrap(FSDPTest):
     )
     @parametrize(
         "backward_prefetch",
-        [BackwardPrefetch_.BACKWARD_POST, BackwardPrefetch_.BACKWARD_PRE]
+        [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
     )
     @parametrize(
         "fsdp_init_mode",
@@ -256,6 +265,16 @@ class TestAutoWrap(TestCase):
         self.assertTrue(layer.process_group is new_process_group)
         self.assertEqual(layer.rank, 0)
         self.assertEqual(layer.world_size, 2)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test Requires CUDA")
+    def test_always_wrap(self):
+        """
+        Test to ensure that if `always_wrap_policy` is
+        passed into FSDP, all submodules are wrapped.
+        """
+        seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
+        model = FSDP(seq, process_group=self.process_group, fsdp_auto_wrap_policy=always_wrap_policy)
+        TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
     def test_auto_wrap_api(self):
         """

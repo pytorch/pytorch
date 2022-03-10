@@ -12,6 +12,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/DefaultDtype.h>
+#include <c10/util/irange.h>
 
 /* Implements a numpy-like histogramdd function running on cpu
  * https://numpy.org/doc/stable/reference/generated/numpy.histogramdd.html
@@ -61,7 +62,7 @@ void histogramdd_check_inputs(const Tensor& input, const TensorList& bins, const
                 "-dimensional histogram but got ", bins.size());
 
     auto input_dtype = input.dtype();
-    for (int64_t dim = 0; dim < N; dim++) {
+    for (const auto dim : c10::irange(N)) {
         const Tensor& dim_bins = bins[dim];
 
         auto bins_dtype = dim_bins.dtype();
@@ -113,7 +114,7 @@ void histogramdd_prepare_out(const Tensor& input, const std::vector<int64_t>& bi
     TORCH_CHECK(input.dtype() == hist.dtype(), "torch.histogram: input tensor and hist tensor should",
             " have the same dtype, but got input ", input.dtype(), " and hist ", hist.dtype());
 
-    for (int64_t dim = 0; dim < N; dim++) {
+    for (const auto dim : c10::irange(N)) {
         TORCH_CHECK(input.dtype() == bin_edges[dim].dtype(), "torch.histogram: input tensor and bin_edges tensor should",
                 " have the same dtype, but got input ", input.dtype(), " and bin_edges ", bin_edges[dim].dtype(),
                 " for dimension ", dim);
@@ -167,7 +168,7 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         TORCH_CHECK((int64_t)range.value().size() == 2 * N, "torch.histogramdd: for a ", N, "-dimensional histogram",
                 " range should have ", 2 * N, " elements, but got ", range.value().size());
 
-        for (int64_t dim = 0; dim < N; dim++) {
+        for (const auto dim : c10::irange(N)) {
             leftmost_edges[dim] = range.value()[2 * dim];
             rightmost_edges[dim] = range.value()[2 * dim + 1];
         }
@@ -178,7 +179,7 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         });
     }
 
-    for (int64_t dim = 0; dim < N; dim++) {
+    for (const auto dim : c10::irange(N)) {
         double leftmost_edge = leftmost_edges[dim];
         double rightmost_edge = rightmost_edges[dim];
 
@@ -232,7 +233,7 @@ std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
     TORCH_CHECK(self.dim() >= 2, "torch.histogramdd: input tensor should have at least 2 dimensions");
     const int64_t N = self.size(-1);
     std::vector<Tensor> bin_edges_out(N);
-    for (int64_t dim = 0; dim < N; dim++) {
+    for (const auto dim : c10::irange(N)) {
         bin_edges_out[dim] = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     }
     return bin_edges_out;
@@ -246,7 +247,7 @@ Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
     histogramdd_check_inputs(self, bins, weight);
     histogramdd_prepare_out(self, bins, hist, bin_edges);
 
-    for (size_t dim = 0; dim < bins.size(); dim++) {
+    for (const auto dim : c10::irange(bins.size())) {
         bin_edges[dim].copy_(bins[dim]);
     }
 
@@ -280,7 +281,7 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
 
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
 
-    for (int64_t dim = 0; dim < N; dim++) {
+    for (const auto dim : c10::irange(N)) {
         linspace_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
                 bin_ct[dim] + 1, bin_edges_out[dim]);
     }
@@ -304,7 +305,7 @@ Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
     histogramdd_check_inputs(self, bins, weight);
     histogramdd_prepare_out(self, bins, hist, bin_edges);
 
-    for (size_t dim = 0; dim < bins.size(); dim++) {
+    for (const auto dim : c10::irange(bins.size())) {
         bin_edges[dim].copy_(bins[dim]);
     }
 

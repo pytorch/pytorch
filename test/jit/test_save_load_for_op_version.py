@@ -481,3 +481,62 @@ class TestSaveLoadForOpVersion(JitTestCase):
             self.assertTrue(output.size(dim=0) == 100)
             # "Upgraded" model should match the new version output
             self.assertEqual(output, output_current)
+
+    def test_versioned_logspace(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+
+            def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
+                c = torch.logspace(a, b, steps=5)
+                d = torch.logspace(a, b, steps=100)
+                return c, d
+
+        scripted_module = torch.jit.load(
+            pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_v8.ptl")
+
+        buffer = io.BytesIO(scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        v8_mobile_module = _load_for_lite_interpreter(buffer)
+
+        current_mobile_module = self._save_load_mobile_module(Module)
+
+        sample_inputs = ((3, 10), (-10, 10), (4.0, 6.0), (3 + 4j, 4 + 5j))
+        for (a, b) in sample_inputs:
+            (output_with_step, output_without_step) = v8_mobile_module(a, b)
+            (current_with_step, current_without_step) = current_mobile_module(a, b)
+            # when no step is given, should have used 100
+            self.assertTrue(output_without_step.size(dim=0) == 100)
+            self.assertTrue(output_with_step.size(dim=0) == 5)
+            # outputs should be equal to the newest version
+            self.assertEqual(output_with_step, current_with_step)
+            self.assertEqual(output_without_step, current_without_step)
+
+    def test_versioned_logspace_out(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super(Module, self).__init__()
+
+            def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
+                return torch.logspace(a, b, steps=100, out=out)
+
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_out_v8.ptl"
+        loaded_model = torch.jit.load(model_path)
+        buffer = io.BytesIO(loaded_model._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        v8_mobile_module = _load_for_lite_interpreter(buffer)
+        current_mobile_module = self._save_load_mobile_module(Module)
+
+        sample_inputs = (
+            (3, 10, torch.empty((100,), dtype=torch.int64), torch.empty((100,), dtype=torch.int64)),
+            (-10, 10, torch.empty((100,), dtype=torch.int64), torch.empty((100,), dtype=torch.int64)),
+            (4.0, 6.0, torch.empty((100,), dtype=torch.float64), torch.empty((100,), dtype=torch.float64)),
+            (3 + 4j, 4 + 5j, torch.empty((100,), dtype=torch.complex64), torch.empty((100,), dtype=torch.complex64)),
+        )
+        for (start, end, out_for_old, out_for_new) in sample_inputs:
+            output = v8_mobile_module(start, end, out_for_old)
+            output_current = current_mobile_module(start, end, out_for_new)
+            # when no step is given, should have used 100
+            self.assertTrue(output.size(dim=0) == 100)
+            # "Upgraded" model should match the new version output
+            self.assertEqual(output, output_current)
