@@ -83,8 +83,8 @@ class DistTestCases:
 
 
 def skip_if_no_gpu(func):
-    """Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
-
+    """Skips if the world size exceeds the number of GPUs, ensuring that if the
+    test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
@@ -224,6 +224,7 @@ def with_dist_debug_levels(levels):
             old_level = os.environ.get("TORCH_DISTRIBUTED_DEBUG", None)
             for level in levels:
                 os.environ["TORCH_DISTRIBUTED_DEBUG"] = level
+                c10d.set_debug_level_from_env()
                 ret = func(*args, **kwargs)
                 c10d.barrier()
                 if old_level is not None:
