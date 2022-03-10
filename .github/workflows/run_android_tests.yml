@@ -1,6 +1,7 @@
 name: android-tests
 
 on:
+  pull_request:
   push:
     tags:
       # Trigger on release candidate builds
