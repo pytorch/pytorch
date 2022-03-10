@@ -6,6 +6,8 @@
 #include <iterator>
 #include <limits>
 
+#include <c10/util/C++17.h>
+
 #include <ATen/cuda/cub_definitions.cuh>
 
 #if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
@@ -45,17 +47,23 @@
 
 #ifdef USE_ROCM
 #define NO_ROCM(x)
+#define ROCM_HIPCUB(x) ::hipcub
 #else
 #define NO_ROCM(x) x
+#define ROCM_HIPCUB(x) x
 #endif
 
-#if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
+     (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
+#if !defined(USE_ROCM)
 namespace at_cuda_detail {
+#endif
+
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
 template <>
-struct cub::FpLimits<c10::BFloat16>
+struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 {
     static __host__ __device__ __forceinline__ c10::BFloat16 Max() {
         unsigned short max_word = 0x7F7F;
@@ -68,8 +76,14 @@ struct cub::FpLimits<c10::BFloat16>
     }
 };
 
-template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-}
+template <>
+struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
+       ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+
+#if !defined(USE_ROCM)
+} // namespace at_cuda_detail
+#endif
+
 #endif
 
 #if !defined(USE_ROCM)
@@ -93,11 +107,18 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if CUB_SUPPORTS_NV_BFLOAT16()
+#if !defined(USE_ROCM) && CUB_SUPPORTS_NV_BFLOAT16()
 
 template<>
 struct cuda_type<c10::BFloat16> {
   using type = __nv_bfloat16;
+};
+
+#elif (defined(USE_ROCM) && ROCM_VERSION >= 40500)
+
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = hip_bfloat16;
 };
 
 #endif
@@ -141,6 +162,34 @@ inline void segmented_sort_pairs(
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   }
 }
+
+#if CUB_SUPPORTS_UNIQUE_BY_KEY()
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename KeysOutputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
+inline void unique_by_key(
+  KeysInputIteratorT keys_in, ValuesInputIteratorT values_in,
+  KeysOutputIteratorT keys_out, ValuesOutputIteratorT values_out,
+  NumSelectedIteratorT num_selected, int64_t num_input_items)
+{
+  // TODO: use thrust::discard_iterator to handle null keys_out when https://github.com/NVIDIA/cub/issues/406 is fixed.
+  constexpr bool null_keys_out = std::is_same<KeysOutputIteratorT, std::nullptr_t>::value;
+  using KeyT = typename std::iterator_traits<KeysInputIteratorT>::value_type;
+  using RealKeysOutputIteratorT = typename std::conditional<null_keys_out, KeyT *, KeysOutputIteratorT>::type;
+  RealKeysOutputIteratorT keys_out_;
+  auto allocator = c10::cuda::CUDACachingAllocator::get();
+  c10::DataPtr keys_out_owner;
+  c10::guts::if_constexpr<null_keys_out>(
+    [&](auto _) {
+      keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
+      keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
+    },
+    [&](auto _) {
+      keys_out_ = keys_out;
+    }
+  );
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
+    keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
+}
+#endif
 
 namespace impl {
 
@@ -315,5 +364,25 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   }
 #endif
 }
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
+inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
+      keys, input, output, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename ScanOpT>
+inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+  TORCH_CHECK(num_items <= std::numeric_limits<int>::max(),
+    "cub InclusiveSumByKey does not support more than INT_MAX elements");
+  CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
+      keys, input, output, scan_op, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+}
+
+#endif
 
 }}}  // namespace at::cuda::cub

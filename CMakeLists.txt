@@ -189,6 +189,8 @@ option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
     BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
     "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
+cmake_dependent_option(
+     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -201,9 +203,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
     "USE_CUDA;BUILD_TEST" OFF)
-cmake_dependent_option(
-  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
-    "USE_STATIC_CUDNN" OFF)
 cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
     "USE_CUDNN" OFF)
@@ -277,12 +276,20 @@ if(IOS)
   set(USE_BREAKPAD OFF)
 endif()
 
+option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
-option(USE_XNNPACK "Use XNNPACK" ON)
+# option USE_XNNPACK: try to enable xnnpack by default.
+set(XNNPACK_MIN_CMAKE_VER 3.12)
+cmake_dependent_option(
+    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
+    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
+if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
+  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
+endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
@@ -297,6 +304,7 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
     "USE_MKLDNN" OFF)
+option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -428,8 +436,14 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(STATIC_DISPATCH_BACKEND "" CACHE STRING
-    "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+    STATIC_DISPATCH_BACKEND
+    "Name of the backend for which static dispatch code is generated, e.g.: CPU."
+    "")
+option(USE_LIGHTWEIGHT_DISPATCH "Enable codegen unboxing for ATen ops, need to work with static dispatch in order to work properly." OFF)
+if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
+  message(FATAL_ERROR "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
+endif()
 option(
   TRACING_BASED
   "Master flag to build Lite Interpreter with tracing build option"
@@ -688,6 +702,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_SLEEF_FOR_ARM_VEC256)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
 endif()
 
 if(USE_XNNPACK)
