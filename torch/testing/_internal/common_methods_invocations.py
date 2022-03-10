@@ -8349,7 +8349,8 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    assert_autodiffed=True,
                    supports_sparse_csr=True,
-                   supports_forward_ad=True),
+                   supports_forward_ad=True,
+                   override_lambda=lambda input, out=None: -1,),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    aliases=('arccos', ),
@@ -8367,6 +8368,7 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
                    safe_casts_outputs=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -8395,6 +8397,7 @@ op_db: List[OpInfo] = [
                    supports_inplace_autograd=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -8480,7 +8483,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_addmm,
-           supports_overrides=True,
            override_lambda=lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
@@ -8509,7 +8511,8 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_addmv),
+           sample_inputs_func=sample_inputs_addmv,
+           override_lambda=lambda input, mat, vec, beta=1, alpha=1, out=None: -1,),
     OpInfo('addbmm',
            ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
                                                                  np.multiply(np.asarray(alpha, dtype=batch1.dtype),
@@ -8521,6 +8524,7 @@ op_db: List[OpInfo] = [
                                                                 *[torch.bfloat16] if (SM53OrLater or TEST_WITH_ROCM) else []),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05),
@@ -8545,6 +8549,7 @@ op_db: List[OpInfo] = [
                                                     torch.complex64, torch.complex128),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
@@ -8579,6 +8584,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda input, mat2, out=None: -1,
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
@@ -8602,6 +8608,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda input, vec1, vec2, beta=1, alpha=1, out=None: -1,
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -8616,6 +8623,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_inplace_autograd=False,
+           override_lambda=lambda input, tensor1, tensor2, value=1, out=None: -1,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),),
@@ -8626,6 +8634,7 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda input, tensor1, tensor2, value=1, out=None: -1,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                DecorateInfo(unittest.skip("Skipped!"),
@@ -8644,6 +8653,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
+                   override_lambda=lambda input, out=None: -1,
                    decorators=[
                        DecorateInfo(
                            toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
@@ -8677,6 +8687,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
                    supports_sparse_csr=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -8705,6 +8716,7 @@ op_db: List[OpInfo] = [
                    supports_sparse_csr=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -8726,6 +8738,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and(torch.bool),
                     dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
+                    override_lambda=lambda input, other, out=None: -1,
                     sample_inputs_func=sample_inputs_atan2,
                     skips=(
                         # TypeError: atan2(): argument 'other' (position 2) must be Tensor, not float
@@ -8744,6 +8757,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
                    supports_sparse_csr=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat]),
@@ -8766,6 +8780,7 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            supports_forward_ad=False,
            sample_inputs_func=sample_inputs_allclose,
+           override_lambda=lambda input, other, trol=1e-05, atol=1e-08, equal_nan=False: -1,
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
@@ -8777,6 +8792,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda self, size: -1,
            sample_inputs_func=sample_inputs_broadcast_to),
     OpInfo('broadcast_tensors',
            ref=np.broadcast_arrays,
@@ -8784,6 +8800,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda *tensors: -1,
            skips=(
                # JIT does not support variadic tensors.
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -8797,6 +8814,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda *tensors: -1,
            skips=(
                # JIT does not support variadic tensors.
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -8809,6 +8827,7 @@ op_db: List[OpInfo] = [
                     dtypes=integral_types_and(torch.bool),
                     supports_autograd=False,
                     sample_inputs_func=sample_inputs_binary_pwise,
+                    override_lambda=lambda input, other, out=None: -1,
                     skips=(
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -8816,12 +8835,14 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   override_lambda=lambda input, out=None: -1,),
     BinaryUfuncInfo('bitwise_left_shift',
                     op=torch.bitwise_left_shift,
                     dtypes=all_types(),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_autograd=False,
+                    override_lambda=lambda input, other, out=None: -1,
                     sample_inputs_func=sample_inputs_bitwise_shift,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -8833,6 +8854,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types(),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_autograd=False,
+                    override_lambda=lambda input, other, out=None: -1,
                     sample_inputs_func=sample_inputs_bitwise_shift,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -8844,12 +8866,14 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_autograd=False,
            supports_out=False,
+           override_lambda=lambda input, r=2, with_replacement=False: -1,
            sample_inputs_func=sample_inputs_combinations),
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_autograd=False,
            supports_out=False,
+           override_lambda=lambda *tensors: -1,
            sample_inputs_func=sample_inputs_cartesian_prod,
            skips=(
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -8862,6 +8886,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
+           override_lambda=lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
@@ -8871,12 +8896,14 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
                    supports_sparse_csr=True,
-                   assert_autodiffed=True),
+                   assert_autodiffed=True,
+                   override_lambda=lambda input, out=None: -1,),
     OpInfo('cholesky',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           override_lambda=lambda input, upper=False, out=None: -1,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
@@ -8886,6 +8913,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
            gradcheck_wrapper=gradcheck_wrapper_triangular_input,
+           override_lambda=lambda input, upper=False, out=None: -1,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # TODO: FIXME: cholesky_inverse throws an error in forward when requires_grad=True
@@ -8901,6 +8929,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
+           override_lambda=lambda input1, input2, upper=False, out=None: -1,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # cholesky_solve does not correctly warn when resizing out= inputs
@@ -8910,13 +8939,15 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_chunk,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_out=False,
+           override_lambda=lambda input, chunks, dim=0: -1,),
     OpInfo('clone',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_clone,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_out=False,
+           override_lambda=lambda input: -1,),
     OpInfo('contiguous',
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -8950,6 +8981,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            assert_autodiffed=True,
+           override_lambda=lambda input, min=None, max=None, out=None: -1,
            sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',
@@ -8982,7 +9014,8 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   supports_out=False),
+                   supports_out=False,
+                   override_lambda=lambda input, out=None: -1),
     UnaryUfuncInfo('conj_physical',
                    ref=np.conj,
                    dtypes=all_types_and_complex_and(torch.bool,
@@ -8991,6 +9024,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    supports_sparse=True,
                    supports_sparse_csr=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        # RuntimeError: inputSet && outputSet
                        # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118,
@@ -9005,6 +9039,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
+           override_lambda=lambda input, out=None: -1,
            ),
     OpInfo('resolve_neg',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -9012,6 +9047,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
+           override_lambda=lambda input, out=None: -1,
            ),
     OpInfo('view_as_real',
            dtypes=complex_types(),
@@ -9039,6 +9075,7 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_complex,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
+                    override_lambda=lambda real, imag: -1,
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -9051,7 +9088,8 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_copysign,
                     supports_inplace_autograd=False,
                     supports_forward_ad=True,
-                    supports_fwgrad_bwgrad=True),
+                    supports_fwgrad_bwgrad=True,
+                    override_lambda=lambda input, other, out=None: -1,),
     OpInfo('corrcoef',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.half,
@@ -9059,7 +9097,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_corrcoef,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_out=False,
+           override_lambda=lambda input: -1,),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -9069,6 +9108,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   override_lambda=lambda input, out=None: -1,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
@@ -9085,6 +9125,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/48641
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -9110,6 +9151,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda input, correction=1, fweights=None, aweights=None: -1,
            skips=(
                # JIT test not working for tensor kwargs (https://github.com/pytorch/pytorch/issues/58507)
                # RuntimeError:
@@ -9873,6 +9915,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           override_lambda=lambda input, out=None: -1,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
@@ -9882,6 +9925,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
+           override_lambda=lambda input, check_errors=False, out=None: -1,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
     OpInfo('linalg.cond',
@@ -9893,6 +9937,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           override_lambda=lambda input, ord=None: -1,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
     OpInfo('linalg.eig',
            aten_name='linalg_eig',
@@ -10619,6 +10664,7 @@ op_db: List[OpInfo] = [
                     dtypes=integral_types_and(torch.bool),
                     sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
+                    override_lambda=lambda input, other, out=None: -1,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_or_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure,
@@ -10631,6 +10677,7 @@ op_db: List[OpInfo] = [
                     dtypes=integral_types_and(torch.bool),
                     sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
+                    override_lambda=lambda input, other, out=None: -1,
                     skips=(
                         # TODO: FIXME: RuntimeError: "bitwise_xor_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure,
@@ -10782,6 +10829,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
+           override_lambda=lambda input, dim=None, keepdim=False, out=None: -1,
            sample_inputs_func=sample_inputs_aminmax),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -12788,6 +12836,7 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
                    supports_complex_to_float=True,
+                   override_lambda=lambda input, out=None: -1,
                    skips=(
                        # The complex formula might be wrong
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
@@ -13052,6 +13101,7 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
                     sample_inputs_func=sample_inputs_polar,
+                    override_lambda=lambda abs, ang: -1,
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_type_promotion'),
@@ -13242,6 +13292,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_atleast1d2d3d,
+           override_lambda=lambda *tensors: -1,
            skips=(
                # JIT does not support variadic tensors.
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -13255,6 +13306,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda *tensors: -1,
            skips=(
                # JIT does not support variadic tensors.
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -13269,6 +13321,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda *tensors: -1,
            skips=(
                # JIT does not support variadic tensors.
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -13289,6 +13342,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           override_lambda=lambda tensors, out=None: -1,
            skips=(
                # JIT does not support variadic tensors.
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -13865,6 +13919,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_bernoulli,
+           override_lambda=lambda input, generator=None, out=None: -1,
            skips=(
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -13872,7 +13927,8 @@ op_db: List[OpInfo] = [
                # dtype torch.float32 into an out= with dtype torch.lon
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning')),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestTorchFunctionOverrideOpInfo', 'test_tensor_like_overrides')),
            supports_autograd=False),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13953,6 +14009,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_bincount,
            supports_out=False,
            supports_autograd=False,
+           override_lambda=lambda input, weights=None, minlength=0: -1,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
@@ -13963,6 +14020,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_bucketize,
            supports_autograd=False,
+           override_lambda=lambda input, boundaries, out_int32=False, right=False, out=None: -1,
            skips=(
                # JIT tests don't work with Tensor keyword arguments
                DecorateInfo(unittest.skip("Expected failure!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -13987,6 +14045,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
+           override_lambda=lambda tensors, dim=0, out=None: -1,
            skips=(
                # TODO: see https://github.com/pytorch/pytorch/issues/64709
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
@@ -14931,6 +14990,7 @@ op_db: List[OpInfo] = [
         result_dtype=torch.bool,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.any),
+        override_lambda=lambda input, dim=None, keepdim=False, out=None: -1,
         skips=(
             # FIXME: does not support passing keepdim without dim
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
@@ -14946,6 +15006,7 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amax),
+        override_lambda=lambda input, dim=None: -1,
         skips=(
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -14957,6 +15018,7 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amin),
+        override_lambda=lambda input, dim=None: -1,
         skips=(
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -14970,6 +15032,7 @@ op_db: List[OpInfo] = [
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        override_lambda=lambda input: -1,
         skips=(
             # FIXME: keepdim parameter is ignored when dim=None
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
@@ -14983,6 +15046,7 @@ op_db: List[OpInfo] = [
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        override_lambda=lambda input: -1,
         skips=(
             # FIXME: keepdim parameter is ignored when dim=None
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
