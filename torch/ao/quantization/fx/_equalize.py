@@ -9,14 +9,16 @@ from .utils import (
     WEIGHT_INDEX_DICT,
     get_new_attr_name_with_prefix,
     maybe_get_next_module,
-    _parent_name,
 )
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
     ObserverBase,
 )
-from ..utils import check_min_max_valid
+from ..utils import (
+    check_min_max_valid,
+    _parent_name,
+)
 
 from collections import namedtuple
 from typing import Dict, Any, List, Tuple, Optional

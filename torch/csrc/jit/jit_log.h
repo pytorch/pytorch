@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -109,6 +109,14 @@ TORCH_API std::ostream& operator<<(
 // pass
 #define GRAPH_DEBUG(...) \
   JIT_LOG(::torch::jit::JitLoggingLevels::GRAPH_DEBUG, __VA_ARGS__);
+// use GRAPH_EXPORT to export a graph so that the IR can be loaded by a script
+#define GRAPH_EXPORT(MSG, G)                       \
+  JIT_LOG(                                         \
+      ::torch::jit::JitLoggingLevels::GRAPH_DEBUG, \
+      MSG,                                         \
+      "\n<GRAPH_EXPORT>\n",                        \
+      (G)->toString(),                             \
+      "</GRAPH_EXPORT>");
 
 #define GRAPH_DUMP_ENABLED \
   (is_enabled(__FILE__, ::torch::jit::JitLoggingLevels::GRAPH_DUMP))

@@ -56,20 +56,20 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
   start = maybe_wrap_dim(start, names.size());
   end = maybe_wrap_dim(end, names.size());
   names_.reserve(end - start);
-  for (int64_t idx = start; idx < end; ++idx) {
+  for (const auto idx : c10::irange(start, end)) {
     names_.emplace_back(names, idx);
   }
 }
 
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,clang-diagnostic-absolute-value,cppcoreguidelines-narrowing-conversions)
-  size_t size_diff = std::labs(names_.size() - other.names_.size());
 
   if (names_.size() > other.names_.size()) {
+    const auto size_diff = names_.size() - other.names_.size();
     for (const auto idx : c10::irange(size_diff, names_.size())) {
       names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
     }
   } else {
+    const auto size_diff = other.names_.size() - names_.size();
     // pad names_ to the same length as other.names_ before unification
     names_.insert(
         names_.begin(),

@@ -236,7 +236,7 @@ def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str
     prioritized_tests = []
     # Try using historic stats from PR.
     if is_reordering_by_pr and HAVE_BOTO3:
-        pr_number = os.environ.get("CIRCLE_PR_NUMBER", "")
+        pr_number = os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER", ""))
         if len(pr_number):
             ci_job_prefix = _get_stripped_CI_job()
             s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(

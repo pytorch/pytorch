@@ -2,6 +2,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/Pool.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 
@@ -169,8 +170,7 @@ static void avg_pool3d_out_frame(
           c10::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
 
@@ -315,7 +315,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
         scalar_t *output_data = output.data_ptr<scalar_t>();
 
         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-          for (auto p = start; p < end; p++) {
+          for (const auto p : c10::irange(start, end)) {
             avg_pool3d_out_frame(
               input_data + p * istride, output_data + p * ostride, nslices,
               itime, iwidth, iheight,
@@ -358,8 +358,7 @@ static void avg_pool3d_backward_out_frame(
           c10::optional<int64_t> divisor_override)
 {
   at::parallel_for(0, nslices, 0, [&](int64_t start, int64_t end) {
-    for (auto k = start; k < end; k++)
-    {
+    for (const auto k : c10::irange(start, end)) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t i, j, ti;
 
@@ -500,8 +499,7 @@ TORCH_IMPL_FUNC(avg_pool3d_backward_out_cpu) (
         scalar_t *gradOutput_data = gradOutput.data_ptr<scalar_t>();
 
         at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-          for (auto p = start; p < end; p++)
-          {
+          for (const auto p : c10::irange(start, end)) {
             avg_pool3d_backward_out_frame(
               gradInput_data  + p * istride, gradOutput_data + p * ostride, nslices,
               itime, iwidth, iheight,

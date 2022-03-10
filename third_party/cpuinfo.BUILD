@@ -41,7 +41,6 @@ cc_library(
     ]),
     copts = [
         "-DCPUINFO_LOG_LEVEL=2",
-        "-DTH_BLAS_MKL",
         "-D_GNU_SOURCE=1",
     ],
     includes = [

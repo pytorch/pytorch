@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -43,27 +44,39 @@ class ReplaySelf : public ReplayTransformations {
         "Transform traversal failed, modified a node but it was not a leaf node.");
 
     // outer loop size
-    Val* remainder = ceilDiv(mapped->extent(), s->factor());
+    Val* remainder = ceilDiv(
+        Split::extent(mapped->extent(), s->startOffset(), s->stopOffset()),
+        s->factor());
 
     // Manually replay the split, following the output of the operations.
     // This is so rfactor ops are replayed correctly.
-    IterDomain* ido = new IterDomain(
-        new Int(0),
+    IterDomain* ido = IrBuilder::create<IterDomain>(
+        s->container(),
+        s->container()->zeroVal(),
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
         s->outer()->getParallelType(),
         s->outer()->getIterType(),
         s->outer()->isRFactorProduct());
 
     // inner IterDomain
-    IterDomain* idi = new IterDomain(
-        new Int(0),
+    IterDomain* idi = IrBuilder::create<IterDomain>(
+        s->container(),
+        s->container()->zeroVal(),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
         s->inner()->getParallelType(),
         s->inner()->getIterType(),
         s->inner()->isRFactorProduct());
 
     // Generate the split node
-    new Split(ido, idi, mapped, s->factor(), s->innerSplit());
+    IrBuilder::create<Split>(
+        s->container(),
+        ido,
+        idi,
+        mapped,
+        s->factor(),
+        s->innerSplit(),
+        s->startOffset(),
+        s->stopOffset());
 
     // Remove mapped id from leaf IDs
     leaf_ids_.erase(mapped);
@@ -103,14 +116,16 @@ class ReplaySelf : public ReplayTransformations {
     Val* merged_id_size =
         mul(id_outer_mapped->extent(), id_inner_mapped->extent());
 
-    IterDomain* merged_id = new IterDomain(
-        new Int(0),
+    IterDomain* merged_id = IrBuilder::create<IterDomain>(
+        m->container(),
+        m->container()->zeroVal(),
         merged_id_size->as<Int>(),
         m->out()->getParallelType(),
         m->outer()->getIterType(),
         m->out()->isRFactorProduct());
 
-    new Merge(merged_id, id_outer_mapped, id_inner_mapped);
+    IrBuilder::create<Merge>(
+        m->container(), merged_id, id_outer_mapped, id_inner_mapped);
 
     // Remove inputs from the leaf IDs
     leaf_ids_.erase(id_outer_mapped);
@@ -144,14 +159,6 @@ TensorDomain* TransformReplay::fullSelfReplay(
   {
     size_t i = 0;
     for (auto id : self->getRootDomain()) {
-      TORCH_INTERNAL_ASSERT(
-          new_self_root->getRootDomain()[i]->start()->isZeroInt() &&
-              id->start()->isZeroInt(),
-          "Replay does not support IterDomains that do not start at 0, received: ",
-          new_self_root->getRootDomain()[i]->start(),
-          " and ",
-          id->start()->isZeroInt());
-
       TORCH_INTERNAL_ASSERT(
           new_self_root->getRootDomain()[i]->getParallelType() ==
                   id->getParallelType() &&
@@ -196,16 +203,20 @@ TensorDomain* TransformReplay::fullSelfReplay(
             "Error during replay, didn't replay an axis.");
         new_rfactor_domain[i++] = it->second;
       }
-      return new TensorDomain(
+      return IrBuilder::create<TensorDomain>(
+          self->container(),
           new_self_root->getRootDomain(),
           new_rfactor_domain,
           new_domain,
-          new_self_root->contiguity());
+          self->contiguity());
     }
   }
 
-  return new TensorDomain(
-      new_self_root->getRootDomain(), new_domain, new_self_root->contiguity());
+  return IrBuilder::create<TensorDomain>(
+      self->container(),
+      new_self_root->getRootDomain(),
+      new_domain,
+      new_self_root->contiguity());
 }
 
 // Producer could have rfactor axes which consumer may want replayed. We can
@@ -298,16 +309,26 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
     }
   }
 
-  auto processed_roots = IterVisitor::getInputsTo(unordered_non_root_leaf_vals);
-
   auto producer_root = producer->getMaybeRFactorDomain();
+
+  // Figure out all id's that have been processed to generate the
+  // unordered_non_root_leaf_vals. This needs to be done because we want to
+  // match on producer's rfactor domain, not root domain.
+  std::unordered_set<IterDomain*> all_processed_ids;
+  {
+    auto all_processed_vals_vec = DependencyCheck::getAllValsBetween(
+        {producer_root.begin(), producer_root.end()},
+        unordered_non_root_leaf_vals);
+    auto all_processed_ids_vec =
+        ir_utils::filterByType<IterDomain>(all_processed_vals_vec);
+    all_processed_ids.insert(
+        all_processed_ids_vec.begin(), all_processed_ids_vec.end());
+  }
 
   // Any root domain that was not used to generate computeIDs we can also put in
   // the map to forward their transformations.
   for (auto producer_root_id : producer_root) {
-    if (std::find(
-            processed_roots.begin(), processed_roots.end(), producer_root_id) ==
-            processed_roots.end() &&
+    if (all_processed_ids.find(producer_root_id) == all_processed_ids.end() &&
         std::find(needed_dims.begin(), needed_dims.end(), producer_root_id) ==
             needed_dims.end()) {
       producer_self_replay_map[producer_root_id] = producer_root_id;
@@ -391,11 +412,13 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   }
 
   // Add axes in (4)
-  for (auto id : producer_replayed_leaves.getLeafIDs())
-    if (used_IDs.find(id) == used_IDs.end())
+  for (auto id : producer_replayed_leaves.getLeafIDs()) {
+    if (used_IDs.find(id) == used_IDs.end()) {
       new_IDs.push_back(id);
-
-  TensorDomain* replayed = new TensorDomain(
+    }
+  }
+  TensorDomain* replayed = IrBuilder::create<TensorDomain>(
+      producer->container(),
       producer->getRootDomain(),
       producer->getRFactorDomain(),
       new_IDs,
@@ -592,7 +615,8 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
     if (used_IDs.find(id) == used_IDs.end())
       new_IDs.push_back(id);
 
-  TensorDomain* replayed = new TensorDomain(
+  TensorDomain* replayed = IrBuilder::create<TensorDomain>(
+      consumer->container(),
       consumer->getRootDomain(),
       consumer->getRFactorDomain(),
       new_IDs,

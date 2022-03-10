@@ -26,70 +26,66 @@ using namespace qnnpack::testing;
 
 class ConvolutionOperatorTester {
  public:
+  inline size_t dimensionality() const {
+    return this->dimensionality_;
+  }
+
+  inline ConvolutionOperatorTester& dimensionality(size_t dimensionality) {
+    assert(dimensionality == 2 || dimensionality == 3);
+    this->dimensionality_ = dimensionality;
+    return *this;
+  }
+
   inline ConvolutionOperatorTester& padding(uint32_t padding) {
-    this->paddingTop_ = padding;
-    this->paddingRight_ = padding;
-    this->paddingBottom_ = padding;
-    this->paddingLeft_ = padding;
+    if (this->dimensionality_ == 3) {
+      this->paddingDepth_ = padding;
+    }
+    this->paddingHeight_ = padding;
+    this->paddingWidth_ = padding;
     return *this;
   }
 
   inline ConvolutionOperatorTester& padding(
       uint32_t paddingHeight,
       uint32_t paddingWidth) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingRight_ = paddingWidth;
-    this->paddingBottom_ = paddingHeight;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingHeight_ = paddingHeight;
+    this->paddingWidth_ = paddingWidth;
+    return *this;
+  }
+
+  inline ConvolutionOperatorTester& padding(
+      uint32_t paddingDepth,
+      uint32_t paddingHeight,
+      uint32_t paddingWidth) {
+    this->paddingDepth_ = paddingDepth;
+    return this->padding(paddingHeight, paddingWidth);
+  }
+
+  inline ConvolutionOperatorTester& paddingDepth(uint32_t paddingDepth) {
+    this->paddingDepth_ = paddingDepth;
     return *this;
   }
 
   inline ConvolutionOperatorTester& paddingHeight(uint32_t paddingHeight) {
-    this->paddingTop_ = paddingHeight;
-    this->paddingBottom_ = paddingHeight;
+    this->paddingHeight_ = paddingHeight;
     return *this;
   }
 
   inline ConvolutionOperatorTester& paddingWidth(uint32_t paddingWidth) {
-    this->paddingRight_ = paddingWidth;
-    this->paddingLeft_ = paddingWidth;
+    this->paddingWidth_ = paddingWidth;
     return *this;
   }
 
-  inline ConvolutionOperatorTester& paddingTop(uint32_t paddingTop) {
-    this->paddingTop_ = paddingTop;
-    return *this;
+  inline uint32_t paddingDepth() const {
+    return this->paddingDepth_;
   }
 
-  inline uint32_t paddingTop() const {
-    return this->paddingTop_;
+  inline uint32_t paddingHeight() const {
+    return this->paddingHeight_;
   }
 
-  inline ConvolutionOperatorTester& paddingRight(uint32_t paddingRight) {
-    this->paddingRight_ = paddingRight;
-    return *this;
-  }
-
-  inline uint32_t paddingRight() const {
-    return this->paddingRight_;
-  }
-
-  inline ConvolutionOperatorTester& paddingBottom(uint32_t paddingBottom) {
-    this->paddingBottom_ = paddingBottom;
-    return *this;
-  }
-
-  inline uint32_t paddingBottom() const {
-    return this->paddingBottom_;
-  }
-
-  inline ConvolutionOperatorTester& paddingLeft(uint32_t paddingLeft) {
-    this->paddingLeft_ = paddingLeft;
-    return *this;
-  }
-
-  inline uint32_t paddingLeft() const {
-    return this->paddingLeft_;
+  inline uint32_t paddingWidth() const {
+    return this->paddingWidth_;
   }
 
   inline ConvolutionOperatorTester& inputSize(
@@ -100,6 +96,25 @@ class ConvolutionOperatorTester {
     this->inputHeight_ = inputHeight;
     this->inputWidth_ = inputWidth;
     return *this;
+  }
+
+  inline ConvolutionOperatorTester& inputSize(
+      uint32_t inputDepth,
+      uint32_t inputHeight,
+      uint32_t inputWidth) {
+    assert(inputDepth >= 1);
+    this->inputDepth_ = inputDepth;
+    return this->inputSize(inputHeight, inputWidth);
+  }
+
+  inline ConvolutionOperatorTester& inputDepth(uint32_t inputDepth) {
+    assert(inputDepth >= 1);
+    this->inputDepth_ = inputDepth;
+    return *this;
+  }
+
+  inline uint32_t inputDepth() const {
+    return this->inputDepth_;
   }
 
   inline ConvolutionOperatorTester& inputHeight(uint32_t inputHeight) {
@@ -174,6 +189,9 @@ class ConvolutionOperatorTester {
 
   inline ConvolutionOperatorTester& kernelSize(uint32_t kernelSize) {
     assert(kernelSize >= 1);
+    if (this->dimensionality_ == 3) {
+      this->kernelDepth_ = kernelSize;
+    }
     this->kernelHeight_ = kernelSize;
     this->kernelWidth_ = kernelSize;
     return *this;
@@ -187,6 +205,25 @@ class ConvolutionOperatorTester {
     this->kernelHeight_ = kernelHeight;
     this->kernelWidth_ = kernelWidth;
     return *this;
+  }
+
+  inline ConvolutionOperatorTester& kernelSize(
+      uint32_t kernelDepth,
+      uint32_t kernelHeight,
+      uint32_t kernelWidth) {
+    assert(kernelDepth >= 1);
+    this->kernelDepth_ = kernelDepth;
+    return this->kernelSize(kernelHeight, kernelWidth);
+  }
+
+  inline ConvolutionOperatorTester& kernelDepth(uint32_t kernelDepth) {
+    assert(kernelDepth >= 1);
+    this->kernelDepth_ = kernelDepth;
+    return *this;
+  }
+
+  inline uint32_t kernelDepth() const {
+    return this->kernelDepth_;
   }
 
   inline ConvolutionOperatorTester& kernelHeight(uint32_t kernelHeight) {
@@ -211,6 +248,9 @@ class ConvolutionOperatorTester {
 
   inline ConvolutionOperatorTester& dilation(uint32_t dilation) {
     assert(dilation >= 1);
+    if (this->dimensionality_ == 3) {
+      this->dilationDepth_ = dilation;
+    }
     this->dilationHeight_ = dilation;
     this->dilationWidth_ = dilation;
     return *this;
@@ -224,6 +264,25 @@ class ConvolutionOperatorTester {
     this->dilationHeight_ = dilationHeight;
     this->dilationWidth_ = dilationWidth;
     return *this;
+  }
+
+  inline ConvolutionOperatorTester& dilation(
+      uint32_t dilationDepth,
+      uint32_t dilationHeight,
+      uint32_t dilationWidth) {
+    assert(dilationDepth >= 1);
+    this->dilationDepth_ = dilationDepth;
+    return this->dilation(dilationHeight, dilationWidth);
+  }
+
+  inline ConvolutionOperatorTester& dilationDepth(uint32_t dilationDepth) {
+    assert(dilationDepth >= 1);
+    this->dilationDepth_ = dilationDepth;
+    return *this;
+  }
+
+  inline uint32_t dilationDepth() const {
+    return this->dilationDepth_;
   }
 
   inline ConvolutionOperatorTester& dilationHeight(uint32_t dilationHeight) {
@@ -248,6 +307,9 @@ class ConvolutionOperatorTester {
 
   inline ConvolutionOperatorTester& subsampling(uint32_t subsampling) {
     assert(subsampling >= 1);
+    if (this->dimensionality_ == 3) {
+      this->subsamplingDepth_ = subsampling;
+    }
     this->subsamplingHeight_ = subsampling;
     this->subsamplingWidth_ = subsampling;
     return *this;
@@ -261,6 +323,26 @@ class ConvolutionOperatorTester {
     this->subsamplingHeight_ = subsamplingHeight;
     this->subsamplingWidth_ = subsamplingWidth;
     return *this;
+  }
+
+  inline ConvolutionOperatorTester& subsampling(
+      uint32_t subsamplingDepth,
+      uint32_t subsamplingHeight,
+      uint32_t subsamplingWidth) {
+    assert(subsamplingDepth >= 1);
+    this->subsamplingDepth_ = subsamplingDepth;
+    return this->subsampling(subsamplingHeight, subsamplingWidth);
+  }
+
+  inline ConvolutionOperatorTester& subsamplingDepth(
+      uint32_t subsamplingDepth) {
+    assert(subsamplingDepth >= 1);
+    this->subsamplingDepth_ = subsamplingDepth;
+    return *this;
+  }
+
+  inline uint32_t subsamplingDepth() const {
+    return this->subsamplingDepth_;
   }
 
   inline ConvolutionOperatorTester& subsamplingHeight(
@@ -316,6 +398,10 @@ class ConvolutionOperatorTester {
     }
   }
 
+  inline uint32_t dilatedKernelDepth() const {
+    return (kernelDepth() - 1) * dilationDepth() + 1;
+  }
+
   inline uint32_t dilatedKernelHeight() const {
     return (kernelHeight() - 1) * dilationHeight() + 1;
   }
@@ -324,9 +410,17 @@ class ConvolutionOperatorTester {
     return (kernelWidth() - 1) * dilationWidth() + 1;
   }
 
+  inline size_t outputDepth() const {
+    const size_t paddedInputDepth = inputDepth() + paddingDepth() * 2;
+    if (paddedInputDepth <= dilatedKernelDepth()) {
+      return 1;
+    } else {
+      return (paddedInputDepth - dilatedKernelDepth()) / subsamplingDepth() + 1;
+    }
+  }
+
   inline size_t outputHeight() const {
-    const size_t paddedInputHeight =
-        paddingTop() + inputHeight() + paddingBottom();
+    const size_t paddedInputHeight = inputHeight() + paddingHeight() * 2;
     if (paddedInputHeight <= dilatedKernelHeight()) {
       return 1;
     } else {
@@ -336,8 +430,7 @@ class ConvolutionOperatorTester {
   }
 
   inline size_t outputWidth() const {
-    const size_t paddedInputWidth =
-        paddingLeft() + inputWidth() + paddingRight();
+    const size_t paddedInputWidth = inputWidth() + paddingWidth() * 2;
     if (paddedInputWidth <= dilatedKernelWidth()) {
       return 1;
     } else {
@@ -383,20 +476,22 @@ class ConvolutionOperatorTester {
 
     std::vector<uint8_t> input(
         batchSize() *
-            ((inputHeight() * inputWidth() - 1) * inputPixelStride() +
+            ((inputDepth() * inputHeight() * inputWidth() - 1) *
+                 inputPixelStride() +
              groups() * groupInputChannels()) +
         8);
     std::vector<uint8_t> kernel(
-        groups() * groupOutputChannels() * kernelHeight() * kernelWidth() *
-        groupInputChannels());
+        groups() * groupOutputChannels() * kernelHeight() * kernelDepth() *
+        kernelWidth() * groupInputChannels());
     std::vector<int32_t> bias(groups() * groupOutputChannels());
     std::vector<uint8_t> output(
         batchSize() *
-        ((outputHeight() * outputWidth() - 1) * outputPixelStride() +
+        ((outputDepth() * outputHeight() * outputWidth() - 1) *
+             outputPixelStride() +
          groups() * groupOutputChannels()));
     std::vector<int32_t> accumulators(
-        batchSize() * outputHeight() * outputWidth() * groups() *
-        groupOutputChannels());
+        batchSize() * outputDepth() * outputHeight() * outputWidth() *
+        groups() * groupOutputChannels());
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
@@ -417,58 +512,84 @@ class ConvolutionOperatorTester {
       std::fill(accumulators.begin(), accumulators.end(), 0);
 
       for (size_t i = 0; i < batchSize(); i++) {
-        for (size_t oy = 0; oy < outputHeight(); oy++) {
-          for (size_t ox = 0; ox < outputWidth(); ox++) {
-            for (size_t g = 0; g < groups(); g++) {
-              for (size_t oc = 0; oc < groupOutputChannels(); oc++) {
-                accumulators
-                    [(((i * outputHeight() + oy) * outputWidth() + ox) *
-                          groups() +
-                      g) *
-                         groupOutputChannels() +
-                     oc] = bias[g * groupOutputChannels() + oc];
+        for (size_t oz = 0; oz < outputDepth(); oz++) {
+          for (size_t oy = 0; oy < outputHeight(); oy++) {
+            for (size_t ox = 0; ox < outputWidth(); ox++) {
+              for (size_t g = 0; g < groups(); g++) {
+                for (size_t oc = 0; oc < groupOutputChannels(); oc++) {
+                  accumulators
+                      [((((i * outputDepth() + oz) * outputHeight() + oy) *
+                             outputWidth() +
+                         ox) *
+                            groups() +
+                        g) *
+                           groupOutputChannels() +
+                       oc] = bias[g * groupOutputChannels() + oc];
+                }
               }
             }
           }
         }
       }
       for (size_t i = 0; i < batchSize(); i++) {
-        for (size_t oy = 0; oy < outputHeight(); oy++) {
-          for (size_t ox = 0; ox < outputWidth(); ox++) {
-            for (size_t ky = 0; ky < kernelHeight(); ky++) {
-              const size_t iy = oy * subsamplingHeight() +
-                  ky * dilationHeight() - paddingTop();
-              if (iy < inputHeight()) {
-                for (size_t kx = 0; kx < kernelWidth(); kx++) {
-                  const size_t ix = ox * subsamplingWidth() +
-                      kx * dilationWidth() - paddingLeft();
-                  if (ix < inputWidth()) {
-                    for (size_t g = 0; g < groups(); g++) {
-                      for (size_t oc = 0; oc < groupOutputChannels(); oc++) {
-                        for (size_t ic = 0; ic < groupInputChannels(); ic++) {
-                          accumulators
-                              [(((i * outputHeight() + oy) * outputWidth() +
-                                 ox) *
-                                    groups() +
-                                g) *
-                                   groupOutputChannels() +
-                               oc] +=
-                              (int32_t(inputPtr
-                                           [((i * inputHeight() + iy) *
-                                                 inputWidth() +
-                                             ix) *
-                                                inputPixelStride() +
-                                            g * groupInputChannels() + ic]) -
-                               int32_t(inputZeroPoint)) *
-                              (int32_t(kernel
-                                           [(((g * groupOutputChannels() + oc) *
-                                                  kernelHeight() +
-                                              ky) *
-                                                 kernelWidth() +
-                                             kx) *
-                                                groupInputChannels() +
-                                            ic]) -
-                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
+        for (size_t oz = 0; oz < outputDepth(); oz++) {
+          for (size_t oy = 0; oy < outputHeight(); oy++) {
+            for (size_t ox = 0; ox < outputWidth(); ox++) {
+              for (size_t kz = 0; kz < kernelDepth(); kz++) {
+                const size_t iz = oz * subsamplingDepth() +
+                    kz * dilationDepth() - paddingDepth();
+                if (iz < inputDepth()) {
+                  for (size_t ky = 0; ky < kernelHeight(); ky++) {
+                    const size_t iy = oy * subsamplingHeight() +
+                        ky * dilationHeight() - paddingHeight();
+                    if (iy < inputHeight()) {
+                      for (size_t kx = 0; kx < kernelWidth(); kx++) {
+                        const size_t ix = ox * subsamplingWidth() +
+                            kx * dilationWidth() - paddingWidth();
+                        if (ix < inputWidth()) {
+                          for (size_t g = 0; g < groups(); g++) {
+                            for (size_t oc = 0; oc < groupOutputChannels();
+                                 oc++) {
+                              for (size_t ic = 0; ic < groupInputChannels();
+                                   ic++) {
+                                accumulators
+                                    [((((i * outputDepth() + oz) *
+                                            outputHeight() +
+                                        oy) *
+                                           outputWidth() +
+                                       ox) *
+                                          groups() +
+                                      g) *
+                                         groupOutputChannels() +
+                                     oc] +=
+                                    (int32_t(
+                                         inputPtr
+                                             [(((i * inputDepth() + iz) *
+                                                    inputHeight() +
+                                                iy) *
+                                                   inputWidth() +
+                                               ix) *
+                                                  inputPixelStride() +
+                                              g * groupInputChannels() + ic]) -
+                                     int32_t(inputZeroPoint)) *
+                                    (int32_t(
+                                         kernel
+                                             [((((g * groupOutputChannels() +
+                                                  oc) *
+                                                     kernelDepth() +
+                                                 kz) *
+                                                    kernelHeight() +
+                                                ky) *
+                                                   kernelWidth() +
+                                               kx) *
+                                                  groupInputChannels() +
+                                              ic]) -
+                                     int32_t(
+                                         kernelZeroPoints
+                                             [g * groupOutputChannels() + oc]));
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -514,32 +635,56 @@ class ConvolutionOperatorTester {
 
       ASSERT_EQ(
           pytorch_qnnp_status_success,
-          pytorch_qnnp_create_convolution2d_nhwc_q8(
-              paddingTop(),
-              paddingRight(),
-              paddingBottom(),
-              paddingLeft(),
-              kernelHeight(),
-              kernelWidth(),
-              subsamplingHeight(),
-              subsamplingWidth(),
-              dilationHeight(),
-              dilationWidth(),
-              groups(),
-              groupInputChannels(),
-              groupOutputChannels(),
-              inputZeroPoint,
-              kernelZeroPoints.data(),
-              kernel.data(),
-              bias.data(),
-              outputZeroPoint,
-              qmin(),
-              qmax(),
-              0,
-              requantization_scales.data(),
-              per_channel(),
-              &convolution));
-
+          (dimensionality() == 2 ? pytorch_qnnp_create_convolution2d_nhwc_q8(
+                                       paddingHeight(),
+                                       paddingWidth(),
+                                       kernelHeight(),
+                                       kernelWidth(),
+                                       subsamplingHeight(),
+                                       subsamplingWidth(),
+                                       dilationHeight(),
+                                       dilationWidth(),
+                                       groups(),
+                                       groupInputChannels(),
+                                       groupOutputChannels(),
+                                       inputZeroPoint,
+                                       kernelZeroPoints.data(),
+                                       kernel.data(),
+                                       bias.data(),
+                                       outputZeroPoint,
+                                       qmin(),
+                                       qmax(),
+                                       0,
+                                       requantization_scales.data(),
+                                       per_channel(),
+                                       &convolution)
+                                 : pytorch_qnnp_create_convolution3d_ndhwc_q8(
+                                       paddingDepth(),
+                                       paddingHeight(),
+                                       paddingWidth(),
+                                       kernelDepth(),
+                                       kernelHeight(),
+                                       kernelWidth(),
+                                       subsamplingDepth(),
+                                       subsamplingHeight(),
+                                       subsamplingWidth(),
+                                       dilationDepth(),
+                                       dilationHeight(),
+                                       dilationWidth(),
+                                       groups(),
+                                       groupInputChannels(),
+                                       groupOutputChannels(),
+                                       inputZeroPoint,
+                                       kernelZeroPoints.data(),
+                                       kernel.data(),
+                                       bias.data(),
+                                       outputZeroPoint,
+                                       qmin(),
+                                       qmax(),
+                                       0,
+                                       requantization_scales.data(),
+                                       per_channel(),
+                                       &convolution)));
       switch (mode) {
         case Mode::Static: {
           ASSERT_EQ(
@@ -547,7 +692,7 @@ class ConvolutionOperatorTester {
               pytorch_qnnp_setup_convolution_ndhwc_q8(
                   convolution,
                   batchSize(),
-                  1, /* inputDepth */
+                  inputDepth(),
                   inputHeight(),
                   inputWidth(),
                   inputPtr,
@@ -580,7 +725,7 @@ class ConvolutionOperatorTester {
                   convolution,
                   packW->getPackedWeights(),
                   batchSize(),
-                  1,
+                  inputDepth(),
                   inputHeight(),
                   inputWidth(),
                   inputZeroPoint,
@@ -604,34 +749,42 @@ class ConvolutionOperatorTester {
       }
 
       for (size_t i = 0; i < batchSize(); i++) {
-        for (size_t y = 0; y < outputHeight(); y++) {
-          for (size_t x = 0; x < outputWidth(); x++) {
-            for (size_t g = 0; g < groups(); g++) {
-              for (size_t c = 0; c < groupOutputChannels(); c++) {
-                const double scaledAccumulator =
-                    accumulators
-                        [(((i * outputHeight() + y) * outputWidth() + x) *
-                              groups() +
-                          g) *
-                             groupOutputChannels() +
-                         c] *
-                    requantization_scales[g * groupOutputChannels() + c];
-                const double clampedAccumulator = std::max(
-                    std::min(
-                        scaledAccumulator,
-                        double(qmax()) - double(outputZeroPoint)),
-                    double(qmin()) - double(outputZeroPoint));
-                ASSERT_NEAR(
-                    clampedAccumulator,
-                    (int32_t(
-                         output
-                             [((i * outputHeight() + y) * outputWidth() + x) *
-                                  outputPixelStride() +
-                              g * groupOutputChannels() + c]) -
-                     outputZeroPoint),
-                    0.9)
-                    << "(x, y) = (" << x << ", " << y << "), group = " << g
-                    << ", channel = " << c;
+        for (size_t z = 0; z < outputDepth(); z++) {
+          for (size_t y = 0; y < outputHeight(); y++) {
+            for (size_t x = 0; x < outputWidth(); x++) {
+              for (size_t g = 0; g < groups(); g++) {
+                for (size_t c = 0; c < groupOutputChannels(); c++) {
+                  const double scaledAccumulator =
+                      ((double)accumulators
+                           [((((i * outputDepth() + z) * outputHeight() + y) *
+                                  outputWidth() +
+                              x) *
+                                 groups() +
+                             g) *
+                                groupOutputChannels() +
+                            c]) *
+                      requantization_scales[g * groupOutputChannels() + c];
+                  const double clampedAccumulator = std::max(
+                      std::min(
+                          scaledAccumulator,
+                          double(qmax()) - double(outputZeroPoint)),
+                      double(qmin()) - double(outputZeroPoint));
+                  ASSERT_NEAR(
+                      clampedAccumulator,
+                      (int32_t(output
+                                   [(((i * outputDepth() + z) * outputHeight() +
+                                      y) *
+                                         outputWidth() +
+                                     x) *
+                                        outputPixelStride() +
+                                    g * groupOutputChannels() + c]) -
+                       outputZeroPoint),
+                      0.9)
+                      << "(x, y" << (dimensionality() == 3 ? ", z" : "")
+                      << ") = (" << x << ", " << y
+                      << (dimensionality() == 3 ? ", " + std::to_string(z) : "")
+                      << "), group = " << g << ", channel = " << c;
+                }
               }
             }
           }
@@ -641,10 +794,10 @@ class ConvolutionOperatorTester {
   }
 
  private:
-  uint32_t paddingTop_{0};
-  uint32_t paddingRight_{0};
-  uint32_t paddingBottom_{0};
-  uint32_t paddingLeft_{0};
+  uint32_t paddingDepth_{0};
+  uint32_t paddingHeight_{0};
+  uint32_t paddingWidth_{0};
+  size_t inputDepth_{1};
   size_t inputHeight_{1};
   size_t inputWidth_{1};
   uint32_t groups_{1};
@@ -653,14 +806,18 @@ class ConvolutionOperatorTester {
   size_t groupOutputChannels_{1};
   size_t outputPixelStride_{0};
   size_t batchSize_{1};
+  uint32_t kernelDepth_{1};
   uint32_t kernelHeight_{1};
   uint32_t kernelWidth_{1};
+  uint32_t dilationDepth_{1};
   uint32_t dilationHeight_{1};
   uint32_t dilationWidth_{1};
+  uint32_t subsamplingDepth_{1};
   uint32_t subsamplingHeight_{1};
   uint32_t subsamplingWidth_{1};
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{1};
   bool per_channel_{false};
+  size_t dimensionality_{2}; // 2 or 3
 };

@@ -6,8 +6,13 @@
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wdeprecated-copy-dtor")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-copy-dtor")
+#endif
 
 C10_DECLARE_bool(torch_jit_disable_warning_prints);
 C10_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
@@ -83,6 +88,7 @@ struct TORCH_API MobileCode : Code {
       std::string function_name,
       bool emit_default_input_instructions = true,
       bool support_default_args_before_out = true,
+      bool emit_promoted_ops = true,
       size_t remaining_bailout_depth = 0);
   ~MobileCode();
 };
@@ -159,3 +165,5 @@ TORCH_API std::vector<std::string> currentModuleHierarchy();
 
 } // namespace jit
 } // namespace torch
+
+C10_CLANG_DIAGNOSTIC_POP()

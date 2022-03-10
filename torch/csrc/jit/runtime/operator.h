@@ -12,9 +12,8 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/library.h>
 
-#include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #include <functional>
 #include <initializer_list>

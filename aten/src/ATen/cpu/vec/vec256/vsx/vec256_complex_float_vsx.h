@@ -4,11 +4,12 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 using ComplexFlt = c10::complex<float>;
 
 template <>
@@ -222,7 +223,7 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> map(ComplexFlt (*const f)(ComplexFlt)) const {
     __at_align__ ComplexFlt tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -231,7 +232,7 @@ class Vectorized<ComplexFlt> {
   Vectorized<ComplexFlt> map(ComplexFlt (*const f)(const ComplexFlt&)) const {
     __at_align__ ComplexFlt tmp[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -430,7 +431,7 @@ class Vectorized<ComplexFlt> {
     __at_align__ ComplexFlt y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
     }
     return loadu(x_tmp);

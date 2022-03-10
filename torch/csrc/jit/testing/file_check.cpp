@@ -13,7 +13,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -46,6 +46,12 @@ struct Check {
       : type_(type), search_str_(std::move(str)) {
     count_ = count;
   };
+
+  Check(
+      CheckType type,
+      c10::string_view str,
+      c10::optional<size_t> count = c10::nullopt)
+      : Check(type, std::string(str.begin(), str.end()), count) {}
 
   CheckType type_;
   c10::optional<size_t> count_;
@@ -116,7 +122,7 @@ size_t assertFind(
 }
 
 size_t assertFind(
-    const std::shared_ptr<Source>& source,
+    const std::shared_ptr<SourceView>& source,
     const std::string& sub,
     size_t start,
     const Check& check) {
@@ -196,7 +202,9 @@ struct FileCheckImpl {
   friend std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc);
 
  private:
-  bool parseSingleCheck(const std::shared_ptr<Source>& source, size_t* start) {
+  bool parseSingleCheck(
+      const std::shared_ptr<SourceView>& source,
+      size_t* start) {
     const static std::vector<std::pair<CheckType, std::string>> check_pairs = {
         {CHECK, ": "},
         {CHECK_NEXT, "-NEXT: "},
@@ -226,8 +234,9 @@ struct FileCheckImpl {
         }
         size_t end =
             assertFind(SourceRange(source, end_check_string, end_line), ":");
-        count = c10::stoll(
-            source->text().substr(end_check_string, end - end_check_string));
+        auto count_view =
+            source->text().substr(end_check_string, end - end_check_string);
+        count = c10::stoll(std::string(count_view.begin(), count_view.end()));
         end_check_string = end + 2; // add ':' and the space
       }
       auto check = Check(
@@ -244,7 +253,9 @@ struct FileCheckImpl {
     return false;
   }
 
-  size_t findNextStart(const std::shared_ptr<Source>& source, size_t prev_end) {
+  size_t findNextStart(
+      const std::shared_ptr<SourceView>& source,
+      size_t prev_end) {
     size_t start = source->text().find('#', prev_end);
     if (start == std::string::npos) {
       return start;
@@ -267,7 +278,7 @@ struct FileCheckImpl {
     }
   }
 
-  void parseStrings(const std::shared_ptr<Source>& source) {
+  void parseStrings(const std::shared_ptr<SourceView>& source) {
     size_t start = 0;
     start = findNextStart(source, 0);
     while (start != std::string::npos) {
@@ -286,7 +297,7 @@ struct FileCheckImpl {
 
   void doCheckNot(
       const std::vector<Check>& nots,
-      const std::shared_ptr<Source>& source,
+      const std::shared_ptr<SourceView>& source,
       const SourceRange& prev,
       const SourceRange& next) {
     auto start = prev.end(); // inclusive
@@ -303,7 +314,7 @@ struct FileCheckImpl {
   // Checks that source token is highlighted, does not advance search range.
   void doCheckSourceHighlighted(
       const Check& check,
-      const std::shared_ptr<Source>& source,
+      const std::shared_ptr<SourceView>& source,
       size_t start_offset) {
     auto construct_error_and_throw = [&](size_t error_start_pos) {
       SourceRange error_range(
@@ -379,7 +390,7 @@ struct FileCheckImpl {
 
   SourceRange matchDagGroup(
       const std::vector<Check>& group,
-      const std::shared_ptr<Source>& source,
+      const std::shared_ptr<SourceView>& source,
       const SourceRange& prev) {
     size_t group_beg = std::string::npos;
     size_t group_end = 0;
@@ -397,7 +408,7 @@ struct FileCheckImpl {
 
   SourceRange matchGroup(
       const std::vector<Check>& group,
-      const std::shared_ptr<Source>& source,
+      const std::shared_ptr<SourceView>& source,
       const SourceRange& prev) {
     AT_ASSERT(group.size() != 0);
     CheckType type = group[0].type_;
@@ -456,7 +467,7 @@ struct FileCheckImpl {
     return SourceRange(source, start_range, end_range);
   }
 
-  void doChecks(const std::shared_ptr<Source>& source) {
+  void doChecks(const std::shared_ptr<SourceView>& source) {
     SourceRange prev(source, 0, 0);
     for (size_t i = 0; i < groups.size(); i++) {
       const auto& curr_group = groups[i];

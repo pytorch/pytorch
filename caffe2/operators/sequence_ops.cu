@@ -1,6 +1,7 @@
 #include <algorithm>
 
 #include <cub/cub.cuh>
+#include "caffe2/utils/cub_namespace.cuh"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/sequence_ops.h"

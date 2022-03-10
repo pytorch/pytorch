@@ -12,7 +12,7 @@
 // C10
 // - Move file to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
-// it it.
+// it.
 // - Revise constructor logic so that it is 1) consistent with c++ 17 standard
 // documented here in (8):
 // https://en.cppreference.com/w/cpp/utility/optional/optional, and 2) able to
@@ -40,6 +40,20 @@
 #include <utility>
 
 #include <c10/util/Metaprogramming.h>
+
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wstring-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-conversion")
+#endif
 
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
@@ -1233,5 +1247,7 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // C10_UTIL_OPTIONAL_H_

@@ -70,5 +70,9 @@ Tensor _test_ambiguous_defaults(const Tensor& dummy, int64_t a, c10::string_view
   return c10::scalar_to_tensor(2);
 }
 
+Tensor _test_warn_in_autograd(const Tensor &self) {
+  return self.clone();
+}
+
 } // namespace native
 } // namespace at

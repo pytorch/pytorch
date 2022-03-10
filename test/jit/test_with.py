@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 import os
 import sys
 
@@ -413,15 +415,15 @@ class TestWith(JitTestCase):
         # checkScript and checkScriptRaisesRegex cannot be used because the string frontend will
         # not compile class types (of which Context, the context manager being used for this test
         # is one).
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
             test_exception(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
             test_exception_nested(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\"raised exception"):
             test_exception_fn_call(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
@@ -619,7 +621,7 @@ class TestWith(JitTestCase):
         function_events = p.function_events
         # Event with name "foo" should be recorded.
         rf_events = [evt for evt in function_events if evt.name == "foo"]
-        self.assertTrue(len(rf_events), 1)
+        self.assertEqual(len(rf_events), 1)
         rf_event = rf_events[0]
         child_events = rf_event.cpu_children
         # Ensure we find nested record_function event

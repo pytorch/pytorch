@@ -3,7 +3,8 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 
-namespace caffe2 { namespace onnx  {
+namespace caffe2 {
+namespace onnx {
 
 std::string DummyName::NewDummyName() {
   while (true) {
@@ -16,7 +17,7 @@ std::string DummyName::NewDummyName() {
   }
 }
 
-void DummyName::Reset(const std::unordered_set<std::string> &used_names) {
+void DummyName::Reset(const std::unordered_set<std::string>& used_names) {
   used_names_ = used_names;
   counter_ = 0;
 }
@@ -44,15 +45,16 @@ NodeProto MakeNode(
     node.set_name(name);
   }
   node.set_op_type(type);
-  for (const auto& input: inputs) {
+  for (const auto& input : inputs) {
     node.add_input(input);
   }
-  for (const auto& output: outputs) {
+  for (const auto& output : outputs) {
     node.add_output(output);
   }
-  for (const auto& attr: attributes) {
+  for (const auto& attr : attributes) {
     node.add_attribute()->CopyFrom(attr);
   }
   return node;
 }
-}}
+} // namespace onnx
+} // namespace caffe2

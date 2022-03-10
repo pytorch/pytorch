@@ -1,5 +1,6 @@
 #include "caffe2/operators/quantized/int8_test_utils.h"
 #include "caffe2/operators/quantized/int8_utils.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 

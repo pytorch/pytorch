@@ -22,7 +22,7 @@ void Int8DequantizeNNPI(
     const float X_scale,
     const int32_t X_offset) {
   float X_scale_fp32 = 1.0f / X_scale;
-  for (auto i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     out[i] = (float)(static_cast<int32_t>(in[i]) - X_offset) / X_scale_fp32;
   }
 } // namespace

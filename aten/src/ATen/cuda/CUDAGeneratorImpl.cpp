@@ -1,5 +1,5 @@
 #include <ATen/Utils.h>
-#include <ATen/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDAFunctions.h>

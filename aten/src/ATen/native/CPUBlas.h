@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
@@ -61,6 +61,18 @@ void gemm(
     const float *b, int64_t ldb,
     float beta,
     float *c, int64_t ldc);
+
+#ifdef BLAS_HAS_SBGEMM
+using _bfloat16_t = decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t);
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    _bfloat16_t alpha,
+    const _bfloat16_t *a, int64_t lda,
+    const _bfloat16_t *b, int64_t ldb,
+    _bfloat16_t beta,
+    _bfloat16_t *c, int64_t ldc);
+#endif // BLAS_HAS_SBGEMM
 
 void gemm(
     TransposeType transa, TransposeType transb,

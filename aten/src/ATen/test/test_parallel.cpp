@@ -9,7 +9,7 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #include <thread>
 #endif

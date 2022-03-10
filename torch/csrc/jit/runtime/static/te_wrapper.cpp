@@ -27,10 +27,6 @@ void TEWrapper::call(const std::vector<void*>& args) {
   cg->call_raw(args);
 }
 
-bool TEWrapper::supports(const at::Tensor& t) {
-  return t.is_contiguous() && t.dtype().Match<float>();
-}
-
 void optimizePointwise(LoopNest* ln, Tensor target, int width) {
   std::vector<ForPtr> loops = ln->getLoopStmtsFor(target);
   ForPtr inner, tail;
@@ -69,10 +65,6 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 
 void TEWrapper::call(const std::vector<void*>& args) {
   DCHECK(0 && "Invalid call");
-}
-
-bool TEWrapper::supports(const at::Tensor& t) {
-  return false;
 }
 
 std::shared_ptr<TEWrapper> wrapTECompute(
@@ -156,7 +148,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
-    return ifThenElse(a < zero, zero, a);
+    return CompareSelect::make(a, zero, zero, a, kLT);
   });
   wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);

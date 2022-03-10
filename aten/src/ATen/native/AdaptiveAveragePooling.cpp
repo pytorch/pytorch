@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/AdaptivePooling.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <c10/util/irange.h>
 
 
 namespace at {
@@ -16,7 +17,7 @@ namespace {
   {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     int64_t ndim = input.ndimension();
-    for (int64_t i = 1; i < ndim; i++) {
+    for (const auto i : c10::irange(1, ndim)) {
       TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
@@ -52,7 +53,7 @@ namespace {
     const Tensor& input)
   {
     int64_t ndim = grad_output.ndimension();
-    for (int64_t i = 1; i < ndim; i++) {
+    for (const auto i : c10::irange(1, ndim)) {
       TORCH_CHECK(grad_output.size(i) > 0,
         "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
         "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
@@ -96,6 +97,10 @@ namespace {
 
   Tensor adaptive_avg_pool2d(at::Tensor const& input, IntArrayRef output_size) {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+    TORCH_CHECK(
+        (output_size[0] >= 0 && output_size[1] >= 0),
+        "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
+        "but received {", output_size[0], ", ", output_size[1], "}");
 
     if (input.is_mkldnn()) {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);

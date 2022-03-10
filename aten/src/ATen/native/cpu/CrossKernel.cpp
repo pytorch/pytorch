@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Cross.h>
 
 #include <numeric>
@@ -5,13 +6,16 @@
 #include <algorithm>
 #include <vector>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vml.h>
+#include <c10/util/irange.h>
 namespace at { namespace native { namespace {
 
 template<typename scalar_t>
-static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
+static void apply_cross(const Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
   int64_t total = a.numel() / 3;
   int64_t a_stride = a.stride(dim);
   int64_t b_stride = b.stride(dim);
@@ -28,7 +32,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
     int64_t a_start = 0;
     int64_t b_start = 0;
     int64_t r_start = 0;
-    for (int64_t i = 0; i < a.dim(); i++) {
+    for (const auto i : c10::irange(a.dim())) {
       if (i == dim) continue;
       position_in_dims[i] = index_in_curr_dim % a.size(i);
       a_start += (index_in_curr_dim % a.size(i)) * a.stride(i);
@@ -43,7 +47,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
       r_ptr[r_start+2*r_stride] = a_ptr[a_start+0*a_stride]*b_ptr[b_start+1*b_stride] - a_ptr[a_start+1*a_stride]*b_ptr[b_start+0*b_stride];
       s++;
 
-      for (int i = 0; i < a.dim(); i++) {
+      for (const auto i : c10::irange(a.dim())) {
         if (i == dim) {
           continue;
         }
@@ -64,7 +68,7 @@ static void apply_cross(Tensor& result, const Tensor& a, const Tensor& b, const 
   });
 }
 
-static void cross_kernel_impl(Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
+static void cross_kernel_impl(const Tensor& result, const Tensor& a, const Tensor& b, const int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, result.scalar_type(), "cross", [&]() {
     apply_cross<scalar_t>(result, a, b, dim);
   });

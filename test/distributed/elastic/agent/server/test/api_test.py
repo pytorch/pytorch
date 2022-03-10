@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -528,33 +529,33 @@ class SimpleElasticAgentTest(unittest.TestCase):
         self.assertEquals(expected_info.serialize(), store.value)
         store_mock.assert_called_once()
 
-    def test_get_agent_status_event(self):
+    def test_get_event(self):
         spec = self._get_worker_spec(max_restarts=1)
         agent = TestAgent(spec)
-        actual_event = agent.get_agent_status_event(state=WorkerState.SUCCEEDED)
-        self.assertEqual("AGENT", actual_event.source)
-        self.assertEqual("static", actual_event.metadata["rdzv_backend"])
-        self.assertEqual(WorkerState.SUCCEEDED.value, actual_event.metadata["state"])
-        self.assertEqual(spec.role, actual_event.metadata["role"])
+        event = agent.get_event_succeeded()
+        self.assertEqual("AGENT", event.source)
+        self.assertEqual("static", event.metadata["rdzv_backend"])
+        self.assertEqual("SUCCEEDED", event.metadata["state"])
+        self.assertEqual(spec.role, event.metadata["role"])
 
     def test_get_worker_status_event(self):
         spec = self._get_worker_spec(max_restarts=4)
         agent = TestAgent(spec)
         agent._remaining_restarts = spec.max_restarts - 2
         actual_event = agent._construct_event(
-            state=WorkerState.SUCCEEDED.value,
+            state="SUCCEEDED",
             source="WORKER",
             worker=agent._worker_group.workers[0],
         )
         self.assertEqual("WORKER", actual_event.source)
         self.assertEqual("static", actual_event.metadata["rdzv_backend"])
-        self.assertEqual(WorkerState.SUCCEEDED.value, actual_event.metadata["state"])
+        self.assertEqual("SUCCEEDED", actual_event.metadata["state"])
         self.assertEqual(spec.role, actual_event.metadata["role"])
         self.assertEqual(2, actual_event.metadata["agent_restarts"])
 
     @patch("torch.distributed.elastic.agent.server.api.put_metric")
     @patch.object(TestAgent, "_invoke_run")
-    def test_agent_process_signal_exception(self, invoke_run, put_metric_mock):
+    def test_agent_process_signal_exception(self, invoke_run, _):
         spec = self._get_worker_spec(max_restarts=0)
         agent = TestAgent(spec)
         invoke_run.side_effect = SignalException(

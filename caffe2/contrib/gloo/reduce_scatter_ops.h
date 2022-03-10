@@ -75,7 +75,7 @@ class ReduceScatterOp final : public Operator<Context> {
 
     // Verify inputs == outputs
     CAFFE_ENFORCE_EQ(init_.inputs.size(), init_.outputs.size());
-    for (auto i = 0; i < init_.inputs.size(); i++) {
+    for (const auto i : c10::irange(init_.inputs.size())) {
       CAFFE_ENFORCE_EQ(init_.inputs[i], init_.outputs[i]);
     }
 
@@ -107,7 +107,7 @@ class ReduceScatterOp final : public Operator<Context> {
     params.context = OperatorBase::Input<std::shared_ptr<::gloo::Context>>(0);
     params.inputs.resize(InputSize() - 2);
     params.outputs.resize(OutputSize() - 1);
-    for (auto i = 0; i < params.inputs.size(); i++) {
+    for (const auto i : c10::irange(params.inputs.size())) {
       params.inputs[i] = Input(i + 1).raw_data();
       params.outputs[i] = Output(i)->raw_mutable_data();
     }

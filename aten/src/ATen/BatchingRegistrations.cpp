@@ -1,8 +1,10 @@
 #include <torch/library.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/VmapTransforms.h>
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -61,7 +63,7 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   // >>> x = torch.randn(B0)  # the per-examples are all scalars
   // >>> vmap(partial(torch.sum, dim=0), x)
   // then we replicate the behavior of sum(scalar_tensor, dim=0).
-  if (/*logical*/self.dim() == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])) {
+  if (/*logical*/self.dim() == 0 && (dims.size() == 0 || (dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0])))) {
     return self.clone();
   }
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
@@ -329,7 +331,7 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
 
   VmapDimVector all_dims_physical;
   all_dims_physical.reserve(self_physical.tensor().dim());
-  for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
+  for (const auto bdim : c10::irange(self_physical.numBatchDims())) {
     all_dims_physical.push_back(bdim);
   }
   all_dims_physical.insert(
@@ -538,6 +540,36 @@ static void checkBasicAsStridedValidForSlice(
       "`tensor` can only access some memory in range [", base_offset, ", ",
       *max_slice_loc, "]. This is not supported inside of vmap, please try to",
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
+}
+
+Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  return reshape_batching_rule(self, sizes);
+}
+
+Tensor _new_zeros_with_same_feature_meta_batching_rule(
+    const Tensor& self,
+    const Tensor& other,
+    int64_t unused_num_batch_dims) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+    "Only the 'batched grad' use case is supported in PyTorch core.");
+
+  TORCH_INTERNAL_ASSERT(unused_num_batch_dims == 0,
+    "num_batch_dims should not be explicitly passed in because it will be overridden");
+  auto self_physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
+  const auto& self_physical_tensor = self_physical_view.tensor();
+  int64_t num_batch_dims = self_physical_view.numBatchDims();
+  checkBatchDimsAtFrontInLayout(self_physical_tensor.strides(), num_batch_dims);
+  auto result = at::_new_zeros_with_same_feature_meta(self_physical_tensor, other, num_batch_dims);
+  return self_physical_view.getPhysicalToLogicalMap().apply(result);
+}
+
+bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+    "Only the 'batched grad' use case is supported in PyTorch core.");
+  // The _has_same_storage_numel check is skipped if the tangent is a batched
+  // tensor because using as_strided to access storage locations not indexable
+  // by the input tensor is not supported in vmap
+  return true;
 }
 
 // What are the semantics of as_strided inside of vmap?
@@ -794,6 +826,17 @@ Tensor mv_batching_rule(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
 
+Tensor _make_dual_batching_rule(
+  c10::DispatchKeySet ks,
+  const Tensor& primal,
+  const Tensor& tangent,
+  int64_t level
+) {
+  DispatchKeySet after_batched_keyset =
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Batched);
+  return at::redispatch::_make_dual(ks & after_batched_keyset, primal, tangent, level);
+}
+
 Tensor dot_batching_rule(const Tensor& self, const Tensor& other) {
   auto self_batched = isBatchedTensor(self);
   auto other_batched = isBatchedTensor(other);
@@ -1025,6 +1068,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
+  m.impl("_make_dual", _make_dual_batching_rule);
+  m.impl("_has_same_storage_numel", _has_same_storage_numel_batching_rule);
+  m.impl("is_same_size", native::is_same_size);
+  m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
@@ -1047,9 +1094,13 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // NB: static_cast because there's another variant of narrow. However, we don't
   // want to support the other variant yet bc it isn't documented...
   m.impl("narrow", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t,int64_t)>(native::narrow)); // composite wrt autograd
-  m.impl("numpy_T", native::numpy_T); // composite wrt autograd
+  m.impl("numpy_T", native::numpy_T);   // composite wrt autograd
+  m.impl("matrix_H", native::matrix_H); // composite wrt autograd
+  m.impl("mT", native::mT);             // composite wrt autograd
+  m.impl("mH", native::mH);             // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
+  m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);

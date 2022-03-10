@@ -1,7 +1,8 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -51,36 +52,39 @@ namespace cuda {
 //! predicate still in the inner most loop, making sure that we cover edges and
 //! corners.
 //!
-class TORCH_CUDA_CU_API UnrollPass {
+class TORCH_CUDA_CU_API UnrollPass : kir::ExprMutator {
  public:
   // Take the incoming exprs and run loop unrolling, returning the new IR
-  static std::vector<kir::Expr*> runPass(
+  static std::vector<Expr*> runPass(
       Fusion* fusion,
-      const std::vector<kir::Expr*>& exprs);
+      const std::vector<Expr*>& exprs);
+
+  static bool canOmitElseClause(kir::ForLoop* fl);
 
  private:
   // Generate the for Expr replacement map
-  UnrollPass(const std::vector<kir::Expr*>& exprs);
+  UnrollPass(const std::vector<Expr*>& exprs);
 
-  const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
+  const std::unordered_map<Expr*, Expr*>& replacementMap() const {
     return expr_replacement_map_;
   }
 
-  void handle(kir::ForLoop* fl);
+  using OptOutDispatch::handle;
 
-  void handle(kir::Expr* expr);
+  void handle(kir::ForLoop* fl) final;
 
-  bool canOmitElseClause(kir::ForLoop* fl) const;
+  void handle(Expr* expr) final;
 
  private:
   // We will track which loops in the incoming IR will be replaced and by what
-  std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
-
-  // Keep all for loops conveniently to make unrolling easier
-  std::vector<kir::ForLoop*> for_loops_;
+  std::unordered_map<Expr*, Expr*> expr_replacement_map_;
 
   // keep track if we're within an unrolled loop
   bool look_for_unroll_ = true;
+
+  // Indicates if the currently visited expression is inside a
+  // unswitched path
+  bool unswitched_loop_ = false;
 
   // As we generate inline predicates check if we actually generated a
   // non-trivial one.

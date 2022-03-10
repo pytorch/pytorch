@@ -1,15 +1,15 @@
-ir_version: 7
+ir_version: 3
 producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
+    input: "onnx::Shape_0"
+    output: "onnx::ConstantFill_1"
     name: "Shape_0"
     op_type: "Shape"
   }
   node {
-    input: "1"
+    input: "onnx::ConstantFill_1"
     output: "2"
     name: "ConstantFill_1"
     op_type: "ConstantFill"
@@ -29,9 +29,9 @@ graph {
       type: FLOAT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Shape_0"
     type {
       tensor_type {
         elem_type: 1

@@ -42,6 +42,7 @@ void mkl_gemm_batched(
 #else // AT_MKL_ENABLED
 
 #include <mkl.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 

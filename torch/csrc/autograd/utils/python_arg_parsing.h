@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <torch/csrc/utils/python_arg_parser.h>
 

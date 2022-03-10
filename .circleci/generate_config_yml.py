@@ -10,13 +10,8 @@ import shutil
 import sys
 from collections import namedtuple
 
-import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
-import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
-import cimodel.data.simple.ios_definitions
-import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
@@ -140,19 +135,11 @@ def generate_required_docker_images(items):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        # For rocm images, which don't have a circleci job equivalent
-        cimodel.data.simple.docker_definitions.get_workflow_jobs,
-        pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_definitions.get_workflow_jobs,
-        cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
-        cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         cimodel.data.simple.anaconda_prune_defintions.get_workflow_jobs,
-        binary_build_definitions.get_post_upload_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
     build_jobs.extend(
@@ -163,18 +150,8 @@ def gen_build_workflows_tree():
     )
     master_build_jobs = filter_master_only_jobs(build_jobs)
 
-    binary_build_functions = [
-        binary_build_definitions.get_binary_build_jobs,
-        binary_build_definitions.get_nightly_tests,
-        binary_build_definitions.get_nightly_uploads,
-    ]
-
     return {
         "workflows": {
-            "binary_builds": {
-                "when": r"<< pipeline.parameters.run_binary_tests >>",
-                "jobs": [f() for f in binary_build_functions],
-            },
             "build": {
                 "when": r"<< pipeline.parameters.run_build >>",
                 "jobs": build_jobs,
@@ -206,7 +183,6 @@ YAML_SOURCES = [
     File("job-specs/docker_jobs.yml"),
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-    File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]
 
