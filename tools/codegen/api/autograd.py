@@ -350,7 +350,6 @@ def match_differentiability_info(
                     matches = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
                     if matches:
                         op_name, between_parens = matches.group(1), matches.group(2)
-                        # NB: The below check isn't necessary, currently
                         # We want to...
                         #   Match: self_t.op1(other_p.op2(arg))
                         #   Avoid: self_ self_t.op1(args) + self_t.op2(args)
