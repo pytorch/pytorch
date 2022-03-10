@@ -141,7 +141,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
       .setbMatDesc(cudnn_utils::getTensorDescriptor(orig_weight.sizes(), orig_weight.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
       .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment))
-      .setmatmulDesc(getLinearDescriptor(CUDNN_DATA_FLOAT)) // is this right? should it be float?
+      .setmatmulDesc(getLinearDescriptor(CUDNN_DATA_INT32)) // is this right? should it be float?
       .build();
   // std::cout << "operator:" << linear_op.describe() << std::endl;
 
