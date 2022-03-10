@@ -565,7 +565,11 @@ class TestFunctionalIterDataPipe(TestCase):
     def _serialization_test_helper(self, datapipe):
         serialized_dp = pickle.dumps(datapipe)
         deserialized_dp = pickle.loads(serialized_dp)
-        self.assertEqual(list(datapipe), list(deserialized_dp))
+        try:
+            self.assertEqual(list(datapipe), list(deserialized_dp))
+        except AssertionError as e:
+            print(f"{datapipe} is failing.")
+            raise e
 
     def _serialization_test_for_single_dp(self, dp):
         # 1. Testing for serialization before any iteration starts
@@ -598,43 +602,44 @@ class TestFunctionalIterDataPipe(TestCase):
         self._serialization_test_helper(dp2)
 
     def test_serializable(self):
-        input_dp = dp.iter.IterableWrapper(range(10))
-        picklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
-            (dp.iter.Batcher, (3, True,), {}),
-            (dp.iter.Collator, (_fake_fn,), {}),
-            (dp.iter.Concater, (dp.iter.IterableWrapper(range(5)),), {}),
-            (dp.iter.Demultiplexer, (2, _fake_filter_fn), {}),
-            (dp.iter.FileLister, (), {}),
-            (dp.iter.FileOpener, (), {}),
-            (dp.iter.Filter, (_fake_filter_fn,), {}),
-            (dp.iter.Filter, (partial(_fake_filter_fn_constant, 5),), {}),
-            (dp.iter.Forker, (2,), {}),
-            (dp.iter.Grouper, (_fake_filter_fn,), {"group_size": 2}),
-            (dp.iter.IterableWrapper, (), {}),
-            (dp.iter.Mapper, (_fake_fn, ), {}),
-            (dp.iter.Mapper, (partial(_fake_add, 1), ), {}),
-            (dp.iter.Multiplexer, (input_dp,), {}),
-            (dp.iter.Sampler, (), {}),
-            (dp.iter.Shuffler, (), {}),
-            (dp.iter.StreamReader, (), {}),
-            (dp.iter.UnBatcher, (0,), {}),
-            (dp.iter.Zipper, (input_dp,), {}),
+        picklable_datapipes: List = [
+            (dp.iter.Batcher, None, (3, True,), {}),
+            (dp.iter.Collator, None, (_fake_fn,), {}),
+            (dp.iter.Concater, None, (dp.iter.IterableWrapper(range(5)),), {}),
+            (dp.iter.Demultiplexer, None, (2, _fake_filter_fn), {}),
+            (dp.iter.FileLister, ".", (), {}),
+            (dp.iter.FileOpener, None, (), {}),
+            (dp.iter.Filter, None, (_fake_filter_fn,), {}),
+            (dp.iter.Filter, None, (partial(_fake_filter_fn_constant, 5),), {}),
+            (dp.iter.Forker, None, (2,), {}),
+            (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
+            (dp.iter.IterableWrapper, range(10), (), {}),
+            (dp.iter.Mapper, None, (_fake_fn, ), {}),
+            (dp.iter.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.iter.Multiplexer, None, (dp.iter.IterableWrapper(range(10)),), {}),
+            (dp.iter.Sampler, None, (), {}),
+            (dp.iter.Shuffler, dp.iter.IterableWrapper([0] * 10), (), {}),
+            (dp.iter.StreamReader, None, (), {}),
+            (dp.iter.UnBatcher, None, (0,), {}),
+            (dp.iter.Zipper, None, (dp.iter.IterableWrapper(range(10)),), {}),
         ]
         # Skipping comparison for these DataPipes
-        dp_skip_comparison = {dp.iter.FileLister, dp.iter.FileOpener, dp.iter.StreamReader, dp.iter.Shuffler}
+        dp_skip_comparison = {dp.iter.FileOpener, dp.iter.StreamReader}
         # These DataPipes produce multiple DataPipes as outputs and those should be compared
         dp_compare_children = {dp.iter.Demultiplexer, dp.iter.Forker}
 
-        for dpipe, dp_args, dp_kwargs in picklable_datapipes:
+        for dpipe, custom_input, dp_args, dp_kwargs in picklable_datapipes:
+            if custom_input is None:
+                custom_input = dp.iter.IterableWrapper(range(10))
             if dpipe in dp_skip_comparison:  # Merely make sure they are picklable and loadable (no value comparison)
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 serialized_dp = pickle.dumps(datapipe)
                 _ = pickle.loads(serialized_dp)
             elif dpipe in dp_compare_children:  # DataPipes that have children
-                dp1, dp2 = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                dp1, dp2 = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 self._serialization_test_for_dp_with_children(dp1, dp2)
             else:  # Single DataPipe that requires comparison
-                datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                 self._serialization_test_for_single_dp(datapipe)
 
     def test_serializable_with_dill(self):
@@ -1433,30 +1438,45 @@ class TestFunctionalIterDataPipe(TestCase):
 
 class TestFunctionalMapDataPipe(TestCase):
 
-    def _serialization_test_helper(self, datapipe, has_two_children=False):
+    def _serialization_test_helper(self, datapipe):
         serialized_dp = pickle.dumps(datapipe)
         deserialized_dp = pickle.loads(serialized_dp)
-        if not has_two_children:
+        try:
             self.assertEqual(list(datapipe), list(deserialized_dp))
-        else:
-            for c1, c2 in zip(list(datapipe), list(deserialized_dp)):
-                self.assertEqual(list(c1), list(c2))
+        except AssertionError as e:
+            print(f"{datapipe} is failing.")
+            raise e
+
+    def _serialization_test_for_single_dp(self, dp):
+        # 1. Testing for serialization before any iteration starts
+        self._serialization_test_helper(dp)
+        # 2. Testing for serialization after DataPipe is partially read
+        it = iter(dp)
+        _ = next(it)
+        self._serialization_test_helper(dp)
+        # 3. Testing for serialization after DataPipe is fully read
+        _ = list(it)
+        self._serialization_test_helper(dp)
 
     def test_serializable(self):
-        input_dp = dp.map.SequenceWrapper(range(10))
-        picklable_datapipes: List[
-            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
-        ] = [
-            (dp.map.Mapper, (), {}),
-            (dp.map.Mapper, (_fake_fn, ), {}),
-            (dp.map.Mapper, (partial(_fake_add, 1), ), {}),
+        picklable_datapipes: List = [
+            (dp.map.Batcher, None, (2,), {}),
+            (dp.map.Concater, None, (dp.map.SequenceWrapper(range(10)),), {}),
+            (dp.map.Mapper, None, (), {}),
+            (dp.map.Mapper, None, (_fake_fn, ), {}),
+            (dp.map.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.map.SequenceWrapper, range(10), (), {}),
+            (dp.map.Shuffler, dp.map.SequenceWrapper([0] * 5), (), {}),
+            (dp.map.Zipper, None, (dp.map.SequenceWrapper(range(10)),), {}),
         ]
-        for dpipe, dp_args, dp_kwargs in picklable_datapipes:
-            _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
-            datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-            self._serialization_test_helper(datapipe)
+        for dpipe, custom_input, dp_args, dp_kwargs in picklable_datapipes:
+            if custom_input is None:
+                custom_input = dp.map.SequenceWrapper(range(10))
+            datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+            self._serialization_test_for_single_dp(datapipe)
 
     def test_serializable_with_dill(self):
+        """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
         unpicklable_datapipes: List[
             Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
