@@ -50,3 +50,11 @@ and the inputs to the Module's forward pass.
     make_functional
     make_functional_with_buffers
     combine_state_for_ensemble
+
+If you're looking for information on fixing Batch Norm modules, please follow the
+guidance here
+
+.. toctree::
+   :maxdepth: 1
+
+   batch_norm
