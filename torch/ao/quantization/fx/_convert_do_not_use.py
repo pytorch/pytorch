@@ -7,6 +7,7 @@ from torch.fx import (
 from torch.fx.graph import (
     Graph,
     Node,
+    Argument,
 )
 from ..utils import (
     activation_is_statically_quantized,
@@ -87,6 +88,12 @@ DYNAMIC_MODULE_CLASSES = (
     torch.nn.RNNCell,
     torch.nn.LSTM,
 )
+
+def has_none_qconfig(node: Argument, qconfig_map: Dict[str, QConfigAny]) -> bool:
+    """ Check if a node has a qconfig of None, i.e. user requested to not quantize
+    the node
+    """
+    return isinstance(node, Node) and node.name in qconfig_map and qconfig_map[node.name] is None
 
 def run_weight_observers(observed: GraphModule) -> None:
     """ Extract the subgraph that produces the weight for dynamic quant
@@ -186,6 +193,8 @@ def get_module_path_and_prefix(
     # operator (they can be the same)
     # this flag identifies if the observer is inserted only because the observed node is
     # the input of the next operator
+    assert isinstance(observed_node, Node), \
+        f"Expecting observed node to be a Node, but got {observed_node}"
     is_input_observer_only = qconfig_map[observed_node.name] is None if observed_node.name in qconfig_map else None
     if is_input_observer_only:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
@@ -203,7 +212,7 @@ def get_module_path_and_prefix(
         prefix = "_input"
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
-        first_linear_use_or_first_use = obs_node.args[0]
+        first_linear_use_or_first_use = observed_node
         prefix = ""
 
     if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
@@ -246,7 +255,7 @@ def convert_standalone_module(
         modules: Dict[str, torch.nn.Module],
         model: torch.fx.GraphModule,
         is_reference: bool,
-        backend_config_dict: Dict[str, Any]):
+        backend_config_dict: Optional[Dict[str, Any]]):
     """ Converts a observed standalone module to a quantized standalone module by calling
     the fx convert api, currently using the same `is_reference` flag as parent, but we may
     changing this behavior in the future (e.g. separating quantization and lowering for
@@ -307,8 +316,11 @@ def convert_weighted_module(
         node: Node,
         modules: Dict[str, torch.nn.Module],
         observed_node_names: Set[str],
-        quantized_reference_module_mapping: Dict[Callable, Any]):
+        quantized_reference_module_mapping: Dict[Callable, Any],
+        qconfig_map: Dict[str, QConfigAny]):
     """ Convert a weighted module to reference quantized module in the model
+    If the QConfig of a QAT module is not set, the module will still be converted to
+    a float module.
 
     Args:
       - node: The call_module node of the observed standalone module
@@ -319,11 +331,25 @@ def convert_weighted_module(
         to quantized reference module class, e.g. nn.Conv2d to nn.quantized._reference.Conv2d
     """
     original_module = modules[str(node.target)]
-    qconfig = original_module.qconfig
+    float_module = original_module
+    weight_post_process = None
 
+    if isinstance(
+            original_module,
+            QAT_MODULE_CLASSES):
+        # Converting qat module to a float module, we need to attch
+        # weight fake_quant to the module, weight fake_quant is assumed to be run during
+        # QAT so we don't need to run it again here
+        float_module = original_module.to_float()  # type: ignore[operator]
+        # change qat module to float module
+        parent_name, name = _parent_name(node.target)
+        setattr(modules[parent_name], name, float_module)
+        weight_post_process = original_module.weight_fake_quant
+
+    qconfig = original_module.qconfig
     is_observed = node.name in observed_node_names
-    if qconfig is None or \
-       not is_observed:
+    # If a qconfig is not defined for this node, then skip converting to a reference module
+    if qconfig is None or has_none_qconfig(node, qconfig_map) or not is_observed:
         return
 
     # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
@@ -347,41 +373,18 @@ def convert_weighted_module(
     if not is_weight_quantized:
         return
 
-    float_module = original_module
     fused_module = None
-    if isinstance(
-            original_module,
-            QAT_MODULE_CLASSES):
-        # case 1. converting qat module to
-        # a float module, we need to attch
-        # weight fake_quant to the module,
-        # weight fake_quant is assumed to be run during
-        # QAT so we don't need to run it again here
-        float_module = original_module.to_float()  # type: ignore[operator]
-        # change qat conv to conv
-        parent_name, name = _parent_name(node.target)
-        setattr(modules[parent_name], name, float_module)
-        if isinstance(float_module, torch.nn.intrinsic._FusedModule):
-            fused_module = float_module
-            float_module = fused_module[0]
-        weight_post_process = original_module.weight_fake_quant
-    else:
-        # case 2. converting a float module/fused float module
-        # to float module, we need to attach
-        # weight observer to the conv module and run it
-        # with conv weight
-        if isinstance(original_module, torch.nn.intrinsic._FusedModule):
-            fused_module = original_module
-            float_module = fused_module[0]  # type: ignore[index]
-        assert qconfig is not None
-        weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
+    # extract the inidividual float_module and fused module
+    if isinstance(float_module, torch.nn.intrinsic._FusedModule):
+        fused_module = float_module
+        float_module = fused_module[0]  # type: ignore[index]
 
     # TODO: expose this through backend_config_dict
     # weight_qparams or weight_qparams dict
     wq_or_wq_dict = {}
     if isinstance(float_module, torch.nn.RNNCellBase):
-        weight_post_process_ih = qconfig.weight()
-        weight_post_process_hh = qconfig.weight()
+        weight_post_process_ih = qconfig.weight()  # type: ignore[union-attr, operator]
+        weight_post_process_hh = qconfig.weight()  # type: ignore[union-attr, operator]
         weight_post_process_ih(float_module.weight_ih)
         weight_post_process_hh(float_module.weight_hh)
         weight_qparams_ih = get_qparam_dict(weight_post_process_ih)
@@ -396,11 +399,15 @@ def convert_weighted_module(
         for wn in float_module._flat_weights_names:
             if hasattr(float_module, wn) and wn.startswith("weight"):
                 weight = getattr(float_module, wn)
-                weight_post_process = qconfig.weight()
+                weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
                 if weight_post_process.dtype == torch.qint8:
                     weight_post_process(weight)
                 wq_or_wq_dict[wn] = get_qparam_dict(weight_post_process)
     else:
+        # weight_post_process is None means the original module is not a QAT module
+        # we need to get weight_post_process from qconfig in this case
+        if weight_post_process is None:
+            weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
         # run weight observer
         # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
         # In the future, we should require the user to calibrate the model after calling prepare
@@ -455,6 +462,9 @@ def convert_custom_module(
         statically_quantized_custom_module_nodes.add(node)
         # remove the previous dequant node
         prev_node = node.args[0]
+        # expecting the input node for a custom module node to be a Node
+        assert isinstance(prev_node, Node), \
+            f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
         if prev_node.op == "call_method" and prev_node.target == "dequantize":
             assert len(prev_node.users) == 1, "dequantize node before custom module is used "
             "multiple times, this is currently not supported yet, but it can be "
@@ -582,7 +592,12 @@ def _convert_do_not_use(
         module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope, qconfig_map)
         observer_module = modules[node.target]
         maybe_quantize_node_info = get_quantize_node_info(observer_module)
-        if maybe_quantize_node_info is None:
+        # Skip replacing observers to quant/dequant nodes if the qconfigs of all
+        # consumers and producers of this observer are None
+        skip_replacement = all([
+            has_none_qconfig(n, qconfig_map) for n in
+            list(node.args) + list(node.users.keys())])
+        if skip_replacement or maybe_quantize_node_info is None:
             # didn't find correponding quantize op and info for the observer_module
             # so we just remove the observer
             with graph.inserting_before(node):
@@ -616,6 +631,8 @@ def _convert_do_not_use(
     # this properly after the custom module class design is finalized
     def replace_observer_with_dequantize_node(node: Node, graph: Graph):
         call_custom_module_node = node.args[0]
+        assert isinstance(call_custom_module_node, Node), \
+            f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
         node.replace_all_uses_with(call_custom_module_node)
         graph.erase_node(node)
         insert_dequantize_node(call_custom_module_node, graph)
@@ -676,7 +693,7 @@ def _convert_do_not_use(
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
                 convert_weighted_module(
-                    node, modules, observed_node_names, quantized_reference_module_mapping)
+                    node, modules, observed_node_names, quantized_reference_module_mapping, qconfig_map)
             elif type(modules[node.target]) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,

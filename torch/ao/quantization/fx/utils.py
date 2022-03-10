@@ -112,7 +112,7 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Union[Callable, str], Dict[str, Any]]:
+def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
     ''' Given an activation_post_process module,
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
@@ -148,7 +148,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
-        return None, None, None
+        return None
     return node_type, quantize_op, qparams
 
 def quantize_node(
@@ -197,7 +197,10 @@ def quantize_node(
         module_path = ""
     root_module = modules['']
     graph = quantized_graph
-    node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
+    maybe_quantize_node_info = get_quantize_node_info(obs_module)
+    assert maybe_quantize_node_info is not None, \
+        f"Expecting quantize node info not to be None, observer: {obs_module}"
+    node_type, quantize_op, qparams = maybe_quantize_node_info
     inputs = [in_node]
 
     for key, value in qparams.items():

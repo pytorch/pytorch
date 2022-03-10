@@ -26,7 +26,7 @@ from ..utils import _parent_name
 from ..qconfig import QConfigAny
 from ..quantization_mappings import get_quantized_operator
 from .utils import create_node_from_old_node_preserve_meta
-from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set
+from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set, Optional
 from torch.fx import Node
 import operator
 
@@ -211,7 +211,7 @@ STATIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = 
 }
 
 # Mapping from reference module class to the replacement dynamic quantized module class for lowering
-DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[WeightedQuantizedModule]] = {
+DYNAMIC_LOWER_MODULE_MAP: Dict[Type[nn.Module], Type[nn.Module]] = {
     nnqr.Linear: nnqd.Linear,
     nnqr.GRUCell: nnqd.GRUCell,
     nnqr.LSTMCell: nnqd.LSTMCell,
@@ -258,7 +258,7 @@ STATIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type
 # Mapping from fused module class to a 2-tuple of:
 #   1) The inner reference module class
 #   2) The replacement dynamic quantized module class for lowering
-DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[WeightedQuantizedModule]]] = {
+DYNAMIC_LOWER_FUSED_MODULE_MAP: Dict[Type[nn.Module], Tuple[Type[nn.Module], Type[nn.Module]]] = {
     nni.LinearReLU: (nnqr.Linear, nniqd.LinearReLU),
 }
 
@@ -284,10 +284,12 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
 # (activation_compute_dtype, weight_dtype) and the value is a 2-tuple of
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
-DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Callable]] = {
+DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Dict[Tuple[torch.dtype, torch.dtype], Tuple[Callable, Optional[Callable]]]] = {
     F.linear: {
-        (torch.quint8, torch.qint8): (torch.ops.quantized.linear_dynamic, torch.ops.quantized.linear_relu_dynamic),
-        (torch.float16, torch.float16): (torch.ops.quantized.linear_dynamic_fp16, torch.ops.quantized.linear_relu_dynamic_fp16)
+        (torch.quint8, torch.qint8): (torch.ops.quantized.linear_dynamic,
+                                      torch.ops.quantized.linear_relu_dynamic),
+        (torch.float16, torch.float16): (torch.ops.quantized.linear_dynamic_fp16,
+                                         torch.ops.quantized.linear_relu_dynamic_fp16)
     },
     # dynamic conv + relu is not available yet
     F.conv1d: {
@@ -434,7 +436,7 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> Quantized
     Traverse the graph and find quantize_per_tensor_dynamic - dequantize - ref_module patterns
     and replace them with the dynamically quantized version of the ref module.
     """
-    named_modules = dict(model.named_modules())
+    named_modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         if n.op != "call_module" or \
            type(named_modules[str(n.target)]) not in \
@@ -473,9 +475,9 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> Quantized
             if type(ref_module[0]) != inner_ref_class:
                 continue
         else:
-            q_class = DYNAMIC_LOWER_MODULE_MAP.get(ref_class)
-        # assert issubclass(q_class, WeightedQuantizedModule)  # suppress mypy warnings
-        q_module = q_class.from_reference(ref_module)
+            q_class = DYNAMIC_LOWER_MODULE_MAP.get(ref_class)  # type: ignore[assignment]
+        # TODO: maybe define a WeightedDynamicallyQuantizedModule
+        q_module = q_class.from_reference(ref_module)  # type: ignore[attr-defined]
 
         # replace reference moduel with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
@@ -494,7 +496,7 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> Quant
     Traverse the graph and find ref_module patterns
     and replace them with the weight only quantized version of the ref module.
     """
-    named_modules = dict(model.named_modules())
+    named_modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         if n.op != "call_module" or \
            type(named_modules[str(n.target)]) not in \
@@ -507,8 +509,8 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> Quant
         # TODO: WeightedQuantizedModule is currently assuming static quant apis
         # with output_scale, output_zero_point in from_reference, we may want to
         # relax that, or rename this
-        # assert issubclass(q_class, WeightedQuantizedModule)  # suppress mypy warnings
-        q_module = q_class.from_reference(ref_module)
+        # TODO: maybe define a WeightedWeightOnlyQuantizedModule
+        q_module = q_class.from_reference(ref_module) # type: ignore[union-attr]
 
         # replace reference moduel with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
