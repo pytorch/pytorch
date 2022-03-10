@@ -213,7 +213,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   c10::optional<at::Tensor> after_add;
   c10::optional<at::Tensor> broadcasted_bias;
   c10::optional<at::Tensor> after_relu;
-  auto weight = orig_weight.int_repr();
+  auto weight = orig_weight_.int_repr();
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
@@ -437,8 +437,8 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
   const int D = kSpatialDim == 3 ? act.size(2) : 1;
   const int H = act.size(kSpatialDim);
   const int W = act.size(kSpatialDim + 1);
-  const int M = orig_weight.size(0); // output channels
-  std::vector<int64_t> kernel_size = {orig_weight.size(2), orig_weight.size(3)};
+  const int M = orig_weight_.size(0); // output channels
+  std::vector<int64_t> kernel_size = {orig_weight_.size(2), orig_weight_.size(3)};
   at::SmallVector<int64_t, kSpatialDim + 2> output_shape = MakeConvOutputShape<kSpatialDim>(N, M, {H, W},
   kernel_size, stride_, padding_, dilation_);
   at::Tensor quantized_output = at::_empty_affine_quantized(
@@ -452,7 +452,7 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
   // TODO:  note we will remove the int_repr() in a subsequent PR, so we can move the computations for
   // the multipliers into the helper function
   auto act_scale = act.q_scale();
-  auto weight_scale = orig_weight.q_scale();
+  auto weight_scale = orig_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   auto bias_multiplier = 1.0 / (act_scale * weight_scale);
   apply_impl_helper<kReluFused>(
