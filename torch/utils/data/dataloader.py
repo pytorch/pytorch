@@ -895,7 +895,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             multiprocessing_context = loader.multiprocessing_context
 
         self._worker_init_fn = loader.worker_init_fn
-        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
         self._worker_pids_set = False
@@ -981,6 +980,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # It does not mean that a worker is dead. In case of `_persistent_workers`,
         # the worker will be reset to available in the next epoch.
         self._workers_status = [True for i in range(self._num_workers)]
+        # Reset the worker queue cycle so it resumes next epoch at worker 0
+        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # We resume the prefetching in case it was enabled
         if not first_iter:
             for idx in range(self._num_workers):
