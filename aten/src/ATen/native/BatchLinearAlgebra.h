@@ -5,6 +5,10 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TransposeType.h>
 
+// Forward declare TI
+namespace at {
+struct TensorIterator;
+}
 
 namespace at { namespace native {
 
