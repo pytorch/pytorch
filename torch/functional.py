@@ -1686,7 +1686,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         ``LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)`` should be replaced with
 
         .. code:: python
-            LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots, false)
+            LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)
 
     .. note::
         * The returned permutation matrix for every matrix in the batch is

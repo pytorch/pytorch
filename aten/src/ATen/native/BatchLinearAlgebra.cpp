@@ -1798,13 +1798,13 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
    TORCH_WARN_ONCE(
     "torch.lu is deprecated in favor of torch.linalg.lu_factor / torch.linalg.lu_factor_ex and will be ",
     "removed in a future PyTorch release.\n",
-    "LU, pivots, info = torch.lu(A, compute_pivots)\n",
+    "LU, pivots = torch.lu(A, compute_pivots)\n",
     "should be replaced with\n",
     "LU, pivots = torch.linalg.lu_factor(A, compute_pivots)\n",
     "and\n",
     "LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)\n",
     "should be replaced with\n",
-    "LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots, false)"
+    "LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)"
   );
   return at::linalg_lu_factor_ex(self, compute_pivots, false);
 }
