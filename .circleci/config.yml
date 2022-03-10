@@ -1975,15 +1975,17 @@ workflows:
           context: org-member
           ios_arch: x86_64
           ios_platform: SIMULATOR
-          lite_interpreter: "0"
           name: pytorch_ios_12_5_1_nightly_x86_64_build
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-arm64-build
           context: org-member
           ios_arch: arm64
           ios_platform: OS
-          lite_interpreter: "0"
           name: pytorch_ios_12_5_1_nightly_arm64_build
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_build:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-x86_64-build
           context: org-member
@@ -1991,6 +1993,8 @@ workflows:
           ios_platform: SIMULATOR
           lite_interpreter: "0"
           name: pytorch_ios_full_jit_12_5_1_nightly_x86_64_build
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_build:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-arm64-build
           context: org-member
@@ -1998,12 +2002,16 @@ workflows:
           ios_platform: OS
           lite_interpreter: "0"
           name: pytorch_ios_full_jit_12_5_1_nightly_arm64_build
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_upload:
           build_environment: libtorch-ios-12.5.1-nightly-binary-build-upload
           context: org-member
           requires:
             - pytorch_ios_12_5_1_nightly_x86_64_build
             - pytorch_ios_12_5_1_nightly_arm64_build
+          use_coreml: "0"
+          use_metal: "0"
       - binary_ios_upload:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-binary-build-upload
           context: org-member
@@ -2011,6 +2019,8 @@ workflows:
           requires:
             - pytorch_ios_full_jit_12_5_1_nightly_x86_64_build
             - pytorch_ios_full_jit_12_5_1_nightly_arm64_build
+          use_coreml: "0"
+          use_metal: "0"
       - pytorch_linux_build:
           build_environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32
           docker_image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c
