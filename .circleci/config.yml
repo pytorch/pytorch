@@ -1970,24 +1970,6 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
-      - binary_mac_build:
-          build_environment: wheel 3.7 cpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: binary_macos_wheel_3_7_cpu_build
-      - binary_mac_build:
-          build_environment: libtorch 3.7 cpu
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          name: binary_macos_libtorch_3_7_cpu_build
       - binary_ios_build:
           build_environment: libtorch-ios-12.5.1-nightly-x86_64-build
           context: org-member
@@ -2162,12 +2144,6 @@ workflows:
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_x86_64_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v7a_build
             - pytorch_linux_xenial_py3_clang5_android_ndk_r19c_arm_v8a_build
-      - binary_mac_build:
-          build_environment: wheel 3.7 cpu
-          name: binary_macos_wheel_3_7_cpu_build
-      - binary_mac_build:
-          build_environment: libtorch 3.7 cpu
-          name: binary_macos_libtorch_3_7_cpu_build
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
           image_name: "pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
