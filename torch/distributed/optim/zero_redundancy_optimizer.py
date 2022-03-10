@@ -10,7 +10,16 @@ import inspect
 import io
 import logging
 from itertools import chain
-from typing import Any, Callable, Dict, List, Optional, Set, Type
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Type,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
@@ -287,7 +296,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     Arguments:
         params (``Iterable``): an ``Iterable`` of :class:`torch.Tensor` s
-            giving all parameters, which will be sharded across ranks.
+            or :class:`dict` s giving all parameters, which will be sharded
+            across ranks.
 
     Keyword Args:
         optimizer_class (:class:`torch.nn.Optimizer`): the class of the local
@@ -364,7 +374,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         **defaults: Any,
     ):
         # Perform type and assumption checks on the input parameters
-        self._verify_and_init_params(params)
+        params = self._verify_and_init_params(params)
         self._verify_same_dense_param_type()
 
         # NOTE: The parent constructor uses `add_param_group()` which is
@@ -373,7 +383,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         # between the parent and child.
         self.initialized = False
 
-        Optimizer.__init__(self, self._all_params, defaults)
+        Optimizer.__init__(self, params, defaults)
         Joinable.__init__(self)
         # Now, all parameters are held in both `self._all_params` and
         # `self.param_groups`
@@ -1289,36 +1299,60 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     offset = offset_next
                 bucket_assignment.tensor = tensor
 
-    def _verify_and_init_params(self, params: Any) -> None:
+    def _verify_and_init_params(
+        self, params: Any,
+    ) -> Union[List[torch.Tensor], List[dict]]:
         r"""
         Verifies the type of ``params`` and initializes ``self._all_params``
-        if ``params`` is valid.
+        as a :class:`list` of all parameters if ``params`` is valid.
 
-        While :class:`optim.Optimizer <torch.optim.Optimizer>` allows
-        ``params`` to be an iterable of :class:`dict` s, currently
-        ``ZeroRedundancyOptimizer`` strictly requires ``params`` to be an
-        iterable of :class:`torch.Tensor` s.
+        Arguments:
+            params (Any): Candidate parameter list or parameter groups to
+                verify.
 
         Raises:
             TypeError: ``params`` has an invalid type.
             ValueError: ``params`` is empty.
+
+        Returns:
+            The persistent form of ``params`` to be passed into the parent
+            :class:`Optimizer` constructor -- i.e. returns ``params`` as a
+            :class:`list` to ensure that it can be iterated over again.
         """
         if isinstance(params, torch.Tensor):
-            raise TypeError("params argument should be an iterable of "
+            raise TypeError("`params` argument should be an iterable of "
                             f"Tensors, but got {torch.typename(params)}")
         try:
-            self._all_params = list(params)
+            all_params = list(params)
         except TypeError:
-            raise TypeError("params argument should be an iterable of "
+            raise TypeError("`params` argument should be an iterable of "
                             f"Tensors, but got {torch.typename(params)}")
-        if len(self._all_params) == 0:
+        if len(all_params) == 0:
             raise ValueError("ZeroRedundancyOptimizer got an empty parameter "
                              "list")
-        for param in self._all_params:
-            if not isinstance(param, torch.Tensor):
-                raise TypeError("params argument should be an iterable of "
-                                "Tensors, but got an iterable containing "
-                                f"{torch.typename(param)}")
+        all_tensors = True
+        all_dicts = True
+        for param in all_params:
+            all_tensors &= isinstance(param, torch.Tensor)
+            all_dicts &= isinstance(param, dict)
+        if not all_tensors and not all_dicts:
+            raise TypeError("`params` argument should be an iterable of "
+                            "Tensors or dicts")
+        # Ensure that `self._all_params` contains a list of all parameters
+        if all_tensors:
+            self._all_params = all_params
+        elif all_dicts:
+            self._all_params = []
+            # `all_params` contains parameter groups (not parameters)
+            for param_group in all_params:
+                if "params" not in param_group:
+                    raise ValueError(
+                        "Each parameter group passed-in via `params` must "
+                        "have a 'params' key mapping to the parameters in "
+                        "the group"
+                    )
+                self._all_params.extend(param_group["params"])
+        return all_params
 
     def _verify_same_dense_param_type(self) -> None:
         r"""
@@ -1381,10 +1415,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
                     "error due to an empty parameter list"
                 )
-                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)
+                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
 
             # Log information about the DDP and ZeRO bucketing
-            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            if dist.get_debug_level() != dist.DebugLevel.OFF:
                 local_numel = sum(p.numel() for p in params)
                 num_assigned_buckets = len(self._bucket_assignments_per_rank[self.global_rank])
                 logger.info(

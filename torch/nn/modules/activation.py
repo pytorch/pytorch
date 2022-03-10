@@ -1038,7 +1038,15 @@ class MultiheadAttention(Module):
         """
         is_batched = query.dim() == 3
         if self.batch_first and is_batched:
-            query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
+            # make sure that the transpose op does not affect the "is" property
+            if key is value:
+                if query is key:
+                    query = key = value = query.transpose(1, 0)
+                else:
+                    query, key = [x.transpose(1, 0) for x in (query, key)]
+                    value = key
+            else:
+                query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
             attn_output, attn_output_weights = F.multi_head_attention_forward(
