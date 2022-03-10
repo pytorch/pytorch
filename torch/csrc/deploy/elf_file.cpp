@@ -27,9 +27,15 @@ ElfFile::ElfFile(const char* filename) : memFile_(filename) {
   }
 }
 
+<<<<<<< HEAD
+at::optional<Section> ElfFile::findSection(const char* name) const {
+  MULTIPY_CHECK(name != nullptr, "Null name");
+  at::optional<Section> found = at::nullopt;
+=======
 multipy::optional<Section> ElfFile::findSection(const char* name) const {
   MULTIPY_CHECK(name != nullptr, "Null name");
   multipy::optional<Section> found = multipy::nullopt;
+>>>>>>> 1d40494b3d ([torch::deploy] replace c10::optional with generic optional of boost)
   for (const auto& section : sections_) {
     if (strcmp(name, section.name) == 0) {
       found = section;
