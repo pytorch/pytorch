@@ -6,6 +6,7 @@ import torch.utils._pytree as pytree
 import copy
 import os
 from torch.fx.passes import graph_drawer
+from typing import Tuple
 
 
 class InvalidNodeBase(object):
@@ -18,7 +19,8 @@ InvalidNode = InvalidNodeBase()
 
 def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     """
-    Given a graph, extracts out a subgraph that takes the specified nodes as inputs and returns the specified outputs.
+    Given a graph, extracts out a subgraph that takes the specified nodes as
+    inputs and returns the specified outputs.
 
     This includes specifying non-placeholder nodes as inputs.
 
@@ -109,7 +111,32 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
     return fwd_module, bwd_module
 
 
-def default_partition(joint_module: fx.GraphModule, _joint_inputs):
+def default_partition(
+    joint_module: fx.GraphModule, _joint_inputs
+) -> Tuple[fx.GraphModule, fx.GraphModule]:
+    """
+    Partitions the :attr:`joint_module` in a manner that closely resembles the
+    behavior observed in the original ``.forward()`` and ``.backward()`` of the
+    callable, i.e., the resulting forward graph contains those operators that
+    are executed in the original ``.forward()`` callable passed to
+    :func:`aot_function`.
+
+    The default partitioner collects the operators that are between the forward
+    inputs and the forward outputs. This helps in finding the tensors which have
+    to be stashed for the backward pass. These stashed tensors become the output
+    of the generated forward graph. The remaining operators are then placed in
+    the backward graph.
+
+    .. warning::
+        This API is experimental and likely to change.
+
+    Args:
+        joint_module(fx.GraphModule): The joint forward and backward graph. This
+            is the result of AOT Autograd tracing.
+
+    Returns:
+        Returns the generated forward and backward Fx graph modules.
+    """
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
@@ -153,7 +180,9 @@ def _size_of(metadata):
     return numel * sizes[dtype]
 
 
-def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inputs):
+def min_cut_rematerialization_partition(
+    joint_module: fx.GraphModule, _joint_inputs
+) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
     Recomputing helps in trading off memory bandwidth with computation.
@@ -161,6 +190,16 @@ def min_cut_rematerialization_partition(joint_module: fx.GraphModule, _joint_inp
     To create the fwd and bwd graph, we copy the joint graph, manually set the
     outputs to just original forward or backward outputs. And then we run the
     resulting graphs through dead code elimintation.
+
+    .. warning::
+        This API is experimental and likely to change.
+
+    Args:
+        joint_module(fx.GraphModule): The joint forward and backward graph. This
+            is the result of AOT Autograd tracing.
+
+    Returns:
+        Returns the generated forward and backward Fx graph modules.
     """
     try:
         import networkx as nx
