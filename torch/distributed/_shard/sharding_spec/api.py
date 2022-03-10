@@ -227,6 +227,7 @@ class ChunkShardingSpec(ShardingSpec):
         dist.scatter(local_tensor, scatter_list=tensors_to_scatter, src=src_rank, group=process_group)
 
         assert local_tensor is not None
+        assert local_metadata is not None
         # Sync requires_grad to local_shard.
         local_tensor.requires_grad = tensor.requires_grad
 

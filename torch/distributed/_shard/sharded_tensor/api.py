@@ -291,6 +291,8 @@ class ShardedTensor(object):
             group=self._process_group,
         )
         if rank == dst:
+            if out is None:
+                raise ValueError("`out` Tensor must be provided on dst rank!")
             dims = len(full_size)
             for shards in gathered_shards:
                 if shards is None:
