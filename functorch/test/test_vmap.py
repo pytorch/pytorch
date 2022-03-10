@@ -3104,6 +3104,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),
         xfail('nonzero'),
         xfail('nn.functional.glu'),
+        xfail('nn.functional.rrelu'),  # random?
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
