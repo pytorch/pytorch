@@ -1237,21 +1237,21 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
-struct SymbolicOrConcreteIntType;
-using SymbolicOrConcreteIntTypePtr = SingletonTypePtr<SymbolicOrConcreteIntType>;
-struct TORCH_API SymbolicOrConcreteIntType : public Type {
+struct SymIntType;
+using SymIntTypePtr = SingletonTypePtr<SymIntType>;
+struct TORCH_API SymIntType : public Type {
   bool equals(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   std::string str() const override {
     return "BoxedInt";
   }
-  static const TypeKind Kind = TypeKind::SymbolicOrConcreteIntType;
+  static const TypeKind Kind = TypeKind::SymIntType;
   // global singleton
-  static SymbolicOrConcreteIntTypePtr get();
+  static SymIntTypePtr get();
 
  private:
-  SymbolicOrConcreteIntType() : Type(TypeKind::SymbolicOrConcreteIntType) {}
+  SymIntType() : Type(TypeKind::SymIntType) {}
 };
 
 struct IntType;
@@ -1717,9 +1717,9 @@ struct getTypePtr_<int64_t> final {
 };
 
 template <>
-struct getTypePtr_<SymbolicOrConcreteInt> final {
+struct getTypePtr_<SymInt> final {
   static decltype(auto) call() {
-    return SymbolicOrConcreteIntType::get();
+    return SymIntType::get();
   }
 };
 template <>

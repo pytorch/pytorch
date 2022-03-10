@@ -91,8 +91,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
         return ComplexType::get();
       case Tag::Int:
         return IntType::get();
-      case Tag::SymbolicOrConcreteInt:
-        return c10::SymbolicOrConcreteIntType::get();
+      case Tag::SymInt:
+        return c10::SymIntType::get();
       case Tag::Bool:
         return BoolType::get();
       case Tag::String:
@@ -300,8 +300,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
-    case Tag::SymbolicOrConcreteInt:
-      return rhs.isSymbolicOrConcreteInt() && lhs.toSymbolicOrConcreteInt() == rhs.toSymbolicOrConcreteInt();
+    case Tag::SymInt:
+      return rhs.isSymInt() && lhs.toSymInt() == rhs.toSymInt();
     case Tag::Bool:
       return rhs.isBool() && lhs.toBool() == rhs.toBool();
     case Tag::String:
@@ -353,7 +353,7 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
       return c10::get_hash(v.payload.u.as_int);
-    case Tag::SymbolicOrConcreteInt:
+    case Tag::SymInt:
       return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
@@ -573,8 +573,8 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::Int:
       return out << v.toInt();
-    case IValue::Tag::SymbolicOrConcreteInt:
-      return out << "SymbolicOrConcreteInt(" << v.toInt() << ")";
+    case IValue::Tag::SymInt:
+      return out << "SymInt(" << v.toInt() << ")";
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -761,8 +761,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printComplex(out, v);
     } case IValue::Tag::Int:
       return out << v.toInt();
-    case IValue::Tag::SymbolicOrConcreteInt:
-      return out << "SymbolicOrConcreteInt(" << v.toInt() << ")";
+    case IValue::Tag::SymInt:
+      return out << "SymInt(" << v.toInt() << ")";
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -896,7 +896,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::None:
     case IValue::Tag::Double:
     case IValue::Tag::Int:
-    case IValue::Tag::SymbolicOrConcreteInt:
+    case IValue::Tag::SymInt:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
     case IValue::Tag::Uninitialized: {

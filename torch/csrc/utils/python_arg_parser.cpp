@@ -41,7 +41,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"Stream", ParameterType::STREAM},
   {"std::string", ParameterType::STRING},
   {"c10::string_view", ParameterType::STRING},
-  {"SymbolicOrConcreteInt", ParameterType::SYMBOLICORCONCRETEINT},
+  {"SymInt", ParameterType::SymInt},
   {"Dimname", ParameterType::DIMNAME},
   {"DimnameList", ParameterType::DIMNAME_LIST},
   {"ScalarList", ParameterType::SCALAR_LIST},
@@ -482,7 +482,7 @@ static bool is_int_or_symbolic_or_concrete_int(PyObject* obj) {
       return true;
   }
 
-  auto sci = py::handle(obj).cast<c10::SymbolicOrConcreteInt*>();
+  auto sci = py::handle(obj).cast<c10::SymInt*>();
   return sci != nullptr;
 }
 
@@ -552,7 +552,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::SCALAR_LIST: {
       return is_scalar_list(obj);
     }
-    case ParameterType::SYMBOLICORCONCRETEINT: {
+    case ParameterType::SymInt: {
       return is_int_or_symbolic_or_concrete_int(obj);
     }
   }
@@ -563,7 +563,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::TENSOR: return "Tensor";
     case ParameterType::SCALAR: return "Number";
     case ParameterType::INT64: return "int";
-    case ParameterType::SYMBOLICORCONCRETEINT: return "SymbolicOrConcreteInt";
+    case ParameterType::SymInt: return "SymInt";
     case ParameterType::DOUBLE: return "float";
     case ParameterType::COMPLEX: return "complex";
     case ParameterType::TENSOR_LIST: return "tuple of Tensors";

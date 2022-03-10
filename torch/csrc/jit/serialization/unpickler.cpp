@@ -90,7 +90,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case DynamicType::Kind:
       case UnionType::Kind:
       case EnumType::Kind:
-      case c10::SymbolicOrConcreteIntType::Kind:
+      case c10::SymIntType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         TORCH_INTERNAL_ASSERT(false);
       case TupleType::Kind: {

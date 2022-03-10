@@ -48,7 +48,7 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
-  _(SymbolicOrConcreteIntType) \
+  _(SymIntType)             \
   _(UnionType)              \
   _(DynamicType)
 
@@ -58,11 +58,11 @@ public:
   virtual SymbolicInt* add(int64_t) = 0;
 };
 
-class TORCH_API SymbolicOrConcreteInt {
+class TORCH_API SymInt {
 
 public:
 
-  SymbolicOrConcreteInt(int64_t d):
+  SymInt(int64_t d):
   data_(d) {};
 
   int64_t data_;
@@ -83,7 +83,7 @@ public:
   }
 
   // TODO: can we make it more C++ cast-style like?
-  static SymbolicInt* unbox(SymbolicOrConcreteInt sci) {
+  static SymbolicInt* unbox(SymInt sci) {
     TORCH_INTERNAL_ASSERT(sci.isSymbolicInt());
     return reinterpret_cast<SymbolicInt*>(sci.data_ ^ SYMBOLIC_INT_TAG);
   }
@@ -93,13 +93,13 @@ public:
   }
   
 
-  bool operator==(const SymbolicOrConcreteInt& p2)
+  bool operator==(const SymInt& p2)
   {
       TORCH_INTERNAL_ASSERT("NYI");
       return false;
   }
 
-  SymbolicOrConcreteInt operator+(SymbolicOrConcreteInt sci) {
+  SymInt operator+(SymInt sci) {
     int64_t result = 0;
     if (this->isSymbolicInt()) {
       if (sci.isSymbolicInt()) {
@@ -114,11 +114,11 @@ public:
       result = data_ + sci.data_;
     }
 
-    return SymbolicOrConcreteInt(result);
+    return SymInt(result);
   }
 };
 
-TORCH_API std::ostream& operator<<(std::ostream& os, const SymbolicOrConcreteInt& s);
+TORCH_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,

@@ -67,7 +67,7 @@ intArrayRefT = BaseCppType('at', 'IntArrayRef')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
-SymbolicOrConcreteIntT = BaseCppType('c10', 'SymbolicOrConcreteInt')
+SymIntT = BaseCppType('c10', 'SymInt')
 
 # Types representing template parameters.  Technically, we probably shouldn't
 # represent them this way in codegen, but it was pretty convenient.
@@ -106,7 +106,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.QScheme: qschemeT,
     BaseTy.Storage: storageT,
     BaseTy.Stream: streamT,
-    BaseTy.SymbolicOrConcreteInt: SymbolicOrConcreteIntT,
+    BaseTy.SymInt: SymIntT,
 }
 
 # CTypes encode C++ type structure as needed for translation.

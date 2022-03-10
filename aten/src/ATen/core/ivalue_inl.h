@@ -1584,7 +1584,7 @@ DEFINE_TO(at::MemoryFormat, toMemoryFormat)
 DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
-DEFINE_TO(c10::SymbolicOrConcreteInt, toSymbolicOrConcreteInt)
+DEFINE_TO(c10::SymInt, toSymInt)
 
 template <class T>
 struct _fake_type {};

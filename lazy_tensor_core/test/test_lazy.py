@@ -151,7 +151,7 @@ class SymbolicIntTest(JitTestCase):
     def test_narrow_copy_with_symbolic_int(self):
         a = torch.rand(10)
         LENGTH = 5
-        s = torch._C.SymbolicOrConcreteInt.create(LENGTH)
+        s = torch._C.SymInt.create(LENGTH)
         b = a.narrow_copy(0,0,s)
         c = a.narrow(0,0,LENGTH)
         torch.testing.assert_allclose(b, c)
@@ -164,8 +164,8 @@ class SymbolicIntTest(JitTestCase):
         torch.testing.assert_allclose(b, c)
 
     def test_add_on_concrete_ints(self):
-        s = torch._C.SymbolicOrConcreteInt.create(5)
-        s2 = torch._C.SymbolicOrConcreteInt.create(3)
+        s = torch._C.SymInt.create(5)
+        s2 = torch._C.SymInt.create(3)
         self.assertEqual(int(s + s2), 8)
 
 

@@ -600,7 +600,7 @@ void addInputs(Node* n, const char* name, int64_t value) {
   }
 }
 
-void addInputs(Node* n, const char* name, c10::SymbolicOrConcreteInt value) {
+void addInputs(Node* n, const char* name, c10::SymInt value) {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasValue(name)) {
     Value* v = ArgumentStash::popValue(name);

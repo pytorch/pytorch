@@ -206,25 +206,25 @@ void initPythonIRBindings(PyObject* module_) {
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
 
-  py::class_<c10::SymbolicOrConcreteInt>(m, "SymbolicOrConcreteInt")
-      .def("__add__", [](c10::SymbolicOrConcreteInt a, c10::SymbolicOrConcreteInt b) -> SymbolicOrConcreteInt {
+  py::class_<c10::SymInt>(m, "SymInt")
+      .def("__add__", [](c10::SymInt a, c10::SymInt b) -> SymInt {
 
         auto result = a + b;
         return result;
       })
       .def("size", [](at::Tensor t, size_t dim) {
-        return c10::SymbolicOrConcreteInt(t.size(dim));
+        return c10::SymInt(t.size(dim));
       })
       .def("create", [](int64_t data) {
-        return c10::SymbolicOrConcreteInt(data);
+        return c10::SymInt(data);
       })
-      .def("__int__", [](c10::SymbolicOrConcreteInt self) {
+      .def("__int__", [](c10::SymInt self) {
         TORCH_CHECK(!self.isSymbolicInt());
         return self.data_;
       })
-      .def("__str__", [](c10::SymbolicOrConcreteInt self) {
+      .def("__str__", [](c10::SymInt self) {
         std::stringstream ss;
-        ss << "SymbolicOrConcreteInt("
+        ss << "SymInt("
           << self.data_ 
           << ")";
         return ss.str();

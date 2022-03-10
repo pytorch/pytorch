@@ -1181,7 +1181,7 @@ BaseTy = Enum('BaseTy', (
     'QScheme',
     'Storage',
     'Stream',
-    'SymbolicOrConcreteInt',
+    'SymInt',
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
