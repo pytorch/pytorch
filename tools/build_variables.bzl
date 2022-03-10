@@ -341,6 +341,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/cpp_codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/external_functions_core.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_registry.cpp",
     "torch/csrc/jit/tensorexpr/graph_opt.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
