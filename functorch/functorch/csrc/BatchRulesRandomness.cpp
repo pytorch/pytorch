@@ -149,6 +149,33 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
   return makeBatched(out, 0, cur_level);
 }
 
+template<typename F, F Func, typename... ExtraArgs>
+Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args) {
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  const auto cur_level = maybe_layer->layerId();
+  RandomnessType randomness = maybe_layer->randomness();
+  check_randomness(randomness);
+
+  Tensor tensor_value;
+  optional<int64_t> tensor_bdim;
+  std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(self, cur_level);
+  tensor_value = moveBatchDimToFront(tensor_value, tensor_bdim);
+
+  if (randomness == RandomnessType::Same && tensor_bdim) {
+    tensor_value = tensor_value[0];
+  } else if (randomness == RandomnessType::Different && !tensor_bdim) {
+    auto shape = tensor_value.sizes();
+    VmapDimVector shapeVec(1, maybe_layer->batchSize());
+    shapeVec.reserve(shape.size() + 1);
+    shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
+    tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
+  }
+
+  auto res = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
+  return (randomness == RandomnessType::Same) ? res : makeBatched(res, 0, cur_level);
+}
+
 std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tensor, double p, c10::optional<bool> train) {
   c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
@@ -396,6 +423,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM(poisson);
   UNARY_POINTWISE_RANDOM(bernoulli);
 
+  #define TENSOR_LIKE_COMMON_ARG_TYPES optional<ScalarType>, optional<Layout>, optional<Device>, optional<bool>, optional<MemoryFormat>
+  m.impl("randint_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(randint_like)), &ATEN_FN(randint_like), int64_t, TENSOR_LIKE_COMMON_ARG_TYPES>);
+  m.impl("randint_like.low_dtype", tensor_like_random_batch_rule<\
+    decltype(&ATEN_FN2(randint_like, low_dtype)), &ATEN_FN2(randint_like, low_dtype), int64_t, int64_t, TENSOR_LIKE_COMMON_ARG_TYPES>);
+  m.impl("rand_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(rand_like)), &ATEN_FN(rand_like), TENSOR_LIKE_COMMON_ARG_TYPES>);
+  m.impl("randn_like", tensor_like_random_batch_rule<decltype(&ATEN_FN(randn_like)), &ATEN_FN(randn_like), TENSOR_LIKE_COMMON_ARG_TYPES>);
+  
   #undef RANDOM_BATCH_RULE
   #undef RANDOM_BATCH_RULE2
   #undef RANDOM_INPLACE_BATCH_RULE
@@ -408,5 +442,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   #undef UNARY_POINTWISE_RANDOM
   #undef UNARY_POINTWISE_RANDOM2
   #undef UNARY_POINTWISE_RANDOM_LEADING_FLOAT
+  #undef TENSOR_LIKE_COMMON_ARG_TYPES
 }
 }} // namespace at::functorch

@@ -17,8 +17,8 @@ namespace at {
 namespace functorch {
 
 void unsupportedRandomOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
-              "Please perform random operations outside of vmap as a workaround");
+  TORCH_CHECK(false, "vmap: We do not support calling out variants of random operations inside of vmap. ",
+              "Please use non-out variants as a workaround");
 }
 
 TORCH_LIBRARY_IMPL(_, FuncTorchVmapMode, m) {
@@ -34,8 +34,7 @@ TORCH_LIBRARY_IMPL(_, FuncTorchVmapMode, m) {
 
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
-  UNSUPPORTED_RANDOM(randint_like);
-  UNSUPPORTED_RANDOM2(randint_like, low_dtype);
+  UNSUPPORTED_RANDOM2(bernoulli, out);
 }
 
 

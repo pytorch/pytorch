@@ -2633,22 +2633,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
              in_dims=(2, 0))
 
-    def test_no_random_op_support(self):
-        B0 = 2
-
-        captured = torch.rand(3)
-
-        random_ops = [
-            (lambda t: torch.randint_like(t, 2), (torch.rand(B0, 1),)),
-            (lambda t: torch.randint_like(t, 0, 2), (torch.rand(B0, 1),)),
-            (lambda t: torch.randint_like(captured, 2), (torch.rand(B0),)),
-            (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
-        ]
-        for op, args in random_ops:
-            with self.assertRaisesRegex(RuntimeError,
-                                        'vmap: We do not yet support calling random operations'):
-                vmap(op)(*args)
-
     def test_conv2d(self):
         conv_setups = [
             (torch.nn.Conv1d, torch.conv1d, [2, 4, 15]),
@@ -3225,8 +3209,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bool', 'channels_last'),
         xfail('linalg.cross'),
         xfail('long', 'channels_last'),
-        xfail('rand_like'),
-        xfail('randint_like'),
         xfail('searchsorted'),
         xfail('short', 'channels_last'),
         xfail('unique_consecutive'),
@@ -3328,7 +3310,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # test = functools.partial(_vmap_test, check_propagates_grad=False)
 
         B, N, C, H, W = 2, 3, 24, 5, 7
-        for op in [torch.ones_like, torch.zeros_like, torch.randn_like, torch.rand_like]:
+        for op in [torch.ones_like, torch.zeros_like]:
             x = torch.randn(B, N, C, H, W)
             # todo(chilli): test these better
             # Not testing correctness, just that they run
@@ -3717,6 +3699,49 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         assert randomness == 'same'
         self._assert_all_slices_equal(vmap_result)
+
+    @parametrize('randomness', ['error', 'same', 'different'])
+    @parametrize('batched_input', [True, False])
+    def test_like_functions(self, device, randomness, batched_input):
+        seed = 1234567
+        supported_ops = [
+            lambda t, _: torch.randint_like(t, 20),
+            lambda t, _: torch.randint_like(t, 0, 20),
+            lambda t, _: torch.rand_like(t),
+            lambda t, _: torch.randn_like(t),
+        ]
+        B0 = 4
+
+        for op in supported_ops:
+            always_batched = torch.randn(B0)
+            passed = self._get_image(batched_input, B0, device)
+            passed = passed.unsqueeze(-1)
+            in_dims = 0 if batched_input else (None, 0)
+
+            if randomness == 'error':
+                with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+                    vmap(op, in_dims=in_dims, randomness=randomness)(passed, always_batched)
+                return
+
+            torch.manual_seed(seed)
+            vmap_result = vmap(op, randomness=randomness, in_dims=in_dims)(passed, always_batched)
+
+            torch.manual_seed(seed)
+            if randomness == 'different':
+                if not batched_input:
+                    passed = passed.expand(B0, *passed.shape)
+                expected = op(passed, 0)
+
+                self._assert_all_slices_unique(vmap_result)
+                self.assertEqual(expected, vmap_result)
+                return
+
+            assert randomness == 'same'
+            passed = passed if not batched_input else passed[0]
+            expected = op(passed, 0)
+            self._assert_all_slices_equal(vmap_result)
+            for i in range(B0):
+                self.assertEqual(expected, vmap_result[i])
 
     @parametrize('use_generator', [True, False])
     @parametrize('randomness', ['error', 'same', 'different'])
