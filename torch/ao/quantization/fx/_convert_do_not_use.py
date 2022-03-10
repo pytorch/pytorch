@@ -9,9 +9,7 @@ from torch.fx.graph import (
     Node,
 )
 from ..utils import (
-    activation_is_int8_quantized,
     activation_is_statically_quantized,
-    activation_is_dynamically_quantized,
     weight_is_quantized,
     get_qparam_dict,
     _parent_name,
@@ -91,11 +89,11 @@ DYNAMIC_MODULE_CLASSES = (
 )
 
 def run_weight_observers(observed: GraphModule) -> None:
-    r''' Extract the subgraph that produces the weight for dynamic quant
+    """ Extract the subgraph that produces the weight for dynamic quant
     or weight only quant node and run the subgraph to observe the weight.
     Note that the observers of dynamic quant or weight only quant ops are
     run during the convert step.
-    '''
+    """
     for node in observed.graph.nodes:
         if node.op != 'call_function' or node.target not in WEIGHT_INDEX_DICT:
             continue
@@ -176,11 +174,18 @@ def get_module_path_and_prefix(
         obs_node: Node,
         node_name_to_scope: Dict[str, Tuple[str, type]],
         qconfig_map: Dict[str, QConfigAny]):
+    """ Given and observer node, get the `Scope` or the fully qualified name for
+    the submodule containing the observed node, also return a prefix of "_input"
+    when the observed node is an input of a F.linear op, and not the output of another
+    quantized op.
+    TODO: this logic is hacky, we should think about how to remove it or make it more
+    general
+    """
+    observed_node = obs_node.args[0]
     # an observer can be inserted for both input of the next operator or output of the previous
     # operator (they can be the same)
     # this flag identifies if the observer is inserted only because the observed node is
     # the input of the next operator
-    observed_node = obs_node.args[0]
     is_input_observer_only = qconfig_map[observed_node.name] is None if observed_node.name in qconfig_map else None
     if is_input_observer_only:
         # if the quantize function is at the input of op, then we find the first user of the observer_node
@@ -220,19 +225,6 @@ def insert_dequantize_node(
         for user_node in dict(node.users):
             if user_node is not dequantize_node:
                 user_node.replace_input_with(node, dequantize_node)
-
-def remove_observer_for_node(
-        node: Node,
-        graph: Graph,
-        modules: Dict[str, torch.nn.Module]
-):
-    for maybe_obs_node, _ in node.users.items():
-        if maybe_obs_node.op == 'call_module':
-            maybe_obs = modules[str(maybe_obs_node.target)]
-            if is_activation_post_process(maybe_obs):
-                maybe_obs_node.replace_all_uses_with(maybe_obs_node.args[0])
-                graph.erase_node(maybe_obs_node)
-                return
 
 def maybe_get_observer_for_node(
         node: Node,
@@ -432,6 +424,30 @@ def convert_custom_module(
         modules: Dict[str, torch.nn.Module],
         custom_module_class_mapping: Dict[Callable, Callable],
         statically_quantized_custom_module_nodes: Set[Node]):
+    """ Converts an observed custom module to a quantized custom module based on
+    `custom_module_class_mapping`
+    For static quantization, we'll also remove the previous `dequantize` node and
+    attach the observer node for output to the module, the observer for the node
+    will be converted to a dequantize node instead of quantize-dequantize pairs
+    later in the graph. In the end we would have a quantized custom module that
+    has the same interface as a default quantized module in nn.quantized namespace,
+    i.e. quantized input and quantized output.
+
+    Args:
+      - node: The call_module node of the observed standalone module
+      - graph: The graph containing the node
+      - modules: named_module of original model
+      - custom_module_class_mapping: mapping from observed custom module class to
+        quantized custom module class, used to swap custom modules
+      - statically_quantized_custom_module_nodes: we'll add the custom module node
+        if we find it is statically quantized, this will be used later when converting
+        observers to quant/dequant node pairs, if the observed node is a statically
+        quantized custom module nodes, we'll convert the observer to a dequantize node,
+        this is to keep the interface the same as the default quantized module.
+        TODO: maybe we want to redesign this part to align with reference model design
+        as well, but there has been some discussions around the interface, so we can do
+        it later.
+    """
     observed_custom_module = modules[str(node.target)]
     maybe_obs = maybe_get_observer_for_node(node, modules)
     qconfig = observed_custom_module.qconfig
@@ -651,14 +667,20 @@ def _convert_do_not_use(
                 if observed_node in statically_quantized_custom_module_nodes:
                     replace_observer_with_dequantize_node(node, model.graph)
                 else:
-                    replace_observer_with_quantize_dequantize_node(model, model.graph, node, modules, node_name_to_scope, qconfig_map)
+                    replace_observer_with_quantize_dequantize_node(
+                        model, model.graph, node, modules, node_name_to_scope,
+                        qconfig_map)
             elif is_observed_standalone_module(modules[node.target]):
-                convert_standalone_module(node, modules, model, is_reference, backend_config_dict)
+                convert_standalone_module(
+                    node, modules, model, is_reference, backend_config_dict)
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
-                convert_weighted_module(node, modules, observed_node_names, quantized_reference_module_mapping)
+                convert_weighted_module(
+                    node, modules, observed_node_names, quantized_reference_module_mapping)
             elif type(modules[node.target]) in custom_module_classes:
-                convert_custom_module(node, model.graph, modules, custom_module_class_mapping, statically_quantized_custom_module_nodes)
+                convert_custom_module(
+                    node, model.graph, modules, custom_module_class_mapping,
+                    statically_quantized_custom_module_nodes)
 
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
     model = QuantizedGraphModule(model, model.graph, preserved_attributes)
@@ -668,7 +690,9 @@ def _convert_do_not_use(
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
+    # TODO: this looks hacky, we want to check why we need this and see if we can
+    # remove this
     # removes qconfig and activation_post_process modules
     if _remove_qconfig_flag:
-       _remove_qconfig(model)
+        _remove_qconfig(model)
     return model

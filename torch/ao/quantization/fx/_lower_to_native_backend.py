@@ -280,7 +280,8 @@ WEIGHT_PREPACK_OPS: Set[Callable] = {
     torch._ops.ops.quantized.conv3d_prepack,
 }
 
-# Mapping from a functional to (activation_compute_dtype, weight_dtype) to lower to a 2-tuple of
+# Mapping from a functional to a dictionary, where the key is a 2-tuple of
+# (activation_compute_dtype, weight_dtype) and the value is a 2-tuple of
 #   1) The dynamically quantized version of the op
 #   2) The dynamically quantized version of the op fused with relu, if it exists, else None
 DYNAMIC_LOWER_FUNCTIONAL_MAP: Dict[Callable, Tuple[Callable, Callable]] = {

@@ -3845,6 +3845,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             if quant_type in self.static_quant_types:
                 self.assertEqual(result_dict["quantized_output"], result_dict["quantized_reference_output"])
 
+        # TODO: enable test for dynamic quant
         # Test linear-relu
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             model = LinearReLUModel(f_relu)
