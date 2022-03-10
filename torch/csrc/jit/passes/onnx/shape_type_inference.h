@@ -35,7 +35,7 @@ TORCH_API void ONNXAssignOutputShape(
     bool onnx_shape_inference);
 
 // Utilize ONNX Shape Inference for node.
-// The node must have ONNX namespace, and is valid ONNX node accroding to spec.
+// The node must have ONNX namespace, and is valid ONNX node according to spec.
 // On successful ONNX shape inference runs, the function updates output types of
 // n with inferred shape and type. Otherwise n is unchanged.
 TORCH_API void ONNXShapeTypeInference(
