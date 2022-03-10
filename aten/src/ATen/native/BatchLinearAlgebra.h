@@ -5,12 +5,12 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TransposeType.h>
 
-
+// Forward declare TI
 namespace at {
-
 struct TensorIterator;
+}
 
-namespace native {
+namespace at { namespace native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
