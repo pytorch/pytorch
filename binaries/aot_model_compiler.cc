@@ -36,6 +36,10 @@ C10_DEFINE_string(
     "Input memory format."
     "If multiple inputs needed, use semicolon to separate."
     "Supported values: contiguous, channels_last");
+C10_DEFINE_string(
+    dynamic_dims,
+    "",
+    "Comma separated dimensions of input tensors that can be dynamic");
 C10_DEFINE_string(method_name, "forward", "The name of the method.");
 C10_DEFINE_string(
     output_llvm,
@@ -68,6 +72,7 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   method_spec.insert("sizes", FLAGS_input_dims);
   method_spec.insert("types", FLAGS_input_types);
   method_spec.insert("memory_formats", FLAGS_input_memory_formats);
+  method_spec.insert("dynamic_sizes", FLAGS_dynamic_dims);
   method_spec.insert("asmfile", FLAGS_output_llvm);
   method_spec.insert("model_name", FLAGS_model_name);
   method_spec.insert("model_version", FLAGS_model_version);

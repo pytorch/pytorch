@@ -40,11 +40,12 @@ concurrency:
 
 {%- macro parse_ref(pytorch_directory="") -%}
       - name: Parse ref
+        shell: bash
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
 {%- endif %}
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
 {%- endmacro -%}
 
 {%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="", needs_credentials=False) -%}
@@ -86,6 +87,11 @@ concurrency:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}
