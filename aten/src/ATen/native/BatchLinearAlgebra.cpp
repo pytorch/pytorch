@@ -1555,20 +1555,19 @@ TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
                                    const Tensor& result,
                                    const Tensor& LU,
                                    const Tensor& pivots) {
-  // Possible optimization: Compute the LU factorization of A^H if A is contiguous (when possible)
-  // Then we solve A^H X = B with adjoint=True
+  // Possible optimization: Compute the LU factorization of A^T if A is contiguous
+  // Then we solve A^T X = B with adjoint=True
   // This saves a copy as A doesn't need to be copied into an F-contig matrix in lu_factor
-  // We are not doing this because we would need to save a bool for the backward indicating
-  // whether the LU is from A or A^H, and structured kernels do not support returning bools yet
+  const bool use_A_T = A.is_contiguous() && !A.is_complex();
   auto info = at::empty({0}, A.options().dtype(kInt));
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
-                              A,
+                              use_A_T ? A.mT() : A,
                               /*pivot=*/true,
                               /*check_errors=*/false);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
-  at::linalg_lu_solve_out(const_cast<Tensor&>(result), LU, pivots, B, left, /*adjoint*/false);
+  at::linalg_lu_solve_out(const_cast<Tensor&>(result), LU, pivots, B, left, /*adjoint*/use_A_T);
 }
 
 Tensor& linalg_solve_out(const Tensor& A,
