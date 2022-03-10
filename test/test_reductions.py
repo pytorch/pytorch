@@ -3151,11 +3151,11 @@ as the input tensor excluding its innermost dimension'):
             # Tests to check if reduction happens along the specified dim.
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
             self.assertEqual(numpy_fn(numpy_input, axis=2),
-                             fn(master_input, dim=2).cpu().numpy(), exact_dtype=False)
+                             fn(master_input, dim=2), exact_dtype=False)
 
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=-1))
             self.assertEqual(numpy_fn(numpy_input, axis=-1),
-                             fn(master_input, dim=-1).cpu().numpy(), exact_dtype=False)
+                             fn(master_input, dim=-1), exact_dtype=False)
 
     # Tests to ensure that reduction of zero-dim tensors (i.e. empty tensors) using comparison operators
     # raises an error if no `dim` parameter is specified. This exists separately from tests in
