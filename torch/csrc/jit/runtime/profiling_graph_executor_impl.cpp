@@ -421,42 +421,36 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     LowerSimpleTuples(graph);
     GRAPH_DEBUG("After LowerSimpleTuples\n", *graph);
 
+    // Remove prim::profile nodes and embed the profile info directly in the
+    // IR in value types. We're doing such transformation as optimizations
+    // that try to merge/fuse nodes in the graph (e.g. BatchMM and GraphFuser)
+    // work worse in the presence of intermittent prim::profile nodes.
+    // Optimizations relying on the type info are also responsible for
+    // inserting proper type checks. Once we're done with these optimizations
+    // we will wipe the tensor type information from the IR, so that it's not
+    // accidentally used by any other pass.
+    RemoveProfileNodesAndSpecializeTypes(graph);
+    GRAPH_DEBUG(
+        "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n", *graph);
+    // Rewrite subgraphs with many MMs into expressions that batch them.
+    BatchMM(graph);
+    GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
     if (tensorExprFuserEnabled()) {
-      // Remove prim::profile nodes and embed the profile info directly in the
-      // IR in value types. We're doing such transformation as optimizations
-      // that try to merge/fuse nodes in the graph (e.g. BatchMM and GraphFuser)
-      // work worse in the presence of intermittent prim::profile nodes.
-      // Optimizations relying on the type info are also responsible for
-      // inserting proper type checks. Once we're done with these optimizations
-      // we will wipe the tensor type information from the IR, so that it's not
-      // accidentally used by any other pass.
-      RemoveProfileNodesAndSpecializeTypes(graph);
-      GRAPH_DEBUG(
-          "After RemoveProfileNodesAndSpecializeTypes, before BatchMM\n",
-          *graph);
-      // Rewrite subgraphs with many MMs into expressions that batch them.
-      BatchMM(graph);
-      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
       auto min_size = getFusionGroupInlining() ? 2 : 1;
       bool dyn_shapes = getCurrentBehavior(remaining_bailout_depth) ==
           FusionBehavior::DYNAMIC;
       FuseTensorExprs(graph, min_size, /*composed_op*/ false, dyn_shapes);
       GRAPH_DEBUG(
           "After Fusion, before RemoveTensorTypeSpecializations\n", *graph);
-
-      // Wipe tensor type info from the IR
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG(
-          "After RemoveTensorTypeSpecializations, before customPostPasses\n",
-          *graph);
     } else {
-      // Rewrite subgraphs with many MMs into expressions that batch them.
-      BatchMM(graph);
-      GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-
-      FuseGraph(graph, true);
-      GRAPH_DEBUG("After Fusion, before customPostPasses\n", *graph);
+      GRAPH_DEBUG("TEFuser Not enabled, before Fusion\n", *graph);
     }
+
+    // Wipe tensor type info from the IR
+    RemoveTensorTypeSpecializations(graph);
+    GRAPH_DEBUG(
+        "After RemoveTensorTypeSpecializations, before customPostPasses\n",
+        *graph);
 
     // Run custom post-fusion passes
     for (const auto& passPair : getCustomPostPasses()) {
