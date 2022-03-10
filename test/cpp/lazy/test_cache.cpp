@@ -25,6 +25,10 @@ class CacheNode : public Node {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
 
+  const Shape& shape(size_t output_index = 0) const override {
+    TORCH_INTERNAL_ASSERT(false, "Can't access shape of test node");
+  }
+
  private:
   std::string str_;
 };

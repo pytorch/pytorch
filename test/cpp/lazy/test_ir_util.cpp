@@ -31,6 +31,10 @@ class IrUtilNode : public Node {
     return operands_as_outputs_.at(i);
   }
 
+  const Shape& shape(size_t output_index = 0) const override {
+    TORCH_INTERNAL_ASSERT(false, "Can't access shape of IrUtilNode");
+  }
+
  private:
   std::vector<NodePtr> operands_;
   std::vector<Output> operands_as_outputs_;
