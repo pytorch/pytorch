@@ -393,8 +393,10 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto& fallback_list = fallback.getFallbackList();
 
   cudnn_frontend::EngineConfigList filtered_configs;
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
+  // because we removed the int_repr call and now input is a quantized tensor, we will pass in
+  // at::kChar instead of input.scalar_type()
+  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
+  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
 
   for (auto &cfg : engine_configs) {
     try {
