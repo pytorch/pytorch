@@ -3,7 +3,7 @@ import functools
 import warnings
 
 from typing import Any, Optional
-from .types import _dtype
+from torch.types import _dtype
 
 def autocast_decorator(autocast_instance, func):
     @functools.wraps(func)

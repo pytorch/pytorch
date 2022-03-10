@@ -1,7 +1,7 @@
 .. role:: hidden
     :class: hidden-section
 
-Automatic Mixed Precision package - torch.autocast
+Automatic Mixed Precision package - torch.amp
 ==================================================
 
 .. Both modules below are missing doc entry. Adding them here for now.
