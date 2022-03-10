@@ -495,38 +495,6 @@ static Tensor generic_solve_jvp(
   return solve(A, dB, dA_contrib);
 }
 
-Tensor solve_jvp(
-  const Tensor& X,
-  const Tensor& A,
-  const Tensor& dA,
-  const Tensor& dB
-) {
-  return generic_solve_jvp(
-    [](const Tensor& A, const Tensor& dB, const Tensor& dA_contrib) {
-      return at::linalg_solve(A, dB - dA_contrib);
-    },
-    X, A, dA, dB
-  );
-}
-
-Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return at::linalg_solve(A.mH(), grad);
-}
-
-Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
-  at::NoTF32Guard disable_tf32;
-  Tensor grad_self = solve_backward_self(grad, self, A);
-  if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, solution.mH());
-  }
-  // if self was unsqueezed from (..., M) to (..., M, 1)
-  bool vector_case = at::native::linalg_solve_is_vector_rhs(A, self);
-  if (vector_case) {
-    return -at::matmul(grad_self.unsqueeze(-1), solution.unsqueeze(-1).mH());
-  }
-  return -at::matmul(grad_self, solution.mH());
-}
-
 Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
   // Trivial case
   if (grad.numel() <= 1 || grad.size(dim) == 1) {
@@ -4672,10 +4640,66 @@ Tensor linalg_lu_solve_jvp(
     // dX = op_2(op_1(-op_3(X)^H PRL^{-1} P^T)) + S
     R = at::linalg_solve_triangular(L, -V.matmul(P).matmul(R), /*upper*/false, /*left*/false, /*unitriangular*/true).matmul(P.mT());
     // dX = op_2(R^H) + S
-    //
     dX = (left ? R.mH() : R) + S;
   }
   return vector_case ? dX.squeeze(-1) : dX;
+}
+
+Tensor linalg_solve_jvp(
+  const Tensor& dA,
+  const Tensor& dB,
+  const Tensor& X,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const bool left) {
+  at::NoTF32Guard disable_tf32;
+  // For left=True (left=False is analogous)
+  // dX = A^{-1}(dB - dAX)
+  const bool vector_case = at::native::linalg_solve_is_vector_rhs(dA, dB);
+  // This case is disallowed in the forward as A.shape = (*, 1, 1)
+  TORCH_INTERNAL_ASSERT(left || !vector_case);
+  auto X_ = vector_case ? X.unsqueeze(-1) : X;
+  auto R = left ? dA.matmul(X_) : X_.matmul(dA);
+  R = vector_case ? R.squeeze(-1) : R;
+  return at::linalg_lu_solve(LU, pivots, dB - R, left);
+}
+
+std::tuple<Tensor, Tensor> linalg_solve_backward(
+  const Tensor& gX,
+  const Tensor& X,
+  const Tensor& A,
+  const Tensor& LU,
+  const Tensor& pivots,
+  const bool left,
+  const bool B_requires_grad) {
+  // for X = A^{-1}B
+  // gB = A^{-H}gX
+  // gA = -gB X^H
+  at::NoTF32Guard disable_tf32;
+  const auto A_requires_grad = A.requires_grad();
+  if (!gX.defined() || (!A_requires_grad && !B_requires_grad)) {
+    return {};
+  }
+  auto LU_ = LU;
+  auto pivots_ = pivots;
+  // If the user is going to compute higher order gradients, then we need to recompute the LU and the pivots
+  Tensor gB;
+  if (at::GradMode::is_enabled()) {
+    gB = at::linalg_solve(A.mH(), gX, left);
+  } else {
+    gB = at::linalg_lu_solve(LU, pivots, gX, left, /*adjoint*/true);
+  }
+
+  if (!A_requires_grad) {
+    return std::make_tuple(Tensor{}, gB);
+  } else {
+    const bool vector_case = at::native::linalg_solve_is_vector_rhs(LU, X);
+    auto gB_ = vector_case ? gB.unsqueeze(-1) : gB;
+    auto X_ = vector_case ? X.unsqueeze(-1) : X;
+    auto gA = left ? -gB_.matmul(X_.mH()) : -X_.mH().matmul(gB_);
+    return std::make_tuple(vector_case ? gA.squeeze(-1) : gA,
+                           B_requires_grad ? gB : Tensor{});
+  }
 }
 
 Tensor lu_unpack_backward(

@@ -24,7 +24,6 @@
 #include <ATen/ops/_cholesky_solve_helper_native.h>
 #include <ATen/ops/_linalg_inv_out_helper_native.h>
 #include <ATen/ops/_linalg_qr_helper_native.h>
-#include <ATen/ops/_solve_helper_native.h>
 #include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
@@ -1281,94 +1280,6 @@ magma_trans_t to_magma(TransposeType trans) {
   auto storage_##name = pin_memory<type>(size); \
   name = static_cast<type*>(storage_##name.data());
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-template <typename scalar_t>
-static void apply_solve(Tensor& b, Tensor& A, Tensor& infos_out) {
-#if !AT_MAGMA_ENABLED()
-AT_ERROR("solve: MAGMA library not found in "
-    "compilation. Please rebuild with MAGMA.");
-#else
-  auto A_data = A.data_ptr<scalar_t>();
-  auto b_data = b.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
-  magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
-  magma_int_t lda = std::max(magma_int_t{1}, n);
-
-  if (b.dim() == 2) {
-    auto ipiv = at::empty({n}, at::kInt);
-    // magmaSolve requires infos tensor to live on CPU
-    Tensor infos = at::empty(infos_out.sizes(), infos_out.options().device(kCPU));
-    magmaSolve<scalar_t>(n, nrhs, A_data, lda, ipiv.data_ptr<magma_int_t>(),
-                        b_data, lda, infos.data_ptr<magma_int_t>());
-    infos_out.copy_(infos);
-  } else {
-    auto infos_data = infos_out.data_ptr<magma_int_t>();
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
-    magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
-
-    magma_int_t* ipiv_data;
-    magma_int_t** ipiv_array;
-    scalar_t** A_array;
-    scalar_t** b_array;
-
-    ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n);
-    ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
-    ALLOCATE_ARRAY(A_array, scalar_t*, batch_size);
-    ALLOCATE_ARRAY(b_array, scalar_t*, batch_size);
-
-    // Set up the created arrays
-    for (int64_t i = 0; i < batch_size; i++) {
-      A_array[i] = &A_data[i * A_mat_stride];
-      b_array[i] = &b_data[i * b_mat_stride];
-      ipiv_array[i] = &ipiv_data[i * n];
-    }
-
-    MAGMAQueue magma_queue(b.get_device());
-
-    constexpr int64_t batch_limit = 65535;
-    // Compute as many batches of 65535 possible
-    // The number of "mini"-batches are floor(batch_size / batch_limit)
-    // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
-    int64_t mini_batches = batch_size / batch_limit, mini_idx;
-    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
-      scalar_t** A_array_cur = &A_array[mini_idx];
-      scalar_t** b_array_cur = &b_array[mini_idx];
-      magma_int_t** ipiv_array_cur = &ipiv_array[mini_idx];
-      magma_int_t* info_array_cur = &infos_data[mini_idx];
-
-      magmaSolveBatched<scalar_t>(
-          n, nrhs, A_array_cur, lda, ipiv_array_cur, b_array_cur, lda,
-          info_array_cur, batch_limit, magma_queue);
-    }
-
-    // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
-    // which concisely is equal to batch_size % batch_limit
-    if (batch_size % batch_limit != 0) {
-      magmaSolveBatched<scalar_t>(
-          n, nrhs, &A_array[mini_idx], lda, &ipiv_array[mini_idx], &b_array[mini_idx], lda,
-          &infos_data[mini_idx], batch_size % batch_limit, magma_queue);
-    }
-  }
-#endif
-}
-
-std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  auto A_working_copy = cloneBatchedColumnMajor(A);
-  // infos might not get filled for empty inputs therefore at::zeros is used instead of at::empty
-  auto infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "solve_cuda", [&]{
-    apply_solve<scalar_t>(self_working_copy, A_working_copy, infos);
-  });
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "solve_cuda");
-  } else {
-    singleCheckErrors(infos.item().toInt(), "solve_cuda");
-  }
-  return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
-}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -3311,8 +3222,7 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 struct DispatchInitializer {
   DispatchInitializer() {
-    cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
-                                       _symeig_helper_cuda,
+    cuda::detail::LinalgDispatch disp{ _symeig_helper_cuda,
                                        _linalg_qr_helper_cuda,
                                        _cholesky_solve_helper_cuda,
                                        legacy_lstsq_cuda,

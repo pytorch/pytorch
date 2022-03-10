@@ -7088,18 +7088,8 @@
 
 - func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: solve
 
 - func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
-  dispatch:
-    CompositeExplicitAutograd: solve_out
-
-- func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _solve_helper_cpu
-    CUDA: _solve_helper_cuda
 
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
@@ -11116,16 +11106,19 @@
   python_module: linalg
   variants: function
 
-- func: linalg_solve(Tensor input, Tensor other) -> Tensor
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_solve
+- func: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_solve.result
 
-- func: linalg_solve.out(Tensor input, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
+- func: _linalg_solve.result(Tensor A, Tensor B, *, bool left=True, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_solve_out
+    CPU, CUDA: _linalg_solve_out
+
+- func: linalg_solve(Tensor A, Tensor B, *, bool left=True) -> Tensor
+  python_module: linalg
+
+- func: linalg_solve.out(Tensor A, Tensor B, *, bool left=True, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
 
 - func: linalg_tensorinv(Tensor self, int ind=2) -> Tensor
   python_module: linalg
