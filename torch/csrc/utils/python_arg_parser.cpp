@@ -482,8 +482,7 @@ static bool is_int_or_symbolic_or_concrete_int(PyObject* obj) {
       return true;
   }
 
-  auto sci = py::handle(obj).cast<c10::SymInt*>();
-  return sci != nullptr;
+  return false;
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.

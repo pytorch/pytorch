@@ -1,13 +1,6 @@
 import torch
 import lazy_tensor_core
 import lazy_tensor_core.debug.metrics as metrics
-from caffe2.python import workspace
-
-workspace.GlobalInit(
-    [
-        "--v=10",
-    ]
-)
 
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 

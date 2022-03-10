@@ -574,7 +574,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::SymInt:
-      return out << "SymInt(" << v.toInt() << ")";
+      return out << c10::SymInt(v.toInt());
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
@@ -762,7 +762,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::SymInt:
-      return out << "SymInt(" << v.toInt() << ")";
+      return out << c10::SymInt(v.toInt());
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {

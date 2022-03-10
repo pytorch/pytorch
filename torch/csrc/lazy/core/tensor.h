@@ -15,20 +15,6 @@ namespace lazy {
 class LazyTensor;
 using LazyTensorPtr = c10::intrusive_ptr<LazyTensor>;
 
-class LazySymbolicInt : public c10::SymbolicInt {
-  
-  virtual SymbolicInt* add(SymbolicInt* b) override {
-    TORCH_INTERNAL_ASSERT("NYI");
-    return nullptr;
-  }
-  virtual SymbolicInt* add(int64_t) override {
-    TORCH_INTERNAL_ASSERT("NYI");
-    return nullptr;
-  }
-
-  torch::lazy::NodePtr node_;
-};
-
 class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
  public:
   // This is the core lazy tensor data structure where all the tensor data is

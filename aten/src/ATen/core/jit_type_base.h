@@ -6,6 +6,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
+#include <ATen/core/symint.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -51,74 +52,6 @@ namespace c10 {
   _(SymIntType)             \
   _(UnionType)              \
   _(DynamicType)
-
-class TORCH_API SymbolicInt {
-public:
-  virtual SymbolicInt* add(SymbolicInt* b) = 0;
-  virtual SymbolicInt* add(int64_t) = 0;
-};
-
-class TORCH_API SymInt {
-
-public:
-
-  SymInt(int64_t d):
-  data_(d) {};
-
-  int64_t data_;
-
-  static const int64_t SYMBOLIC_INT_TAG = 1LL << 63;
-
-  operator int64_t() {
-    TORCH_CHECK(!isSymbolicInt());
-    return data_;
-  }
-
-  bool isSymbolicInt() {
-    return isSymbolicInt(data_);
-  }
-
-  static bool isSymbolicInt(int64_t data) {
-    return data < -1;
-  }
-
-  // TODO: can we make it more C++ cast-style like?
-  static SymbolicInt* unbox(SymInt sci) {
-    TORCH_INTERNAL_ASSERT(sci.isSymbolicInt());
-    return reinterpret_cast<SymbolicInt*>(sci.data_ ^ SYMBOLIC_INT_TAG);
-  }
-
-  static int64_t box(SymbolicInt* s) {
-    return reinterpret_cast<int64_t>(s) ^ SYMBOLIC_INT_TAG;
-  }
-  
-
-  bool operator==(const SymInt& p2)
-  {
-      TORCH_INTERNAL_ASSERT("NYI");
-      return false;
-  }
-
-  SymInt operator+(SymInt sci) {
-    int64_t result = 0;
-    if (this->isSymbolicInt()) {
-      if (sci.isSymbolicInt()) {
-        result = box(unbox(*this)->add(unbox(sci)));
-      }
-      else {
-        result = box(unbox(*this)->add(sci.data_));
-      }
-    } else if (sci.isSymbolicInt()) {
-        result = box(unbox(sci)->add(data_));
-    } else {
-      result = data_ + sci.data_;
-    }
-
-    return SymInt(result);
-  }
-};
-
-TORCH_API std::ostream& operator<<(std::ostream& os, const SymInt& s);
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,

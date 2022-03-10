@@ -1244,7 +1244,7 @@ struct TORCH_API SymIntType : public Type {
     return rhs.kind() == kind();
   }
   std::string str() const override {
-    return "BoxedInt";
+    return "SymInt";
   }
   static const TypeKind Kind = TypeKind::SymIntType;
   // global singleton
@@ -1266,7 +1266,7 @@ struct TORCH_API IntType : public NumberType {
   }
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override {
     // NOLINTNEXTLINE(bugprone-parent-virtual-call)
-    return rhs.kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
+    return rhs.kind() == TypeKind::NumberType || rhs.kind() == TypeKind::SymIntType ||  Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
