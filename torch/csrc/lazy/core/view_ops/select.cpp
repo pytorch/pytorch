@@ -16,7 +16,7 @@ Select::Select(
           {input},
           [&]() {
             return MakeSelectShape(
-                GetShapeFromTsValue(input), dim, start, end, stride);
+                GetShapeFromValue(input), dim, start, end, stride);
           },
           /*num_outputs=*/1,
           MHash(dim, start, end, stride)),

@@ -16,7 +16,7 @@ Diagonal::Diagonal(
           {input},
           [&]() {
             return MakeDiagonalShape(
-                GetShapeFromTsValue(input), offset, dim1, dim2);
+                GetShapeFromValue(input), offset, dim1, dim2);
           },
           /*num_outputs=*/1,
           MHash(offset, dim1, dim2)),

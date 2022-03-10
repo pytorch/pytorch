@@ -14,7 +14,7 @@ DiagonalViewUpdate::DiagonalViewUpdate(
     : TsNode(
           ltc_diagonal_view_update,
           {target, input},
-          {GetShapeFromTsValue(target)},
+          {GetShapeFromValue(target)},
           /*num_outputs=*/1,
           MHash(offset, dim1, dim2)),
       offset_(offset),

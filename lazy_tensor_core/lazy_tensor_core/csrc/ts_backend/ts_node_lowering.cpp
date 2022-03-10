@@ -190,7 +190,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const torch::lazy::Output& input_op = node->operand(1);
     const torch::lazy::Shape& input_shape =
-        torch::lazy::GetShapeFromTsOutput(input_op);
+        torch::lazy::GetShapeFromOutput(input_op);
     const auto input_dimensions = input_shape.sizes();
     std::vector<torch::jit::NamedValue> dest_arguments;
     dest_arguments.emplace_back(destination);
@@ -268,7 +268,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     const auto& base_indices = node->base_indices();
     const auto& sizes = node->sizes();
     const torch::lazy::Shape& input_shape =
-        torch::lazy::GetShapeFromTsOutput(input);
+        torch::lazy::GetShapeFromOutput(input);
     CHECK_EQ(sizes.size(), base_indices.size());
     CHECK_EQ(input_shape.dim(), base_indices.size());
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {
@@ -333,7 +333,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     const auto& base_indices = node->base_indices();
     const torch::lazy::Output& source_argument = node->operand(1);
     const torch::lazy::Shape& source_shape =
-        torch::lazy::GetShapeFromTsOutput(source_argument);
+        torch::lazy::GetShapeFromOutput(source_argument);
     CHECK_EQ(source_shape.dim(), base_indices.size());
     torch::jit::Value* base = dest;
     for (size_t dim = 0; dim < base_indices.size(); ++dim) {

@@ -36,7 +36,7 @@ using namespace torch::lazy;
 
 torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
                                const torch::lazy::Shape& target_shape) {
-  if (torch::lazy::GetShapeFromTsValue(input).sizes() == target_shape.sizes()) {
+  if (torch::lazy::GetShapeFromValue(input).sizes() == target_shape.sizes()) {
     return input;
   }
   return torch::lazy::MakeNode<torch::lazy::Expand>(

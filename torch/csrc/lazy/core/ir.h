@@ -15,6 +15,7 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <torch/csrc/lazy/core/shape.h>
 #include <c10/util/Flags.h>
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
@@ -162,6 +163,11 @@ class TORCH_API Node {
 
   virtual const Output& operand(size_t i) const = 0;
 
+  // Retrieves the shape of the output at a given index.
+  virtual const Shape& shape(size_t output_index = 0) const = 0;
+
+  virtual void SetShapeDeferred(const std::function<Shape()>& shape_fn);
+
   hash_t node_hash() const {
     return node_hash_;
   }
@@ -243,6 +249,14 @@ const T* NodeCast(const Node* node, OpKind op) {
   return &dynamic_cast<const T&>(*node);
 #endif
 }
+
+// Helper that makes it easy to access the TsNode::shape() method
+// from an torch::lazy::Output* that holds a Node* that points to a TsNode
+// TODO(whc) remove these once migrating to codegen and cleaning up Shape use
+TORCH_API const Shape& GetShapeFromOutput(const Output& output);
+TORCH_API const Shape& GetShapeFromValue(const Value& value);
+TORCH_API void NodeSetShapeDeferred(
+    NodePtr node, const std::function<Shape()>& shape_fn);
 
 } // namespace lazy
 } // namespace torch

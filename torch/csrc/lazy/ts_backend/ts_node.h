@@ -2,7 +2,6 @@
 
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
-#include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -13,13 +12,6 @@ namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-// Helper that makes it easy to access the TsNode::shape() method
-// from an torch::lazy::Output* that holds a Node* that points to a TsNode
-// TODO(whc) remove these once migrating to codegen and cleaning up Shape use
-TORCH_API const Shape& GetShapeFromTsOutput(const Output& output);
-TORCH_API const Shape& GetShapeFromTsValue(const Value& value);
-TORCH_API void TsNodeSetShapeDeferred(
-    NodePtr node, const std::function<Shape()>& shape_fn);
 
 class TORCH_API TsNode : public lazy::Node {
  public:
@@ -36,7 +28,7 @@ class TORCH_API TsNode : public lazy::Node {
   TsNode(OpKind op, OpList operands, size_t num_outputs = 1,
          hash_t hash_seed = kHashSeed);
 
-  void SetShapeDeferred(const std::function<Shape()>& shape_fn);
+  void SetShapeDeferred(const std::function<Shape()>& shape_fn) override;
 
   // Contructor used to create leaf nodes.
   TsNode(OpKind op, Shape shape, size_t num_outputs = 1,
@@ -51,7 +43,7 @@ class TORCH_API TsNode : public lazy::Node {
   c10::ArrayRef<Shape> shapes() const { return shapes_; }
 
   // Retrieves the shape of the output at a given index.
-  const Shape& shape(size_t output_index = 0) const;
+  const Shape& shape(size_t output_index = 0) const override;
 
   std::string ToString() const override;
 

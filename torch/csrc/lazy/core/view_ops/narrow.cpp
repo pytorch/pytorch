@@ -17,7 +17,7 @@ Narrow::Narrow(
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
   SetShapeDeferred([&]() {
-    return Shape(GetShapeFromTsOutput(operand(0)).scalar_type(), sizes);
+    return Shape(GetShapeFromOutput(operand(0)).scalar_type(), sizes);
   });
 }
 

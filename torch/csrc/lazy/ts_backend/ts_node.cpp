@@ -17,29 +17,6 @@ namespace {
 namespace torch {
 namespace lazy {
 
-const Shape& GetShapeFromTsOutput(const Output& output) {
-  if (auto* tsnode = dynamic_cast<const TsNode*>(output.node)) {
-    return tsnode->shape(output.index);
-  }
-  throw std::runtime_error("Expected TsNode but could not dynamic cast");
-}
-
-const Shape& GetShapeFromTsValue(const Value& value) {
-  if (auto* tsnode = dynamic_cast<const TsNode*>(value.node.get())) {
-    return tsnode->shape(value.index);
-  }
-  throw std::runtime_error("Expected TsNode but could not dynamic cast");
-}
-
-void TsNodeSetShapeDeferred(
-    NodePtr node, const std::function<Shape()>& shape_fn) {
-  if (auto tsnode = std::dynamic_pointer_cast<TsNode>(node)) {
-    tsnode->SetShapeDeferred(shape_fn);
-    return;
-  }
-  throw std::runtime_error("Expected TsNode but could not dynamic cast");
-}
-
 hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes) {
   hash_t hash = seed;
   for (auto& operand : operands) {

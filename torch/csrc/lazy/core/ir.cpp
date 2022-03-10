@@ -64,6 +64,8 @@ Node::Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_
 
 Node::~Node() = default;
 
+void Node::SetShapeDeferred(const std::function<Shape()>& shape_fn) {}
+
 std::string Node::ToString() const {
   std::stringstream ss;
   ss << op();
@@ -76,6 +78,19 @@ std::string Node::ToString() const {
   EmitShortFrameInfo(ss, metadata_.frame_info);
   return ss.str();
 }
+
+const Shape& GetShapeFromOutput(const Output& output) {
+  return output.node->shape(output.index);
+}
+
+const Shape& GetShapeFromValue(const Value& value) {
+  return value.node->shape(value.index);
+}
+
+void NodeSetShapeDeferred(NodePtr node, const std::function<Shape()>& shape_fn) {
+  node->SetShapeDeferred(shape_fn);
+}
+
 
 } // namespace lazy
 } // namespace torch
