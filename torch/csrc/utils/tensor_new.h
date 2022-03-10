@@ -6,6 +6,7 @@
 
 namespace torch { namespace utils {
 
+at::Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs);
 at::Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs);
 at::Tensor indexing_tensor_from_data(
