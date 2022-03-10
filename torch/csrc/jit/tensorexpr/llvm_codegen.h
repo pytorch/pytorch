@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef TORCH_ENABLE_LLVM
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -130,6 +130,11 @@ struct TORCH_API LLVMCodeGenBuilder {
   c10::optional<std::string> cpu_ = c10::nullopt;
   c10::optional<std::string> attrs_ = c10::nullopt;
 };
+
+TORCH_API c10::optional<std::string>& LLVMTargetTriple();
+TORCH_API c10::optional<std::string>& LLVMTargetCPU();
+TORCH_API c10::optional<std::string>& LLVMTargetAttrs();
+TORCH_API bool& LLVMAOTWorkflow();
 
 } // namespace tensorexpr
 } // namespace jit

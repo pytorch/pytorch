@@ -41,7 +41,8 @@ struct TORCH_API PredictorConfig {
   std::shared_ptr<Workspace> ws;
 };
 
-TORCH_API Workspace makeWorkspace(std::shared_ptr<PredictorParameters> parameters);
+TORCH_API Workspace
+makeWorkspace(std::shared_ptr<PredictorParameters> parameters);
 
 TORCH_API PredictorConfig makePredictorConfig(
     const MetaNetDef& net,

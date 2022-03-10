@@ -583,6 +583,7 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
+    torch._C._log_api_usage_once("torch.distributed.rpc_remote")
     qualified_name = torch.jit._builtins._find_builtin(func)
     dst_worker_info = _to_worker_info(to)
     should_profile = torch.autograd._profiler_enabled()
@@ -761,6 +762,7 @@ def rpc_sync(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.shutdown()
 
     """
+    torch._C._log_api_usage_once("torch.distributed.rpc_sync")
     fut = _invoke_rpc(to, func, RPCExecMode.SYNC, args, kwargs, timeout)
     return fut.wait()
 
@@ -853,6 +855,7 @@ def rpc_async(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
         >>> rpc.init_rpc("worker1", rank=1, world_size=2)
         >>> rpc.shutdown()
     """
+    torch._C._log_api_usage_once("torch.distributed.rpc_async")
     fut = _invoke_rpc(to, func, RPCExecMode.ASYNC, args, kwargs, timeout)
     if hasattr(_thread_local_var, "future_list"):
         _thread_local_var.future_list.append(fut)

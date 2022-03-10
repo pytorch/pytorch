@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import unittest
 from typing import Dict, Optional
 
@@ -16,10 +18,7 @@ class StaticModule:
             self.static_module = torch._C._jit_to_static_module(scripted.graph)
 
     def __call__(self, *args, **kwargs):
-        if not kwargs:
-            return self.static_module(args)
-        else:
-            return self.static_module(args, kwargs)
+        return self.static_module(*args, **kwargs)
 
     def benchmark(self, args, kwargs, warmup_runs, main_runs):
         self.static_module.benchmark(args, kwargs, warmup_runs, main_runs)
@@ -227,20 +226,20 @@ class TestStaticModule(TestCase):
             bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
             top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
         ref_bot = bot_l(bot_inp)
-        acc_bot = bot_l_acc(bot_inp)[0]
+        acc_bot = bot_l_acc(bot_inp)
         torch.testing.assert_close(acc_bot, ref_bot)
         ref_top = top_l(top_inp)
-        acc_top = top_l_acc(top_inp)[0]
+        acc_top = top_l_acc(top_inp)
         torch.testing.assert_close(acc_top, ref_top)
         for _ in range(5):
             with torch.no_grad():
                 bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
                 top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
             ref_bot = bot_l(bot_inp)
-            acc_bot = bot_l_acc(bot_inp)[0]
+            acc_bot = bot_l_acc(bot_inp)
             torch.testing.assert_close(acc_bot, ref_bot)
             ref_top = top_l(top_inp)
-            acc_top = top_l_acc(top_inp)[0]
+            acc_top = top_l_acc(top_inp)
             torch.testing.assert_close(acc_top, ref_top)
 
     def test_trivial_graph(self):
@@ -248,7 +247,7 @@ class TestStaticModule(TestCase):
         tg = torch.jit.script(trivial_graph)
         o_ref = tg(s, s, s)
         tg_a = StaticModule(tg)
-        o_test = tg_a(s, s, s)[0]
+        o_test = tg_a(s, s, s)
         torch.testing.assert_close(o_ref, o_test)
 
     def test_leaky_relu(self):
@@ -256,7 +255,7 @@ class TestStaticModule(TestCase):
         tg = torch.jit.script(nn.LeakyReLU(0.1))
         o_ref = tg(s)
         tg_a = StaticModule(tg)
-        o_test = tg_a(s)[0]
+        o_test = tg_a(s)
         torch.testing.assert_close(o_ref, o_test)
 
     def test_attr(self):
@@ -292,7 +291,7 @@ class TestStaticModule(TestCase):
 
         ms = torch.jit.script(m)
         sm = StaticModule(ms)
-        output_sm = sm(input)[0]
+        output_sm = sm(input)
         torch.testing.assert_close(output_s, output_sm)
         sm.benchmark([input], {}, 2, 2)
         sm.benchmark_individual_ops([input], {}, 2, 2)
@@ -359,6 +358,27 @@ class TestStaticModule(TestCase):
         for i in o_ref.keys():
             torch.testing.assert_close(o_ref[i], o_test[i])
 
+    def test_create_object(self):
+        class Foo:  # noqa: B903
+            def __init__(self, x: torch.Tensor) -> None:
+                self.x = x
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, y: torch.Tensor) -> torch.Tensor:
+                foo = Foo(y)
+                return y * foo.x
+
+        mod = torch.jit.script(Mod()).eval()
+        y = torch.randn((1, ))
+        expected = mod(y)
+
+        static_mod = StaticModule(torch.jit.freeze(mod))
+        actual = static_mod(y)
+
+        self.assertEqual(expected, actual)
 
 if __name__ == "__main__":
     run_tests()

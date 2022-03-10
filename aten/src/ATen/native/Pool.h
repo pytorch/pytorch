@@ -1,7 +1,8 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/div_rtn.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/util/irange.h>
 
 #pragma once
 
@@ -133,12 +134,10 @@ max_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
   const Tensor& indices,
-  int64_t nbatch,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format,
-  bool cuda=false)
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   pool2d_shape_check(
     input,
@@ -162,7 +161,7 @@ static inline void
 avg_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
-  int64_t nbatch,
+  int64_t /*nbatch*/,
   int kH, int kW, int dH, int dW, int padH, int padW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
@@ -212,7 +211,7 @@ pool3d_shape_check(
   TORCH_CHECK(ndim == 4 || ndim == 5,
               fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
 
-  for (int64_t i = 1; i < ndim; ++i) {
+  for (const auto i : c10::irange(1, ndim)) {
     TORCH_CHECK(input.size(i) > 0,
                 fn_name, "Expected input to have non-zero size for non-batch dimensions, but got",
                 input.sizes(), " with dimension ", i, " being empty.");

@@ -137,7 +137,7 @@ void _unpack_pivots_internal_kernel(
     }
   };
 
-  _launch_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  _launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 }
 
 void unpack_pivots_cuda_kernel(

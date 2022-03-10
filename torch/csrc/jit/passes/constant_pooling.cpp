@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/node_hashing.h>

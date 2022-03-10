@@ -51,7 +51,7 @@ test/custom_operator/model.pt
 test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
-test/backward_compatibility/nightly_schemas.txt
+test/forward_backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
@@ -196,9 +196,6 @@ docs/source/scripts/activation_images/
 # PyCharm files
 .idea
 
-# OSX dir files
-.DS_Store
-
 # GDB history
 .gdb_history
 
@@ -258,6 +255,9 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
+# Downloaded bazel
+tools/bazel
+
 # Visual Studio Code files
 .vs
 /.vscode/*
@@ -287,6 +287,7 @@ TAGS
 # clang tooling storage location
 .clang-format-bin
 .clang-tidy-bin
+.lintbin
 
 # clangd background index
 .clangd/

@@ -54,7 +54,7 @@ def _batch_mahalanobis(bL, bx):
     flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
     flat_x = bx.reshape(-1, flat_L.size(0), n)  # shape = c x b x n
     flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
-    M_swap = torch.triangular_solve(flat_x_swap, flat_L, upper=False)[0].pow(2).sum(-2)  # shape = b x c
+    M_swap = torch.linalg.solve_triangular(flat_L, flat_x_swap, upper=False).pow(2).sum(-2)  # shape = b x c
     M = M_swap.t()  # shape = c x b
 
     # Now we revert the above reshape and permute operators.
@@ -70,8 +70,8 @@ def _precision_to_scale_tril(P):
     # Ref: https://nbviewer.jupyter.org/gist/fehiepsi/5ef8e09e61604f10607380467eb82006#Precision-to-scale_tril
     Lf = torch.linalg.cholesky(torch.flip(P, (-2, -1)))
     L_inv = torch.transpose(torch.flip(Lf, (-2, -1)), -2, -1)
-    L = torch.triangular_solve(torch.eye(P.shape[-1], dtype=P.dtype, device=P.device),
-                               L_inv, upper=False)[0]
+    Id = torch.eye(P.shape[-1], dtype=P.dtype, device=P.device)
+    L = torch.linalg.solve_triangular(L_inv, Id, upper=False)
     return L
 
 
@@ -179,14 +179,12 @@ class MultivariateNormal(Distribution):
     @lazy_property
     def covariance_matrix(self):
         return (torch.matmul(self._unbroadcasted_scale_tril,
-                             self._unbroadcasted_scale_tril.transpose(-1, -2))
+                             self._unbroadcasted_scale_tril.mT)
                 .expand(self._batch_shape + self._event_shape + self._event_shape))
 
     @lazy_property
     def precision_matrix(self):
-        identity = torch.eye(self.loc.size(-1), device=self.loc.device, dtype=self.loc.dtype)
-        # TODO: use cholesky_inverse when its batching is supported
-        return torch.cholesky_solve(identity, self._unbroadcasted_scale_tril).expand(
+        return torch.cholesky_inverse(self._unbroadcasted_scale_tril).expand(
             self._batch_shape + self._event_shape + self._event_shape)
 
     @property

@@ -1,19 +1,19 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
-#include <ATen/native/IndexingUtils.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 
 namespace at {
 namespace cuda {
 namespace detail {
 
-TORCH_CUDA_CU_API bool maybeOverlappingIndices(const at::Tensor& t);
+TORCH_CUDA_CU_API bool maybeOverlappingIndices(const at::TensorBase &t);
 using at::native::canUse32BitIndexMath;
 
 template <typename scalar, typename IndexType>
 TensorInfo<scalar, IndexType>
-getTensorInfo(const at::Tensor& t) {
+getTensorInfo(const at::TensorBase &t) {
   IndexType sz[MAX_TENSORINFO_DIMS];
   IndexType st[MAX_TENSORINFO_DIMS];
 

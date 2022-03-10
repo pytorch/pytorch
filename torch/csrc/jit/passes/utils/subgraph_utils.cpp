@@ -2,7 +2,10 @@
 
 #include <torch/csrc/jit/passes/canonicalize.h>
 
+#include <ATen/core/symbol.h>
+#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
@@ -134,6 +137,73 @@ void mergeSubgraph(Node* mergeTo, Node* mergeFrom) {
     ++it;
     mergeNodeIntoSubgraph(node, mergeTo);
   }
+}
+
+struct topo_cmp_value {
+  bool operator()(Value* a, Value* b) const {
+    if (a->node() == b->node()) {
+      return a->unique() < b->unique();
+    }
+    return a->node()->isBefore(b->node());
+  }
+};
+
+struct topo_cmp_node {
+  bool operator()(Node* a, Node* b) const {
+    return a->isBefore(b);
+  }
+};
+
+void collectNodesToUnfuse(Node* start, std::set<Node*, topo_cmp_node>& s) {
+  if (start->kind() == prim::Return || start->kind() == prim::Param) {
+    GRAPH_DEBUG("reached the param or return node", getHeader(start));
+    return;
+  }
+
+  if (s.count(start) != 0) {
+    // already visited, no need to visit descendants
+    return;
+  }
+
+  GRAPH_DEBUG("collectNodesToUnfuse: inserting node ", getHeader(start));
+  s.insert(start);
+
+  for (auto o : start->outputs()) {
+    for (auto use : o->uses()) {
+      collectNodesToUnfuse(use.user, s);
+    }
+  }
+}
+
+std::vector<std::set<Value*, topo_cmp_value>> buildAliasedSets(
+    std::shared_ptr<Graph> subgraph) {
+  auto outputs = subgraph->outputs();
+  AliasDb alias_db(subgraph);
+  TORCH_INTERNAL_ASSERT(outputs.size() > 1);
+  std::vector<std::set<Value*, topo_cmp_value>> res;
+  for (auto o : outputs) {
+    auto grouped = false;
+    for (auto& s : res) {
+      auto os = *s.begin();
+      auto aliased = alias_db.mayContainAlias(os, o);
+      GRAPH_DEBUG(
+          "comparing %",
+          o->debugName(),
+          " with %",
+          os->debugName(),
+          " result ",
+          aliased);
+      if (aliased) {
+        s.insert(o);
+        GRAPH_DEBUG("Grouping %", o->debugName(), " with %", os->debugName());
+        grouped = true;
+      }
+    }
+    if (!grouped) {
+      res.push_back({o});
+    }
+  }
+  return res;
 }
 
 } // namespace
@@ -360,6 +430,174 @@ Node* createSingletonSubgraphAndUpdateAliasing(
       to_merge, c10::nullopt, db, [&]() {
         return createSingletonSubgraph(to_merge, subgraphKind);
       });
+}
+
+bool unmergeOutputsAlisingInputs(Node* subgraphNode) {
+  GRAPH_DEBUG("unfuseOutputsAlisingInputs on ", getHeader(subgraphNode));
+  auto subgraph = subgraphNode->g(attr::Subgraph);
+  AliasDb alias_db(subgraph);
+
+  std::set<Node*, topo_cmp_node> nodes;
+  for (auto o : subgraph->outputs()) {
+    if (alias_db.mayContainAlias(o, subgraph->inputs())) {
+      collectNodesToUnfuse(o->node(), nodes);
+    }
+  }
+
+  // unfuse in the reverse topo order
+  for (auto it = nodes.rbegin(); it != nodes.rend(); it++) {
+    SubgraphUtils::unmergeNode(*it, subgraphNode);
+  }
+
+  return !nodes.empty();
+}
+
+bool unmergeAliasedOutputs(Node* subgraphNode) {
+  GRAPH_DEBUG("unfuseAliasedOutputs on ", getHeader(subgraphNode));
+  if (subgraphNode->outputs().size() < 2) {
+    return false;
+  }
+
+  auto subgraph = subgraphNode->g(attr::Subgraph);
+  GRAPH_DUMP("unfuseAliasedOutputs Subgraph ", subgraph);
+  auto sets = buildAliasedSets(subgraph);
+  GRAPH_DEBUG("buildAliasedSets sets.size() = ", sets.size());
+
+  std::set<Node*, topo_cmp_node> nodes;
+
+  for (auto i : c10::irange(sets.size())) {
+    if (sets[i].size() <= 1) {
+      GRAPH_DEBUG(
+          "Set ",
+          i,
+          " with leader ",
+          (*(sets[i].begin()))->debugName(),
+          " size = ",
+          sets[i].size());
+      continue;
+    }
+
+    // we have at least two aliased outputs
+    // we skip the earliest node w.r.t. the topo order
+    // NB. after some nodes are unfused, the outputs of some other nodes
+    // may become the outputs of the subgraph and alias the remaining ones
+    // so we have to re-run this function until there are no more changes
+    auto it = ++sets[i].begin();
+    while (it != sets[i].end()) {
+      GRAPH_DEBUG(
+          "root aliased value ", (*it)->debugName(), " node ", *(*it)->node());
+      collectNodesToUnfuse((*it)->node(), nodes);
+      it++;
+    }
+  }
+
+  // unfuse in the reverse topo order
+  for (auto it = nodes.rbegin(); it != nodes.rend(); it++) {
+    unmergeNode(*it, subgraphNode);
+  }
+
+  return !nodes.empty();
+}
+
+void unmergeNode(Node* n, Node* subgraphNode) {
+  // collect output indices
+  GRAPH_DEBUG("unfuseNode node ", getHeader(n));
+  auto subgraph = n->owningGraph();
+
+  std::set<Value*> node_outputs(n->outputs().begin(), n->outputs().end());
+  std::set<size_t> output_indices;
+  std::set<Value*> node_inputs(n->inputs().begin(), n->inputs().end());
+
+  std::unordered_map<Value*, Value*> local_map;
+  auto env = [&](Value* v) {
+    auto it = local_map.find(v);
+    if (it != local_map.end()) {
+      return it->second;
+    }
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "all inputs should've been mapped. Couldn't map %",
+        v->debugName());
+    return v;
+  };
+
+  for (auto i : c10::irange(subgraph->outputs().size())) {
+    if (node_outputs.count(subgraph->outputs().at(i)) != 0) {
+      output_indices.insert(i);
+    }
+
+    if (node_inputs.count(subgraph->outputs().at(i)) != 0) {
+      GRAPH_DEBUG(
+          "output %",
+          subgraph->outputs().at(i)->debugName(),
+          " is already subgraph's output");
+      GRAPH_DEBUG(
+          "Mapping %",
+          subgraph->outputs().at(i)->debugName(),
+          " to %",
+          subgraphNode->outputs().at(i)->debugName());
+      local_map[subgraph->outputs().at(i)] = subgraphNode->outputs().at(i);
+      node_inputs.erase(subgraph->outputs().at(i));
+    }
+  }
+
+  WithInsertPoint wip(subgraphNode->next());
+
+  // these node inputs need to be added to subgraph's outputs
+  // put them in vmap
+  for (auto ni : node_inputs) {
+    if (local_map.count(ni) != 0) {
+      // this could happen if `n` uses two or more outputs
+      // of a constant node and we already cloned the constant
+      // into the outer graph and mapped its outputs
+      continue;
+    }
+
+    Value* sno = nullptr;
+    if (ni->node()->kind() == prim::Constant) {
+      auto copy = subgraphNode->owningGraph()->createClone(ni->node(), env);
+      subgraphNode->owningGraph()->insertNode(copy);
+      // in case we have a multi-output const, map the rest of the outputs
+      // so when we get to clone `n`, `n`'s clone will use the outputs of this
+      // constant clone
+      for (auto i : c10::irange(n->outputs().size())) {
+        GRAPH_DEBUG(
+            "Mapping %",
+            ni->node()->output(i)->debugName(),
+            " to %",
+            copy->output(i)->debugName());
+        local_map[ni->node()->output(i)] = copy->output(i);
+      }
+    } else {
+      subgraph->registerOutput(ni);
+      sno = subgraphNode->addOutput();
+      sno->setType(ni->type());
+      GRAPH_DEBUG("Mapping %", ni->debugName(), " to %", sno->debugName());
+      local_map[ni] = sno;
+    }
+  }
+
+  auto copy = subgraphNode->owningGraph()->createClone(n, env);
+  GRAPH_DEBUG("copy ", *copy);
+
+  for (auto i : c10::irange(n->outputs().size())) {
+    auto oo = n->outputs()[i];
+    auto no = copy->outputs()[i];
+    no->copyMetadata(oo);
+    GRAPH_DEBUG("Mapping %", oo->debugName(), " to %", no->debugName());
+    local_map[oo] = no;
+  }
+
+  subgraphNode->owningGraph()->insertNode(copy);
+
+  for (auto it = output_indices.rbegin(); it != output_indices.rend(); it++) {
+    auto replace_val = local_map[subgraph->outputs().at(*it)];
+    subgraphNode->outputs().at(*it)->replaceAllUsesWith(replace_val);
+    subgraphNode->eraseOutput(*it);
+    subgraph->eraseOutput(*it);
+  }
+
+  n->destroy();
 }
 
 std::string truncateStrWithHash(const std::string& s, size_t maxlen) {

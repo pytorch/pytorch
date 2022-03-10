@@ -503,6 +503,12 @@ def saved_variables(
             'suffix': '_sizes',
             'nctype': lambda name: NamedCType(name, BaseCType(intArrayRefT)),
         }),
+        # replace self->sizes() with self_sizes_opt
+        (r'{}->sizes\(\)', {
+            'suffix': '_sizes_opt',
+            'nctype': lambda name: NamedCType(name, OptionalCType(BaseCType(intArrayRefT))),
+            'expr': lambda name: f'{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt',
+        }),
         # replace self.options() with self_options
         (r'{}.options\(\)', {
             'suffix': '_options',

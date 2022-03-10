@@ -423,8 +423,9 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str, args: Optional[str] = None):
         self.name: str = name
+        self.args: Optional[str] = args
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
@@ -432,7 +433,7 @@ class record_function(ContextDecorator):
         self.handle: torch.Tensor = torch.zeros(1)
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name)
+        self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):

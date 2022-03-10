@@ -1,9 +1,11 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -33,8 +35,8 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
 
   using Vec = vec::Vectorized<scalar_t>;
   scalar_t* result_ptr = result_data;
-  for (int64_t i = 0; i < outer; ++i) {
-    for (int64_t j = 0; j < ninputs; j++) {
+  for (const auto i : c10::irange(outer)) {
+    for (const auto j : c10::irange(ninputs)) {
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       int64_t d = 0;

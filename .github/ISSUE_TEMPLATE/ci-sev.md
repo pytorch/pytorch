@@ -1,9 +1,9 @@
 ---
 name: "⚠️CI SEV"
 about: Tracking incidents for PyTorch's CI infra.
-labels: "ci: sev"
 ---
 
+> NOTE: Remember to label this issue with "`ci: sev`"
 
 ## Current Status
 *Status could be: preemptive, ongoing, mitigated, closed. Also tell people if they need to take action to fix it (i.e. rebase)*.
@@ -16,6 +16,7 @@ labels: "ci: sev"
 
 <details>
 <summary> Click for example </summary>
+
 e.g.
 - 10/30 7:27a incident began
 - 10/30 8:30a detected by <method>

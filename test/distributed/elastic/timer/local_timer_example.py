@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,7 +10,6 @@ import logging
 import multiprocessing as mp
 import signal
 import time
-import unittest
 
 import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_MACOS,
     sandcastle_skip_if,
+    TestCase
 )
 
 
@@ -41,7 +42,7 @@ def _stuck_function(rank, mp_queue):
 
 # timer is not supported on macos or windowns
 if not (IS_WINDOWS or IS_MACOS):
-    class LocalTimerExample(unittest.TestCase):
+    class LocalTimerExample(TestCase):
         """
         Demonstrates how to use LocalTimerServer and LocalTimerClient
         to enforce expiration of code-blocks.

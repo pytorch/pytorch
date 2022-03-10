@@ -1,6 +1,7 @@
 #include <ATen/Operators.h>
 #include <ATen/test/test_assert.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -21,9 +22,9 @@ TEST(PackedtensoraccessorTest, TransposeTest) {
   ASSERT_EQ(original.size(0), transposed.size(2));
   ASSERT_EQ(original.size(1), transposed.size(1));
   ASSERT_EQ(original.size(2), transposed.size(0));
-  for (int i = 0; i < sizes[0]; i++) {
-    for (int j = 0; j < sizes[1]; j++) {
-      for (int k = 0; k < sizes[2]; k++) {
+  for (const auto i : c10::irange(sizes[0])) {
+    for (const auto j : c10::irange(sizes[1])) {
+      for (const auto k : c10::irange(sizes[2])) {
         ASSERT_EQ(original[i][j][k], transposed[k][j][i]);
       }
     }
@@ -34,7 +35,7 @@ TEST(PackedtensoraccessorTest, TransposeTest) {
   t = rand({size}, CPU(kFloat));
   auto original_1d = t.packed_accessor64<float, 1, DefaultPtrTraits>();
   auto transposed_1d = original_1d.transpose(0, 0);
-  for (int i = 0; i < size; i++){
+  for (const auto i : c10::irange(size)) {
     ASSERT_EQ(original_1d[i], transposed_1d[i]);
   }
 

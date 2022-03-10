@@ -12,6 +12,30 @@ import audio_text_models
 
 from utils import to_markdown_table, TimingResultType, InputsType, GetterType, VType
 
+def get_task_func(task: str) -> Callable:
+    def hessian_fwdrev(model, inp, strict=None):
+        return functional.hessian(model, inp, strict=False, vectorize=True, outer_jacobian_strategy="forward-mode")
+
+    def hessian_revrev(model, inp, strict=None):
+        return functional.hessian(model, inp, strict=False, vectorize=True)
+
+    def jacfwd(model, inp, strict=None):
+        return functional.jacobian(model, inp, strict=False, vectorize=True, strategy="forward-mode")
+
+    def jacrev(model, inp, strict=None):
+        return functional.jacobian(model, inp, strict=False, vectorize=True)
+
+    if task == "hessian_fwdrev":
+        return hessian_fwdrev
+    elif task == "hessian_revrev":
+        return hessian_revrev
+    elif task == "jacfwd":
+        return jacfwd
+    elif task == "jacrev":
+        return jacrev
+    else:
+        return getattr(functional, task)
+
 # Listing of the different tasks
 FAST_TASKS_NO_DOUBLE_BACK = [
     "vjp",
@@ -22,13 +46,17 @@ FAST_TASKS = FAST_TASKS_NO_DOUBLE_BACK + [
     "jvp",
 ]
 
-ALL_TASKS = FAST_TASKS + [
+ALL_TASKS_NON_VECTORIZED = FAST_TASKS + [
     "hvp",
     "jacobian",
     "hessian"
 ]
 
 DOUBLE_BACKWARD_TASKS = ["jvp", "hvp", "vhp", "hessian"]
+
+VECTORIZED_TASKS = ["hessian_fwdrev", "hessian_revrev", "jacfwd", "jacrev"]
+
+ALL_TASKS = ALL_TASKS_NON_VECTORIZED + VECTORIZED_TASKS
 
 # Model definition which contains:
 # - name: a string with the model name.
@@ -72,7 +100,7 @@ def get_v_for(model: Callable, inp: InputsType, task: str) -> VType:
     return v
 
 def run_once(model: Callable, inp: InputsType, task: str, v: VType) -> None:
-    func = getattr(functional, task)
+    func = get_task_func(task)
 
     if v is not None:
         res = func(model, inp, v=v, strict=True)

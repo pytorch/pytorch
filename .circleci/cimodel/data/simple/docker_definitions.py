@@ -4,11 +4,8 @@ from cimodel.lib.miniutils import quote
 from cimodel.data.simple.util.branch_filters import gen_filter_dict, RC_PATTERN
 
 
-# TODO: make this generated from a matrix rather than just a static list
+# NOTE: All hardcoded docker image builds have been migrated to GHA
 IMAGE_NAMES = [
-    "pytorch-linux-bionic-rocm4.1-py3.6",
-    "pytorch-linux-bionic-rocm4.2-py3.6",
-    "pytorch-linux-bionic-rocm4.3.1-py3.6",
 ]
 
 # This entry should be an element from the list above
@@ -29,7 +26,7 @@ def get_workflow_jobs(images=IMAGE_NAMES, only_slow_gradcheck=False):
             "name": quote(f"docker-{image_name}"),
             "image_name": quote(image_name),
         })
-        if image_name == "pytorch-linux-xenial-py3.6-gcc5.4":
+        if image_name == "pytorch-linux-xenial-py3.7-gcc5.4":
             # pushing documentation on tags requires CircleCI to also
             # build all the dependencies on tags, including this docker image
             parameters['filters'] = gen_filter_dict(branches_list=r"/.*/",

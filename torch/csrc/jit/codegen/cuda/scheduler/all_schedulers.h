@@ -11,9 +11,8 @@ namespace cuda {
 enum class TORCH_CUDA_CU_API ScheduleHeuristic {
   PointWise,
   Reduction,
-  Normalization
+  Persistent
 };
-
 }
 } // namespace fuser
 } // namespace jit

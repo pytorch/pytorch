@@ -13,7 +13,16 @@ class TEWrapper {
  public:
   TEWrapper() = default;
   void call(const std::vector<void*>& args);
-  bool supports(const at::Tensor& t);
+
+  template <typename ExpectedType>
+  bool checkInput(const at::Tensor& t) {
+#ifdef TORCH_ENABLE_LLVM
+    return t.is_contiguous() && t.dtype().Match<ExpectedType>();
+#else
+    return false;
+#endif
+  }
+
 #ifdef TORCH_ENABLE_LLVM
   void update(std::unique_ptr<tensorexpr::LLVMCodeGen>&& cg_);
 #endif

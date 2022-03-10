@@ -1,8 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/core/ScalarType.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 const int DTYPE_NAME_LEN = 64;
 

@@ -79,19 +79,19 @@ TORCH_LIBRARY(metal, m) {
 
 TORCH_LIBRARY(metal_prepack, m) {
   m.def(
-      "conv2d_prepack(Tensor W, Tensor? B, int[2] stride, "
+      TORCH_SELECTIVE_SCHEMA("metal_prepack::conv2d_prepack(Tensor W, Tensor? B, int[2] stride, "
       "int[2] padding, int[2] dilation, int groups, "
       "Scalar? output_min=None, Scalar? output_max=None) "
-      "-> __torch__.torch.classes.metal.Conv2dOpContext");
+      "-> __torch__.torch.classes.metal.Conv2dOpContext"));
   m.def(
-      "conv2d_run(Tensor X, "
-      "__torch__.torch.classes.metal.Conv2dOpContext W_prepack) -> Tensor Y");
+      TORCH_SELECTIVE_SCHEMA("metal_prepack::conv2d_run(Tensor X, "
+      "__torch__.torch.classes.metal.Conv2dOpContext W_prepack) -> Tensor Y"));
 
   m.def(
-      "linear_prepack(Tensor W, Tensor? B, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.metal.LinearOpContext");
+      TORCH_SELECTIVE_SCHEMA("metal_prepack::linear_prepack(Tensor W, Tensor? B, Scalar? output_min=None, Scalar? output_max=None) -> __torch__.torch.classes.metal.LinearOpContext"));
 
   m.def(
-      "linear_run(Tensor X, __torch__.torch.classes.metal.LinearOpContext W_prepack) -> Tensor Y");
+      TORCH_SELECTIVE_SCHEMA("metal_prepack::linear_run(Tensor X, __torch__.torch.classes.metal.LinearOpContext W_prepack) -> Tensor Y"));
 }
 
 c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
@@ -125,8 +125,8 @@ c10::intrusive_ptr<LinearOpContext> linear_prepack(
 }
 
 TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
-  m.impl("conv2d_prepack", TORCH_FN(conv2d_prepack));
-  m.impl("linear_prepack", TORCH_FN(linear_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("metal_prepack::conv2d_prepack"), TORCH_FN(conv2d_prepack));
+  m.impl(TORCH_SELECTIVE_NAME("metal_prepack::linear_prepack"), TORCH_FN(linear_prepack));
 }
 
 } // namespace metal

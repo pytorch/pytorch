@@ -53,12 +53,12 @@ void Int8QuantizeNNPI(
   std::vector<float> inv_scalev(N, inv_scale_fp16);
   std::vector<float> offsetv(N, -offset_tmp);
   fake_fp16::fma_fp16(N, in_fp16.data(), inv_scalev.data(), offsetv.data());
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     offsetv[i] = round(offsetv[i]);
   }
   fbgemm::RoundToFloat16(
       offsetv.data(), offsetv.data(), N, false /* no clamping */);
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     float halfRes = offsetv[i];
     if (std::isinf(halfRes)) {
       if (halfRes > 0) {

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
@@ -52,23 +53,26 @@ class ReplayRFactor : public ReplayTransformations {
 
     // Manually replay the split, making reduction = false and rfactor = true
     // outer IterDomain
-    IterDomain* ido = new IterDomain(
-        new Int(0),
+    IterDomain* ido = IrBuilder::create<IterDomain>(
+        s->container(),
+        IrBuilder::create<Int>(s->container(), 0),
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
-        mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_outer ? IterType::Reduction : IterType::Iteration,
         true); // broadcast
 
     // inner IterDomain
-    IterDomain* idi = new IterDomain(
-        new Int(0),
+    IterDomain* idi = IrBuilder::create<IterDomain>(
+        s->container(),
+        IrBuilder::create<Int>(s->container(), 0),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
-        mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_inner ? IterType::Reduction : IterType::Iteration,
         true);
 
     // Generate the split node
-    new Split(ido, idi, mapped, s->factor(), s->innerSplit());
+    IrBuilder::create<Split>(
+        s->container(), ido, idi, mapped, s->factor(), s->innerSplit());
 
     // Remove mapped id from leaf IDs
     leaf_ids_.erase(mapped);
@@ -115,14 +119,16 @@ class ReplayRFactor : public ReplayTransformations {
     Val* merged_id_size =
         mul(id_outer_mapped->extent(), id_inner_mapped->extent());
 
-    IterDomain* merged_id = new IterDomain(
-        new Int(0),
+    IterDomain* merged_id = IrBuilder::create<IterDomain>(
+        m->container(),
+        IrBuilder::create<Int>(m->container(), 0),
         merged_id_size->as<Int>(),
-        id_outer_mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_output ? IterType::Reduction : IterType::Iteration,
         true);
 
-    new Merge(merged_id, id_outer_mapped, id_inner_mapped);
+    IrBuilder::create<Merge>(
+        m->container(), merged_id, id_outer_mapped, id_inner_mapped);
 
     // Remove inputs from the leaf IDs
     leaf_ids_.erase(id_outer_mapped);
@@ -208,16 +214,6 @@ TensorDomain* TransformRFactor::runReplay(
   auto rfactor_root_vals = IterVisitor::getInputsTo(
       std::vector<Val*>(rfactor_axes.begin(), rfactor_axes.end()));
 
-  // Make sure they're all IterDomains.
-  TORCH_INTERNAL_ASSERT(
-      std::all_of(
-          rfactor_root_vals.begin(),
-          rfactor_root_vals.end(),
-          [](Val* v) {
-            return v->getValType().value() == ValType::IterDomain;
-          }),
-      "Found invalid input domain axes.");
-
   // Put in a set to make searching easy
   std::unordered_set<IterDomain*> rfactor_root_axes;
   std::transform(
@@ -228,7 +224,13 @@ TensorDomain* TransformRFactor::runReplay(
         TORCH_INTERNAL_ASSERT(
             val->getValType().value() == ValType::IterDomain,
             "Invalid value type found in rfactor axes inputs.");
-        return val->as<IterDomain>();
+        auto rfactor_root_id = val->as<IterDomain>();
+        // Partial domains don't work with RFactor
+        TORCH_INTERNAL_ASSERT(
+            !rfactor_root_id->maybePartial(),
+            "Rfactor partial domains not allowed:",
+            rfactor_root_id);
+        return rfactor_root_id;
       });
 
   auto orig_td_root = orig_td->getRootDomain();
@@ -242,19 +244,23 @@ TensorDomain* TransformRFactor::runReplay(
     for (auto id : orig_td_root) {
       // If this is an rfactor root, it will be a reduction in this stage
       if (rfactor_root_axes.find(id) != rfactor_root_axes.end()) {
-        new_root[i] = new IterDomain(
+        new_root[i] = IrBuilder::create<IterDomain>(
+            id->container(),
             id->start(),
             id->extent(),
-            id->getParallelType(),
+            id->stopOffset(),
+            ParallelType::Serial,
             IterType::Reduction,
             true);
         // If this is not an rfactor root, but a reduction root, it should be
         // turned into an iteration domain
       } else if (id->isReduction()) {
-        new_root[i] = new IterDomain(
+        new_root[i] = IrBuilder::create<IterDomain>(
+            id->container(),
             id->start(),
             id->extent(),
-            id->getParallelType(),
+            id->stopOffset(),
+            ParallelType::Serial,
             IterType::Iteration,
             false);
       } else {
@@ -272,12 +278,18 @@ TensorDomain* TransformRFactor::runReplay(
 
   std::vector<IterDomain*> new_domain(orig_td->nDims(), nullptr);
   {
-    size_t i = 0;
-    for (auto id : orig_td->domain()) {
+    for (auto i : c10::irange(orig_td->nDims())) {
+      auto orig_id = orig_td->axis(i);
+      auto replayed_id_it = replayed.find(orig_id);
       TORCH_INTERNAL_ASSERT(
-          replayed.find(id) != replayed.end(),
+          replayed_id_it != replayed.end(),
           "Error during rfactor replay, missing an axis.");
-      new_domain[i++] = replayed[id];
+      auto replayed_id = replayed_id_it->second;
+      replayed_id->parallelize(orig_id->getParallelType());
+      if (orig_id->hasPaddingToMultipleOfWarp()) {
+        replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
+      }
+      new_domain[i++] = replayed_id;
     }
   }
 
@@ -292,11 +304,12 @@ TensorDomain* TransformRFactor::runReplay(
     if (dom->isRFactorProduct())
       rfactor_root.push_back(dom);
 
-  return new TensorDomain(
+  return IrBuilder::create<TensorDomain>(
+      orig_td->container(),
       new_root,
       rfactor_root,
       new_domain,
-      std::vector<bool>(new_root.size(), true));
+      std::vector<bool>(rfactor_root.size(), true));
 }
 
 // We want to take any axes marked in axes and remove them from the TensorDomain
@@ -377,12 +390,18 @@ TensorDomain* TransformRFactor::runReplay2(
 
   {
     // Construct the new domain, and append rfactor axes to the new root domain
-    size_t i = 0;
-    for (auto id : orig_td->domain()) {
-      if (replayed.find(id) != replayed.end()) {
-        new_domain.push_back(replayed[id]);
+    for (auto i : c10::irange(orig_td->nDims())) {
+      auto orig_id = orig_td->axis(i);
+      auto replayed_id_it = replayed.find(orig_id);
+      if (replayed_id_it != replayed.end()) {
+        auto replayed_id = replayed_id_it->second;
+        new_domain.push_back(replayed_id);
+        replayed_id->parallelize(orig_id->getParallelType());
+        if (orig_id->hasPaddingToMultipleOfWarp()) {
+          replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
+        }
       } else if (axes_set.find(i) == axes_set.end()) {
-        IterDomain* new_id = id->clone();
+        IterDomain* new_id = orig_id->clone();
         new_domain.push_back(new_id);
         new_root.push_back(new_id);
       }
@@ -390,8 +409,11 @@ TensorDomain* TransformRFactor::runReplay2(
     }
   }
 
-  return new TensorDomain(
-      new_root, new_domain, std::vector<bool>(new_root.size(), true));
+  return IrBuilder::create<TensorDomain>(
+      orig_td->container(),
+      new_root,
+      new_domain,
+      std::vector<bool>(new_root.size(), true));
 }
 
 } // namespace cuda
