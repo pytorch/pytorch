@@ -77,7 +77,6 @@ from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  
 from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
-from jit.test_dataclasses import TestDataclasses  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -205,11 +204,6 @@ def doAutodiffCheck(testname):
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
-# even though FULL_PROFILER should be our default
-# we haven't tested every single test in this file
-# but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode_for_profiling_tests"
-torch._C._jit_set_profiling_mode(False)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden
@@ -6667,6 +6661,13 @@ a")
         script_model_2 = torch.jit.script(model2)
         self.assertEqual(model1.forward(), script_model_1.forward())
         self.assertEqual(model2.forward(), script_model_2.forward())
+
+    def test_ternary_right_associative(self):
+        def plus_123(x: int):
+            return x + 1 if x == 1 else x + 2 if x == 2 else x + 3
+        self.checkScript(plus_123, (1,))
+        self.checkScript(plus_123, (2,))
+        self.checkScript(plus_123, (3,))
 
     def test_print(self):
         def func(x, y):

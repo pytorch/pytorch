@@ -99,7 +99,7 @@ struct TORCH_API GraphFunction : public Function {
   using Function::call;
   bool call(
       Stack& stack,
-      size_t bailOut,
+      c10::optional<size_t> bailOut,
       c10::function_ref<void(const Code&)> f) override {
     f(get_executor().getPlanFor(stack, bailOut).code);
     return true;

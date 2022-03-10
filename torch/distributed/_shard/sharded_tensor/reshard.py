@@ -15,7 +15,7 @@ from torch.distributed.nn.functional import (
     all_to_all,
     all_to_all_single,
 )
-from ..metadata import ShardMetadata
+from torch.distributed._shard.metadata import ShardMetadata
 
 from .shard import Shard
 
