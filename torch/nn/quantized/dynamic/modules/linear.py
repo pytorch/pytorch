@@ -119,7 +119,7 @@ class Linear(nnq.Linear):
             ref_qlinear (Module): a reference quantized  module, either produced by
             torch.ao.quantization functions or provided by the user
         """
-        qlinear = cls(ref_qlinear.in_features, ref_qlinear.out_features)
+        qlinear = cls(ref_qlinear.in_features, ref_qlinear.out_features, dtype=ref_qlinear.weight_dtype)
         qweight = ref_qlinear.get_quantized_weight()
         bias = ref_qlinear.bias
         qlinear.set_weight_bias(qweight, bias)

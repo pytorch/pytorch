@@ -4,6 +4,7 @@ from torch import Tensor  # noqa: F401
 from torch._jit_internal import Optional, List  # noqa: F401
 from torch.nn.quantized.modules.utils import hide_packed_params_repr
 from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import WeightedQuantizedModule
 
 class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
@@ -19,7 +20,7 @@ class EmbeddingPackedParams(torch.nn.Module):
                                                            axis=0, dtype=self.dtype)
             self.set_weight(wq)
         else:
-            raise NotImplementedError('Unsupported dtype on quantized embedding! Supports quint8 and quint4x2.')
+            raise NotImplementedError(f'Unsupported dtype on quantized embedding! Supports quint8 and quint4x2. Got dtype: {dtype}')
 
     @torch.jit.export
     def set_weight(self, weight: torch.Tensor) -> None:
@@ -174,6 +175,20 @@ class Embedding(torch.nn.Module):
         qembedding.set_weight(qweight)
         return qembedding
 
+    @classmethod
+    def from_reference(cls, ref_embedding):
+        qembedding = cls(
+            ref_embedding.num_embeddings,
+            ref_embedding.embedding_dim,
+            ref_embedding.padding_idx,
+            ref_embedding.max_norm,
+            ref_embedding.norm_type,
+            ref_embedding.scale_grad_by_freq,
+            ref_embedding.sparse,
+            ref_embedding.get_quantized_weight(),
+            ref_embedding.weight_dtype,
+        )
+        return qembedding
 
 class EmbeddingBag(Embedding):
     r"""
@@ -259,4 +274,20 @@ class EmbeddingBag(Embedding):
         # Create quantized EmbeddingBag module and pass in the quantized weight
         qembedding_bag = EmbeddingBag(mod.num_embeddings, mod.embedding_dim, dtype=dtype)
         qembedding_bag.set_weight(qweight)
+        return qembedding_bag
+
+    @classmethod
+    def from_reference(cls, ref_embedding_bag):
+        qembedding_bag = cls(
+            ref_embedding_bag.num_embeddings,
+            ref_embedding_bag.embedding_dim,
+            ref_embedding_bag.max_norm,
+            ref_embedding_bag.norm_type,
+            ref_embedding_bag.scale_grad_by_freq,
+            ref_embedding_bag.mode,
+            ref_embedding_bag.sparse,
+            ref_embedding_bag.get_quantized_weight(),
+            ref_embedding_bag.include_last_offset,
+            ref_embedding_bag.weight_dtype,
+        )
         return qembedding_bag

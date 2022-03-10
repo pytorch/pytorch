@@ -162,6 +162,18 @@ def is_output_dtype_supported_by_backend(
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"]
 
+def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
+    """ Check if observer in same graph
+    when the node output is not fp32 and input is 'placeholder'
+    the input is assumed to be quantized, so it is observed
+    in a different place rather than not observed.
+    """
+    node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
+    if isinstance(node.args[0], Node):
+        if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
+            return False
+    return True
+
 def is_pattern_dtype_config_supported_by_backend(
     pattern: Optional[Pattern],
     matched_nodes: Optional[List[Node]],
@@ -482,7 +494,11 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # if qconfig is reuse_input qconfig, we won't insert extra observer for input
             not is_reuse_input_qconfig_ or
             # need to add input observer for dynamic quantization
-            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8])
+            # only add observer for first input for now, we may need to extend
+            # qconfig_dict and backend_config_dict to support more general configurations
+            # of dynamic quantization, e.g. dynamically quantizing second input, third
+            # input etc.
+            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8, torch.float16]) and arg is node.args[0]
         )
 
     else:
@@ -1138,18 +1154,23 @@ def insert_observers_for_model(
                             if user != node and is_user_quantized:
                                 is_quantized_branch = True
 
-                    # this modifies node inplace
-                    maybe_insert_input_observers_for_node(
-                        node, qconfig, model, modules, graph,
-                        node_name_to_target_dtype,
-                        qhandler,
-                        prepare_custom_config_dict,
-                        backend_config_dict)
+                    # TODO: this only works for sequential fusion right now, extend it
+                    # it to automatically detect all input nodes based on the pattern
+                    # need to change find_matches function to return this information
+                    is_input_node_of_the_pattern = matched_nodes[-1] is node
+                    if is_input_node_of_the_pattern:
+                        # this modifies node inplace
+                        maybe_insert_input_observers_for_node(
+                            node, qconfig, model, modules, graph,
+                            node_name_to_target_dtype,
+                            qhandler,
+                            prepare_custom_config_dict,
+                            backend_config_dict)
 
-                    # Insert equalization input observers if needed
-                    maybe_insert_input_equalization_observers_for_node(
-                        node, equalization_qconfig, model, modules, graph,
-                        node_name_to_target_dtype, is_quantized_branch)
+                        # Insert equalization input observers if needed
+                        maybe_insert_input_equalization_observers_for_node(
+                            node, equalization_qconfig, model, modules, graph,
+                            node_name_to_target_dtype, is_quantized_branch)
 
                     is_last_node_of_pattern = root_node is node
                     is_general_tensor_value_op = \
@@ -1187,10 +1208,13 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
+                            is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
+
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if is_general_tensor_value_op or is_general_tensor_shape_op or is_reuse_input_qconfig_:
+                            if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
+                                    is_general_tensor_shape_op or is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 

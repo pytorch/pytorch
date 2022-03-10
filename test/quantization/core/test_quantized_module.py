@@ -1545,58 +1545,58 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
         hidden_size = 7
         num_layers = 2
         bias = True
-        weight_keys = []
-        bias_keys = []
-        for bidirectional in [True, False]:
-            num_directions = 2 if bidirectional else 1
-            for layer in range(num_layers):
-                for direction in range(num_directions):
-                    suffix = '_reverse' if direction == 1 else ''
-                    key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    weight_keys.append(key_name1)
-                    weight_keys.append(key_name2)
-                    key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
-                    bias_keys.append(key_name1)
-                    bias_keys.append(key_name2)
+        # weight_keys = []
+        # bias_keys = []
+        # for bidirectional in [True, False]:
+        #     num_directions = 2 if bidirectional else 1
+        #     for layer in range(num_layers):
+        #         for direction in range(num_directions):
+        #             suffix = '_reverse' if direction == 1 else ''
+        #             key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+        #             key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+        #             weight_keys.append(key_name1)
+        #             weight_keys.append(key_name2)
+        #             key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+        #             key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+        #             bias_keys.append(key_name1)
+        #             bias_keys.append(key_name2)
 
-            x = torch.randn(seq_len, batch, input_size)
-            h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
-            c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
-            fp32_rnn = torch.nn.LSTM(
-                input_size=input_size,
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                bias=bias,
-                batch_first=False,
-                dropout=0.0,
-                bidirectional=bidirectional)
-            # initialize ref rnn module
-            weight_qparams = {
-                'qscheme': torch.per_tensor_affine,
-                'dtype': torch.quint8,
-                'scale': 2.0,
-                'zero_point': 5
-            }
-            weight_qparams_dict = {key: weight_qparams for key in fp32_rnn._flat_weights_names}
-            ref_rnn = nnqr.LSTM(
-                input_size=input_size,
-                hidden_size=hidden_size,
-                num_layers=num_layers,
-                bias=bias,
-                batch_first=False,
-                dropout=0.0,
-                bidirectional=bidirectional,
-                weight_qparams_dict=weight_qparams_dict)
-            ref_rnn._flat_weights = fp32_rnn._flat_weights
+        x = torch.randn(seq_len, batch, input_size)
+        h = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+        c = torch.randn(num_layers * (bidirectional + 1), batch, hidden_size)
+        fp32_rnn = torch.nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bias=bias,
+            batch_first=False,
+            dropout=0.0,
+            bidirectional=bidirectional)
+        # initialize ref rnn module
+        weight_qparams = {
+            'qscheme': torch.per_tensor_affine,
+            'dtype': torch.quint8,
+            'scale': 2.0,
+            'zero_point': 5
+        }
+        weight_qparams_dict = {key: weight_qparams for key in fp32_rnn._flat_weights_names}
+        ref_rnn = nnqr.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bias=bias,
+            batch_first=False,
+            dropout=0.0,
+            bidirectional=bidirectional,
+            weight_qparams_dict=weight_qparams_dict)
+        ref_rnn._flat_weights = fp32_rnn._flat_weights
 
-            # quantize and dequantize the weights for fp32_rnn module
-            fp32_rnn._flat_weights = [self._quant_dequant_weight(w, weight_qparams) for w in fp32_rnn._flat_weights]
+        # quantize and dequantize the weights for fp32_rnn module
+        fp32_rnn._flat_weights = [self._quant_dequant_weight(w, weight_qparams) for w in fp32_rnn._flat_weights]
 
-            fp32_res = fp32_rnn(x, (h, c))
-            ref_res = ref_rnn(x, (h, c))
-            self.assertEqual(fp32_res, ref_res)
+        fp32_res = fp32_rnn(x, (h, c))
+        ref_res = ref_rnn(x, (h, c))
+        self.assertEqual(fp32_res, ref_res)
 
     def test_sparse(self):
         """ Embedding and EmbeddingBag

@@ -12,10 +12,11 @@ from ..utils import (
     activation_is_int8_quantized,
     activation_is_statically_quantized,
     activation_is_dynamically_quantized,
-    weight_is_statically_quantized,
+    weight_is_quantized,
     get_qparam_dict,
     _parent_name,
     get_swapped_custom_module_class,
+    get_quant_type,
 )
 from ..qconfig import (
     QConfigAny,
@@ -41,7 +42,11 @@ from .utils import (
     get_custom_module_class_keys,
     get_quantize_node_info,
     create_getattr_from_value,
+    collect_producer_nodes,
+    graph_module_from_producer_nodes,
+    WEIGHT_INDEX_DICT,
 )
+from ..quant_type import QuantType
 
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
@@ -53,6 +58,7 @@ from .convert import restore_state
 # these are tuples so that they can work with isinstance(module, tuple_of_classes)
 FUSED_MODULE_CLASSES = (
     torch.nn.intrinsic.LinearReLU,
+    torch.nn.intrinsic.LinearBn1d,
     torch.nn.intrinsic.ConvReLU1d,
     torch.nn.intrinsic.ConvReLU2d,
     torch.nn.intrinsic.ConvReLU3d,
@@ -63,6 +69,7 @@ QAT_MODULE_CLASSES = (
     torch.nn.qat.Conv2d,
     torch.nn.qat.Conv3d,
     torch.nn.intrinsic.qat.LinearReLU,
+    torch.nn.intrinsic.qat.LinearBn1d,
     torch.nn.intrinsic.qat.ConvBn2d,
     torch.nn.intrinsic.qat.ConvBnReLU2d,
     torch.nn.intrinsic.qat.ConvReLU2d,
@@ -70,6 +77,40 @@ QAT_MODULE_CLASSES = (
     torch.nn.intrinsic.qat.ConvBnReLU3d,
     torch.nn.intrinsic.qat.ConvReLU3d
 )
+
+WEIGHT_ONLY_MODULE_CLASSES = (
+    torch.nn.Embedding,
+    torch.nn.EmbeddingBag,
+)
+
+DYNAMIC_MODULE_CLASSES = (
+    torch.nn.GRUCell,
+    torch.nn.LSTMCell,
+    torch.nn.RNNCell,
+    torch.nn.LSTM,
+)
+
+def run_weight_observers(observed: GraphModule) -> None:
+    r''' Extract the subgraph that produces the weight for dynamic quant
+    or weight only quant node and run the subgraph to observe the weight.
+    Note that the observers of dynamic quant or weight only quant ops are
+    run during the convert step.
+    '''
+    for node in observed.graph.nodes:
+        if node.op != 'call_function' or node.target not in WEIGHT_INDEX_DICT:
+            continue
+        for i, node_arg in enumerate(node.args):
+            if i not in WEIGHT_INDEX_DICT[node.target]:
+                continue
+            # node_arg is weight
+            weight_observer_nodes = collect_producer_nodes(node_arg)
+            if weight_observer_nodes is None:
+                continue
+            weight_observer_module = \
+                graph_module_from_producer_nodes(
+                    observed, weight_observer_nodes)
+            # run the weight observer
+            weight_observer_module()
 
 def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     """
@@ -133,20 +174,32 @@ def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGrap
 
 def get_module_path_and_prefix(
         obs_node: Node,
-        node_name_to_scope: Dict[str, Tuple[str, type]]):
-    # we'll find the first user of the observer_node
-    # to get the path. If a linear call_function is in the user list, we return the first instance
-    # of linear node to get the FQN.
-    users = list(obs_node.users)
-    first_linear_use_or_first_use = users[0] if users else None
-    linear_node = None
-    for n in users:
-        if n.op == "call_function" and n.target == torch.nn.functional.linear:
-            linear_node = n
-            break
-    if linear_node:
-        first_linear_use_or_first_use = linear_node
-    prefix = "_input"
+        node_name_to_scope: Dict[str, Tuple[str, type]],
+        qconfig_map: Dict[str, QConfigAny]):
+    # an observer can be inserted for both input of the next operator or output of the previous
+    # operator (they can be the same)
+    # this flag identifies if the observer is inserted only because the observed node is
+    # the input of the next operator
+    observed_node = obs_node.args[0]
+    is_input_observer_only = qconfig_map[observed_node.name] is None if observed_node.name in qconfig_map else None
+    if is_input_observer_only:
+        # if the quantize function is at the input of op, then we find the first user of the observer_node
+        # to get the path. If a linear call_function is in the user list, we return the first instance
+        # of linear node to get the FQN.
+        users = list(obs_node.users)
+        first_linear_use_or_first_use = users[0] if users else None
+        linear_node = None
+        for n in users:
+            if n.op == "call_function" and n.target == torch.nn.functional.linear:
+                linear_node = n
+                break
+        if linear_node:
+            first_linear_use_or_first_use = linear_node
+        prefix = "_input"
+    else:
+        # if the quantize function is at the output of the op, we use the observer input node to get the path
+        first_linear_use_or_first_use = obs_node.args[0]
+        prefix = ""
 
     if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
         module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
@@ -280,15 +333,26 @@ def convert_weighted_module(
     if qconfig is None or \
        not is_observed:
         return
-    is_activation_statically_quantized = activation_is_statically_quantized(qconfig)
-    is_activation_dynamically_quantized = activation_is_dynamically_quantized(qconfig)
-    is_weight_quantized = weight_is_statically_quantized(qconfig)
-    # the condition for swapping the module to reference quantized module is:
-    # activation needs to be statically or dynamically quantized, weights
-    # need to be quantized
+
     # TODO: rename weight_is_statically_quantized to weight_is_int8_quantized
-    if not ((is_activation_statically_quantized or \
-             is_activation_dynamically_quantized) and is_weight_quantized):
+    is_weight_quantized = weight_is_quantized(qconfig)
+    quant_type = get_quant_type(qconfig)
+
+    # skip reference module swapping for embedding when quantization mode does not
+    # match
+    # TODO: we need a more systematic way to handle this after we migrate to use
+    # backend_config_dict everywhere
+    if isinstance(original_module, WEIGHT_ONLY_MODULE_CLASSES) and \
+       quant_type != QuantType.WEIGHT_ONLY:
+        return
+
+    if isinstance(original_module, DYNAMIC_MODULE_CLASSES) and \
+       quant_type != QuantType.DYNAMIC:
+        return
+
+    # the condition for swapping the module to reference quantized module is:
+    # weights need to be quantized
+    if not is_weight_quantized:
         return
 
     float_module = original_module
@@ -319,13 +383,43 @@ def convert_weighted_module(
             float_module = fused_module[0]  # type: ignore[index]
         assert qconfig is not None
         weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
+
+    # TODO: expose this through backend_config_dict
+    # weight_qparams or weight_qparams dict
+    wq_or_wq_dict = {}
+    if isinstance(float_module, torch.nn.RNNCellBase):
+        weight_post_process_ih = qconfig.weight()
+        weight_post_process_hh = qconfig.weight()
+        weight_post_process_ih(float_module.weight_ih)
+        weight_post_process_hh(float_module.weight_hh)
+        weight_qparams_ih = get_qparam_dict(weight_post_process_ih)
+        weight_qparams_hh = get_qparam_dict(weight_post_process_hh)
+        wq_or_wq_dict = {
+            "weight_ih": weight_qparams_ih,
+            "weight_hh": weight_qparams_hh,
+        }
+    elif isinstance(float_module, torch.nn.LSTM):
+        # format for wq_or_wq_dict (flattened attributes):
+        # {"weight_ih_l0_scale": ..., "weight_ih_l0_qscheme": ..., ...}
+        for wn in float_module._flat_weights_names:
+            if hasattr(float_module, wn) and wn.startswith("weight"):
+                weight = getattr(float_module, wn)
+                weight_post_process = qconfig.weight()
+                if weight_post_process.dtype == torch.qint8:
+                    weight_post_process(weight)
+                wq_or_wq_dict[wn] = get_qparam_dict(weight_post_process)
+    else:
         # run weight observer
+        # TODO: This is currently a hack for QAT to get the right shapes for scale and zero point.
+        # In the future, we should require the user to calibrate the model after calling prepare
+        # Issue: https://github.com/pytorch/pytorch/issues/73941
         weight_post_process(float_module.weight)  # type: ignore[operator]
-    weight_qparams = get_qparam_dict(weight_post_process)
-    # TODO: may need to change the mapping when we support dynamic quantization
+        wq_or_wq_dict = get_qparam_dict(weight_post_process)
+
+    # We use the same reference module for all modes of quantization: static, dynamic, weight_only
     ref_qmodule_cls = quantized_reference_module_mapping.get(type(float_module), None)
     assert ref_qmodule_cls is not None, f"No reference quantized module class configured for {type(float_module)}"
-    ref_qmodule = ref_qmodule_cls.from_float(float_module, weight_qparams)  # type: ignore[attr-defined]
+    ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
         fused_module[0] = ref_qmodule
     else:
@@ -446,6 +540,10 @@ def _convert_do_not_use(
         weight_eq_obs_dict = update_obs_for_equalization(model, modules)
         convert_eq_obs(model, modules, weight_eq_obs_dict)
 
+    # always run weight observers in the top level forward method
+    # for dynamic quant ops or weight only quant ops
+    run_weight_observers(model)
+
     graph_inputs: List[str] = []
     for node in model.graph.nodes:
         if node.op == 'placeholder':
@@ -457,7 +555,8 @@ def _convert_do_not_use(
             graph: Graph,
             node: Node,
             modules: Dict[str, torch.nn.Module],
-            node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
+            node_name_to_scope: Dict[str, Tuple[str, type]],
+            qconfig_map: Dict[str, QConfigAny]) -> None:
         """ Replace activation_post_process module call node with quantize and
         dequantize node
 
@@ -468,7 +567,7 @@ def _convert_do_not_use(
         """
         assert modules is not None
         assert isinstance(node.target, str)
-        module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope)
+        module_path, prefix = get_module_path_and_prefix(node, node_name_to_scope, qconfig_map)
         observer_module = modules[node.target]
         maybe_quantize_node_info = get_quantize_node_info(observer_module)
         if maybe_quantize_node_info is None:
@@ -556,7 +655,7 @@ def _convert_do_not_use(
                 if observed_node in statically_quantized_custom_module_nodes:
                     replace_observer_with_dequantize_node(node, model.graph)
                 else:
-                    replace_observer_with_quantize_dequantize_node(model, model.graph, node, modules, node_name_to_scope)
+                    replace_observer_with_quantize_dequantize_node(model, model.graph, node, modules, node_name_to_scope, qconfig_map)
             elif is_observed_standalone_module(modules[node.target]):
                 convert_standalone_module(node, modules, model, is_reference, backend_config_dict)
             elif type(modules[node.target]) in set(
@@ -565,9 +664,6 @@ def _convert_do_not_use(
             elif type(modules[node.target]) in custom_module_classes:
                 convert_custom_module(node, model.graph, modules, custom_module_class_mapping, statically_quantized_custom_module_nodes)
 
-    # removes qconfig and activation_post_process modules
-    if _remove_qconfig_flag:
-        _remove_qconfig(model)
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
     model = QuantizedGraphModule(model, model.graph, preserved_attributes)
     # TODO: maybe move this to quantize_fx.py
@@ -576,4 +672,7 @@ def _convert_do_not_use(
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
+    # removes qconfig and activation_post_process modules
+    if _remove_qconfig_flag:
+       _remove_qconfig(model)
     return model

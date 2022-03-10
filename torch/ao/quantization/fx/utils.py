@@ -138,7 +138,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
-    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8]:
+    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
         # TODO: get reduce range from observer
