@@ -1,9 +1,11 @@
 #pragma once
 
-#include <vector>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
+#include <c10/util/Synchronized.h>
 #include <c10/util/irange.h>
+
+#include <vector>
 
 namespace c10d {
 const int kUnsetSeqNum = 0;
@@ -39,8 +41,13 @@ inline uint64_t fromVec(const std::vector<T>& values) {
 
 class TORCH_API SequenceNum {
  public:
+  // Creates a SequenceNum where num_ is not set.
   SequenceNum();
+  // Creates a SequenceNum with num_ set to the provided value.
   explicit SequenceNum(const uint64_t num);
+  // Creates a copy of other.
+  SequenceNum(const SequenceNum& other);
+
   // Retrieve num_. Will throw if not set.
   uint64_t get() const;
   // Increment num_. Will throw if not set.
@@ -55,11 +62,9 @@ class TORCH_API SequenceNum {
 
   SequenceNum& operator=(const SequenceNum& other);
 
-  SequenceNum(const SequenceNum& other);
-
  private:
-  c10::optional<uint64_t> num_;
-  mutable std::mutex lock_;
+  // The underlying sequence number, if set.
+  c10::Synchronized<c10::optional<uint64_t>> num_;
 };
 
 } // namespace c10d
