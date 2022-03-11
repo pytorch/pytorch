@@ -362,8 +362,7 @@ def fold_weight(
         else:
             # copy other nodes
             env[node.name] = folded_graph.node_copy(node, load_arg)
-    quantized = QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
-    return quantized
+    return QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
 
 def _lower_static_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """
@@ -429,7 +428,6 @@ def _lower_static_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedG
             model.graph.erase_node(q_node)
             model.graph.erase_node(scale_node)
             model.graph.erase_node(zero_point_node)
-    return model
 
 def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """
@@ -489,8 +487,6 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> Quantized
         input_dynamic_q_node.replace_all_uses_with(input_dynamic_q_node.args[0])
         model.graph.erase_node(input_dynamic_q_node)
 
-    return model
-
 def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     """
     Traverse the graph and find ref_module patterns
@@ -515,8 +511,6 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> Quant
         # replace reference moduel with dynamically quantized module
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
-
-    return model
 
 def _lower_static_weighted_ref_functional(
     model: QuantizedGraphModule,
@@ -595,7 +589,6 @@ def _lower_static_weighted_ref_functional(
         model.graph.erase_node(q_node)
         if relu_node is not None:
             model.graph.erase_node(relu_node)
-    return model
 
 def _lower_dynamic_weighted_ref_functional(
     model: QuantizedGraphModule,
@@ -709,7 +702,6 @@ def _lower_dynamic_weighted_ref_functional(
         model.graph.erase_node(input_dynamic_q_node)
         if relu_node is not None:
             model.graph.erase_node(relu_node)
-    return model
 
 def _lower_quantized_binary_op(
     model: QuantizedGraphModule,
@@ -835,8 +827,6 @@ def _lower_quantized_binary_op(
             # remove binary op node
             model.graph.erase_node(bop_node)
 
-    return model
-
 def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
@@ -944,9 +934,7 @@ def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphMo
 
     return model
 
-def _lower_getattr_tensor_metadta_op(
-        model: QuantizedGraphModule
-) -> None:
+def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
     """ Modified the graph of the model inplace, to skip extra dequantize op before
     the general tensor shape ops when possible
     """
@@ -969,16 +957,11 @@ def _lower_to_native_backend(
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
     """
-    # TODO: these transformations are just inplace modification of graphs, we don't
-    # need to return a model
-    model = _lower_static_weighted_ref_module(model)
-    model = _lower_dynamic_weighted_ref_module(model)
-    model = _lower_weight_only_weighted_ref_module(model)
-    model = _lower_static_weighted_ref_functional(model, qconfig_map)
-    model = _lower_dynamic_weighted_ref_functional(model, qconfig_map)
-    # TODO: remove this
-    for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
+    _lower_static_weighted_ref_module(model)
+    _lower_dynamic_weighted_ref_module(model)
+    _lower_weight_only_weighted_ref_module(model)
+    _lower_static_weighted_ref_functional(model, qconfig_map)
+    _lower_dynamic_weighted_ref_functional(model, qconfig_map)
     _lower_quantized_binary_op(model, qconfig_map)
     _lower_getattr_tensor_metadta_op(model)
     special_pattern_replacement(model)
