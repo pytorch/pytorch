@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
      toleranceOverride, tol, has_cusolver)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
+from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -208,7 +208,7 @@ class ErrorInput(object):
 
     __slots__ = ['sample_input', 'error_type', 'error_regex']
 
-    def __init__(self, sample_input, *, error_type, error_regex):
+    def __init__(self, sample_input, *, error_type=RuntimeError, error_regex):
         self.sample_input = sample_input
         self.error_type = error_type
         self.error_regex = error_regex
@@ -1474,8 +1474,8 @@ def error_inputs_hsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
-            ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
+    return (ErrorInput(si1, error_regex=err_msg1),
+            ErrorInput(si2, error_regex=err_msg2),)
 
 def error_inputs_vsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.vsplit requires a tensor with at least 2 dimension, "
@@ -1491,8 +1491,8 @@ def error_inputs_vsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
-            ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
+    return (ErrorInput(si1, error_regex=err_msg1),
+            ErrorInput(si2, error_regex=err_msg2),)
 
 def error_inputs_dsplit(op_info, device, **kwargs):
     err_msg1 = ("torch.dsplit requires a tensor with at least 3 dimension, "
@@ -1508,8 +1508,8 @@ def error_inputs_dsplit(op_info, device, **kwargs):
                                   dtype=torch.float32,
                                   device=device),
                       args=(0,),)
-    return (ErrorInput(si1, error_type=RuntimeError, error_regex=err_msg1),
-            ErrorInput(si2, error_type=RuntimeError, error_regex=err_msg2),)
+    return (ErrorInput(si1, error_regex=err_msg1),
+            ErrorInput(si2, error_regex=err_msg2),)
 
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwargs):
     # Each test case consists of the sizes in the chain of multiplications
@@ -3060,12 +3060,12 @@ def error_inputs_gather(op_info, device, **kwargs):
 
     # Index should be smaller than self except on dimesion 1
     bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(bad_src, args=(1, idx,)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(bad_src, args=(1, idx,)),
                      error_regex="Size does not match at dimension 0")
 
     # Index must have long dtype
     bad_idx = idx.to(torch.int32)
-    yield ErrorInput(SampleInput(src, args=(1, bad_idx)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(src, args=(1, bad_idx)),
                      error_regex="Expected dtype int64 for index")
 
     # TODO: FIXME
@@ -3074,20 +3074,20 @@ def error_inputs_gather(op_info, device, **kwargs):
     src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
     out = torch.empty((2, 2), device=device, dtype=torch.float64)
-    yield ErrorInput(SampleInput(src, args=(1, idx), kwargs={'out': out}), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(src, args=(1, idx), kwargs={'out': out}),
                      error_regex="Expected out tensor to have dtype")
 
     # src and index tensors must have the same # of dimensions
     # idx too few dimensions
     src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
     idx = torch.tensor((0, 0), device=device, dtype=torch.long)
-    yield ErrorInput(SampleInput(src, args=(1, idx)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(src, args=(1, idx)),
                      error_regex="Index tensor must have the same number of dimensions")
 
     # src too few dimensions
     src = torch.tensor((1, 2), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
-    yield ErrorInput(SampleInput(src, args=(0, idx)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(src, args=(0, idx)),
                      error_regex="Index tensor must have the same number of dimensions")
 
     # index out of bounds
@@ -3095,7 +3095,7 @@ def error_inputs_gather(op_info, device, **kwargs):
     if torch.device(device).type == 'cpu':
         src = torch.tensor(((1, 2), (3, 4)), device=device, dtype=torch.float32)
         idx = torch.tensor(((0, 23), (1, 0)), device=device, dtype=torch.long)
-        yield ErrorInput(SampleInput(src, args=(1, idx,)), error_type=RuntimeError,
+        yield ErrorInput(SampleInput(src, args=(1, idx,)),
                          error_regex="index 23 is out of bounds for dimension")
 
     x = torch.rand((1,), device=device).expand((3,))
@@ -3137,28 +3137,28 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
     dst = torch.zeros((3, 5), device=device, dtype=torch.double)
-    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                      error_regex="Expected self.dtype to be equal to src.dtype")
 
     # Index dtype must be long
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.int32)
     dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                      error_regex="Expected dtype int64 for index")
 
     # Index and destination must have the same number of dimensions
     src = make_tensor((2, 5), device=device, dtype=torch.float32)
     idx = torch.tensor(((0, 1), (1, 2)), device=device, dtype=torch.long)
     dst = torch.zeros((3, 5, 3), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                      error_regex="Index tensor must have the same number of dimensions as self tensor")
 
     # Index and src must have the same number of dimensions when src is not a scalar
     src = make_tensor((2, 5, 2), device=device, dtype=torch.float32)
     idx = torch.tensor(((34, 1), (1, 2)), device=device, dtype=torch.long)
     dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
-    yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+    yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                      error_regex="Index tensor must have the same number of dimensions as src tensor")
 
     # Index out of bounds
@@ -3167,7 +3167,7 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
         src = make_tensor((2, 5), device=device, dtype=torch.float32)
         idx = torch.tensor(((34, 1), (1, 2)), device=device, dtype=torch.long)
         dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
-        yield ErrorInput(SampleInput(dst, args=(0, idx, src)), error_type=RuntimeError,
+        yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                          error_regex="index 34 is out of bounds for dimension 0 with size 3")
 
 def error_inputs_renorm(op_info, device, **kwargs):
@@ -5723,6 +5723,39 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
+def error_inputs_cov(op_info, device, **kwargs):
+    a = torch.rand(S, device=device)
+    error_inputs = []
+    error_inputs.append(ErrorInput(
+        SampleInput(torch.rand(S, S, S, device=device)),
+        error_regex="expected input to have two or fewer dimensions"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.rand(S, S, device=device)}),
+        error_regex="expected fweights to have one or fewer dimensions"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.rand(S, S, device=device)}),
+        error_regex="expected aweights to have one or fewer dimensions"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.rand(S, device=device)}),
+        error_regex="expected fweights to have integral dtype"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.tensor([1, 1], device=device)}),
+        error_regex="expected aweights to have floating point dtype"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.tensor([1], device=device)}),
+        error_regex="expected fweights to have the same numel"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.rand(1, device=device)}),
+        error_regex="expected aweights to have the same numel"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'fweights': torch.tensor([-1, -2, -3, -4 , -5], device=device)}),
+        error_regex="fweights cannot be negative"))
+    error_inputs.append(ErrorInput(
+        SampleInput(a, kwargs={'aweights': torch.tensor([-1., -2., -3., -4., -5.], device=device)}),
+        error_regex="aweights cannot be negative"))
+    return error_inputs
+
+
 def sample_inputs_svd(op_info, device, dtype, requires_grad=False, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6158,7 +6191,7 @@ def error_inputs_neg(op_info, device, **kwargs):
     msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
            " If you are trying to invert a mask, use the `\\~` or"
            " `logical_not\\(\\)` operator instead.")
-    return (ErrorInput(si, error_type=RuntimeError, error_regex=msg),)
+    return (ErrorInput(si, error_regex=msg),)
 
 def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7295,7 +7328,7 @@ def error_inputs_where(op_info, device, **kwargs):
             si = SampleInput(make_tensor(shape, device=devices[0], dtype=torch.float32),
                              args=(make_tensor(shape, dtype=torch.bool, device=devices[1]),
                              make_tensor(shape, device=devices[2], dtype=torch.float32)))
-            yield ErrorInput(si, error_type=RuntimeError, error_regex=err_msg)
+            yield ErrorInput(si, error_regex=err_msg)
 
 def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7355,13 +7388,13 @@ def error_inputs_kthvalue(op_info, device, **kwargs):
     si = SampleInput(t, args=(5,), kwargs={'out': (t, indices)})
 
     k_out_of_range_err = "selected number k out of range for dimension"
-    return (ErrorInput(si, error_type=RuntimeError, error_regex="unsupported operation"),
+    return (ErrorInput(si, error_regex="unsupported operation"),
             ErrorInput(SampleInput(torch.randn(2, 2, device=device), args=(3, 0)),
-                       error_type=RuntimeError, error_regex=k_out_of_range_err),
+                       error_regex=k_out_of_range_err),
             ErrorInput(SampleInput(torch.randn(2, 2, device=device), args=(3,)),
-                       error_type=RuntimeError, error_regex=k_out_of_range_err),
+                       error_regex=k_out_of_range_err),
             ErrorInput(SampleInput(torch.tensor(2, device=device), args=(3,)),
-                       error_type=RuntimeError, error_regex=k_out_of_range_err),)
+                       error_regex=k_out_of_range_err),)
 
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
                           train=None, valid_input_dim=None, **kwargs):
@@ -9114,7 +9147,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_symeig,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off]),
     # NOTE: clamp has seperate opinfos for scalar min/max (unary op) vs. tensors
     OpInfo('clamp',
            aliases=('clip',),
@@ -10067,7 +10100,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],),
     OpInfo('linalg.eig',
            aten_name='linalg_eig',
            op=torch.linalg.eig,
@@ -10078,7 +10111,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
            skips=(
                # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),),),
@@ -10107,7 +10140,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
            skips=(
                # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
@@ -10183,7 +10216,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_grad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
            sample_inputs_func=sample_inputs_linalg_matrix_power,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            ),
@@ -10229,7 +10262,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_matrix_norm',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
            sample_inputs_func=sample_inputs_linalg_matrix_norm,
            skips=(
                # Pre-existing condition; Needs to be fixed
@@ -11196,6 +11229,7 @@ op_db: List[OpInfo] = [
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
+           supports_expanded_weight=True,
            supports_out=False,),
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
@@ -11212,6 +11246,7 @@ op_db: List[OpInfo] = [
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
            ),
+           supports_expanded_weight=True,
            supports_out=False,),
     OpInfo('nn.functional.group_norm',
            aten_name='group_norm',
@@ -13157,7 +13192,7 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
            skips=(
                # Fixme, forward over backward gives a numerical error
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
@@ -13173,7 +13208,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_svd,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
            skips=(
                # FIXME forward over backward gives a numerical error
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
@@ -13188,7 +13223,7 @@ op_db: List[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_gradgrad=False,
            sample_inputs_func=sample_inputs_linalg_svdvals,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off]),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
                lambda a, b, **kwargs: torch.svd_lowrank(a @ b.mT, **kwargs),
@@ -13202,7 +13237,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off,
                        DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
@@ -13223,7 +13258,10 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off,
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                                    'TestCommon', 'test_noncontiguous_samples',
+                                    device_type='cuda')],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
