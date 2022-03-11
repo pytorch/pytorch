@@ -139,8 +139,6 @@ class QConvPackWeightInt8Cudnn final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
-  // Conv
-  // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_prepack"), TORCH_FN(QConvPackWeightInt8Cudnn<2>::run_conv));
 }
 
