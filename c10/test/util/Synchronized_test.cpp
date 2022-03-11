@@ -1,4 +1,3 @@
-#include "c10/util/Synchronized.h"
 #include <c10/util/Synchronized.h>
 #include <gtest/gtest.h>
 
@@ -10,15 +9,11 @@ TEST(Synchronized, TestSingleThreadExecution) {
   c10::Synchronized<int> iv(0);
   const int kMaxValue = 100;
   for (int i = 0; i < kMaxValue; ++i) {
-    auto ret = iv.withLock([](int& iv) {
-      return ++iv;
-    });
+    auto ret = iv.withLock([](int& iv) { return ++iv; });
     EXPECT_EQ(ret, i + 1);
   }
 
-  iv.withLock([&](int& iv) {
-    EXPECT_EQ(iv, kMaxValue);
-  });
+  iv.withLock([&](int& iv) { EXPECT_EQ(iv, kMaxValue); });
 }
 
 TEST(Synchronized, TestMultiThreadedExecution) {
@@ -27,9 +22,7 @@ TEST(Synchronized, TestMultiThreadedExecution) {
 
   auto thread_cb = [&kMaxValue, &iv]() {
     for (int i = 0; i < kMaxValue; ++i) {
-      iv.withLock([](int& iv) {
-        ++iv;
-      });
+      iv.withLock([](int& iv) { ++iv; });
     }
   };
 
@@ -42,9 +35,7 @@ TEST(Synchronized, TestMultiThreadedExecution) {
     threads[i].join();
   }
 
-  iv.withLock([&](int& iv) {
-    EXPECT_EQ(iv, kMaxValue * 10);
-  });
+  iv.withLock([&](int& iv) { EXPECT_EQ(iv, kMaxValue * 10); });
 }
 
 } // namespace

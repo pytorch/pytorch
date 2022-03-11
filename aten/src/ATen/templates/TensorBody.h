@@ -340,6 +340,10 @@ class TORCH_API Tensor: public TensorBase {
     return to(options().device(DeviceType::Metal), /*non_blocking*/ false, /*copy*/ false);
   }
 
+  Tensor meta() const {
+    return to(options().device(DeviceType::Meta), /*non_blocking*/ false, /*copy*/ false);
+  }
+
   // ~~~~~ Autograd API ~~~~~
 
   /// \fn bool is_leaf() const;
@@ -674,7 +678,7 @@ struct MaybeOwnedTraits<at::Tensor> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };
