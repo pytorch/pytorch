@@ -197,6 +197,21 @@ class TestExpandedWeightFunctional(TestCase):
             normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result)
 
+    def test_inplace_embedding(self, device):
+        input = torch.tensor([[2, 3], [2, 4]], dtype=torch.long, device=device)
+        weight = torch.randn((5, 5), device=device) + 2
+        weight_2 = weight.clone()
+        self.assertNotEqual(weight.storage().data_ptr(), weight_2.storage().data_ptr())
+        torch.nn.functional.embedding(input, weight, max_norm=1.)
+        self.assertNotEqual(weight, weight_2)
+
+    def test_inplace_basic(self, device):
+        weight = torch.randn((5, 5), device=device)
+        weight_2 = weight.clone()
+        self.assertNotEqual(weight.storage().data_ptr(), weight_2.storage().data_ptr())
+        weight.add_(3.)
+        self.assertNotEqual(weight, weight_2)
+
     def test_expanded_weight_error(self, device):
         batch_size = 3
         sample_input = make_tensor((batch_size, 4), dtype=torch.float32, device=device, requires_grad=True)
