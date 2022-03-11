@@ -1598,8 +1598,10 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
     "should be replaced with\n",
     "X = torch.linalg.solve(A, B)"
   );
+  // We cannot use _linalg_solve_out as it sometimes computes the LU from A^T
+  at::linalg_solve_out(solution, A, self);
   auto pivots = at::empty({0}, A.options().dtype(kInt));
-  at::_linalg_solve_out(solution, lu, pivots, A, self);
+  at::linalg_lu_factor_out(lu, pivots, A);
   return std::tie(solution, lu);
 }
 
@@ -1613,8 +1615,10 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
     "should be replaced with\n",
     "X = torch.linalg.solve(A, B)"
   );
-  Tensor X, LU, pivots;
-  std::tie(X, LU, pivots) = at::_linalg_solve(A, self);
+  // We cannot use _linalg_solve_out as it sometimes computes the LU from A^T
+  Tensor X, LU;
+  X = at::linalg_solve(A, self);
+  LU = std::get<0>(at::linalg_lu_factor(A));
   return std::make_tuple(X, LU);
 }
 

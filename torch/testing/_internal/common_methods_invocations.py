@@ -5386,12 +5386,13 @@ def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kw
     )
 
     def out_fn(output):
-        return output[1]
+        return output[0]
 
     # Reverses tensor order
     for sample in out:
         sample.input, sample.args = sample.args[0], (sample.input,)
-        sample.output_process_fn_grad = out_fn
+        if op_info.name == "solve":
+            sample.output_process_fn_grad = out_fn
         yield sample
 
 
@@ -12546,9 +12547,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(
-               # There's no point spending time implementing the forward AD derivative wrt LU
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
