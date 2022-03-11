@@ -14,6 +14,11 @@ def register_decomposition(aten_op, registry=None):
         nonlocal registry
         if registry is None:
             registry = decomposition_table
+        # Converts aten.foo to aten.foo.default
+        # Done so I can be lazy and not write default on all of these ops
+        nonlocal aten_op
+        if not isinstance(aten_op, torch._ops.OpOverload):
+            aten_op = aten_op.default
         registry[aten_op] = f
         return f
     return decomposition_decorator
