@@ -362,7 +362,7 @@ def fold_weight(
             env[node.name] = folded_graph.node_copy(node, load_arg)
     return QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
 
-def _lower_static_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_static_weighted_ref_module(model: QuantizedGraphModule):
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
     and replace them with the quantized version of the ref module.
@@ -427,7 +427,7 @@ def _lower_static_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedG
             model.graph.erase_node(scale_node)
             model.graph.erase_node(zero_point_node)
 
-def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
     """
     Traverse the graph and find quantize_per_tensor_dynamic - dequantize - ref_module patterns
     and replace them with the dynamically quantized version of the ref module.
@@ -485,7 +485,7 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule) -> Quantized
         input_dynamic_q_node.replace_all_uses_with(input_dynamic_q_node.args[0])
         model.graph.erase_node(input_dynamic_q_node)
 
-def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
     """
     Traverse the graph and find ref_module patterns
     and replace them with the weight only quantized version of the ref module.
@@ -510,10 +510,7 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule) -> Quant
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
 
-def _lower_static_weighted_ref_functional(
-    model: QuantizedGraphModule,
-    qconfig_map: Dict[str, QConfigAny]
-) -> QuantizedGraphModule:
+def _lower_static_weighted_ref_functional(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
@@ -588,10 +585,7 @@ def _lower_static_weighted_ref_functional(
         if relu_node is not None:
             model.graph.erase_node(relu_node)
 
-def _lower_dynamic_weighted_ref_functional(
-    model: QuantizedGraphModule,
-    qconfig_map: Dict[str, QConfigAny]
-) -> QuantizedGraphModule:
+def _lower_dynamic_weighted_ref_functional(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and replace functional reference patterns with their dynamically
     quantized versions.
@@ -701,10 +695,7 @@ def _lower_dynamic_weighted_ref_functional(
         if relu_node is not None:
             model.graph.erase_node(relu_node)
 
-def _lower_quantized_binary_op(
-    model: QuantizedGraphModule,
-    qconfig_map: Dict[str, QConfigAny]
-) -> QuantizedGraphModule:
+def _lower_quantized_binary_op(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
     modules = dict(model.named_modules(remove_duplicate=False))
 
     def get_bop_patterns(bop: Any) -> List[Pattern]:
@@ -825,7 +816,7 @@ def _lower_quantized_binary_op(
             # remove binary op node
             model.graph.erase_node(bop_node)
 
-def special_pattern_replacement(model: QuantizedGraphModule) -> QuantizedGraphModule:
+def special_pattern_replacement(model: QuantizedGraphModule):
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         q_node = n
