@@ -77,38 +77,40 @@ class DefaultFuseHandler(FuseHandler):
         root_module = quantizer.modules[root_node.target]
         assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
         "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
-        def get_modules(pattern, modules):
+        def get_modules(pattern):
             """ Given a node pattern, extract the corresponding modules
             e.g. input: (relu_node, (bn_node, conv_node))
                  output: (relu_module, (bn_module, conv_module))
             """
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
-                get_modules(n, modules)
-                arg_modules: List[torch.nn.Module] = []
+                modules: List[torch.nn.Module] = []
+                modules.append(get_modules(n))
                 for a in args:
-                    get_modules(a, arg_modules)
-                arg_modules = tuple(arg_modules) if len(arg_modules) > 1 else arg_modules[0]  # type: ignore[assignment]
-                modules.append(arg_modules)
+                    modules.append(get_modules(a))
+                return tuple(modules)
             else:
                 n = pattern
                 if n.op == "call_module":
-                    modules.append(quantizer.modules[n.target])
+                    return quantizer.modules[n.target]
                 elif n.op == "call_function" and n.target == torch.nn.functional.relu:
                     relu = torch.nn.ReLU()
                     relu.training = root_module.training
-                    modules.append(relu)
+                    return relu
+                elif n.op == "call_function" or n.op == "call_method":
+                    return n.target
                 else:
-                    modules.append(MatchAllNode)
-            return tuple(modules)
+                    return MatchAllNode
 
         # since relu can be used multiple times, we'll need to create a relu module for each match
-        matched_modules = get_modules(matched_node_pattern, [])
+        matched_modules = get_modules(matched_node_pattern)
 
         def get_matched_types(m):
             if isinstance(m, tuple):
                 return tuple(map(get_matched_types, m))
-            return type(m)
+            if isinstance(m, torch.nn.Module):
+                return type(m)
+            return m
 
         matched_module_types = get_matched_types(matched_modules)
         module_parent_name, module_name = _parent_name(root_node.target)

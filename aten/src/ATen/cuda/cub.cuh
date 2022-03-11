@@ -51,7 +51,7 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if !CUB_SUPPORTS_NV_BFLOAT16() || \
+#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || \
      (defined(USE_ROCM) && ROCM_VERSION >= 40500)
 
 #if !defined(USE_ROCM)

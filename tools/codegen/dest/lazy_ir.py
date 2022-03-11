@@ -229,7 +229,6 @@ class GenLazyNativeFuncDefinition:
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
-            # TODO: INTEGRATION POINT HERE:
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
         {meta_out}"""
         else:
@@ -291,11 +290,11 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"std::vector<Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API std::vector<Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:
-        return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
+        return f"torch::lazy::compute_shape_{self.__call_suffix()}"
 
 
 @dataclass(frozen=True)

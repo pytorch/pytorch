@@ -174,7 +174,7 @@ class TestTorchDeviceType(TestCase):
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128)
     def test_storage(self, device, dtype):
-        v = make_tensor((3, 5), device, dtype, low=-9, high=9)
+        v = make_tensor((3, 5), dtype=dtype, device=device, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
         self.assertEqual(v.storage()[14], v[2][4])
         v_s = v.storage()
@@ -235,7 +235,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_tensor_from_storage(self, device, dtype):
-        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
         b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, b)
@@ -252,7 +252,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_set_storage(self, device, dtype):
-        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
         b = torch.tensor([], device=device, dtype=dtype).set_(a_s).reshape(a.size())
         self.assertEqual(a, b)
@@ -1720,15 +1720,15 @@ else:
         self.assertTrue(x.min() > 0)
 
     def _generate_correlation_tensors(self, device, dtype):
-        yield make_tensor((0, 0), device, dtype)
-        yield make_tensor((1, 0), device, dtype)
-        yield make_tensor((0, 1), device, dtype)
-        yield make_tensor((2,), device, dtype)
-        yield make_tensor((2, 1), device, dtype)
-        yield make_tensor((2, 2), device, dtype)
-        yield make_tensor((2, 3), device, dtype)
-        yield make_tensor((5, 10), device, dtype)
-        yield make_tensor((5, 10), device, dtype, noncontiguous=True)
+        yield make_tensor((0, 0), dtype=dtype, device=device)
+        yield make_tensor((1, 0), dtype=dtype, device=device)
+        yield make_tensor((0, 1), dtype=dtype, device=device)
+        yield make_tensor((2,), dtype=dtype, device=device)
+        yield make_tensor((2, 1), dtype=dtype, device=device)
+        yield make_tensor((2, 2), dtype=dtype, device=device)
+        yield make_tensor((2, 3), dtype=dtype, device=device)
+        yield make_tensor((5, 10), dtype=dtype, device=device)
+        yield make_tensor((5, 10), dtype=dtype, device=device, noncontiguous=True)
         if dtype != torch.int:
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
@@ -1755,7 +1755,7 @@ else:
             num_observations = x.numel() if x.ndim < 2 else x.size(1)
             if num_observations > 0:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
-                aweights = make_tensor((num_observations,), device, torch.float, low=1)
+                aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
 
@@ -2367,7 +2367,7 @@ else:
             (2, 3, 5))
 
         for shape in shapes:
-            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+            contig = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
 
             non_contig = torch.empty(shape + (2, 2), device=device, dtype=dtype)[..., 0]
             non_contig = non_contig.select(-1, -1)
@@ -2389,7 +2389,7 @@ else:
             (2, 3, 5))
 
         for shape in shapes:
-            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+            contig = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             self._test_diff_numpy(contig)
 
         t = torch.ones(2, 3)
@@ -2494,7 +2494,7 @@ else:
 
         # Test behaviour in very big tensors
         large_size = 100000
-        t = make_tensor((large_size,), device, dtype)
+        t = make_tensor((large_size,), dtype=dtype, device=device)
         t_np = t.cpu().numpy()
         coordinates_np = list(np.random.randn(large_size))
         coordinates = [torch.tensor(coordinates_np, device=device)]
@@ -2820,7 +2820,7 @@ else:
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_copy(tgt, dim, idx, src):
             for i in range(idx.size(0)):
@@ -2981,7 +2981,7 @@ else:
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
             # bfloat16 is just used on GPU, so it's not supported on numpy
@@ -2996,7 +2996,9 @@ else:
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
                     src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, noncontiguous=not idx_contig)
+                    idx = make_tensor(
+                        (num_out,), dtype=torch.int64, device=device, low=0, high=num_src, noncontiguous=not idx_contig
+                    )
                     out = torch.index_select(src, dim, idx)
                     out2 = ref_index_select(src, dim, idx)
                     self.assertEqual(out, out2)
@@ -3005,13 +3007,13 @@ else:
             other_sizes = (3, 2)
             dim = 1
             src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, noncontiguous=False)
+            idx = make_tensor((num_out,), dtype=idx_type, device=device, low=0, high=num_src, noncontiguous=False)
             out = torch.index_select(src, dim, idx)
             out2 = ref_index_select(src, dim, idx)
             self.assertEqual(out, out2)
 
         # Create the 4 possible combinations of scalar sizes for index / source
-        scalars = ((make_tensor(size_s, device, dtype),
+        scalars = ((make_tensor(size_s, dtype=dtype, device=device),
                     torch.zeros(size_i, dtype=torch.int64, device=device))
                    for size_s, size_i in product([(), (1,)], repeat=2))
         for source, idx in scalars:
@@ -4565,7 +4567,7 @@ else:
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_capsule_conversion(self, device, dtype):
         # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
@@ -4573,14 +4575,14 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_protocol_conversion(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(x)
         self.assertEqual(z, x)
 
     @skipMeta
     @onlyNativeDeviceTypes
     def test_dlpack_shared_storage(self, device):
-        x = make_tensor((5,), device, torch.float64)
+        x = make_tensor((5,), dtype=torch.float64, device=device)
         z = from_dlpack(to_dlpack(x))
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
@@ -4593,7 +4595,7 @@ else:
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             # Do an operation in the actual stream
-            x = make_tensor((5,), device, dtype) + 1
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
@@ -4608,7 +4610,7 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_from_dlpack(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
         self.assertEqual(x, y)
 
@@ -4616,7 +4618,7 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_from_dlpack_noncontinguous(self, device, dtype):
-        x = make_tensor((25,), device, dtype).reshape(5, 5)
+        x = make_tensor((25,), dtype=dtype, device=device).reshape(5, 5)
 
         y1 = x[0]
         y1_dl = torch.from_dlpack(y1)
@@ -4649,7 +4651,7 @@ else:
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), device, dtype) + 1
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
             z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
@@ -4659,7 +4661,7 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_from_dlpack_dtype(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         y = torch.from_dlpack(x)
         assert x.dtype == y.dtype
 
@@ -4684,7 +4686,7 @@ else:
 
         # CUDA-based tests runs on non-default streams
         with torch.cuda.stream(torch.cuda.default_stream()):
-            x = DLPackTensor(make_tensor((5,), device, torch.float32))
+            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
             from_dlpack(x)
 
     @skipMeta
@@ -4692,7 +4694,7 @@ else:
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
-            x = make_tensor((5,), device, dtype)
+            x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
 
     @skipMeta
@@ -8194,8 +8196,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
+                b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-1, high=1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
@@ -8203,8 +8205,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):

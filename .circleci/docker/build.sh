@@ -90,7 +90,7 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.7-gcc5.4)
     ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.12.4  # To make sure XNNPACK is enabled for the BACKWARDS_COMPAT_TEST used with this image
     GCC_VERSION=5
     PROTOBUF=yes
     DB=yes

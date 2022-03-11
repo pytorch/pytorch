@@ -20,7 +20,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Split_0"
     type {

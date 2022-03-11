@@ -223,28 +223,5 @@ std::shared_ptr<TEWrapper> createSignedLog1p() {
   return wrap;
 }
 
-std::shared_ptr<TEWrapper> createWhere() {
-  auto wrap = lookupNNCCache(aten::where);
-  if (wrap) {
-    return wrap;
-  }
-  wrap = std::make_shared<TEWrapper>();
-  auto N = VarHandle("N", kLong);
-  BufHandle cond("cond", {N}, kBool);
-  BufHandle x("x", {N}, kLong);
-  BufHandle y("y", {N}, kLong);
-
-  Tensor res = Compute("res", {N}, [&](const VarHandle& i) {
-    auto cond_i = cond.load(i);
-    auto x_i = x.load(i);
-    auto y_i = y.load(i);
-    return ifThenElse(cond_i, x_i, y_i);
-  });
-
-  wrap = wrapTECompute(wrap, res, {cond, x, y, N});
-  updateNNCCache(aten::where, wrap);
-  return wrap;
-}
-
 } // namespace jit
 } // namespace torch

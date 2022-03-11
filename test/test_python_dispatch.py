@@ -1,6 +1,8 @@
 # Owner(s): ["high priority"]
 
+import tempfile
 import torch
+from copy import deepcopy
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -337,6 +339,83 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertEqual(y.size(), x.size())
         self.assertEqual(y.stride(), x.stride())
         self.assertEqual(y.storage_offset(), x.storage_offset())
+
+    def test_wrapper_subclass_serializes(self) -> None:
+        with tempfile.TemporaryFile() as f:
+            x = LoggingTensor(torch.randn(3))
+            torch.save(x, f)
+            f.seek(0)
+            x_loaded = torch.load(f)
+            self.assertTrue(type(x_loaded) is type(x))
+            self.assertEqual(x.elem, x_loaded.elem)
+            self.assertFalse(x is x_loaded)
+
+    def test_deepcopy_wrapper_subclass(self) -> None:
+        x = LoggingTensor(torch.randn(3))
+        x_copy = deepcopy(x)
+        self.assertTrue(type(x_copy) is type(x))
+        self.assertEqual(x.elem, x_copy.elem)
+        self.assertFalse(x is x_copy)
+
+    def test_deepcopy_wrapper_subclass_with_clone_returning_different_type(self) -> None:
+
+        class MyWrapperTensor(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad,
+                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func.__name__ == "clone":
+                    # Return a plain tensor from clone().
+                    return args[0].elem.clone()
+                raise RuntimeError("NYI")
+
+            # NB: The default Tensor.__torch_function__ implementation called for deepcopy
+            # disables __torch_function__ by the time we get to clone(), so there is no need to
+            # explicitly disable __torch_function__ for this subclass.
+
+        x = MyWrapperTensor(torch.randn(3))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "for which cloning returns another instance of the same subclass"):
+            x_copy = deepcopy(x)
+
+    def test_deepcopy_non_wrapper_subclass(self) -> None:
+
+        # Ensure correct error is thrown for common error cases.
+        class SubTensorError1(torch.Tensor):
+            # Default implementation of new_empty() returns a plain tensor.
+            pass
+
+        class SubTensorError2(torch.Tensor):
+            # new_empty() incorrectly returns a different type (i.e. a plain tensor).
+            def new_empty(self, shape):
+                return torch.Tensor(shape)
+
+        for error_cls in [SubTensorError1, SubTensorError2]:
+            x = error_cls(3)
+            with self.assertRaisesRegex(RuntimeError,
+                                        "for which that function returns another instance of the same subclass"):
+                x_copy = deepcopy(x)
+
+        # Ensure a correctly implemented new_empty() causes deepcopy() to work.
+        class SubTensorSuccess(torch.Tensor):
+            def new_empty(self, shape):
+                return type(self)(shape)
+
+        x = SubTensorSuccess(3)
+        x_copy = deepcopy(x)
+        self.assertIs(type(x_copy), type(x))
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
