@@ -1,4 +1,5 @@
 import torch
+import yaml
 from math_ops import (
     PointwiseOpsModule,
     ReductionOpsModule,
@@ -32,6 +33,8 @@ from tensor_ops import (
 )
 
 output_path = "ios/TestApp/models/"
+production_ops_path = "test/mobile/model_test/model_ops.yaml"
+coverage_out_path = "test/mobile/model_test/coverage.yaml"
 
 
 def scriptAndSave(module, name):
@@ -75,4 +78,24 @@ ops = [
     scriptAndSave(NNShuffleModule(), "shuffle_ops.ptl"),
 ]
 
-print(set().union(*ops))
+
+with open(production_ops_path) as input_yaml_file:
+    production_ops = yaml.safe_load(input_yaml_file)
+
+production_ops = set(production_ops["root_operators"])
+all_generated_ops = set().union(*ops)
+covered_ops = production_ops.intersection(all_generated_ops)
+uncovered_ops = production_ops - covered_ops
+coverage = 100 * len(covered_ops) / len(production_ops)
+print(
+    f"\nThese generated models covered {len(covered_ops)} of {len(production_ops)} production ops. ({round(coverage, 2)}%)\n"
+)
+with open(coverage_out_path, "w") as f:
+    yaml.safe_dump(
+        {
+            "uncovered_ops": sorted(list(uncovered_ops)),
+            "covered_ops": sorted(list(covered_ops)),
+            "all_generated_ops": sorted(list(all_generated_ops)),
+        },
+        f,
+    )
