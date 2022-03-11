@@ -1178,7 +1178,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.share_memory_: lambda self: -1,
         Tensor.short: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.size: lambda self: -1,
-        Tensor.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
+        Tensor.slice_scatter: lambda self, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
