@@ -3926,15 +3926,6 @@ else:
 
     # FIXME: convert to ErrorInputs
     @onlyNativeDeviceTypes
-    def test_index_select_mem_overlap(self, device):
-        x = torch.rand((1, 6), device=device).expand((2, 6))
-        y = torch.rand((3, 6), device=device)
-        ind = torch.tensor([0, 1], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.index_select(y, 1, ind, out=x)
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
     def test_scatter_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         src = torch.rand((3,), device=device)
