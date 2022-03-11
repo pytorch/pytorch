@@ -8,8 +8,18 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
+{%- if is_default %}
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif -%}
+{%- for label in ciflow_config.labels | sort %}
+  {%- if loop.first %}
+  push:
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
 
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
@@ -18,18 +28,16 @@ on:
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -53,7 +61,7 @@ on:
       !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-arm-v8a-build", "arm-v8a") }}
       !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_32-build", "x86_32") }}
       !{{ common_android.build_android("pytorch-linux-xenial-py3-clang5-android-ndk-r19c-x86_64-build", "x86_64") }}
-      - name: Build-Final-Artifcact
+      - name: Build final artifact
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |

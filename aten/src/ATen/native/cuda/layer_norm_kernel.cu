@@ -11,6 +11,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <c10/cuda/CUDAMathCompat.h>
 
@@ -257,15 +258,15 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 template <typename T, typename T_ACC,
 typename std::enable_if<std::is_same<T, double>::value, int>::type = 0>
 __device__ __inline__ void vectorized_layer_norm_kernel_impl(
-  const int N,
-  T_ACC eps,
-  const  T* __restrict__ X,
-  const  T* gamma,
-  const  T* beta,
-  T_ACC* mean,
-  T_ACC* rstd,
-  T* Y){
-    CUDA_KERNEL_ASSERT("doesn't work with double");
+  const int /*N*/,
+  T_ACC /*eps*/,
+  const  T* __restrict__ /*X*/,
+  const  T* /*gamma*/,
+  const  T* /*beta*/,
+  T_ACC* /*mean*/,
+  T_ACC* /*rstd*/,
+  T* /*Y*/){
+    CUDA_KERNEL_ASSERT(false && "doesn't work with double");
   }
 
 //to avoid windows SFINAE errors
@@ -636,8 +637,8 @@ void launch_vectorized_layer_norm_kernel(
 ) {
     //constexpr int alignment = 16; //currently unused to make sure float and half results are bw accurate
     auto stream = at::cuda::getCurrentCUDAStream().stream();
-    const int num_threads = 128;
-    const dim3 threads(C10_WARP_SIZE,num_threads/C10_WARP_SIZE,1);
+    const int warp_size = at::cuda::warp_size();
+    const dim3 threads(warp_size, num_threads() / warp_size, 1);
     const dim3 blocks(M);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
@@ -739,22 +740,10 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   if (dX_data != nullptr) {
-    const auto kAccType =
-        (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
-        ? kFloat
-        : X.scalar_type();
-    Tensor ds = at::empty({M}, X.options().dtype(kAccType));
-    Tensor db = at::empty({M}, X.options().dtype(kAccType));
-    Tensor scale = at::empty({M}, X.options().dtype(kAccType));
-    Tensor bias = at::empty({M}, X.options().dtype(kAccType));
-    T_ACC* ds_data = ds.template data_ptr<T_ACC>();
-    T_ACC* db_data = db.template data_ptr<T_ACC>();
-    T_ACC* scale_data = scale.template data_ptr<T_ACC>();
-    T_ACC* bias_data = bias.template data_ptr<T_ACC>();
-    const int num_threads = 128;
+    const int warp_size = at::cuda::warp_size();
     const dim3 blocks(M);
-    int nshared = (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);
-    layer_norm_grad_input_kernel<<<blocks, num_threads, nshared, cuda_stream>>>(dY_data,
+    int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
+    layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
     X_data, mean_data, rstd_data, gamma_data, dX_data, N);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }

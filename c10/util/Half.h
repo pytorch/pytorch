@@ -442,7 +442,7 @@ struct alignas(4) complex<Half> {
 // for `f > limit::max()` below
 template <typename To, typename From>
 typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
-    From f) {
+    From /*f*/) {
   return false;
 }
 
@@ -508,4 +508,4 @@ C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 
-#include <c10/util/Half-inl.h>
+#include <c10/util/Half-inl.h> // IWYU pragma: keep

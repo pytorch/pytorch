@@ -32,6 +32,7 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(foo2.toDouble(), 4.0);
   ASSERT_EQ(foo.use_count(), 2);
   ASSERT_TRUE(baz.toIntVector() == std::vector<int64_t>({3, 4, 5}));
+  ASSERT_TRUE(baz.toDimVector() == at::DimVector({3, 4, 5}));
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);

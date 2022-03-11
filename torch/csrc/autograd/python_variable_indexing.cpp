@@ -4,7 +4,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_compat.h>
@@ -88,7 +87,7 @@ static inline Variable sequenceToVariable(c10::TensorOptions options, PyObject* 
   return torch::utils::indexing_tensor_from_data(options, kLong, c10::nullopt, seq);
 }
 
-static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
+inline Variable valueToTensor(c10::TensorOptions options, PyObject* value, const at::Device& device) {
   if (THPVariable_Check(value)) {
     return THPVariable_Unpack(value);
   }
@@ -341,6 +340,12 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
+void dispatch_set_item(const Tensor& self, ArrayRef<at::indexing::TensorIndex> indices,
+                       const Tensor& value, bool disable_slice_optimization=false) {
+  pybind11::gil_scoped_release no_gil;
+  at::indexing::set_item(self, indices, value, disable_slice_optimization);
+}
+
 // NOTE: Here is the dispatch structure for `THPVariable_setitem`:
 //
 // 1. Python 1-D setter calls C++ `at::indexing::set_item` after
@@ -385,13 +390,13 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     // real 0-sized shapes.
     return 0;
   } else if (index == Py_Ellipsis) {
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(at::indexing::Ellipsis)}, value);
     return 0;
   } else if (index == Py_None) {
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(at::indexing::None)}, value);
     return 0;
   } else if (index == Py_True) {
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(true)}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(true)}, value);
     return 0;
   }
 
@@ -402,7 +407,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     if (is_tracing && THPVariable_Check(index)) {
       recordSelectTrace(THPVariable_Unpack(index));
     }
-    at::indexing::set_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
+    dispatch_set_item(self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}, value);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -412,7 +417,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
       recordSliceTrace(index);
     }
     // See NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing functions from Python ]
-    at::indexing::set_item(
+    dispatch_set_item(
       self_, {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))}, value, /*disable_slice_optimization=*/is_tracing);
     return 0;
   }
@@ -431,23 +436,24 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   Variable sliced = applySlicing(
     self_, holder.get(), variableIndices, /*is_tracing=*/is_tracing, self_device, self_.sizes(), specified_dims);
   if (variableIndices.empty()) {
+    pybind11::gil_scoped_release no_gil;
     at::indexing::copy_to(sliced, value);
     return 0;
   }
 
-  IntArrayRef valueSizes = value.sizes();
-  IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
-  torch::autograd::Variable valuesSliced;
-  if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view(slicedValueSizes);
-  } else {
-    valuesSliced = value;
-  }
   {
     pybind11::gil_scoped_release no_gil;
+    IntArrayRef valueSizes = value.sizes();
+    IntArrayRef slicedValueSizes = at::indexing::slicePrefix1sSize(valueSizes);
+    torch::autograd::Variable valuesSliced;
+    if (!valueSizes.equals(slicedValueSizes)) {
+      valuesSliced = value.view(slicedValueSizes);
+    } else {
+      valuesSliced = value;
+    }
     at::indexing::dispatch_index_put_(sliced, std::move(variableIndices), valuesSliced);
+    return 0;
   }
-  return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
