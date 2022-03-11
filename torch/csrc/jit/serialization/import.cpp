@@ -176,6 +176,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       obj_loader,
       device_,
       *reader_.get(),
+      nullptr,
       storage_context_);
 }
 

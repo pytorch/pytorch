@@ -5,15 +5,15 @@
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
-#include <torch/csrc/jit/mobile/function.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
-
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/promoted_prim_ops.h>
+#include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
@@ -233,8 +233,7 @@ bool InterpreterState::run(Stack& stack) {
           }
           return false;
         case LIST_CONSTRUCT: {
-          const auto& type = code.types_[inst.X]->expectRef<at::ListType>();
-          listConstruct(stack, type, inst.N);
+          listConstruct(stack, *code.types_.at(inst.X), inst.N);
           frame.step();
         } break;
         case LIST_UNPACK: {
@@ -249,24 +248,77 @@ bool InterpreterState::run(Stack& stack) {
           tupleSlice(stack, inst.X, inst.X + inst.N);
           frame.step();
         } break;
+        case TUPLE_INDEX: {
+          tupleIndex(stack);
+          frame.step();
+        } break;
+        case RAISE_EXCEPTION: {
+          raiseExceptionWithMessage(stack);
+          frame.step();
+        } break;
+        case __IS__: {
+          is(stack);
+          frame.step();
+        } break;
+        case UN_INITIALIZED: {
+          unInitialized(stack);
+          frame.step();
+        } break;
+        case __ISNOT__: {
+          isNot(stack);
+          frame.step();
+        } break;
+        case FORMAT: {
+          format(stack, inst.X);
+          frame.step();
+        } break;
+        case DEVICE: {
+          device(stack);
+          frame.step();
+        } break;
+        case DTYPE: {
+          dtype(stack);
+          frame.step();
+        } break;
+        case DIM: {
+          dim(stack);
+          frame.step();
+        } break;
+        case __NOT__: {
+          _not(stack);
+          frame.step();
+        } break;
+        case DICT_INDEX: {
+          dictIndex(stack);
+          frame.step();
+        } break;
+        case TO_LIST: {
+          toList(stack);
+          frame.step();
+        } break;
+        case NUM_TO_TENSOR: {
+          numToTensorScalar(stack);
+          frame.step();
+        } break;
+        case IS_CUDA: {
+          isCuda(stack);
+          frame.step();
+        } break;
         case DICT_CONSTRUCT: {
-          const auto& type = code.types_[inst.X]->expectRef<at::DictType>();
-          dictConstruct(stack, type, inst.N);
+          dictConstruct(stack, *code.types_.at(inst.X), inst.N);
           frame.step();
         } break;
         case NAMED_TUPLE_CONSTRUCT: {
-          namedTupleConstruct(
-              stack, code.types_[inst.X]->expect<at::TupleType>(), inst.N);
+          namedTupleConstruct(stack, code.types_.at(inst.X), inst.N);
           frame.step();
         } break;
         case CREATE_OBJECT: {
-          auto type = code.types_[inst.X]->expect<c10::ClassType>();
+          auto type = code.types_.at(inst.X)->expect<c10::ClassType>();
           createObject(stack, type);
           frame.step();
         } break;
         case ISINSTANCE: {
-          at::ArrayRef<TypePtr> types(
-              &(code.types_[inst.X]), &(code.types_[inst.X + inst.N]));
+          at::ArrayRef<TypePtr> types(&code.types_.at(inst.X), inst.N);
           isinstance(stack, types);
           frame.step();
         } break;

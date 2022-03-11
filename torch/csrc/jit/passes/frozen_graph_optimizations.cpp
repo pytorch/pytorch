@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/frozen_concat_linear.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
@@ -15,6 +16,7 @@ void OptimizeFrozenGraph(
     std::shared_ptr<Graph>& graph,
     bool optimize_numerics) {
   removeDropout(graph);
+  HoistCommonExpression(graph);
   FrozenConcatLinear(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   if (optimize_numerics) {

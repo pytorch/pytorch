@@ -132,12 +132,36 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
   return torch::linalg_matrix_power_out(result, self, n);
 }
 
-inline Tensor matrix_rank(const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return torch::linalg_matrix_rank(input, tol, hermitian);
 }
 
-inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, double tol, bool hermitian) {
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const Tensor& tol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
 inline Tensor multi_dot(TensorList tensors) {
@@ -412,12 +436,36 @@ inline Tensor& matrix_power_out(const Tensor& self, int64_t n, Tensor& result) {
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_rank
-inline Tensor matrix_rank(const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank(input, tol, hermitian);
 }
 
-inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, double tol, bool hermitian) {
+inline Tensor matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian) {
+  return detail::matrix_rank(input, tol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return detail::matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor matrix_rank(const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return detail::matrix_rank(input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, double tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const Tensor& tol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, c10::optional<double> atol, c10::optional<double> rtol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
+}
+
+inline Tensor& matrix_rank_out(Tensor& result, const Tensor& input, const c10::optional<Tensor>& atol, const c10::optional<Tensor>& rtol, bool hermitian) {
+  return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
 }
 
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.multi_dot

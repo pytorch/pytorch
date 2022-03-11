@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/TensorIterator.h>
 #undef TORCH_ASSERT_NO_OPERATORS
@@ -12,6 +13,13 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
@@ -877,14 +885,8 @@ void TensorIteratorBase::build_borrowing_binary_float_op(
         .add_input(b));
 }
 
-void TensorIteratorBase::build_comparison_op(
-    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
-  TensorIteratorConfig config;
-
+static void set_up_comparison_op_config(TensorIteratorConfig& config, const TensorBase& out) {
   config.set_check_mem_overlap(true);
-  config.add_owned_output(out);
-  config.add_owned_input(a);
-  config.add_owned_input(b);
   config.allow_cpu_scalars(true);
   config.promote_inputs_to_common_dtype(true);
 
@@ -905,7 +907,38 @@ void TensorIteratorBase::build_comparison_op(
   if (out.defined() && out.scalar_type() != kBool) {
     config.cast_common_dtype_to_outputs(true);
   }
+}
 
+void TensorIteratorBase::build_comparison_op(
+    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
+  TensorIteratorConfig config;
+  set_up_comparison_op_config(config, out);
+
+  config.add_owned_output(out);
+  config.add_owned_input(a);
+  config.add_owned_input(b);
+  build(config);
+}
+
+void TensorIteratorBase::build_borrowing_comparison_op(
+    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
+  TensorIteratorConfig config;
+  set_up_comparison_op_config(config, out);
+
+  config.add_borrowed_output(out);
+  config.add_borrowed_input(a);
+  config.add_borrowed_input(b);
+  build(config);
+}
+
+void TensorIteratorBase::build_borrowing_except_last_argument_comparison_op(
+    const TensorBase& out, const TensorBase& a, const TensorBase& b) {
+  TensorIteratorConfig config;
+  set_up_comparison_op_config(config, out);
+
+  config.add_borrowed_output(out);
+  config.add_borrowed_input(a);
+  config.add_owned_input(b);
   build(config);
 }
 
@@ -944,37 +977,65 @@ void TensorIteratorBase::build_borrowing_binary_op(
       .add_input(b));
 }
 
+// This cannot be a function because TensorIteratorConfig is not
+// copyable or movable, so it can't be returned from the function.
+#define UNARY_FLOAT_OP_CONFIG()                                         \
+  TensorIteratorConfig()                                                \
+  .set_check_mem_overlap(true)                                          \
+  .promote_inputs_to_common_dtype(true)                                 \
+  .cast_common_dtype_to_outputs(true)                                   \
+  .enforce_safe_casting_to_output(true)                                 \
+  .promote_integer_inputs_to_float(true)
+
 void TensorIteratorBase::build_unary_float_op(const TensorBase& out, const TensorBase& a) {
-  build(TensorIteratorConfig()
-      .set_check_mem_overlap(true)
+  build(UNARY_FLOAT_OP_CONFIG()
       .add_owned_output(out)
-      .add_owned_input(a)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .promote_integer_inputs_to_float(true));
+      .add_owned_input(a));
 }
 
+void TensorIteratorBase::build_borrowing_unary_float_op(const TensorBase& out, const TensorBase& a) {
+  build(UNARY_FLOAT_OP_CONFIG()
+      .add_output(out)
+      .add_input(a));
+}
+
+// This cannot be a function because TensorIteratorConfig is not
+// copyable or movable, so it can't be returned from the function.
+#define UNARY_OP_CONFIG()                                \
+  TensorIteratorConfig()                                 \
+    .set_check_mem_overlap(true)                         \
+    .cast_common_dtype_to_outputs(false)                 \
+    .enforce_safe_casting_to_output(false)               \
+    .check_all_same_dtype(true)
+
 void TensorIteratorBase::build_unary_op(const TensorBase& out, const TensorBase& a) {
-  build(TensorIteratorConfig()
-      .set_check_mem_overlap(true)
+  build(UNARY_OP_CONFIG()
       .add_owned_output(out)
-      .add_owned_input(a)
-      .cast_common_dtype_to_outputs(false)
-      .enforce_safe_casting_to_output(false)
-      .check_all_same_dtype(true));
+      .add_owned_input(a));
+}
+
+void TensorIteratorBase::build_borrowing_unary_op(const TensorBase& out, const TensorBase& a) {
+  build(UNARY_OP_CONFIG()
+      .add_output(out)
+      .add_input(a));
+}
+
+void TensorIteratorBase::build_output_borrowing_argument_owning_unary_op(const TensorBase& out, const TensorBase& a) {
+  build(UNARY_OP_CONFIG()
+      .add_output(out)
+      .add_owned_input(a));
 }
 
 // Helper to construct a unary op that forcibly promotes output to boolean.
 // Only be used when the output tensor must have boolean type.
-void TensorIteratorBase::build_unary_force_boolean_op(const TensorBase& out, const TensorBase& a) {
+void TensorIteratorBase::build_borrowing_unary_force_boolean_op(const TensorBase& out, const TensorBase& a) {
   build(TensorIteratorConfig()
       .set_check_mem_overlap(true)
       .check_all_same_dtype(false)
       .declare_static_dtype(at::kBool)
       .declare_static_device(a.device())
-      .add_owned_output(out)
-      .add_owned_input(a));
+      .add_output(out)
+      .add_input(a));
 }
 
 TensorIterator TensorIterator::binary_op(TensorBase& out, const TensorBase& a, const TensorBase& b) {
@@ -1012,12 +1073,6 @@ TensorIterator TensorIterator::unary_op(TensorBase& out, const TensorBase& a) {
 TensorIterator TensorIterator::unary_float_op(TensorBase& out, const TensorBase& a) {
   TensorIterator iter;
   iter.build_unary_float_op(out, a);
-  return iter;
-}
-
-TensorIterator TensorIterator::unary_force_boolean_op(const TensorBase& out, const TensorBase& a) {
-  TensorIterator iter;
-  iter.build_unary_force_boolean_op(out, a);
   return iter;
 }
 
@@ -1454,7 +1509,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
-// This is the structured kernels implementation of set_output.  It is
+// This is the structured kernels' implementation of set_output.  It is
 // NEVER actually called directly; instead, a subclass of TensorIteratorBase
 // will override set_output to actually do the operation, and then call
 // set_output on the TensorIteratorBase to setup TI's metadata.

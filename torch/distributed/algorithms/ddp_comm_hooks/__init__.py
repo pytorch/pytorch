@@ -9,6 +9,7 @@ from . import (
     default_hooks as default,
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
+    optimizer_overlap_hooks as optimizer_overlap,
 )
 
 
@@ -21,7 +22,7 @@ def _powerSGD_comm_hook_wrapper(
     model,
     state,
     matrix_approximation_rank,
-    start_powerSGD_iter,
+    start_powerSGD_iter=1_000,
 ):
     """
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
