@@ -16,8 +16,6 @@
 namespace torch {
 namespace jit {
 
-#ifdef USE_VULKAN
-
 namespace {
 
 void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
@@ -237,38 +235,5 @@ script::Module vulkanOptimizeForMobile(
   return cloned_module;
 }
 
-#else
-
-void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
-  TORCH_INTERNAL_ASSERT(
-      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
-}
-
-void vulkanInsertPrePackedOps(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
-}
-
-void vulkanFusePrePackedConvWithClamp(script::Module& module) {
-  TORCH_INTERNAL_ASSERT(
-      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
-}
-
-void vulkanFoldPrePackingOps(script::Module& m) {
-  TORCH_INTERNAL_ASSERT(
-      false, "Vulkan is not enabled. Please build with USE_VULKAN=1");
-}
-
-script::Module vulkanOptimizeForMobile(
-    const script::Module& module,
-    const std::vector<std::string>& preserved_methods) {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "Mobile optimizaiton only available with Vulkan at the moment. "
-      "Vulkan is not enabled. Please build with USE_VULKAN=1");
-  return module;
-}
-
-#endif
 } // namespace jit
 } // namespace torch
