@@ -19,10 +19,10 @@ TEST(Synchronized, TestSingleThreadExecution) {
 
 TEST(Synchronized, TestMultiThreadedExecution) {
   c10::Synchronized<int> iv(0);
-  const int kMaxValue = 10000;
+#define NUM_LOOP_INCREMENTS 10000
 
-  auto thread_cb = [&iv, kMaxValue]() {
-    for (int i = 0; i < kMaxValue; ++i) {
+  auto thread_cb = [&iv]() {
+    for (int i = 0; i < NUM_LOOP_INCREMENTS; ++i) {
       iv.withLock([](int& iv) { ++iv; });
     }
   };
@@ -36,7 +36,8 @@ TEST(Synchronized, TestMultiThreadedExecution) {
     t.join();
   }
 
-  iv.withLock([kMaxValue](int& iv) { EXPECT_EQ(iv, kMaxValue * 10); });
+  iv.withLock([](int& iv) { EXPECT_EQ(iv, NUM_LOOP_INCREMENTS * 10); });
+#undef NUM_LOOP_INCREMENTS
 }
 
 } // namespace
