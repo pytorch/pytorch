@@ -207,7 +207,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // TODO: combine empty & fill_ using full_like or full
   at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   auto act_scale = input.q_scale();
-  auto weight_scale = orig_weight.q_scale();
+  auto weight_scale = orig_weight_.q_scale();
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
@@ -215,12 +215,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   c10::optional<at::Tensor> after_add;
   c10::optional<at::Tensor> broadcasted_bias;
   c10::optional<at::Tensor> after_relu;
-<<<<<<< HEAD
   auto weight = orig_weight_.int_repr();
   if (bias_.has_value()) {
-=======
-  if (bias.has_value()) {
->>>>>>> b04ba13424 ([quant][core][performance] Removed int_repr calls in quantized conv2d cudnn implementation)
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
     // the number of trailling dimensions is quantized_output.dim() - 2, so the new size of the broadcast_bias
