@@ -232,6 +232,15 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   return self_scaled * scale_v;
 }
 
+// Tensor norm_jvp(
+//     const Tensor& self_p, const Tensor& self_t,
+//     const optional<Scalar> & p_, const Tensor& result, IntArrayRef dim, bool keepdim) {
+//   // Looks like we need to do some reduction?
+//   size_t ndim = self.sizes().size();
+//   double p = p_.value_or(2.0).toDouble();
+
+// }
+
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
