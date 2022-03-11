@@ -351,9 +351,20 @@ def match_differentiability_info(
                         op_name, between_parens = match.group(1), match.group(2)
                         # We want to...
                         #   Match: self_t.op1(other_p.op2(arg))
-                        #   Avoid: self_ self_t.op1(args) + self_t.op2(args)
-                        # We check this by making sure the first parens in second group is not a closing parens
-                        is_single_method_on_self_t = not re.fullmatch(r'[^\()]*\).*', between_parens)
+                        #   Avoid: self_t.op1(args) + self_t.op2(args)
+                        #   Avoid: self_t.op1(other_p.op2(arg))+ self_t.op2(args)
+                        def check_parens_nest_level_gt_zero(s):
+                            level = 1
+                            for ch in s:
+                                if ch == ")":
+                                    level -= 1
+                                    if level == 0:
+                                        return False
+                                if ch == "(":
+                                    level += 1
+                            assert level == 1, "Parenthesis aren't balanced"
+                            return True
+                        is_single_method_on_self_t = check_parens_nest_level_gt_zero(between_parens)
                     directly_do_inplace = is_single_method_on_self_t and op_name == info.name
 
                     if directly_do_inplace:
