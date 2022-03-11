@@ -61,6 +61,7 @@ class IfThenElse;
 class GridReduction;
 class GridBroadcast;
 class GridWelford;
+class AllocateFusedReduction;
 
 // Expr container
 class Scope;
@@ -627,6 +628,30 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
   // use them, the thread predicate is held here separately from
   // Expr::predicate_.
   ParallelTypeBitmap thread_predicate_;
+};
+
+// Allocate an instance of the fused reduction class.
+class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
+ public:
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GridReduction* grid_reduction);
+
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GridWelford* grid_welford);
+
+  Expr* gridExpr() const {
+    return grid_expr_;
+  }
+
+  TensorIndex* out() const;
+
+  const ParallelTypeBitmap& threadPredicate() const;
+
+ private:
+  //! GridReduction or GridWelford
+  Expr* grid_expr_ = nullptr;
 };
 
 } // namespace kir

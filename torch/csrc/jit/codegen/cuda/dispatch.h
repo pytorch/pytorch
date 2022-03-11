@@ -96,6 +96,7 @@ class IfThenElse;
 class GridReduction;
 class GridBroadcast;
 class GridWelford;
+class AllocateFusedReduction;
 class InitMagicZero;
 class UpdateMagicZero;
 } // namespace kir
@@ -151,6 +152,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const kir::GridReduction*);
   virtual void handle(const kir::GridBroadcast*);
   virtual void handle(const kir::GridWelford*);
+  virtual void handle(const kir::AllocateFusedReduction*);
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
@@ -202,6 +204,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(kir::GridReduction* stmt);
   virtual void handle(kir::GridBroadcast* stmt);
   virtual void handle(kir::GridWelford* stmt);
+  virtual void handle(kir::AllocateFusedReduction* stmt);
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public OptOutConstDispatch {
@@ -294,6 +297,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(kir::GridReduction*);
   virtual void mutate(kir::GridBroadcast*);
   virtual void mutate(kir::GridWelford*);
+  virtual void mutate(kir::AllocateFusedReduction*);
 
  protected:
   void removeExpr(IrContainer*, Expr*);

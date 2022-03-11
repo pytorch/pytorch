@@ -423,7 +423,8 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->getReductionOpType(),
           node->init(),
           node->out(),
-          replaced_inputs.value().at(node->in()));
+          replaced_inputs.value().at(node->in()),
+          node->isFused());
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -466,6 +467,15 @@ std::vector<Expr*> replaceInputsInExpr(
     const std::vector<Expr*>& exprs,
     const std::unordered_map<Val*, Val*>& replacement_map) {
   return ReplaceExprInput::replace(exprs, replacement_map);
+}
+
+bool isTrivialIterDomain(IterDomain* id) {
+  auto pt = id->getParallelType();
+  return id->isReduction() || id->isBroadcast() || id->isStride() ||
+      (id->extent()->isOneInt() && id->start()->isZeroInt()) ||
+      pt == ParallelType::Vectorize ||
+      (isParallelTypeThread(pt) &&
+       !GpuLower::current()->haloInfo().hasHaloWidth(id));
 }
 
 } // namespace cuda

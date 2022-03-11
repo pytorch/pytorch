@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <memory>
@@ -84,7 +85,13 @@ struct KernelSummary {
   // and their maximum vectorized access size
   std::unordered_map<TensorView*, int> vectorized_accesses;
 
+  // Sync map is needed to figure out if global memory buffers need to be marked
+  // as volatile because they're used for communication.
   SyncMap sync_map;
+
+  // Parallel dimension map needed to set the correct properties of grid buffers
+  // (is a dim inactive)
+  ParallelDimensionMap parallel_dimension_map_;
 };
 
 class KernelInternalProxy;

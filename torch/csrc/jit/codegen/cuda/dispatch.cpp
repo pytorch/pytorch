@@ -160,6 +160,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::GridWelford:
       ptr(handler)->handle(expr->as<kir::GridWelford>());
       return;
+    case ExprType::AllocateFusedReduction:
+      ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
+      return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -294,6 +297,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(handler)->handle(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::AllocateFusedReduction:
+      ptr(handler)->handle(expr->as<kir::AllocateFusedReduction>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -440,6 +446,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::GridWelford:
       ptr(mutator)->mutate(expr->as<kir::GridWelford>());
+      return;
+    case ExprType::AllocateFusedReduction:
+      ptr(mutator)->mutate(expr->as<kir::AllocateFusedReduction>());
       return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
@@ -652,6 +661,9 @@ void OptOutConstDispatch::handle(const kir::GridBroadcast* stmt) {
 void OptOutConstDispatch::handle(const kir::GridWelford* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const kir::AllocateFusedReduction* stmt) {
+  unhandled(stmt);
+}
 
 void OptOutDispatch::unhandled(Statement*) {}
 
@@ -758,6 +770,9 @@ void OptOutDispatch::handle(kir::GridBroadcast* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(kir::GridWelford* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(kir::AllocateFusedReduction* stmt) {
   unhandled(stmt);
 }
 

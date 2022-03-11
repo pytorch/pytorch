@@ -24,20 +24,6 @@ __device__ void arraySet(scalar_t* buff, scalar_t val) {
   }
 }
 
-// Type trait utils
-template <typename Type, bool is_volatile>
-struct MaybeVolatile;
-
-template <typename Type>
-struct MaybeVolatile<Type, true> {
-  using type = volatile Type;
-};
-
-template <typename Type>
-struct MaybeVolatile<Type, false> {
-  using type = Type;
-};
-
 template <typename scalar_t, int vec_size>
 __device__ void loadGeneric(scalar_t* to, scalar_t* from) {
   // It would be really nice to use memcpy here, but one example was failing

@@ -324,7 +324,8 @@ struct SubstituteInExpr : public OptInDispatch {
         init_N,
         in_avg,
         in_var,
-        in_N);
+        in_N,
+        welford_expr->isFused());
   }
 
  private:

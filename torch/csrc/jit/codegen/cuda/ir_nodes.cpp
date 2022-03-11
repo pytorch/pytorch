@@ -381,12 +381,14 @@ ReductionOp::ReductionOp(
     BinaryOpType reduction_op_type,
     Val* init,
     Val* out,
-    Val* in)
+    Val* in,
+    bool is_fused)
     : Expr(passkey, ExprType::ReductionOp),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
-      in_(in) {
+      in_(in),
+      is_fused_(is_fused) {
   TORCH_CHECK(
       out->getValType().value() == ValType::TensorView ||
       out->getValType().value() == ValType::TensorIndex);
@@ -423,7 +425,8 @@ WelfordOp::WelfordOp(
     Val* init_N,
     Val* in_avg,
     Val* in_var,
-    Val* in_N)
+    Val* in_N,
+    bool is_fused)
     : Expr(passkey, ExprType::WelfordOp),
       out_avg_(out_avg),
       out_var_(out_var),
@@ -433,7 +436,8 @@ WelfordOp::WelfordOp(
       init_N_(init_N),
       in_avg_(in_avg),
       in_var_(in_var),
-      in_N_(in_N) {
+      in_N_(in_N),
+      is_fused_(is_fused) {
   // Check output type
   TORCH_INTERNAL_ASSERT(
       out_avg->getValType().value() == ValType::TensorView ||
@@ -502,7 +506,8 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       init_N_(ir_cloner->clone(src->init_N_)),
       in_avg_(ir_cloner->clone(src->in_avg_)),
       in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
-      in_N_(ir_cloner->clone(src->in_N_)) {}
+      in_N_(ir_cloner->clone(src->in_N_)),
+      is_fused_(src->is_fused_) {}
 
 namespace {
 inline bool sameOptionalVal(Val* a, Val* b) {
@@ -530,7 +535,8 @@ ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
       reduction_op_type_(src->reduction_op_type_),
       init_(ir_cloner->clone(src->init_)),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      is_fused_(src->is_fused_) {}
 
 bool ReductionOp::sameAs(const Statement* other) const {
   if (this == other) {

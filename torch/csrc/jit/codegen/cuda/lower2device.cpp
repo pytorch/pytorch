@@ -265,6 +265,11 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 
+  // Fuse cetain patterns of reductions, such as a grid reduction
+  // followed by a grid broadcast. Only depends on parallelization and
+  // thread predicate map.
+  fuseReductions(fusion_);
+
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
   haloInfo().build(fusion_);

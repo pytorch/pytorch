@@ -20,6 +20,7 @@
 #include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/fused_reduction.h>
 #include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
 #include <nvfuser_resources/grid_sync.h>
@@ -27,6 +28,8 @@
 #include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
+#include <nvfuser_resources/tuple.h>
+#include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
 
@@ -44,8 +47,6 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
-
-  ss << nvfuser_resources::array_cu;
 
 #ifndef __HIP_PLATFORM_HCC__
   ss << nvfuser_resources::fp16_support_cu;
@@ -71,9 +72,12 @@ std::string kernelPreamble() {
 
   // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
+  ss << nvfuser_resources::type_traits_cu;
+  ss << nvfuser_resources::array_cu;
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
   ss << nvfuser_resources::index_utils_cu;
+  ss << nvfuser_resources::tuple_cu;
 
   // Synchronization classes
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
@@ -90,6 +94,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::warp_cu;
+  ss << nvfuser_resources::fused_reduction_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;

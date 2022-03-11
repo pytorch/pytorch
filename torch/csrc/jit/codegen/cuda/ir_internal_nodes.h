@@ -150,7 +150,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
       BinaryOpType reduction_op_type,
       Val* init,
       Val* out,
-      Val* in);
+      Val* in,
+      bool is_fused = false);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
@@ -168,6 +169,10 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
+  bool isFused() const {
+    return is_fused_;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -175,6 +180,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
   Val* const init_ = nullptr;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
+  //! True if using the fused reduction kernel
+  bool is_fused_ = false;
 };
 
 //! Welford Scan operation.
@@ -190,7 +197,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
       Val* init_N,
       Val* in_avg,
       Val* in_var,
-      Val* in_N);
+      Val* in_N,
+      bool is_fused = false);
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
@@ -250,6 +258,10 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
     return !init_N_->isZeroInt();
   }
 
+  bool isFused() const {
+    return is_fused_;
+  }
+
  private:
   Val* const out_avg_;
   Val* const out_var_;
@@ -260,6 +272,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
   Val* const in_avg_;
   Val* const in_var_;
   Val* const in_N_;
+  //! True if using the fused reduction kernel (not implemented yet)
+  bool is_fused_ = false;
 };
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {

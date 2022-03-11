@@ -146,6 +146,21 @@ ParallelTypeBitmap getReductionPredicateForUnusedParallelTypes(
 void ThreadPredicateMap::updateBitSet(const Expr* expr) {
   FUSER_PERF_SCOPE("GpuLower::Lower::ThreadPredicateMap::updateBitSet");
 
+  // If all of the inputs are not updated and all of the outputs have
+  // already mappings, don't do anything
+  if (std::all_of(
+          ir_utils::filterByType<TensorView>(expr->inputs()).begin(),
+          ir_utils::filterByType<TensorView>(expr->inputs()).end(),
+          [this](TensorView* tv) {
+            return updated_tvs_.find(tv) == updated_tvs_.end();
+          }) &&
+      std::all_of(
+          ir_utils::filterByType<TensorView>(expr->outputs()).begin(),
+          ir_utils::filterByType<TensorView>(expr->outputs()).end(),
+          [this](TensorView* tv) { return find(tv) != end(); })) {
+    return;
+  }
+
   // Which predicates were set for the inputs
   ParallelTypeBitmap input_preds;
 
@@ -181,7 +196,8 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
     for (auto id : tv_inp->domain()->domain()) {
       if (id->isThread()) {
         id_ptypes.set(id->getParallelType());
-        if (id->isReduction()) {
+        if (id->isReduction() &&
+            !GpuLower::current()->fusedReductionInfo().isAllreduce(id)) {
           id_reductions.set(id->getParallelType());
         }
         if (id->isBroadcast() &&
@@ -228,9 +244,8 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
 
   // Run through outputs and set bitset predicates
   for (auto* out_tv : ir_utils::filterByType<TensorView>(expr->outputs())) {
-    TORCH_INTERNAL_ASSERT(find(out_tv) == end());
     auto redundant_types = avoidRedundantWrites(out_tv);
-    insert(out_tv, output_preds, redundant_types);
+    update(out_tv, output_preds, redundant_types);
   }
 }
 
@@ -240,12 +255,13 @@ void ThreadPredicateMap::build(Fusion* fusion) {
   // Initialize mapping for input tensors
   for (auto inp : fusion->inputs()) {
     if (auto tv = dynamic_cast<const TensorView*>(inp)) {
-      insert(tv, ParallelTypeBitmap(), ParallelTypeBitmap());
+      update(tv, ParallelTypeBitmap(), ParallelTypeBitmap());
     }
   }
   for (auto expr : fusion->exprs()) {
     updateBitSet(expr);
   }
+  updated_tvs_.clear();
 }
 
 ThreadPredicateMap::const_iterator ThreadPredicateMap::find(
@@ -284,17 +300,31 @@ ParallelTypeBitmap ThreadPredicateMap::getPredicatedParallelTypes(
   return pred_info.limited_types | pred_info.redundant_types;
 }
 
-void ThreadPredicateMap::insert(
+bool ThreadPredicateMap::update(
     const TensorView* tv,
-    const ParallelTypeBitmap& valid_types,
+    const ParallelTypeBitmap& limited_types,
     const ParallelTypeBitmap& redundant_types) {
-  insert(tv, {valid_types, redundant_types});
+  return update(tv, {limited_types, redundant_types});
 }
 
-void ThreadPredicateMap::insert(
+bool ThreadPredicateMap::update(
     const TensorView* tv,
     const PredicateInfo& pred_info) {
-  thread_predicates_.insert({tv, pred_info});
+  auto existing_mapping_it = thread_predicates_.find(tv);
+  if (existing_mapping_it != end()) {
+    PredicateInfo& existing_info = existing_mapping_it->second;
+    if (existing_info == pred_info) {
+      return false;
+    } else {
+      existing_info = pred_info;
+      markAsUpdated(tv);
+      return true;
+    }
+  } else {
+    thread_predicates_.insert({tv, pred_info});
+    markAsUpdated(tv);
+    return true;
+  }
 }
 
 Bool* ThreadPredicateMap::getPredicate(const TensorView* tv) const {
@@ -331,6 +361,10 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
   }
 
   return parallel_broadcast & at(tv).limited_types;
+}
+
+void ThreadPredicateMap::markAsUpdated(const TensorView* tv) {
+  updated_tvs_.insert(tv);
 }
 
 void ThreadPredicateMap::print() const {

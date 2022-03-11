@@ -183,7 +183,8 @@ void OptOutMutator::mutate(ReductionOp* rop) {
   auto container = rop->container();
   auto rop_type = rop->getReductionOpType();
   container->removeExpr(rop);
-  IrBuilder::create<ReductionOp>(container, rop_type, init, out, in);
+  IrBuilder::create<ReductionOp>(
+      container, rop_type, init, out, in, rop->isFused());
 }
 
 namespace {
@@ -232,7 +233,8 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       init_N,
       in_avg,
       in_var,
-      in_N);
+      in_N,
+      wop->isFused());
 }
 
 void OptOutMutator::mutate(BroadcastOp* bop) {
@@ -384,6 +386,9 @@ void OptOutMutator::mutate(kir::GridBroadcast*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::GridWelford*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::AllocateFusedReduction*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 

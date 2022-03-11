@@ -30,6 +30,9 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   void pushBack(Expr*);
 
+  // Insert an expression before the current top-level expression.
+  void insertAtTopLevel(Expr* expr);
+
   void handle(const UnaryOp*) final;
   void handle(const BinaryOp*) final;
   void handle(const TernaryOp*) final;
@@ -47,6 +50,9 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   Val* lowerSrcIndex(Val* val, Val* dst) const;
   Val* lowerDstIndex(Val* dst) const;
+
+  void handleGridReduction(ReductionOp* new_rop);
+  void handleGridWelford(WelfordOp* new_wop);
 
  private:
   std::vector<Expr*> lowered_exprs_;

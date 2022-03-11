@@ -473,6 +473,50 @@ GridWelford::GridWelford(
       "IR type only valid for Kernel container.");
 }
 
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridReduction* grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridWelford* grid_welford)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_welford) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+TensorIndex* AllocateFusedReduction::out() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->reduction_op()->out()->as<kir::TensorIndex>();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
+}
+
+const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->threadPredicate();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->threadPredicate();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser
