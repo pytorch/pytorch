@@ -3269,6 +3269,23 @@ def error_inputs_gradient(op_info, device, **kwargs):
                          error_type=RuntimeError,
                          error_regex='torch.gradient expected each dimension size to be at least')
 
+def error_inputs_masked_select(op_info, device, **kwargs):
+    x = torch.rand((1,), device=device).expand((3,))
+    y = torch.rand((6,), device=device)
+    mask = torch.tensor([True, False, True, True, False, False], device=device)
+
+    yield ErrorInput(SampleInput(y, args=(mask,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(y, args=(mask,), kwargs=dict(out=y)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(mask.clone(), args=(mask,), kwargs=dict(out=mask)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
                                     low=None, high=None,
@@ -10432,7 +10449,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_masked_select),
+           sample_inputs_func=sample_inputs_masked_select,
+           error_inputs_func=error_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
