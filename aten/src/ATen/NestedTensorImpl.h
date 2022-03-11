@@ -74,6 +74,16 @@ inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor
   return nullptr;
 }
 
+inline NestedTensorImpl* get_nested_tensor_impl(
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      is_nested_tensor_impl(tensor),
+      "get_nested_tensor_impl requires a NestedTensor.");
+  return static_cast<NestedTensorImpl*>(
+      tensor.unsafeGetTensorImpl());
+}
+
+
 // TODO: real implementation once we support strides.
 inline bool nested_tensor_impl_is_contiguous(
     const NestedTensorImpl* nt,
