@@ -295,10 +295,12 @@ TracerResult trace_run(const std::string& input_module_path) {
 
   recordCustomClassesFromOpSchemas(root_ops, traced_operators, loaded_classes);
 
-  kdtype_tracer.getCalledKernelTags().withLock(
-      [&](KernelDTypeTracer::kernel_tags_type& kernel_tags) {
-        called_kernel_tags.insert(kernel_tags.begin(), kernel_tags.end());
-      });
+  {
+    std::lock_guard<std::mutex> guard(KernelDTypeTracer::getMutex());
+    called_kernel_tags.insert(
+        kdtype_tracer.getCalledKernelTags().begin(),
+        kdtype_tracer.getCalledKernelTags().end());
+  }
 
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
