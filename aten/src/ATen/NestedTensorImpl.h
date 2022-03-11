@@ -74,5 +74,12 @@ inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor
   return nullptr;
 }
 
+// TODO: real implementation once we support strides.
+inline bool nested_tensor_impl_is_contiguous(
+    const NestedTensorImpl* nt,
+    at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
+  return memory_format == MemoryFormat::Contiguous;
+}
+
 } // namespace native
 } // namespace at
