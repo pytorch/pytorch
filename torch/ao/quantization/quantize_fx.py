@@ -680,6 +680,7 @@ def convert_fx(
                 ...,
               ],
             }
+
          * `backend_config_dict`: A configuration for the backend which describes how
             operators should be quantized in the backend, this includes quantization
             mode support (static/dynamic/weight_only), dtype support (quint8/qint8 etc.),
