@@ -68,9 +68,10 @@ class PythonTensor(torch.Tensor):
     __torch_function__ = _disabled_torch_function_impl
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        if func in CURRENT_DECOMPOSITION_TABLE:
-            return CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
+    def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
+        func = func_overload.overloadpacket
+        if func_overload in CURRENT_DECOMPOSITION_TABLE:
+            return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
         # Commenting this out for now since it causes some spurious failures (such as error checking)
         # if func == aten._local_scalar_dense:
         #     raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
@@ -90,7 +91,7 @@ class PythonTensor(torch.Tensor):
             proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
         with no_dispatch():
-            real_out = func(*args, **kwargs)
+            real_out = func_overload(*args, **kwargs)
 
         def wrap_with_proxy(e, proxy):
             # Some ops (like native_batch_norm_backward) return undefined tensors that get
