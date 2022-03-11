@@ -345,7 +345,6 @@ def match_differentiability_info(
                     #
                     # (2) may seem too strict, but currently the only ops that satisfy (1) also satisfy (2)
                     # If there is a need, we can relax (2) to allow any op that has an in-place variant
-                    # We can also avoid hard coding self_t, if there is a need, but that is more work.
                     is_single_method_on_self_t = False
                     match = re.fullmatch(r'self_t.([\w]*)\((.*)\)', formula)
                     if match:
