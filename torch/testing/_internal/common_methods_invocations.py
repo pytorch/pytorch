@@ -13863,7 +13863,8 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_inputs_full_like,
            supports_autograd=False,
-           override_lambda=lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
+           override_lambda=(lambda input, fill_value, out=None, dtype=None, layout=torch.strided,
+                            device=None, requires_grad=False: -1),
            skips=(
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
