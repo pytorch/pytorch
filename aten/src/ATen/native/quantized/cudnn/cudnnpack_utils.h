@@ -25,15 +25,15 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
       int64_t groups,
       bool transpose,
       c10::QScheme q_scheme)
-      : orig_weight(std::move(orig_weight)),
-        bias(std::move(bias)),
+      : orig_weight_(std::move(orig_weight)),
+        bias_(std::move(bias)),
         stride_(std::move(stride)),
         padding_(std::move(padding)),
         output_padding_(std::move(output_padding)),
         dilation_(std::move(dilation)),
         groups_(groups),
         transpose_(transpose),
-        q_scheme(q_scheme) {}
+        q_scheme_(q_scheme) {}
 
   at::Tensor apply(
       const at::Tensor& input,
@@ -96,15 +96,15 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   }
 
  private:
-  at::Tensor orig_weight;
-  c10::optional<at::Tensor> bias;
+  at::Tensor orig_weight_;
+  c10::optional<at::Tensor> bias_;
   torch::List<int64_t> stride_;
   torch::List<int64_t> padding_;
   torch::List<int64_t> output_padding_;
   torch::List<int64_t> dilation_;
   int64_t groups_;
   bool transpose_;
-  c10::QScheme q_scheme;
+  c10::QScheme q_scheme_;
 
   template <bool ReluFused>
   at::Tensor apply_impl(
