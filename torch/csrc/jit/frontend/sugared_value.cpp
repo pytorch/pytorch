@@ -221,6 +221,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     return SpecialFormValue::create(prim::tolist);
   }
 
+  // Handle calling __getitem__() directly on a Tensor, it needs special
+  // handling because desired method name (`__getitem__`) doesn't match `aten`
+  // operator name of `aten::index`.
+  if (value_->type()->isSubtypeOf(*TensorType::get()) &&
+      field == "__getitem__") {
+    return SpecialFormValue::create(aten::index);
+  }
+
   ErrorReport report(loc);
   report << "'" << value_->type()->repr_str()
          << "' object has no attribute or method '" << field << "'.";
