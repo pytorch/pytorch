@@ -2,6 +2,7 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
+#include <fmt/format.h>
 
 namespace c10d {
 
@@ -179,5 +180,9 @@ ProcessGroup::ProcessGroup(int rank, int size)
 }
 
 ProcessGroup::~ProcessGroup() {}
+
+void ProcessGroup::init() {
+  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
+}
 
 } // namespace c10d

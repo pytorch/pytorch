@@ -21,9 +21,9 @@ from typing import Iterator
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 @contextlib.contextmanager
 def enable_python_mode(cls) -> Iterator[None]:
-    if not hasattr(cls, '__torch_dispatch__'):
+    if cls.__torch_dispatch__ is torch.Tensor.__torch_dispatch__:
         raise ValueError('The class passed to enable_python_mode '
-                         'must have a __torch_dispatch__ classmethod')
+                         'must have a non-default __torch_dispatch__ classmethod')
     if not isinstance(cls, type) or not issubclass(cls, (torch.Tensor,)):
         raise ValueError('The argument passed to enable_python_mode '
                          'must be the type of a Tensor subclass')
