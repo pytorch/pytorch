@@ -17,14 +17,6 @@ namespace {
 namespace torch {
 namespace lazy {
 
-const Shape& GetShapeFromTsOutput(const Output& output) {
-  return output.node->shape(output.index);
-}
-
-const Shape& GetShapeFromTsValue(const Value& value) {
-  return value.node->shape(value.index);
-}
-
 void TsNodeSetShapeDeferred(
     NodePtr node, const std::function<Shape()>& shape_fn) {
   if (auto tsnode = std::dynamic_pointer_cast<TsNode>(node)) {
