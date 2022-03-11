@@ -1267,7 +1267,16 @@ class _NnapiSerializer(object):
         assert node.outputsSize() == 1
 
         in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
-        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        out_oper = in_oper
+        if opcode == NNAPI_OperationCode.LOGISTIC:
+            # NNAPI docs: For ANEURALNETWORKS_TENSOR_QUANT8_ASYMM, the scale
+            # must be 1.f / 256 and the zeroPoint must be 0.
+            # https://fburl.com/h52stoog
+            if in_oper.op_type == NNAPI_OperandCode.TENSOR_QUANT8_ASYMM:
+                out_oper = in_oper._replace(zero_point=0, scale=1.0 / 256)
+
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         for idx, dim in enumerate(in_oper.shape):
             if dim == 0:

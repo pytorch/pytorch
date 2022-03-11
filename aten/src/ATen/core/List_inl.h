@@ -346,5 +346,3 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 }
-
-#include <ATen/core/jit_type.h>

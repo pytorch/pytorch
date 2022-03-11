@@ -4,7 +4,7 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "input"
-    output: "1"
+    output: "onnx::Softmax_1"
     name: "Transpose_0"
     op_type: "Transpose"
     attribute {
@@ -15,8 +15,8 @@ graph {
     }
   }
   node {
-    input: "1"
-    output: "2"
+    input: "onnx::Softmax_1"
+    output: "onnx::Transpose_2"
     name: "Softmax_1"
     op_type: "Softmax"
     attribute {
@@ -26,7 +26,7 @@ graph {
     }
   }
   node {
-    input: "2"
+    input: "onnx::Transpose_2"
     output: "3"
     name: "Transpose_2"
     op_type: "Transpose"
@@ -37,7 +37,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "input"
     type {

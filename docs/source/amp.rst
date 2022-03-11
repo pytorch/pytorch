@@ -4,6 +4,11 @@
 Automatic Mixed Precision package - torch.cuda.amp
 ==================================================
 
+.. Both modules below are missing doc entry. Adding them here for now.
+.. This does not add anything to the rendered page
+.. py:module:: torch.cpu
+.. py:module:: torch.cpu.amp
+
 .. automodule:: torch.cuda.amp
 .. currentmodule:: torch.cuda.amp
 
