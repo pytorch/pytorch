@@ -1,5 +1,4 @@
 #include <exception>
-using namespace std;
 
 #ifndef MULTIPY_EXCEPTION_H
 #define MULTIPY_INTERNAL_ASSERT_WITH_MESSAGE(condition, message)                 \
