@@ -119,7 +119,7 @@ void validateBlock(
           for (size_t i = 0; i < node->outputs().size(); ++i) {
             node->output(i)->replaceAllUsesWith(new_node->output(i));
           }
-          new_node->s_(Symbol::fromQualString("attr::operator_name"), "expand");
+          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
         }
       }
 #endif

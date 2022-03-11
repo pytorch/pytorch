@@ -1179,9 +1179,9 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 
 # Generate an ONNX ATen op node.
-def _aten_op(g, operator_name, *args, overload_name="", **kwargs):
+def _aten_op(g, operator, *args, overload_name="", **kwargs):
     kwargs["aten"] = True
-    return g.op("ATen", *args, operator_name_s=operator_name, overload_name_s=overload_name, **kwargs)
+    return g.op("ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs)
 
 
 # This helper function can create either constant tensor or constant scalar.

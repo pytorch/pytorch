@@ -8,7 +8,7 @@ graph {
     output: "1"
     op_type: "ATen"
     attribute {
-      name: "operator_name"
+      name: "operator"
       s: "add"
       type: STRING
     }

@@ -18,7 +18,7 @@ static inline Tensor pow(const Tensor & self, Scalar exponent);
 ```
 
 Now create a Caffe2 operator to call this op. The name of the operator is always `"ATen"`,
-and there is always a string attribute `operator_name` that defines which ATen function to call:
+and there is always a string attribute `operator` that defines which ATen function to call:
 
 
 ```
@@ -31,7 +31,7 @@ op = core.CreateOperator(
     "ATen",
     ["MyInput"],
     ["MyOutput"],
-    operator_name="pow", exponent=2.0)
+    operator="pow", exponent=2.0)
 
 ```
 
@@ -57,7 +57,7 @@ op = core.CreateOperator(
     "ATen",
     [],
     ["MyOutput"],
-    operator_name="ones", type="Float", size={2,4})
+    operator="ones", type="Float", size={2,4})
 ```
 
 Generally ATen operators are polymorphic across input types, and work on both the CPU and CUDA.

@@ -169,9 +169,8 @@ private:
     math::Set(1, v, dst->template mutable_data<T>(), &context_);
   }
   int findImplementation(const OperatorDef& operator_def) {
-    CAFFE_ENFORCE(HasArgument("operator_name"));
-    std::string op =
-        OperatorBase::GetSingleArgument<std::string>("operator_name", "");
+    CAFFE_ENFORCE(HasArgument("operator"));
+    std::string op = OperatorBase::GetSingleArgument<std::string>("operator", "");
     // construct descriptor string ([DESCRIPTORS]) given the attributes
     // and inputs of this operator_def, and look up the implementation key
     // for this variant
@@ -180,8 +179,7 @@ private:
     std::vector<std::string> attrs;
     for (const auto i : c10::irange(operator_def.arg_size())) {
       auto & attr = operator_def.arg(i);
-      if (attr.name() == "operator_name" || attr.name() == "type" ||
-          attr.name() == "overload_name") {
+      if (attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name") {
         continue;
       }
       attrs.push_back(attr.name());

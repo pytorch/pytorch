@@ -318,7 +318,6 @@ namespace c10 {
   _(attr, warn_id)                   \
   _(attr, allowzero)                 \
   _(attr, seen_none)                 \
-  _(attr, operator_name)             \
   _(attr, overload_name)
 
 enum class _keys : unique_t {

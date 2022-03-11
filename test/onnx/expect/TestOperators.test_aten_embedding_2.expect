@@ -13,7 +13,7 @@ graph {
       type: STRING
     }
     attribute {
-      name: "operator_name"
+      name: "operator"
       s: "embedding"
       type: STRING
     }
