@@ -5,7 +5,9 @@
 namespace at { namespace native {
 
 cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
-  if (dtype == at::kFloat) {
+  if (dtype == c10::kQInt8) {
+    return CUDNN_DATA_INT8;
+  } else if (dtype == at::kFloat) {
     return CUDNN_DATA_FLOAT;
   } else if (dtype == at::kDouble) {
     return CUDNN_DATA_DOUBLE;
@@ -29,13 +31,6 @@ cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
 }
 
 cudnnDataType_t getCudnnDataType(const at::Tensor& tensor) {
-  if (tensor.is_quantized()) {
-    if (tensor.dtype() == c10::kQInt8) {
-      return CUDNN_DATA_INT8;
-    } else {
-      TORCH_CHECK(false, "Error in getCudnnDataType; quantized datatype not yet supported: ", tensor.dtype());
-    }
-  }
   return getCudnnDataTypeFromScalarType(tensor.scalar_type());
 }
 
