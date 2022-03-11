@@ -1,4 +1,3 @@
-#include "c10/util/Synchronized.h"
 #include <c10/macros/Macros.h>
 #include <c10/util/Synchronized.h>
 #include <array>
@@ -207,16 +206,13 @@ class RWSafeLeftRightWrapper final {
 
   template <typename F>
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
-    return data_.withLock([&readFunc](T const& data) {
-      return readFunc(data);
-    });
+    return data_.withLock(
+        [&readFunc](T const& data) { return readFunc(data); });
   }
 
   template <typename F>
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
-    return data_.withLock([&writeFunc](T& data) {
-      return writeFunc(data);
-    });
+    return data_.withLock([&writeFunc](T& data) { return writeFunc(data); });
   }
 
  private:
