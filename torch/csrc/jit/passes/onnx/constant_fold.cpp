@@ -458,7 +458,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       for (const auto& axis : node->is(attr::axes)) {
         axes.emplace_back(axis < 0 ? axis + rank : axis);
       }
-      std::sort(axes.begin(), axes.end(), std::greater<int64_t>());
+      std::sort(axes.begin(), axes.end(), std::greater<>());
     }
 
     bool keepdims =
