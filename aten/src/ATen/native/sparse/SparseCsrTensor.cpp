@@ -1,14 +1,34 @@
 // Basic functions on sparse tensors
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/InitialTensorOptions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/col_indices_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/crow_indices_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/resize_native.h>
+#include <ATen/ops/sparse_csr_tensor_native.h>
+#include <ATen/ops/values_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -336,6 +356,36 @@ SparseCsrTensor clone_sparse_csr(
                                                options.layout_opt(),
                                                options.device_opt(),
                                                options.pinned_memory_opt());
+}
+
+Tensor empty_like_sparse_csr(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_memory_format(optional_memory_format);
+
+  if (options.layout() == kSparseCsr) {
+    auto result = at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        dtype,
+        self.layout(),
+        device);
+    return result;
+  } else if (options.layout() == kStrided) {
+    return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+  } else {
+    TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+  }
 }
 
 } // namespace native

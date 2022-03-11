@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyNativeDeviceTypes,
-    skipCUDAIfRocm, skipIf, ops, OpDTypes)
+    skipCUDAIfRocm, skipIf, ops, OpDTypes, skipMeta)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, integral_types_and, get_all_dtypes, get_all_int_dtypes, get_all_math_dtypes,
@@ -129,7 +129,7 @@ class TestBinaryUfuncs(TestCase):
 
         for kwargs, tensors in ((lhs_kwargs, lhs_tensors), (rhs_kwargs, rhs_tensors)):
             for shape in shapes:
-                tensors.append(make_tensor(shape, device, dtype, **kwargs))
+                tensors.append(make_tensor(shape, dtype=dtype, device=device, **kwargs))
 
         return lhs_tensors, rhs_tensors
 
@@ -433,8 +433,8 @@ class TestBinaryUfuncs(TestCase):
     def test_non_contig(self, device, dtype, op):
         shapes = ((5, 7), (1024,))
         for shape in shapes:
-            lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
-            rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
+            lhs = make_tensor(shape, dtype=dtype, device=device, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape, dtype=dtype, device=device, **op.rhs_make_tensor_kwargs)
 
             lhs_non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
             lhs_non_contig.copy_(lhs)
@@ -455,8 +455,8 @@ class TestBinaryUfuncs(TestCase):
     @ops(binary_ufuncs)
     def test_non_contig_index(self, device, dtype, op):
         shape = (2, 2, 1, 2)
-        lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
-        rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
+        lhs = make_tensor(shape, dtype=dtype, device=device, **op.lhs_make_tensor_kwargs)
+        rhs = make_tensor(shape, dtype=dtype, device=device, **op.rhs_make_tensor_kwargs)
 
         lhs_non_contig = lhs[:, 1, ...]
         lhs = lhs_non_contig.contiguous()
@@ -478,8 +478,8 @@ class TestBinaryUfuncs(TestCase):
     def test_non_contig_expand(self, device, dtype, op):
         shapes = [(1, 3), (1, 7), (5, 7)]
         for shape in shapes:
-            lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
-            rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
+            lhs = make_tensor(shape, dtype=dtype, device=device, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape, dtype=dtype, device=device, **op.rhs_make_tensor_kwargs)
 
             lhs_non_contig = lhs.clone().expand(3, -1, -1)
             rhs_non_contig = rhs.clone().expand(3, -1, -1)
@@ -498,8 +498,8 @@ class TestBinaryUfuncs(TestCase):
     @ops(binary_ufuncs)
     def test_contig_size1(self, device, dtype, op):
         shape = (5, 100)
-        lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
-        rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
+        lhs = make_tensor(shape, dtype=dtype, device=device, **op.lhs_make_tensor_kwargs)
+        rhs = make_tensor(shape, dtype=dtype, device=device, **op.rhs_make_tensor_kwargs)
 
         lhs = lhs[:1, :50]
         lhs_alt = torch.empty(lhs.size(), device=device, dtype=dtype)
@@ -522,8 +522,8 @@ class TestBinaryUfuncs(TestCase):
     @ops(binary_ufuncs)
     def test_contig_size1_large_dim(self, device, dtype, op):
         shape = (5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4)
-        lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
-        rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
+        lhs = make_tensor(shape, dtype=dtype, device=device, **op.lhs_make_tensor_kwargs)
+        rhs = make_tensor(shape, dtype=dtype, device=device, **op.rhs_make_tensor_kwargs)
 
         lhs = lhs[:1, :, :, :, :, :, :, :, :, :, :, :]
         lhs_alt = torch.empty(lhs.size(), device=device, dtype=dtype)
@@ -546,8 +546,8 @@ class TestBinaryUfuncs(TestCase):
     @ops(binary_ufuncs)
     def test_batch_vs_slicing(self, device, dtype, op):
         shape = (32, 512)
-        lhs = make_tensor(shape, device, dtype, **op.lhs_make_tensor_kwargs)
-        rhs = make_tensor(shape, device, dtype, **op.rhs_make_tensor_kwargs)
+        lhs = make_tensor(shape, dtype=dtype, device=device, **op.lhs_make_tensor_kwargs)
+        rhs = make_tensor(shape, dtype=dtype, device=device, **op.rhs_make_tensor_kwargs)
 
         expected = op(lhs, rhs)
 
@@ -940,8 +940,8 @@ class TestBinaryUfuncs(TestCase):
             info = torch.iinfo(dtype)
             low, high = info.min, info.max
 
-        a = make_tensor((100,), device, dtype, low=low, high=high)
-        b = make_tensor((100,), device, dtype, low=low, high=high)
+        a = make_tensor((100,), dtype=dtype, device=device, low=low, high=high)
+        b = make_tensor((100,), dtype=dtype, device=device, low=low, high=high)
 
         # Avoid division by zero so we can test (a / b) * b == a
         if dtype.is_floating_point:
@@ -1040,8 +1040,8 @@ class TestBinaryUfuncs(TestCase):
         low, high = info.min, info.max
 
         # Compare division of random values against NumPy
-        a = make_tensor((4096,), device, dtype, low=low, high=high)
-        b = make_tensor((4096,), device, dtype, low=low, high=high)
+        a = make_tensor((4096,), dtype=dtype, device=device, low=low, high=high)
+        b = make_tensor((4096,), dtype=dtype, device=device, low=low, high=high)
 
         # Avoid division by zero which raises for integers and, for floats,
         # NumPy 1.20 changed floor_divide to follow IEEE rules for inf/nan
@@ -1488,8 +1488,8 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(*(get_all_dtypes(include_bool=False, include_bfloat16=False)))
     def test_complex_scalar_pow_tensor(self, device, dtype):
         complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
-        first_exp = make_tensor((100,), device, dtype, low=-2, high=2)
-        second_exp = make_tensor((100,), device, dtype, low=-2, high=2, noncontiguous=True)
+        first_exp = make_tensor((100,), dtype=dtype, device=device, low=-2, high=2)
+        second_exp = make_tensor((100,), dtype=dtype, device=device, low=-2, high=2, noncontiguous=True)
         first_exp[0] = first_exp[10] = first_exp[20] = 0
         second_exp[0] = second_exp[10] = second_exp[20] = 0
         for base in complexes:
@@ -1497,6 +1497,7 @@ class TestBinaryUfuncs(TestCase):
             self._test_pow(base, second_exp)
 
     @onlyNativeDeviceTypes
+    @skipMeta
     def test_pow_scalar_type_promotion(self, device):
         # Test against a scalar and non-scalar input
         inputs = [17, [17]]
@@ -2047,16 +2048,27 @@ class TestBinaryUfuncs(TestCase):
     @onlyCPU
     @dtypes(*get_all_dtypes())
     def test_sub(self, device, dtype):
-        m1 = torch.tensor([2.34, 4.44], dtype=dtype, device=device)
-        m2 = torch.tensor([1.23, 2.33], dtype=dtype, device=device)
+        if dtype in get_all_int_dtypes():
+            # Before Python 3.10, floats were implicitly converted to ints, but with
+            #   DeprecationWarning: an integer is required (got type float).
+            #   Implicit conversion to integers using __int__ is deprecated,
+            #   and may be removed in a future version of Python.
+            # Since Python 3.10, that attempt gives an error.
+            m1 = torch.tensor([2, 4], dtype=dtype, device=device)
+            m2 = torch.tensor([1, 2], dtype=dtype, device=device)
+            diff = torch.tensor([1, 2], dtype=dtype)
+        else:
+            m1 = torch.tensor([2.34, 4.44], dtype=dtype, device=device)
+            m2 = torch.tensor([1.23, 2.33], dtype=dtype, device=device)
+            diff = torch.tensor([1.11, 2.11], dtype=dtype)
 
         if dtype == torch.bool:
             self.assertRaises(RuntimeError, lambda: m1 - m2)
         elif (dtype == torch.bfloat16 or dtype == torch.half):
             # bfloat16 has a lower precision so we have to have a separate check for it
-            self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype), atol=0.01, rtol=0)
+            self.assertEqual(m1 - m2, diff, atol=0.01, rtol=0)
         else:
-            self.assertEqual(m1 - m2, torch.tensor([1.11, 2.11], dtype=dtype))
+            self.assertEqual(m1 - m2, diff)
 
     # TODO: what is this test testing?
     @onlyCPU
@@ -2613,8 +2625,8 @@ class TestBinaryUfuncs(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Integer overflows are not allowed under ASAN")
     @dtypes(*get_all_dtypes())
     def test_muldiv_scalar(self, device, dtype):
-        x = make_tensor((10, 3), device, dtype, low=None, high=None)
-        s = make_tensor((1,), 'cpu', dtype, low=None, high=None).item()
+        x = make_tensor((10, 3), dtype=dtype, device=device, low=None, high=None)
+        s = make_tensor((1,), dtype=dtype, device="cpu", low=None, high=None).item()
         y = torch.full_like(x, s)
         self.assertEqual(x * s, x * y)
         self.assertEqual(s * x, y * x)
@@ -3393,6 +3405,7 @@ class TestBinaryUfuncs(TestCase):
                 TypeError, 'received an invalid combination of arguments'):
             actual = torch.cumulative_trapezoid(torch.randn((3, 3)), x=torch.randn((3, 3)), dx=3)
 
+    @skipMeta
     @dtypes(torch.double)
     def test_pow_scalar_overloads_mem_overlap(self, device, dtype):
         sz = 3
@@ -3416,11 +3429,11 @@ class TestBinaryUfuncs(TestCase):
         exp_dtype = dtypes[1]
         out_dtype = torch.complex128 if base_dtype.is_complex or exp_dtype.is_complex else torch.float64
 
-        base = make_tensor((30,), device, base_dtype, low=1, high=100)
+        base = make_tensor((30,), dtype=base_dtype, device=device, low=1, high=100)
         # Complex and real results do not agree between PyTorch and NumPy when computing negative and zero power of 0
         # Related: https://github.com/pytorch/pytorch/issues/48000
         # base[0] = base[3] = base[7] = 0
-        exp = make_tensor((30,), device, exp_dtype, low=-2, high=2)
+        exp = make_tensor((30,), dtype=exp_dtype, device=device, low=-2, high=2)
         exp[0] = exp[4] = exp[6] = 0
 
         expected = torch.from_numpy(np.float_power(to_np(base), to_np(exp)))
@@ -3537,13 +3550,13 @@ class TestBinaryUfuncs(TestCase):
             out_variant_helper(torch_fn, val, z)
 
         # Tensor-Tensor Test (tensor of same and different shape)
-        x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
-        y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
-        z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
+        x = make_tensor((3, 2, 4, 5), dtype=x_dtype, device=device, low=0.5, high=1000)
+        y = make_tensor((3, 2, 4, 5), dtype=y_dtype, device=device, low=0.5, high=1000)
+        z = make_tensor((4, 5), dtype=y_dtype, device=device, low=0.5, high=1000)
 
-        x_1p = make_tensor((3, 2, 4, 5), device, x_dtype, low=-0.5, high=1000)
-        y_1p = make_tensor((3, 2, 4, 5), device, y_dtype, low=-0.5, high=1000)
-        z_1p = make_tensor((4, 5), device, y_dtype, low=-0.5, high=1000)
+        x_1p = make_tensor((3, 2, 4, 5), dtype=x_dtype, device=device, low=-0.5, high=1000)
+        y_1p = make_tensor((3, 2, 4, 5), dtype=y_dtype, device=device, low=-0.5, high=1000)
+        z_1p = make_tensor((4, 5), dtype=y_dtype, device=device, low=-0.5, high=1000)
 
         xlogy_fns = torch.xlogy, scipy.special.xlogy
         xlog1py_fns = torch.special.xlog1py, scipy.special.xlog1py
@@ -3605,13 +3618,13 @@ class TestBinaryUfuncs(TestCase):
         x_dtype, y_dtype = torch.bfloat16, torch.bfloat16
 
         # Tensor-Tensor Test (tensor of same and different shape)
-        x = make_tensor((3, 2, 4, 5), device, x_dtype, low=0.5, high=1000)
-        y = make_tensor((3, 2, 4, 5), device, y_dtype, low=0.5, high=1000)
-        z = make_tensor((4, 5), device, y_dtype, low=0.5, high=1000)
+        x = make_tensor((3, 2, 4, 5), dtype=x_dtype, device=device, low=0.5, high=1000)
+        y = make_tensor((3, 2, 4, 5), dtype=y_dtype, device=device, low=0.5, high=1000)
+        z = make_tensor((4, 5), dtype=y_dtype, device=device, low=0.5, high=1000)
 
-        x_1p = make_tensor((3, 2, 4, 5), device, x_dtype, low=-0.8, high=1000)
-        y_1p = make_tensor((3, 2, 4, 5), device, y_dtype, low=-0.8, high=1000)
-        z_1p = make_tensor((4, 5), device, y_dtype, low=-0.8, high=1000)
+        x_1p = make_tensor((3, 2, 4, 5), dtype=x_dtype, device=device, low=-0.8, high=1000)
+        y_1p = make_tensor((3, 2, 4, 5), dtype=y_dtype, device=device, low=-0.8, high=1000)
+        z_1p = make_tensor((4, 5), dtype=y_dtype, device=device, low=-0.8, high=1000)
 
         xlogy_fns = torch.xlogy, scipy.special.xlogy
         xlog1py_fns = torch.special.xlog1py, scipy.special.xlog1py
@@ -3661,37 +3674,37 @@ class TestBinaryUfuncs(TestCase):
             self.assertEqual(expected, actual, rtol=rtol, atol=atol, exact_dtype=False)
 
         # x tensor - q tensor same size
-        x = make_tensor((2, 3, 4), device, x_dtype)
-        q = make_tensor((2, 3, 4), device, q_dtype)
+        x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
+        q = make_tensor((2, 3, 4), dtype=q_dtype, device=device)
         test_helper(x, q)
 
         # x tensor - q tensor broadcast lhs
-        x = make_tensor((2, 1, 4), device, x_dtype)
-        q = make_tensor((2, 3, 4), device, q_dtype)
+        x = make_tensor((2, 1, 4), dtype=x_dtype, device=device)
+        q = make_tensor((2, 3, 4), dtype=q_dtype, device=device)
         test_helper(x, q)
 
         # x tensor - q tensor broadcast rhs
-        x = make_tensor((2, 3, 4), device, x_dtype)
-        q = make_tensor((2, 1, 4), device, q_dtype)
+        x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
+        q = make_tensor((2, 1, 4), dtype=q_dtype, device=device)
         test_helper(x, q)
 
         # x tensor - q tensor broadcast all
-        x = make_tensor((2, 3, 1), device, x_dtype)
-        q = make_tensor((2, 1, 4), device, q_dtype)
+        x = make_tensor((2, 3, 1), dtype=x_dtype, device=device)
+        q = make_tensor((2, 1, 4), dtype=q_dtype, device=device)
         test_helper(x, q)
 
         # x scalar - q tensor
         for x in np.linspace(-5, 5, num=10).tolist():
             if not q_dtype.is_floating_point:
                 q_dtype = torch.get_default_dtype()
-            q = make_tensor((2, 3, 4), device, q_dtype)
+            q = make_tensor((2, 3, 4), dtype=q_dtype, device=device)
             test_helper(x, q)
 
         # x tensor - q scalar
         for q in np.linspace(-5, 5, num=10).tolist():
             if not x_dtype.is_floating_point:
                 x_dtype = torch.get_default_dtype()
-            x = make_tensor((2, 3, 4), device, x_dtype)
+            x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
 

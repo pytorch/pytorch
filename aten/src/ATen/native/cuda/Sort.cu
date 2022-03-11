@@ -251,8 +251,8 @@ __global__ void fill_reverse_indices_kernel(
 
 template<typename scalar_t>
 inline void segmented_sort_pairs_by_full_sort(
-  int64_t nsegments, int64_t nsort, int64_t n, bool descending, const TensorBase &indices,
-  const scalar_t *self_ptr, scalar_t *values_ptr, int64_t *indices_ptr
+  const int64_t nsegments, const int64_t nsort, const int64_t n, const bool descending,
+  const scalar_t *const self_ptr, scalar_t *const values_ptr, int64_t *const indices_ptr
 ) {
   int64_t segment_bits = std::max<int64_t>(1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
@@ -325,14 +325,14 @@ void launch_stable_sort_kernel(
   TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
   int64_t *indices_ptr = indices.data_ptr<int64_t>();
 
-#if defined(USE_ROCM)
-  constexpr bool is_rocm = true;
+#if (defined(USE_ROCM) && ROCM_VERSION < 40500)
+  constexpr bool is_rocm_bf16_sort_unsupported = true;
 #else
-  constexpr bool is_rocm = false;
+  constexpr bool is_rocm_bf16_sort_unsupported = false;
 #endif
 
   AT_DISPATCH_ALL_TYPES_AND3(kBool, kHalf, kBFloat16, self.scalar_type(), "sort", [&]{
-    c10::guts::if_constexpr<!(is_rocm && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
+    c10::guts::if_constexpr<!(is_rocm_bf16_sort_unsupported && std::is_same<scalar_t, c10::BFloat16>::value)>([&](auto _){
       const scalar_t *self_ptr = self.data_ptr<scalar_t>();
       scalar_t *values_ptr = values.data_ptr<scalar_t>();
       int64_t remaining = _(numel);
@@ -342,7 +342,7 @@ void launch_stable_sort_kernel(
 
         if (nsegments < 128) {
           segmented_sort_pairs_by_full_sort(nsegments, nsort, n, descending,
-            indices, self_ptr, values_ptr, indices_ptr);
+            self_ptr, values_ptr, indices_ptr);
         } else {
           segmented_sort_pairs(nsegments, nsort, n, descending,
                                self_ptr, values_ptr, indices_ptr);
@@ -353,7 +353,7 @@ void launch_stable_sort_kernel(
         values_ptr += n;
         indices_ptr += n;
       }
-    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm"); });
+    }, [&](auto _){ TORCH_CHECK(_(false), "BFloat16 is not supported on ROCm < 4.5"); });
   });
 }
 

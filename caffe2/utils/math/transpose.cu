@@ -21,7 +21,6 @@ constexpr int kBlockRows = 8;
 // Reference https://devblogs.nvidia.com/efficient-matrix-transpose-cuda-cc/
 template <typename TIndex, typename TData>
 __global__ void BatchTranspose2DCUDAKernel(
-    const TIndex N,
     const TIndex H,
     const TIndex W,
     const TIndex dh,
@@ -67,7 +66,7 @@ void BatchTranspose2DCUDAImpl(
   const TIndex dw = DivUp<TIndex>(W, kTileDim);
   BatchTranspose2DCUDAKernel<TIndex, TData>
       <<<N * dh * dw, dim3(kTileDim, kBlockRows), 0, context->cuda_stream()>>>(
-          N, H, W, dh, dw, X, Y);
+          H, W, dh, dw, X, Y);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -106,7 +105,7 @@ void BatchTranspose2DCUDAImpl(
           <<<N * dh * dw,                                          \
              dim3(kTileDim, kBlockRows),                           \
              0,                                                    \
-             context->cuda_stream()>>>(N, H, W, dh, dw, X, Y);     \
+             context->cuda_stream()>>>(H, W, dh, dw, X, Y);        \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                              \
     }                                                              \
   }
