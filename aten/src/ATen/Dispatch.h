@@ -20,8 +20,8 @@ namespace at {
  * included in this file when code-gen is ready.
  */
 inline constexpr bool should_include_kernel_dtype(
-  const char *kernel_tag_str,
-  at::ScalarType scalar_type
+  const char* /*kernel_tag_str*/,
+  at::ScalarType /*scalar_type*/
 ) {
   return true;
 }

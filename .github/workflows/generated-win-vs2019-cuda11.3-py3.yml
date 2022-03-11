@@ -13,6 +13,7 @@ on:
       - 'ciflow/win/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -83,6 +84,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -95,9 +97,14 @@ jobs:
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         shell: bash
         env:
@@ -135,7 +142,7 @@ jobs:
           rm -rf ./*
   test_force_on_cpu_1_1:
     name: test (force_on_cpu, 1, 1, windows.4xlarge)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cuda11.3-py3-test
       SHARD_NUMBER: 1
@@ -160,6 +167,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -197,8 +205,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 270 minutes
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -258,8 +266,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -283,7 +292,7 @@ jobs:
           rm -rf ./*
   test_default_1_2:
     name: test (default, 1, 2, windows.8xlarge.nvidia.gpu)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cuda11.3-py3-test
       SHARD_NUMBER: 1
@@ -308,6 +317,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -353,8 +363,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 270 minutes
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -414,8 +424,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
@@ -439,7 +450,7 @@ jobs:
           rm -rf ./*
   test_default_2_2:
     name: test (default, 2, 2, windows.8xlarge.nvidia.gpu)
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       JOB_BASE_NAME: win-vs2019-cuda11.3-py3-test
       SHARD_NUMBER: 2
@@ -464,6 +475,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -509,8 +521,8 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after 270 minutes
+        timeout-minutes: 270
         run: |
             .jenkins/pytorch/win-test.sh
       - name: Zip JSONs for upload
@@ -570,8 +582,9 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Upload test statistics
         if: always()
         env:
