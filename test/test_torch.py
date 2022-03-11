@@ -5315,6 +5315,8 @@ else:
 
         def make_tensor_wrapper(shape, dtype):
             if dtype is not torch.complex32:
+                # Make tensor does not support generating
+                # complex32 tensor
                 return make_tensor(shape, device=device, dtype=dtype)
             return torch.randn(shape, device=device, dtype=dtype)
 
