@@ -1,6 +1,7 @@
 #include <c10/util/Synchronized.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <thread>
 
 namespace {
@@ -27,12 +28,12 @@ TEST(Synchronized, TestMultiThreadedExecution) {
   };
 
   std::array<std::thread, 10> threads;
-  for (int i = 0; i < threads.size(); ++i) {
-    threads[i] = std::thread(thread_cb);
+  for (auto& t : threads) {
+    t = std::thread(thread_cb);
   }
 
-  for (int i = 0; i < threads.size(); ++i) {
-    threads[i].join();
+  for (auto& t : threads) {
+    t.join();
   }
 
   iv.withLock([kMaxValue](int& iv) { EXPECT_EQ(iv, kMaxValue * 10); });
