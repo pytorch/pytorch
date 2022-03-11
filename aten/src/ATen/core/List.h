@@ -475,4 +475,4 @@ namespace torch {
   template<class T> using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>
+#include <ATen/core/List_inl.h>  // IWYU pragma: keep

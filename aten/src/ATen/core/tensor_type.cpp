@@ -3,27 +3,6 @@
 
 namespace c10 {
 
-namespace {
-
-inline bool is_contiguous_strides(
-    const IntArrayRef sizes,
-    const IntArrayRef strides) {
-  int n_dim = static_cast<int>(sizes.size());
-
-  if (n_dim == 0 || strides[n_dim-1] != 1) {
-    return false;
-  }
-
-  for (int i = n_dim - 2; i >= 0; i--) {
-    if (strides[i] != strides[i+1] * sizes[i+1]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-} // namespace
-
 const TensorTypePtr& TensorType::get() {
   static auto value = TensorType::create(
       {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
@@ -161,7 +140,7 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     // case 1.b. short cut contiguous
     std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
   } else {
-    std::iota(stride_indices.begin(), stride_indices.end(), 0);
+    std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
     // case 2.
     //
     // For broadcasted dimension where stride is 0, we have to stick to

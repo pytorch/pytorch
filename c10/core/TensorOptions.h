@@ -808,4 +808,14 @@ inline TensorOptions dispatchKeyToTensorOptions(DispatchKey dispatch_key) {
       .device(dispatchKeyToDeviceType(dispatch_key));
 }
 
+namespace detail {
+inline bool backend_supports_empty_operator(const TensorOptions options) {
+  // Quantized backends don't support at::empty().
+  // They have separate operators like at::empty_quantized() that take in
+  // extra information about how to quantize the tensor.
+  return !isQIntType(typeMetaToScalarType(options.dtype()));
+}
+
+} // namespace detail
+
 } // namespace c10
