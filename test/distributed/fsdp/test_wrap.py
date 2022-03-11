@@ -273,7 +273,7 @@ class TestAutoWrap(TestCase):
         passed into FSDP, all submodules are wrapped.
         """
         seq = TestFSDPWrap.NestedSequentialModel.get_model(cuda=True)
-        model = FSDP(seq, process_group=self.process_group, fsdp_auto_wrap_policy=always_wrap_policy)
+        model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
     def test_auto_wrap_api(self):
