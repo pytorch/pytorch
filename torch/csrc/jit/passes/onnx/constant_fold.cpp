@@ -461,7 +461,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       std::sort(axes.begin(), axes.end(), std::greater<int64_t>());
     }
 
-    bool keepdims = node->hasAttributeS("keepdims") ? node->i(attr::keepdims) : true;
+    bool keepdims =
+        node->hasAttributeS("keepdims") ? node->i(attr::keepdims) : true;
     updated_val = inputTensorValues[0];
     for (const auto& axis : axes) {
       updated_val = at::prod(updated_val, axis, keepdims);
