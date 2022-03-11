@@ -2392,6 +2392,7 @@ class TestQuantizeFx(QuantizationTestCase):
         prepare_count_check = {
             ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
         }
+        # two quint8 outputs in config, so no quantize_per_tersor and dequantize needed.
         convert_count_check = {
             ns.call_function(torch.quantize_per_tensor): 0,
             ns.call_method('dequantize'): 0,
@@ -2409,6 +2410,8 @@ class TestQuantizeFx(QuantizationTestCase):
         prepare_count_check = {
             ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
         }
+        # one quint8 outputs in config, we have two outputs from the model,
+        # so no 'quantize_per_tersor' and 1 'dequantize' needed.
         convert_count_check = {
             ns.call_function(torch.quantize_per_tensor): 0,
             ns.call_method('dequantize'): 1,
@@ -2457,6 +2460,9 @@ class TestQuantizeFx(QuantizationTestCase):
         prepare_count_check = {
             ns.call_module(torch.ao.quantization.HistogramObserver): 0,
         }
+        # channel shuffle is a float module, we have a qint8 input,
+        # so 2 'quantize_per_tensor' needed for each channel shuffle,
+        # 1 qint8 output in config, so 1 'dequantize' needed.
         convert_count_check = {
             ns.call_function(torch.quantize_per_tensor): 2,
             ns.call_method('dequantize'): 1,
@@ -2489,7 +2495,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 c1 = self.conv1(x)
                 c2 = self.conv2(x)
-                return {'o1':c1,  'o2':c2}
+                return {'o1': c1, 'o2': c2}
 
         # quantized input, quantized output
         m = M()
@@ -2511,6 +2517,7 @@ class TestQuantizeFx(QuantizationTestCase):
         prepare_count_check = {
             ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
         }
+        # two quint8 outputs in config, so no quantize_per_tersor and dequantize needed.
         convert_count_check = {
             ns.call_function(torch.quantize_per_tensor): 0,
             ns.call_method('dequantize'): 0,
