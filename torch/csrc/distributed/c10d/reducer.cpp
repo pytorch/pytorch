@@ -1467,6 +1467,10 @@ void Reducer::finalize_backward() {
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
+    // Convert back to complex as the collective might have not conveted it.
+    if (bucket.gradients.is_complex() && !future_result.is_complex()) {
+      future_result = at::view_as_complex(future_result);
+    }
     if (bucket.expect_sparse_gradient) {
       bucket.gradients.copy_(future_result);
     } else {

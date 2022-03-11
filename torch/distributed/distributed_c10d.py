@@ -25,6 +25,7 @@ from torch._C._distributed_c10d import (
     Store,
     DebugLevel,
     get_debug_level,
+    _broadcast_coalesced,
 )
 from torch._six import string_classes
 
@@ -3234,3 +3235,41 @@ def new_subgroups_by_enumeration(
                 logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups
+
+def broadcast_coalesced(
+    tensors: [torch.Tensor],
+    buffer_size: int,
+    src=0,
+    group=None,
+):
+    """
+    Broadcast a list of tensors from ``src`` by coallesing them first
+    in buckets of at least ``buffer_size`` bytes.
+
+    This routine is multi-device aware, so the tensors can be split across
+    multiple devices and can contain a mix of CPU and CUDA tensors.
+
+    Complex tensors are supported.
+
+    Args:
+        tensors: List of tensors to broadcast.
+        buffer_size: Size of each bucket
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
+
+    Returns:
+        ``None``. If rank is part of the group, ``tensors`` will contain the
+        broadcasted tensors from ``src`` rank.
+    """
+
+    group = _get_default_group() if group is None else group
+
+    if _rank_not_in_group(group):
+        _warn_not_in_group("broadcast_coalesced")
+        return
+
+    tensors = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in tensors
+    ]
+
+    _broadcast_coalesced(group, tensors, buffer_size, src)

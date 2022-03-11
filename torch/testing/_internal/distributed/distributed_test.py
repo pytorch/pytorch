@@ -8533,4 +8533,45 @@ class DistributedTest:
             self.assertIsNone(module.module.l1.bias.grad)
             self.assertIsNone(module.module.buffer.grad)
 
+        def _test_complex_tensor_with_ddp(self, device):
+            class ComplexModule(nn.Module):
+                def __init__(self):
+                    super(ComplexModule, self).__init__()
+                    self.p = torch.nn.Parameter(torch.view_as_complex(torch.tensor([1.0, 1], device=device)))
+
+                def forward(self, input):
+                    return (self.p * self.p)
+
+
+            cpp_builtin_hooks = [
+                None,
+                dist.BuiltinCommHookType.ALLREDUCE,
+                dist.BuiltinCommHookType.FP16_COMPRESS,
+            ]
+
+            for hook in cpp_builtin_hooks:
+
+                model = ComplexModule().to(device)
+                if device == "cpu":
+                    ddp_model = nn.parallel.DistributedDataParallel(model)
+                else:
+                    ddp_model = nn.parallel.DistributedDataParallel(model, device_ids=[self.rank])
+
+                if hook is not None:
+                    ddp_model._register_builtin_comm_hook(hook)
+
+                ddp_model(10).backward()
+
+                grad = torch.view_as_real(model.p.grad).flatten()
+                self.assertEqual(grad, torch.tensor([2.0, -2], dtype=torch.float, device=device))
+
+        @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
+        def test_complex_tensor_with_ddp_cpu(self):
+            self._test_complex_tensor_with_ddp("cpu")
+
+        @skip_if_lt_x_gpu(2)
+        def test_complex_tensor_with_ddp_cuda(self):
+            self._test_complex_tensor_with_ddp(f"cuda:{self.rank}")
+
+
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

@@ -2241,6 +2241,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         target += torch.arange(60, dtype=torch.float64, device=device).chunk(5)
         target += torch.arange(60, dtype=half, device=device).chunk(5)
         target += torch.arange(60, dtype=torch.float32, device=device).chunk(5)
+        target += torch.view_as_complex(torch.arange(12, dtype=torch.float, device=device).view(-1, 2)).chunk(5)
 
         # The tensors to pass to broadcast are idential to the target
         # only on the process that is the root of the broadcast.
@@ -2252,8 +2253,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         if self.rank != root_rank:
             self.assertNotEqual(tensors, target)
 
-        c10d._broadcast_coalesced(
-            process_group, tensors, buffer_size=256, src=root_rank
+        c10d.broadcast_coalesced(
+            tensors, buffer_size=256, src=root_rank, group=process_group
         )
 
         if self.rank != root_rank:

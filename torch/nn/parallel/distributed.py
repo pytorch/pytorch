@@ -1561,9 +1561,7 @@ class DistributedDataParallel(Module, Joinable):
     def _distributed_broadcast_coalesced(
         self, tensors, buffer_size, authoritative_rank=0
     ):
-        dist._broadcast_coalesced(
-            self.process_group, tensors, buffer_size, authoritative_rank
-        )
+        dist.broadcast_coalesced(tensors, buffer_size, authoritative_rank, self.process_group)
 
     def _check_sync_bufs_post_fwd(self):
         return (

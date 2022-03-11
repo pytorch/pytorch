@@ -36,7 +36,6 @@ if is_available():
         _DEFAULT_FIRST_BUCKET_BYTES,
         _register_comm_hook,
         _register_builtin_comm_hook,
-        _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _verify_params_across_processes,
         _test_python_store,

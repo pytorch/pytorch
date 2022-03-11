@@ -6,11 +6,22 @@
 #include <c10d/comm.hpp>
 #include <torch/torch.h>
 
-namespace c10d {
+namespace {
+void convert_complex_tensors(std::vector<at::Tensor> &tensors) {
+  for (auto &tensor : tensors) {
+    if (tensor.is_complex()) {
+      tensor = at::view_as_real(tensor);
+    }
+  }
+}
 
+} // namespace
+
+namespace c10d {
 c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
+  convert_complex_tensors(tensors);
   // Apply the division first to avoid overflow, especially for FP16.
   tensors[0] /= state_->getSize();
   return state_->allreduce(tensors)->getFuture();
@@ -19,7 +30,13 @@ c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
 c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
     GradBucket& bucket) {
 
-  auto compressed_tensor = bucket.getBufferRef().to(torch::kFloat16);
+  at::Tensor compressed_tensor;
+  if (bucket.getBufferRef().is_complex()) {
+    compressed_tensor = at::view_as_real(bucket.getBufferRef()).to(torch::kFloat16);
+  } else {
+    compressed_tensor = bucket.getBufferRef().to(torch::kFloat16);
+  }
+
   // Apply the division first to avoid overflow.
   compressed_tensor /= state_->getSize();
   std::vector<at::Tensor> tensors = {compressed_tensor};
@@ -38,6 +55,10 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
       "Expected reduced tensor to be fp16 in FP16CompressHook, but got type ",
       reduce_tensor.scalar_type()
     );
+    if (decompressed_tensor.is_complex()) {
+      reduce_tensor = at::view_as_complex(reduce_tensor
+        .to(c10::toRealValueType(decompressed_tensor.scalar_type())));
+    }
     decompressed_tensor.copy_(reduce_tensor);
     return c10::IValue(decompressed_tensor);
   };
@@ -48,6 +69,7 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
 c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::
     runHook(GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
+  convert_complex_tensors(tensors);
   return state_->allreduce(tensors)->getFuture();
 }
 
