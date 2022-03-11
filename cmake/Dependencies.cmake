@@ -1922,9 +1922,15 @@ if(USE_KINETO)
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
 
-      if(NOT USE_CUPTI_SO)
+      # I've only tested this sanity check on Linux; if someone
+      # runs into this bug on another platform feel free to
+      # generalize it accordingly
+      if(NOT USE_CUPTI_SO AND UNIX)
         include(CheckCXXSourceRuns)
-        unset(EXCEPTIONS_WORK CACHE)
+        # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
+        if(NOT APPLE)
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+        endif()
         set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
         check_cxx_source_runs("#include <stdexcept>
   int main() {
