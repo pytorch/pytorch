@@ -13,6 +13,8 @@ LEADING_V_PATTERN = re.compile("^v")
 TRAILING_RC_PATTERN = re.compile("-rc[0-9]*$")
 LEGACY_BASE_VERSION_SUFFIX_PATTERN = re.compile("a0$")
 
+
+
 class NoGitTagException(Exception):
     pass
 
