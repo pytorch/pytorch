@@ -11,7 +11,7 @@ from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
@@ -188,9 +188,9 @@ class TestExpandedWeightFunctional(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in supported_inputs(op, sample_inputs):
             if op.name == "nn.functional.embedding":  # embedding flips its argument order for autograd tests
-                sample_input = SampleInput(sample_input.args[0], args=(sample_input.input,), kwargs=sample_input.kwargs)
-                if 'max_norm' in sample_input.kwargs:  # in place update makes it difficult even with copying
-                    return
+                sample_input = SampleInput(sample_input.args[0].clone(),
+                                           args=(sample_input.input.clone(),),
+                                           kwargs=sample_input.kwargs)
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
             expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
@@ -204,20 +204,6 @@ class TestExpandedWeightFunctional(TestCase):
         self.assertNotEqual(weight.storage().data_ptr(), weight_2.storage().data_ptr())
         torch.nn.functional.embedding(input, weight, max_norm=1.)
         self.assertNotEqual(weight, weight_2)
-
-    def test_inplace_basic(self, device):
-        weight = torch.randn((5, 5), device=device)
-        weight_2 = weight.clone()
-        self.assertNotEqual(weight.storage().data_ptr(), weight_2.storage().data_ptr())
-        weight.add_(3.)
-        self.assertNotEqual(weight, weight_2)
-
-    def test_expanded_weight_error(self, device):
-        batch_size = 3
-        sample_input = make_tensor((batch_size, 4), dtype=torch.float32, device=device, requires_grad=True)
-        sample_weight = make_tensor((4), dtype=torch.float32, device=device, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, r"Expanded Weights encountered but cannot handle function"):
-            torch.add(sample_input, ExpandedWeight(sample_weight, batch_size))
 
     def test_small_model(self, device):
         def convnet(num_classes):
