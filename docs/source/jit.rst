@@ -878,3 +878,7 @@ References
 
     jit_python_reference
     jit_unsupported
+
+.. This package is missing doc. Adding it here for coverage
+.. This does not add anything to the rendered page.
+.. py:module:: torch.jit.mobile
