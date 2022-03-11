@@ -33,6 +33,9 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr)
 
+
+
+
 __all__ = [
     "get_ignored_functions",
     "get_overridable_functions",
@@ -42,7 +45,6 @@ __all__ = [
     "is_tensor_like",
     "is_tensor_method_or_property",
     "wrap_torch_function",
-    "get_similar_functions_helper"
 ]
 
 @functools.lru_cache(None)
@@ -273,42 +275,6 @@ def get_default_nowrap_functions() -> Set[Callable]:
         Tensor._grad.__get__,
     }
 
-def get_similar_functions_helper(name : str) -> List[str]:
-    """
-    Helper function for get_testing_overrides that takes in the name
-    of a function and returns a list of the names of the default, inplace,
-    dunder, inplace dunder and reverse dunder methods
-
-    Parameters
-    ----------
-    name : string
-        Name of function given by func.__name__
-
-    Returns
-    -------
-    names : list
-        names of default, inplace, dunder, inplace dunder and reverse dunder
-        methods
-    """
-    # Generate methods like __add__ and add_ by default from add
-    names = [
-        name,  # Default method
-        name + "_",  # Inplace variant
-        "__" + name + "__",  # Dunder method
-        "__i" + name + "__",  # Inplace dunder method
-        "__r" + name + "__",  # Reverse dunder method
-    ]
-
-    if name.startswith("bitwise_"):
-        # bitwise_<op> have dunder methods of the form __<op>__
-        # And so on.
-        subname = name[len("bitwise_"):]
-        names.extend([
-            "__" + subname + "__",
-            "__i" + subname + "__",
-            "__r" + subname + "__"
-        ])
-    return names
 
 @functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
@@ -338,14 +304,22 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     # See Issue #28233.
     Tensor = torch.Tensor
     ret: Dict[Callable, Callable] = {
+        torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
         torch.adaptive_max_pool1d: lambda inputs, output_size: -1,
         torch.adjoint: lambda input: -1,
         torch.affine_grid_generator: lambda theta, size, align_corners: -1,
         torch.all: lambda input, dim=None: -1,
         torch.alpha_dropout: lambda input, p, train, inplace=False: -1,
+        torch.arccos: lambda input, out=None: -1,
+        torch.arccosh: lambda input, out=None: -1,
         torch.argsort: lambda input, dim=None: -1,
         torch._assert_async: lambda input: -1,
+        torch.arcsin: lambda input, out=None: -1,
+        torch.arcsinh: lambda input, out=None: -1,
+        torch.arctan: lambda input, out=None: -1,
+        torch.arctan2: lambda input, other, out=None: -1,
+        torch.arctanh: lambda input, out=None: -1,
         torch.avg_pool1d: lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True: -1,
         torch.batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled: -1,
         torch.batch_norm_backward_elemt: lambda grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu, count_tensor: -1,
@@ -355,79 +329,42 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.batch_norm_gather_stats_with_counts: lambda input, mean, invstd, running_mean, running_var, momentum, eps, count: -1,
         torch.batch_norm_stats: lambda input, eps: -1,
         torch.batch_norm_update_stats: lambda input, running_mean, running_var, momentum: -1,
+        torch.bernoulli: lambda input, generator=None, out=None: -1,
         torch.bilinear: lambda input1, input2, weight, bias: -1,
         torch.binary_cross_entropy_with_logits: (lambda input, target, weight=None, size_average=None, reduce=None,
                                                  reduction='mean', pos_weight=None: -1),
         torch.binomial: lambda count, prob, generator=None: -1,
+        torch.concat: lambda tensors, dim=0, out=None: -1,
         torch.celu: lambda input, alpha=1., inplace=False: -1,
         torch.chain_matmul: lambda *matrices, out=None: -1,
         torch.channel_shuffle: lambda input, groups : -1,
         torch.choose_qparams_optimized: lambda input, numel, n_bins, ratio, bit_width: -1,
+        torch.clip: lambda input, min=None, max=None, out=None: -1,
         torch.clamp_min: lambda input, min, out=None: -1,
         torch.clamp_max: lambda input, max, out=None: -1,
         torch.constant_pad_nd: lambda input, pad, value=0: -1,
-        torch.conv1d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
-        torch.conv2d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
         torch.conv3d: lambda input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1: -1,
         torch.convolution: lambda input, weight, bias, stride, padding, dilation, transposed, output_adding, groups: -1,
         torch.conv_tbc: lambda input, weight, bias, pad=0: -1,
-        torch.conv_transpose1d: lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1,
-        torch.conv_transpose2d: lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1,
-        torch.conv_transpose3d: lambda input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1: -1,
         torch.cosine_embedding_loss: lambda input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean': -1,
-        torch.cosine_similarity: lambda x1, x2, dim=1, eps=1e-8: -1,
-        torch.count_nonzero: lambda input: -1,
-        torch.cross: lambda input, other, dim=None, out=None: -1,
-        torch.linalg.cross: lambda input, other, dim=-1, out=None: -1,
         torch.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction='mean',
                          zero_infinity=False: -1),
-        torch.cummax: lambda input, dim, out=None: -1,
-        torch.cummin: lambda input, dim, out=None: -1,
-        torch.cumprod: lambda input, dim, out=None, dtype=None: -1,
-        torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
-        torch.cumulative_trapezoid: lambda y, x=None, dim=-1: -1,
-        torch.logcumsumexp: lambda input, dim, out=None: -1,
-        torch.deg2rad: lambda input, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
-        torch.linalg.det: lambda input: -1,  # alias for torch.det  # type: ignore[attr-defined]
         torch.detach: lambda input: -1,
-        torch.diag: lambda input, diagonal=0, out=None: -1,
-        torch.diag_embed: lambda input, diagonal=0, out=None: -1,
         torch.diagflat: lambda input, offset=0: -1,
-        torch.diff: lambda input, n=1, dim=-1, prepend=None, append=None, out=None: -1,
-        torch.diagonal: lambda input, offset=0, dim1=0, dim2=1: -1,
         torch.linalg.diagonal: lambda input, offset=0, dim1=-2, dim2=-1: -1,
-        torch.diagonal_scatter: lambda input, src, offset=0, dim1=0, dim2=1: -1,
         torch.digamma: lambda input, out=None: -1,
-        torch.dist: lambda input, other, p=2: -1,
-        torch.div: lambda input, other, rounding_mode=None, out=None: -1,
         torch.divide: lambda input, other, rounding_mode=None, out=None: -1,
-        torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
         torch.dsmm: lambda input, mat2: -1,
         torch.hsmm: lambda mat1, mat2: -1,
-        torch.dsplit: lambda input, indices_or_sections: -1,
-        torch.dstack: lambda tensors, out=None: -1,
-        torch.eig: lambda input, eigenvectors=False, out=None: -1,
-        torch.linalg.eig: lambda input, out=None: -1,
-        torch.linalg.eigvals: lambda input, out=None: -1,
-        torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
-        torch.linalg.eigvalsh: lambda input, UPLO="L", out=None: -1,
         torch.einsum: lambda equation, *operands: -1,
         torch.embedding: (lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False,
                           sparse=False: -1),
         torch.embedding_bag: (lambda input, weight, offsets, max_norm=None, norm_type=2, scale_grad_by_freq=False,
                               mode='mean', sparse=False, per_sample_weights=None, padding_idx=None: -1),
-        torch.empty_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
-        torch.eq: lambda input, other, out=None: -1,
         torch.equal: lambda input, other: -1,
-        torch.erf: lambda input, out=None: -1,
-        torch.erfc: lambda input, out=None: -1,
-        torch.erfinv: lambda input, out=None: -1,
-        torch.exp: lambda input, out=None: -1,
-        torch.exp2: lambda input, out=None: -1,
-        torch.expm1: lambda input, out=None: -1,
         torch.fake_quantize_per_channel_affine: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
         torch.fake_quantize_per_tensor_affine: lambda input, scale, zero_point, quant_min, quant_max: -1,
         torch.fused_moving_avg_obs_fake_quant: (lambda x, observer_on, fake_quant_on, averaging_const, running_min,
@@ -443,47 +380,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.fbgemm_pack_quantized_matrix: lambda input, a, b: -1,
         torch.feature_alpha_dropout: lambda input, p, train: -1,
         torch.feature_dropout: lambda input, p, train: -1,
-        torch.fft.fft: lambda input, n=None, dim=-1, norm=None: -1,
-        torch.fft.ifft: lambda input, n=None, dim=-1, norm=None: -1,
-        torch.fft.rfft: lambda input, n=None, dim=-1, norm=None: -1,
-        torch.fft.irfft: lambda input, n=None, dim=-1, norm=None: -1,
-        torch.fft.hfft: lambda input, n=None, dim=-1, norm=None: -1,
-        torch.fft.ihfft: lambda input, n=None, dim=-1, norm=None: -1,
-        torch.fft.hfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
-        torch.fft.ihfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
-        torch.fft.hfftn: lambda input, s=None, dim=-1, norm=None: -1,
-        torch.fft.ihfftn: lambda input, s=None, dim=-1, norm=None: -1,
-        torch.fft.fftn: lambda input, s=None, dim=None, norm=None: -1,
-        torch.fft.ifftn: lambda input, s=None, dim=None, norm=None: -1,
-        torch.fft.rfftn: lambda input, s=None, dim=None, norm=None: -1,
-        torch.fft.irfftn: lambda input, s=None, dim=None, norm=None: -1,
-        torch.fft.fft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
-        torch.fft.ifft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
-        torch.fft.rfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
-        torch.fft.irfft2: lambda input, s=None, dim=(-2, -1), norm=None: -1,
-        torch.fft.fftshift: lambda input, dim=None: -1,
-        torch.fft.ifftshift: lambda input, dim=None: -1,
-        torch.fft.fft: lambda input, n=None, dim=-1, norm=None: -1,
         torch.fix: lambda input, out=None: -1,
-        torch.flatten: lambda input, start_dim=0, end_dim=-1: -1,
-        torch.flip: lambda input, dims: -1,
-        torch.fliplr: lambda input: -1,
-        torch.flipud: lambda input: -1,
         torch.frobenius_norm: lambda input, dim=None, keepdim=False, out=None: -1,
-        torch.floor: lambda input, out=None: -1,
-        torch.floor_divide: lambda input, other: -1,
-        torch.float_power: lambda input, exponent, out=None: -1,
-        torch.fmod: lambda input, other, out=None: -1,
-        torch.frac: lambda input, out=None: -1,
-        torch.frexp: lambda input, out=None: -1,
-        torch.full_like: lambda input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False: -1,
-        torch.lu_unpack: lambda LU_data, LU_pivots, unpack_data=True, unpack_pivots=True: -1,
-        torch.gather: lambda input, dim, index, out=None, sparse_grad=False: -1,
-        torch.gcd: lambda input, other, out=None: -1,
-        torch.ge: lambda input, other, out=None: -1,
         torch.greater_equal: lambda input, other, out=None: -1,
-        torch.geqrf: lambda input, out=None: -1,
-        torch.i0: lambda input, out=None: -1,
         torch.inner: lambda input, other, out=None: -1,
         torch.outer: lambda input, vec2, out=None: -1,
         torch.ger: lambda input, vec2, out=None: -1,  # alias for torch.outer
@@ -863,7 +762,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
-        torch.slice_scatter: lambda input, src, dim, start, end, step: -1,
+        torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
         torch.sign: lambda input, out=None: -1,
@@ -965,12 +864,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.unsafe_split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsafe_split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.unsqueeze: lambda input, dim, out=None: -1,
-        torch.var: lambda input, dim=None: -1,
-        torch.var_mean: lambda input, dim=None: -1,
-        torch.vsplit: lambda input, indices_or_sections: -1,
-        torch.vstack: lambda tensors, out=None: -1,
         torch.where: lambda condition, x=None, y=None: -1,
-        torch.zeros_like: lambda input, dtype=None, layout=None, device=None, requires_grad=False: -1,
         Tensor.__floordiv__: lambda self, other: -1,
         Tensor.__rfloordiv__: lambda self, other: -1,
         Tensor.__ifloordiv__: lambda self, other: -1,
@@ -1022,8 +916,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
-        Tensor._autocast_to_reduced_precision: lambda self: -1,
-        Tensor._autocast_to_full_precision: lambda self: -1,
+        Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
+        Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
@@ -1139,7 +1033,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.share_memory_: lambda self: -1,
         Tensor.short: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.size: lambda self: -1,
-        Tensor.slice_scatter: lambda self, src, dim, start, end, step: -1,
+        Tensor.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
@@ -1168,11 +1062,37 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }
 
+    from torch.testing._internal.common_methods_invocations import op_db
+
+    ret_opinfo = {}
+    for op in op_db:
+        if op.override_lambda:
+            ret_opinfo[op.op] = op.override_lambda
+
+    ret.update(ret_opinfo)
+
     ret2 = {}
     ignored = get_ignored_functions()
 
     for k, v in ret.items():
-        names = get_similar_functions_helper(k.__name__)
+        # Generate methods like __add__ and add_ by default from add
+        names = [
+            k.__name__,  # Default method
+            k.__name__ + "_",  # Inplace variant
+            "__" + k.__name__ + "__",  # Dunder method
+            "__i" + k.__name__ + "__",  # Inplace dunder method
+            "__r" + k.__name__ + "__",  # Reverse dunder method
+        ]
+
+        if k.__name__.startswith("bitwise_"):
+            # bitwise_<op> have dunder methods of the form __<op>__
+            # And so on.
+            subname = k.__name__[len("bitwise_"):]
+            names.extend([
+                "__" + subname + "__",
+                "__i" + subname + "__",
+                "__r" + subname + "__"
+            ])
 
         for name in names:
             func = getattr(Tensor, name, None)
