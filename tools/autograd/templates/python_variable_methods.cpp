@@ -231,7 +231,11 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
      return handle_torch_function(self, "numel", args);
    }
    auto& self_ = THPVariable_Unpack(self);
-   return THPUtils_packInt64(self_.numel());
+   if (jit::tracer::isTracing()) {
+     return wrap(jit::tracer::getNumelOf(self_));
+   } else {
+     return THPUtils_packInt64(self_.numel());
+   }
    END_HANDLE_TH_ERRORS
 }
 

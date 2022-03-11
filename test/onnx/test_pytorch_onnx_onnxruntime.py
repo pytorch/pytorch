@@ -6474,6 +6474,9 @@ class TestONNXRuntime(unittest.TestCase):
         offset = torch.tensor([0, 2, 5, 6])
         self.run_test(model, (input, offset))
 
+    @disableScriptTest()  # error in propagate as assign input shape
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_embedding_bag_with_offset(self):
         model = torch.nn.EmbeddingBag(10, 5, mode="max")
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
@@ -6503,7 +6506,12 @@ class TestONNXRuntime(unittest.TestCase):
         model = EmbeddingModel()
         x = torch.randint(7, (2, 3))
         w = torch.randn(2, 3)
-        self.run_test(model, (embedding_matrix, x, w))
+
+        x2 = torch.randint(7, (4, 3))
+        w2 = torch.randn(4, 3)
+        self.run_test(model, (embedding_matrix, x, w),
+                      input_names=['embed', 'x', 'w'], dynamic_axes={'x': [0], 'w': [0]},
+                      test_with_inputs=[(embedding_matrix, x2, w2)])
 
     @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -6593,24 +6601,28 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
     def test_numel(self):
-        class MyModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class MyModule(torch.nn.Module):
             def forward(self, input):
                 return input.numel() * input
 
         x = torch.randn(2, 3, 5)
+        x2 = torch.randn(4, 5, 6)
         model = MyModule()
-        self.run_test(model, (x,))
+        self.run_test(model, (x,),
+                      input_names=['x'], dynamic_axes={'x': [0, 1, 2]},
+                      test_with_inputs=[(x2, )])
 
     def test_numel_empty(self):
-        class MyModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class MyModule(torch.nn.Module):
             def forward(self, input):
                 return input.numel() * input
 
         x = torch.randn(0)
+        x2 = torch.randn(4)
         model = MyModule()
-        self.run_test(model, (x,))
+        self.run_test(model, (x,),
+                      input_names=['x'], dynamic_axes={'x': [0]},
+                      test_with_inputs=[(x2, )])
 
     def test_dtype(self):
         class MyModel(torch.jit.ScriptModule):
