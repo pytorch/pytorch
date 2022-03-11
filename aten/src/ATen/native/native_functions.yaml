@@ -4775,12 +4775,11 @@
 - func: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  structured_delegate: where.self_out
+  dispatch:
+    CPU, CUDA: where
 
 - func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: True
-  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: where_self_out
 

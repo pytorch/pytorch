@@ -22,18 +22,6 @@ static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
       "Unsupported input type encountered for isin(): ", type);
 }
 
-TORCH_META_FUNC2(where, self) (const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
-  build(TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .declare_static_dtype_and_device(self.scalar_type(), self.device())
-      .add_output(maybe_get_output())
-      .add_owned_input(cond_bool)
-      .add_input(self)
-      .add_input(other));
-}
-
 TORCH_META_FUNC(clamp) (
 const Tensor& self,
 const OptionalScalarRef min,
@@ -335,8 +323,30 @@ static void isin_sorting(
   }
 }
 
-TORCH_IMPL_FUNC(where_self_out) (const Tensor&, const Tensor&, const Tensor&, const Tensor&) {
-  where_kernel(device_type(), *this);
+Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
+  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
+
+  if (condition.scalar_type() == ScalarType::Byte) {
+  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+  } else {
+  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  }
+  Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
+  auto iter = at::TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(out)
+    .add_input(cond_bool)
+    .add_input(self)
+    .add_input(other)
+    .build();
+  where_kernel(iter.device_type(), iter);
+  return out;
+}
+
+Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  Tensor ret = at::empty({0}, self.options());
+  at::where_out(ret, condition, self, other);
+  return ret;
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {

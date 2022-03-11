@@ -2585,7 +2585,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::cpu::where_out(out, cond, self, other);
+      at::native::where_self_out(cond, self, other, out);
     };
   }
 
