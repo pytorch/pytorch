@@ -38,8 +38,7 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
 class TestGitHubPR(TestCase):
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_match_rules(self, mocked_gql: Any) -> None:
-        """ Tests that PR passes merge rules
-        """
+        "Tests that PR passes merge rules"
         pr = GitHubPR("pytorch", "pytorch", 71759)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
@@ -53,6 +52,7 @@ class TestGitHubPR(TestCase):
         author = pr.get_author()
         self.assertTrue(author is not None)
         self.assertTrue("@" in author)
+        self.assertTrue(pr.get_diff_revision() is None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_large_diff(self, mocked_gql: Any) -> None:
@@ -61,6 +61,12 @@ class TestGitHubPR(TestCase):
         self.assertTrue(pr.get_changed_files_count() > 100)
         flist = pr.get_changed_files()
         self.assertEqual(len(flist), pr.get_changed_files_count())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_internal_changes(self, mocked_gql: Any) -> None:
+        "Tests that PR with internal changes is detected"
+        pr = GitHubPR("pytorch", "pytorch", 73969)
+        self.assertTrue(pr.has_internal_changes())
 
 
 if __name__ == "__main__":
