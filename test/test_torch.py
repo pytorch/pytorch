@@ -54,7 +54,8 @@ import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.common_dtype import (
-    get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes
+    get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes,
+    all_types_and_complex_and
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -5298,6 +5299,36 @@ else:
         # XLA raises RuntimeError with a different message.
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
+
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
+    def test_to_dtype(self, device, dtype):
+        def can_cast(src_dtype, dst_dtype):
+            # torch.can_cast(torch.int16, torch.uint8) returns True 
+            # which isn't actually safe-cast.
+            # This function returns False in this case.
+            def is_unsigned_int(dtype):
+                return dtype is torch.uint8
+
+            if is_unsigned_int(dst_dtype):
+                return is_unsigned_int(src_dtype)
+            return torch.can_cast(src_dtype, dst_dtype)
+
+        src_dtypes = all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32)
+        t = make_tensor((50,), device=device, dtype=dtype)
+        for src_dtype in src_dtypes:
+            src = make_tensor((50,), device=device, dtype=src_dtype)
+            t.copy_(src)
+            dst = make_tensor((50, ), device=device, dtype=src_dtype)
+            if can_cast(src_dtype, dtype):
+                rtol = None
+                atol = None
+                if dtype in (torch.half, torch.complex32):
+                    rtol = 1e-3
+                    atol = 1e-3
+                if dtype in (torch.bfloat16,):
+                    rtol = 1e-2
+                    atol = 1e-2
+                self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
