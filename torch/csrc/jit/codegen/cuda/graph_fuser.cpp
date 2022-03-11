@@ -1710,11 +1710,15 @@ void guardFusionGroups(
     //         c. restore conditional constant to non-constant for fallback
     guardFusionGroup(fusion, fusion_value_to_runtime_size);
   }
+}
 
-  if (GRAPH_DEBUG_ENABLED) {
-    GRAPH_DEBUG("Exporting all NVFuser fusions:");
-    for (Node* fusion : fusions) {
-      GRAPH_EXPORT("", fusion->g(attr::Subgraph));
+void dumpFusionGroups(std::shared_ptr<Graph>& g) {
+  DepthFirstGraphNodeIterator it(g);
+  Node* n = nullptr;
+  GRAPH_DEBUG("Exporting all NVFuser fusions:");
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      GRAPH_EXPORT("", n->g(attr::Subgraph));
     }
   }
 }
@@ -2304,6 +2308,8 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
 
   revertAliasCopyOps(graph, graph->block());
   GRAPH_DEBUG("revert alias_copy ops by nvfuser: ", *graph);
+
+  dumpFusionGroups(graph);
 
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
