@@ -204,8 +204,6 @@ jobs:
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -494,7 +492,7 @@ jobs:
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
+          python3 -m pip install boto3==1.19.12 rockset
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -749,7 +747,7 @@ jobs:
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
+          python3 -m pip install boto3==1.19.12 rockset
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions

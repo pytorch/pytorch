@@ -833,9 +833,9 @@ def build_message(
     }
 
 
-def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
+def get_json_array_of_tests(reports: Dict[str, TestFile]):
     meta_info = build_info()
-    logs = json.dumps(
+    return json.dumps(
         [
             {
                 "category": "perfpipe_pytorch_test_times",
@@ -847,8 +847,20 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
             for test_case in test_suite.test_cases.values()
         ]
     )
+
+def send_report_to_rockset(tests_json_array):
+    from rockset import Client
+
+    # connect to Rockset
+    rs = Client()
+
+    # send, though it should fail due to lack of authentication
+    ret = rs.Collection.add_docs('test-status', json.load(tests_json_array))
+
+
+def send_report_to_scribe(tests_json_array) -> None:
     # no need to print send result as exceptions will be captured and print later.
-    send_to_scribe(logs)
+    send_to_scribe(tests_json_array)
 
 
 def assemble_s3_object(
@@ -1064,10 +1076,17 @@ if __name__ == '__main__':
         print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
 
+    tests_json_array = get_json_array_of_tests(reports_by_file)
+
     try:
-        send_report_to_scribe(reports_by_file)
+        send_report_to_scribe(tests_json_array)
     except Exception as e:
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
+
+    try:
+        send_report_to_rockset(tests_json_array)
+    except Exception as e:
+        print(f"ERROR ENCOUNTERED WHEN UPLOADING TO ROCKSET: {e}")
 
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
