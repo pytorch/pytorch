@@ -5301,7 +5301,7 @@ else:
             torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
-    def test_to_dtype(self, device, dtype):
+    def test_copy_(self, device, dtype):
         def can_cast(src_dtype, dst_dtype):
             # torch.can_cast(torch.int16, torch.uint8) returns True 
             # which isn't actually safe-cast.
@@ -5313,12 +5313,17 @@ else:
                 return is_unsigned_int(src_dtype)
             return torch.can_cast(src_dtype, dst_dtype)
 
+        def make_tensor_wrapper(shape, dtype):
+            if dtype is not torch.complex32:
+                return make_tensor(shape, device=device, dtype=dtype)
+            return torch.randn(shape, device=device, dtype=dtype)
+
+        t = make_tensor_wrapper((50,), dtype)
         src_dtypes = all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32)
-        t = make_tensor((50,), device=device, dtype=dtype)
         for src_dtype in src_dtypes:
-            src = make_tensor((50,), device=device, dtype=src_dtype)
+            src = make_tensor_wrapper((50,), dtype=src_dtype)
             t.copy_(src)
-            dst = make_tensor((50, ), device=device, dtype=src_dtype)
+            dst = make_tensor_wrapper((50, ), dtype=src_dtype)
             if can_cast(src_dtype, dtype):
                 rtol = None
                 atol = None
