@@ -3098,6 +3098,22 @@ def error_inputs_gather(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(src, args=(1, idx,)), error_type=RuntimeError,
                          error_regex="index 23 is out of bounds for dimension")
 
+    x = torch.rand((1,), device=device).expand((3,))
+    src = torch.rand((6,), device=device)
+    ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
+
+    yield ErrorInput(SampleInput(src, args=(0, ind,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(src, args=(0, ind,), kwargs=dict(out=src)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(ind.clone(), args=(0, ind[1:],), kwargs=dict(out=ind[:1])),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
 # Error inputs for scatter
 def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     # Error when self.dtype != src.dtype (and src is not a scalar)
