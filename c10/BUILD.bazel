@@ -1,87 +1,52 @@
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-load("//third_party:substitution.bzl", "header_template_rule")
-load("//tools/config:defs.bzl", "if_cuda")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//:tools/bazel.bzl", "rules")
+load(":build.bzl", "define_targets")
 
-header_template_rule(
-    name = "cmake_macros_h",
-    src = "macros/cmake_macros.h.in",
-    out = "macros/cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
-    },
+define_targets(rules = rules)
+
+# The bool_flag targets allow configuring the build from the
+# command-line, e.g. --//c10:use_gflags or --no//c10:use_gflags to
+# disable.
+
+bool_flag(
+    name = "use_gflags",
+    build_setting_default = True,
 )
 
-header_template_rule(
-    name = "cuda_cmake_macros_h",
-    src = "cuda/impl/cuda_cmake_macros.h.in",
-    out = "cuda/impl/cuda_cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-    },
+bool_flag(
+    name = "use_glog",
+    build_setting_default = True,
+)
+
+config_setting(
+    name = "using_gflags",
+    flag_values = {":use_gflags": "true"},
+)
+
+config_setting(
+    name = "using_glog",
+    flag_values = {":use_glog": "true"},
 )
 
 cc_library(
     name = "headers",
-    hdrs = glob([
-        "core/*.h",
-        "core/impl/*.h",
-        "cuda/*.h",
-        "cuda/impl/*.h",
-        "macros/*.h",
-        "mobile/*.h",
-        "util/*.h",
-        "util/*.hpp",
-    ]),
-    deps = [
-        "@com_github_gflags_gflags//:gflags",
-        "@com_github_glog//:glog",
-        ":cmake_macros_h",
-        ":cuda_cmake_macros_h",
+    hdrs = [
+        "//c10/core:headers",
+        "//c10/cuda:headers",
+        "//c10/mobile:headers",
+        "//c10/util:headers",
     ],
-    visibility = ["//:__pkg__"],
-)
-
-cc_library(
-    name = "c10",
-    srcs = glob([
-        "core/*.cpp",
-        "core/impl/*.cpp",
-        "mobile/*.cpp",
-        "util/*.cpp",
-    ]) + if_cuda(
-        glob([
-            "cuda/*.cpp",
-            "cuda/impl/*.cpp",
-        ]),
-        [],
-    ),
-    copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
-        ":headers",
-        "@fmt",
-    ] + if_cuda(
-        ["@cuda"],
-        [],
-    ),
-    alwayslink = True,
-    visibility = ["//:__pkg__"],
-)
-
-cc_test(
-    name = "tests",
-    size = "small",
-    srcs = glob([
-        "test/util/*.cpp",
-        "test/util/*.h",
-        "test/core/*.cpp",
-        "test/core/impl/*.cpp",
-    ]),
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":c10",
-        ":headers",
-        "@com_google_googletest//:gtest_main",
-    ],
+        "//c10/core:alignment",
+        "//c10/cuda:Macros",
+        "//c10/macros",
+    ] + select({
+        ":using_gflags": ["@com_github_gflags_gflags//:gflags"],
+        "//conditions:default": [],
+    }) + select({
+        ":using_glog": ["@com_github_glog//:glog"],
+        "//conditions:default": [],
+    }),
     visibility = ["//:__pkg__"],
 )

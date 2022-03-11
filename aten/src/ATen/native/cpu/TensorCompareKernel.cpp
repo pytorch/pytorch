@@ -1,3 +1,5 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorCompare.h>
 
@@ -10,12 +12,19 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/TensorIterator.h>
+#include <ATen/WrapDimUtils.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/Loops.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/result_type.h>
+#endif
 
 namespace at { namespace native { namespace {
 
@@ -299,8 +308,10 @@ static void isin_default_kernel_cpu(
   // Since test elements is not an input of the TensorIterator, type promotion
   // must be done manually.
   ScalarType common_type = at::result_type(elements, test_elements);
-  Tensor test_elements_flat = test_elements.to(common_type).ravel();
   Tensor promoted_elements = elements.to(common_type);
+  Tensor test_elements_flat = test_elements.to(common_type).view(-1);
+  auto test_elements_stride = test_elements_flat.stride(0);
+
   auto iter = TensorIteratorConfig()
     .add_output(out)
     .add_input(promoted_elements)
@@ -309,9 +320,9 @@ static void isin_default_kernel_cpu(
   // Dispatch based on promoted type.
   AT_DISPATCH_ALL_TYPES(iter.dtype(1), "isin_default_cpu", [&]() {
     cpu_kernel(iter, [&](scalar_t element_val) -> bool {
-      const auto* test_element_data = reinterpret_cast<scalar_t*>(test_elements_flat.data_ptr());
+      const auto* test_element_data = test_elements_flat.data_ptr<scalar_t>();
       for (const auto j : c10::irange(test_elements_flat.numel())) {
-        if (element_val == test_element_data[j]) {
+        if (element_val == *(test_element_data + test_elements_stride * j)) {
           return !invert;
         }
       }

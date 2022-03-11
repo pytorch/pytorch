@@ -8,9 +8,10 @@
 using namespace torch::monitor;
 
 TEST(MonitorTest, CounterDouble) {
-  FixedCountStat<double> a{
+  Stat<double> a{
       "a",
-      {MEAN, COUNT},
+      {Aggregation::MEAN, Aggregation::COUNT},
+      std::chrono::milliseconds(100000),
       2,
   };
   a.add(5.0);
@@ -19,54 +20,57 @@ TEST(MonitorTest, CounterDouble) {
   ASSERT_EQ(a.count(), 0);
 
   auto stats = a.get();
-  std::unordered_map<Aggregation, double> want = {
-      {MEAN, 5.5},
-      {COUNT, 2.0},
+  std::unordered_map<Aggregation, double, AggregationHash> want = {
+      {Aggregation::MEAN, 5.5},
+      {Aggregation::COUNT, 2.0},
   };
   ASSERT_EQ(stats, want);
 }
 
 TEST(MonitorTest, CounterInt64Sum) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {SUM},
+      {Aggregation::SUM},
+      std::chrono::milliseconds(100000),
       2,
   };
   a.add(5);
   a.add(6);
   auto stats = a.get();
-  std::unordered_map<Aggregation, int64_t> want = {
-      {SUM, 11},
+  std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+      {Aggregation::SUM, 11},
   };
   ASSERT_EQ(stats, want);
 }
 
 TEST(MonitorTest, CounterInt64Value) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {VALUE},
+      {Aggregation::VALUE},
+      std::chrono::milliseconds(100000),
       2,
   };
   a.add(5);
   a.add(6);
   auto stats = a.get();
-  std::unordered_map<Aggregation, int64_t> want = {
-      {VALUE, 6},
+  std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+      {Aggregation::VALUE, 6},
   };
   ASSERT_EQ(stats, want);
 }
 
 TEST(MonitorTest, CounterInt64Mean) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {MEAN},
+      {Aggregation::MEAN},
+      std::chrono::milliseconds(100000),
       2,
   };
   {
     // zero samples case
     auto stats = a.get();
-    std::unordered_map<Aggregation, int64_t> want = {
-        {MEAN, 0},
+    std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+        {Aggregation::MEAN, 0},
     };
     ASSERT_EQ(stats, want);
   }
@@ -76,17 +80,18 @@ TEST(MonitorTest, CounterInt64Mean) {
 
   {
     auto stats = a.get();
-    std::unordered_map<Aggregation, int64_t> want = {
-        {MEAN, 5},
+    std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+        {Aggregation::MEAN, 5},
     };
     ASSERT_EQ(stats, want);
   }
 }
 
 TEST(MonitorTest, CounterInt64Count) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {COUNT},
+      {Aggregation::COUNT},
+      std::chrono::milliseconds(100000),
       2,
   };
   ASSERT_EQ(a.count(), 0);
@@ -96,23 +101,24 @@ TEST(MonitorTest, CounterInt64Count) {
   ASSERT_EQ(a.count(), 0);
 
   auto stats = a.get();
-  std::unordered_map<Aggregation, int64_t> want = {
-      {COUNT, 2},
+  std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+      {Aggregation::COUNT, 2},
   };
   ASSERT_EQ(stats, want);
 }
 
 TEST(MonitorTest, CounterInt64MinMax) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {MIN, MAX},
+      {Aggregation::MIN, Aggregation::MAX},
+      std::chrono::milliseconds(100000),
       6,
   };
   {
     auto stats = a.get();
-    std::unordered_map<Aggregation, int64_t> want = {
-        {MAX, 0},
-        {MIN, 0},
+    std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+        {Aggregation::MAX, 0},
+        {Aggregation::MIN, 0},
     };
     ASSERT_EQ(stats, want);
   }
@@ -125,18 +131,19 @@ TEST(MonitorTest, CounterInt64MinMax) {
   a.add(2);
   {
     auto stats = a.get();
-    std::unordered_map<Aggregation, int64_t> want = {
-        {MAX, 9},
-        {MIN, -6},
+    std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+        {Aggregation::MAX, 9},
+        {Aggregation::MIN, -6},
     };
     ASSERT_EQ(stats, want);
   }
 }
 
 TEST(MonitorTest, CounterInt64WindowSize) {
-  FixedCountStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {COUNT, SUM},
+      {Aggregation::COUNT, Aggregation::SUM},
+      std::chrono::milliseconds(100000),
       /*windowSize=*/3,
   };
   a.add(1);
@@ -145,26 +152,53 @@ TEST(MonitorTest, CounterInt64WindowSize) {
   a.add(3);
   ASSERT_EQ(a.count(), 0);
 
+  // after logging max for window, should be zero
   a.add(4);
-  ASSERT_EQ(a.count(), 1);
+  ASSERT_EQ(a.count(), 0);
 
   auto stats = a.get();
-  std::unordered_map<Aggregation, int64_t> want = {
-      {COUNT, 3},
-      {SUM, 6},
+  std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+      {Aggregation::COUNT, 3},
+      {Aggregation::SUM, 6},
+  };
+  ASSERT_EQ(stats, want);
+}
+
+TEST(MonitorTest, CounterInt64WindowSizeHuge) {
+  Stat<int64_t> a{
+      "a",
+      {Aggregation::COUNT, Aggregation::SUM},
+      std::chrono::hours(24 * 365 * 10), // 10 years
+      /*windowSize=*/3,
+  };
+  a.add(1);
+  a.add(2);
+  ASSERT_EQ(a.count(), 2);
+  a.add(3);
+  ASSERT_EQ(a.count(), 0);
+
+  // after logging max for window, should be zero
+  a.add(4);
+  ASSERT_EQ(a.count(), 0);
+
+  auto stats = a.get();
+  std::unordered_map<Aggregation, int64_t, AggregationHash> want = {
+      {Aggregation::COUNT, 3},
+      {Aggregation::SUM, 6},
   };
   ASSERT_EQ(stats, want);
 }
 
 template <typename T>
-struct TestIntervalStat : public IntervalStat<T> {
-  uint64_t mockWindowId{0};
+struct TestStat : public Stat<T> {
+  uint64_t mockWindowId{1};
 
-  TestIntervalStat(
+  TestStat(
       std::string name,
       std::initializer_list<Aggregation> aggregations,
-      std::chrono::milliseconds windowSize)
-      : IntervalStat<T>(name, aggregations, windowSize) {}
+      std::chrono::milliseconds windowSize,
+      int64_t maxSamples = std::numeric_limits<int64_t>::max())
+      : Stat<T>(name, aggregations, windowSize, maxSamples) {}
 
   uint64_t currentWindowId() const override {
     return mockWindowId;
@@ -192,12 +226,12 @@ struct HandlerGuard {
   }
 };
 
-TEST(MonitorTest, IntervalStat) {
+TEST(MonitorTest, Stat) {
   HandlerGuard<AggregatingEventHandler> guard;
 
-  IntervalStat<int64_t> a{
+  Stat<int64_t> a{
       "a",
-      {COUNT, SUM},
+      {Aggregation::COUNT, Aggregation::SUM},
       std::chrono::milliseconds(1),
   };
   ASSERT_EQ(guard.handler->events.size(), 0);
@@ -213,12 +247,12 @@ TEST(MonitorTest, IntervalStat) {
   ASSERT_LE(guard.handler->events.size(), 2);
 }
 
-TEST(MonitorTest, IntervalStatEvent) {
+TEST(MonitorTest, StatEvent) {
   HandlerGuard<AggregatingEventHandler> guard;
 
-  TestIntervalStat<int64_t> a{
+  TestStat<int64_t> a{
       "a",
-      {COUNT, SUM},
+      {Aggregation::COUNT, Aggregation::SUM},
       std::chrono::milliseconds(1),
   };
   ASSERT_EQ(guard.handler->events.size(), 0);
@@ -236,23 +270,22 @@ TEST(MonitorTest, IntervalStatEvent) {
 
   ASSERT_EQ(guard.handler->events.size(), 1);
   Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
+  ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
+  std::unordered_map<std::string, data_value_t> data{
       {"a.sum", 3L},
       {"a.count", 2L},
   };
-  ASSERT_EQ(e.metadata, metadata);
+  ASSERT_EQ(e.data, data);
 }
 
-TEST(MonitorTest, IntervalStatEventDestruction) {
+TEST(MonitorTest, StatEventDestruction) {
   HandlerGuard<AggregatingEventHandler> guard;
 
   {
-    TestIntervalStat<int64_t> a{
+    TestStat<int64_t> a{
         "a",
-        {COUNT, SUM},
+        {Aggregation::COUNT, Aggregation::SUM},
         std::chrono::hours(10),
     };
     a.add(1);
@@ -262,70 +295,11 @@ TEST(MonitorTest, IntervalStatEventDestruction) {
   ASSERT_EQ(guard.handler->events.size(), 1);
 
   Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
+  ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
+  std::unordered_map<std::string, data_value_t> data{
       {"a.sum", 1L},
       {"a.count", 1L},
   };
-  ASSERT_EQ(e.metadata, metadata);
-}
-
-TEST(MonitorTest, FixedCountStatEvent) {
-  HandlerGuard<AggregatingEventHandler> guard;
-
-  FixedCountStat<int64_t> a{
-      "a",
-      {COUNT, SUM},
-      3,
-  };
-  ASSERT_EQ(guard.handler->events.size(), 0);
-
-  a.add(1);
-  ASSERT_EQ(a.count(), 1);
-  a.add(2);
-  ASSERT_EQ(a.count(), 2);
-  ASSERT_EQ(guard.handler->events.size(), 0);
-
-  a.add(1);
-  ASSERT_EQ(a.count(), 0);
-  ASSERT_EQ(guard.handler->events.size(), 1);
-
-  Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
-  ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
-      {"a.sum", 4L},
-      {"a.count", 3L},
-  };
-  ASSERT_EQ(e.metadata, metadata);
-}
-
-TEST(MonitorTest, FixedCountStatEventDestruction) {
-  HandlerGuard<AggregatingEventHandler> guard;
-
-  {
-    FixedCountStat<int64_t> a{
-        "a",
-        {COUNT, SUM},
-        3,
-    };
-    ASSERT_EQ(guard.handler->events.size(), 0);
-    a.add(1);
-    ASSERT_EQ(a.count(), 1);
-    ASSERT_EQ(guard.handler->events.size(), 0);
-  }
-  ASSERT_EQ(guard.handler->events.size(), 1);
-
-  Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
-  ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
-      {"a.sum", 1L},
-      {"a.count", 1L},
-  };
-  ASSERT_EQ(e.metadata, metadata);
+  ASSERT_EQ(e.data, data);
 }

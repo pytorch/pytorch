@@ -914,8 +914,11 @@ std::shared_ptr<SugaredValue> PythonExceptionValue::call(
             ->insertNode(caller.graph()->createTuple(message_values))
             ->output();
   }
+  Value* qualified_class_name =
+      insertConstant(*caller.graph(), exception_class_qualified_name_, loc);
 
-  return std::make_shared<ExceptionMessageValue>(error_message);
+  return std::make_shared<ExceptionMessageValue>(
+      error_message, qualified_class_name);
 }
 
 bool isNamedTupleClass(const py::object& obj) {
@@ -1102,6 +1105,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(
           m.graph()->insertNode(m.graph()->createTuple(values))->output());
     }
+  }
+
+  auto opoverloadpacket_type =
+      py::module::import("torch").attr("_ops").attr("OpOverloadPacket");
+  py::bool_ is_overloadpacket = py::isinstance(obj, opoverloadpacket_type);
+  if (is_overloadpacket) {
+    obj = py::getattr(obj, "op");
   }
 
   bool isRpcAvailable = py::cast<bool>(

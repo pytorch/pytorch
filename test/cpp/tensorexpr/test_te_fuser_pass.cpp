@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <sstream>
 
@@ -300,24 +301,6 @@ TEST(TEFuserPass, FuserPass_MergeGroups) {
       ->run(*g);
 }
 
-TEST(TEFuserPass, FuserPass_UnknownShapesIgnored) {
-  WithCPUFuser cf;
-  const auto graph_string = R"IR(
-    graph(%x : Float(device=cpu),
-          %y : Float(device=cpu)):
-      %a : Float(device=cpu) = aten::mul(%x, %y)
-      %b : Float(device=cpu) = aten::mul(%x, %a)
-      return (%b))IR";
-  auto g = std::make_shared<Graph>();
-  torch::jit::parseIR(graph_string, g.get());
-
-  g->lint();
-  FuseTensorExprs(g, /* min_group_size= */ 2, /* disable_shape_checks= */ true);
-
-  // Test that we are generating fusion groups even though shapes are not known
-  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
-}
-
 TEST(TEFuserPass, FuserPass_IgnoreUnknownShapeAtStart) {
   WithCPUFuser cf;
   const auto graph_string = R"IR(
@@ -366,6 +349,53 @@ TEST(TEFuserPass, FuserPass_WhereList) {
   g->lint();
   FuseTensorExprs(g, /* min_group_size= */ 2);
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+TEST(TEFuserPass, DynamicShapeFusion) {
+  WithCPUFuser cf;
+  const auto graph_string = R"IR(
+    graph(%0 : Float(10, 5, strides=[5, 1], device=cpu),
+          %1 : Float(10, 5, strides=[5, 1], device=cpu)):
+      %2 : Float(10, 5, strides=[5, 1], device=cpu) = aten::mul(%0, %1)
+      %3 : Float(10, 5, strides=[5, 1], device=cpu) = aten::mul(%2, %1)
+      return (%3))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(
+      g,
+      /* min_group_size = */ 2,
+      /* add_composed_op = */ true,
+      /* fuse_to_dynamic_shapes = */ true);
+  Code code(g, "");
+
+  testing::FileCheck()
+      .check("prim::TensorExprDynamicGroup_")
+      ->check("prim::TensorExprDynamicGuard")
+      ->check("prim::TensorExprGroup_")
+      ->run(*g);
+
+  auto run_and_compare = [&](const std::vector<at::Tensor>& inputs) {
+    TORCH_INTERNAL_ASSERT(inputs.size() == 2);
+
+    auto ref = at::mul(at::mul(inputs[0], inputs[1]), inputs[1]);
+
+    InterpreterState interp(code);
+    Stack stack(inputs.begin(), inputs.end());
+    interp.run(stack);
+    at::Tensor out = pop(stack).toTensor();
+    ASSERT_TRUE(at::allclose(out, ref));
+  };
+
+  std::vector<at::Tensor> inputs = {at::rand({10, 5}), at::rand({10, 5})};
+  run_and_compare(inputs);
+
+  std::vector<at::Tensor> inputs2 = {at::rand({20, 5}), at::rand({20, 5})};
+  run_and_compare(inputs2);
+
+  std::vector<at::Tensor> inputs3 = {at::rand({25, 60}), at::rand({25, 60})};
+  run_and_compare(inputs3);
 }
 
 } // namespace jit

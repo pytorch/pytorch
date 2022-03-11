@@ -30,7 +30,6 @@
 #include <torch/csrc/distributed/rpc/unpickled_python_call.h>
 #include <torch/csrc/distributed/rpc/unpickled_python_remote_call.h>
 #include <torch/csrc/distributed/rpc/utils.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 
 namespace torch {

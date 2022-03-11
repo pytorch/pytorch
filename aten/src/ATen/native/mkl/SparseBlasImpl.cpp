@@ -207,6 +207,58 @@ void addmm_dense_result(
 }
 
 /*
+  Computes a sparse matrix-sparse matrix product with dense result defined as
+  C <- alpha*(A*B) + beta*C
+
+  Args:
+  * `A` - Sparse Tensor storing m x k matrix.
+  * `B` - Sparse Tensor storing k x n matrix.
+  * `C` - [in] Dense Tensor storing matrix of size m x n.
+          [out] result of the operation.
+*/
+void addmm_sparse_input_dense_result(
+    const Tensor& A,
+    const Tensor& B,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& C) {
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(
+      false,
+      "Calling addmm on a sparse CPU tensor requires Linux platform. ",
+      "Please use PyTorch built with MKL on Linux.");
+#else
+  // MKL function computes C <- A*B
+  // So we need a temporary matrix to store the result
+  // and then add it to C
+  auto C_ = at::empty(C.sizes(), C.options());
+  auto order = SPARSE_LAYOUT_ROW_MAJOR;
+  auto ldc = C_.stride(-2);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      C.scalar_type(), "addmm_sparse_input_dense_result", [&] {
+        auto mkl_A = at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(A);
+        auto mkl_B = at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(B);
+        at::mkl::sparse::spmmd<scalar_t>(
+            SPARSE_OPERATION_NON_TRANSPOSE,
+            mkl_A.descriptor(),
+            mkl_B.descriptor(),
+            order,
+            C_.data_ptr<scalar_t>(),
+            ldc);
+      });
+
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    C.zero_();
+  } else {
+    C.mul_(beta);
+  }
+  C.add_(C_, alpha);
+#endif
+}
+
+/*
   Computes a sparse matrix-sparse matrix product defined as
   C <- alpha*(A*B) + beta*C
 
@@ -290,11 +342,15 @@ void addmm_out_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
   if (mat2.layout() == kStrided && result.layout() == kStrided) {
     return addmm_dense_result(mat1, mat2, beta, alpha, result);
+  } else if (
+      mat1.is_sparse_csr() && mat2.is_sparse_csr() &&
+      result.layout() == kStrided) {
+    return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
   } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return addmm_sparse_result(mat1, mat2, beta, alpha, result);
   } else {
-    TORCH_INTERNAL_ASSERT(
-        false, "addmm: Received unexpected tensor layouts as input.");
+    TORCH_CHECK(false, "addmm: computation on CPU is not implemented for ",
+                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
 }
 
@@ -419,6 +475,8 @@ void triangular_solve_out_sparse_csr(
       "Please use PyTorch built with MKL on Linux.");
 #else
   if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    // If A has no nnz, then A is singular and we can't solve.
+    X.fill_(NAN);
     return;
   }
 
