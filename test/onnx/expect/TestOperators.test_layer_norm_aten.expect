@@ -29,8 +29,13 @@ graph {
       s: "layer_norm"
       type: STRING
     }
+    attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 10
     dims: 10
