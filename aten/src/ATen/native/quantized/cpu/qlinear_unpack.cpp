@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
