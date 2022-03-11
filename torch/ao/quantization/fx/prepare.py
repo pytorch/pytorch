@@ -785,8 +785,8 @@ def maybe_insert_observers_before_graph_output(
                     output_target_dtype = torch.quint8
                 k, inner_node = inner_v
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
-                        inner_node, output_target_dtype, node_name_to_target_dtype,
-                        qconfig_map, model, modules, graph)
+                    inner_node, output_target_dtype, node_name_to_target_dtype,
+                    qconfig_map, model, modules, graph)
             new_args.append(results_dict)
         else:
             output_target_dtype = output_quantized_idxs[0]

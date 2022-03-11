@@ -2389,6 +2389,7 @@ class TestQuantizeFx(QuantizationTestCase):
             'input_quantized_idxs': {0: torch.quint8},
             'output_quantized_idxs': {0: torch.quint8, 1: torch.quint8}
         }
+        # two observer needed for two conv module
         prepare_count_check = {
             ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
         }
@@ -2407,6 +2408,7 @@ class TestQuantizeFx(QuantizationTestCase):
             'input_quantized_idxs': {0: torch.quint8},
             'output_quantized_idxs': {1: torch.quint8}
         }
+        # two observer needed for two conv module
         prepare_count_check = {
             ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
         }
