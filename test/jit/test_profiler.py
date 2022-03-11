@@ -140,7 +140,7 @@ class TestProfiler(JitTestCase):
             for _ in range(3):
                 test_fuse(x, x)
 
-            self.assertTrue(torch._C._jit_texpr_detected_specialiazed_tensors())
+            self.assertTrue(torch._C._jit_custom_pass_has_specialiazed_tensors())
 
         finally:
             torch._C._jit_texpr_remove_specialiazation_detection_pass()

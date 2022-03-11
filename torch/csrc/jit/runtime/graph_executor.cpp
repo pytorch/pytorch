@@ -915,6 +915,10 @@ void runNondiffOptimization(
   for (const auto& passPair : getCustomPostPasses()) {
     passPair.first(graph);
   }
+  if(tensorExprFuserEnabled()){
+      RemoveTensorTypeSpecializations(graph);
+      GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
+  }
   GRAPH_DEBUG(
       "After customPostPassses (end of runNondiffOptimization)\n", *graph);
 }

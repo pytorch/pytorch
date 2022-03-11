@@ -141,7 +141,6 @@ bool isSupported(Node* node) {
   return false;
 }
 
-
 // Code to detect specializations for testing CustomPasses.
 static std::unique_ptr<RegisterPass> tTSpecializationDetectionPass = nullptr;
 static bool hasSpecializations = false;
@@ -156,6 +155,9 @@ bool hasTensorTypeSpecialization(Value* v) {
   if (v->node()->kind() == prim::Constant ||
       v->node()->kind() == prim::TypeCheck ||
       v->node()->kind() == prim::TensorExprGroup) {
+    return false;
+  }
+  if (v->type() == TensorType::get()) {
     return false;
   }
   return true;
@@ -180,6 +182,7 @@ bool hasTensorTypeSpecializations(torch::jit::Block* block) {
 }
 
 void detectTTSpecializationPass(std::shared_ptr<Graph>& graph) {
+  GRAPH_DUMP("In detectTTSpecialization Custom Post Pass: ", graph);
   hasSpecializations = hasTensorTypeSpecializations(graph->block());
 }
 
@@ -307,7 +310,7 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
 }
 
 void removeTensorTypeSpecialization(Value* v) {
-  if(tensorexpr::hasTensorTypeSpecialization(v)){
+  if (tensorexpr::hasTensorTypeSpecialization(v)) {
     v->setType(TensorType::get());
   }
 }
@@ -598,8 +601,6 @@ class TensorExprFuser {
     } else {
       prepareFusionGroupAndGuardOutputs(graph_->block());
       GRAPH_DUMP("After guarding fusion groups: ", graph_);
-      removeTensorTypeSpecializations(graph_->block());
-      GRAPH_DUMP("After removing tensor type specializations: ", graph_);
     }
   }
 

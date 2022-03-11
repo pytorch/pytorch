@@ -762,9 +762,15 @@ void initJITBindings(PyObject* module) {
           "_jit_texpr_dynamic_shape_enabled",
           &tensorExprDynamicShapeFusionEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
-      .def("_jit_texpr_add_specialiazation_detection_pass", &tensorexpr::addTensorTypeSpecializationDetectionPass)
-      .def("_jit_texpr_remove_specialiazation_detection_pass", &tensorexpr::removeTensorTypeSpecializationDetectionPass)
-      .def("_jit_texpr_detected_specialiazed_tensors", &tensorexpr::passDetectedSpecializedTensors)
+      .def(
+          "_jit_texpr_add_specialiazation_detection_pass",
+          &tensorexpr::addTensorTypeSpecializationDetectionPass)
+      .def(
+          "_jit_texpr_remove_specialiazation_detection_pass",
+          &tensorexpr::removeTensorTypeSpecializationDetectionPass)
+      .def(
+          "_jit_custom_pass_has_specialiazed_tensors",
+          &tensorexpr::passDetectedSpecializedTensors)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {
