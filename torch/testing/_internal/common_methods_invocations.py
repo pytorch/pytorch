@@ -3114,6 +3114,23 @@ def error_inputs_gather(op_info, device, **kwargs):
                      error_type=RuntimeError,
                      error_regex='unsupported operation')
 
+def error_inputs_take(op_info, device, **kwargs):
+    x = torch.rand((1,), device=device).expand((3,))
+    src = torch.rand((6,), device=device)
+    ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
+
+    yield ErrorInput(SampleInput(src, args=(ind,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(src, args=(ind,), kwargs=dict(out=src)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(ind.clone(), args=(ind[1:],), kwargs=dict(out=ind[:-1])),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
 # Error inputs for scatter
 def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     # Error when self.dtype != src.dtype (and src is not a scalar)
@@ -13596,7 +13613,8 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,  # vmap complains of the sizes
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=False,  # Need: put_
-           sample_inputs_func=sample_inputs_take),
+           sample_inputs_func=sample_inputs_take,
+           error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
