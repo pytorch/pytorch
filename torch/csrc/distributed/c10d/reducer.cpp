@@ -2052,6 +2052,45 @@ void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+
+  // First verify number of parameters to avoid inconsistent inputs into
+  // broadcast which can cause a crash.
+  // See https://github.com/pytorch/pytorch/issues/73547
+
+  auto param_size_data = std::make_unique<std::vector<int64_t>>();
+  param_size_data->push_back(static_cast<int64_t>(params.size()));
+  int64_t data_size = static_cast<int64_t>(param_size_data->size());
+  auto param_size_data_ptr = param_size_data.release();
+  // Make a tensor that contains the parameter size
+  at::Tensor param_size_tensor =
+        at::for_blob(param_size_data_ptr->data(), {data_size})
+            .context(
+                param_size_data_ptr,
+                [](void* ctx) {
+                  delete static_cast<std::vector<int64_t>*>(ctx);
+                })
+            .options(at::TensorOptions().dtype(at::kLong))
+            .make_tensor();
+
+  // This incurs extra CPU -> GPU copy and we'd like to initialize tensor on the
+  // device itself, but passing .device(params[0].device()) into at::TensorOptions()
+  // builder results in an error. See
+  param_size_tensor = param_size_tensor.to(params[0].device());
+  // Broadcast and verify parameter size.
+  std::vector<at::Tensor> param_size_vec{param_size_tensor};
+  process_group->broadcast(param_size_vec)->wait();
+  auto res = param_size_tensor[0].item<int>();
+  TORCH_CHECK(
+    res == params.size(),
+    c10::str(
+      "DDP expects same model across all ranks, but Rank ",
+      process_group->getRank(),
+      " has ", params.size(), " params, while rank 0 has inconsistent ", res,
+      " params."
+    )
+  );
+
+  // Continue with parameter shape verification.
   size_t i = 0;
   for (const auto& t : params) {
     i += 2 * t.dim();

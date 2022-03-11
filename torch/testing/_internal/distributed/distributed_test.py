@@ -316,16 +316,18 @@ class TwoLinLayerNet(nn.Module):
         return (a, b)
 
 
-class EmbeddingNetDifferentDimension(nn.Module):
+class EmbeddingNetDifferentParams(nn.Module):
     """
-    A module containing an embedding with different dimension depending on the
-    rank.
+    A module containing an embedding with different dimension or different # of
+    parameters depending on the rank.
     """
-    def __init__(self, rank):
+    def __init__(self, rank, diff_num_params=False):
         super().__init__()
-        embedding_dim = 500 if rank == 0 else 50
+        embedding_dim = 500 if diff_num_params or rank == 0 else 50
         self.embedding = nn.Embedding(num_embeddings=10, embedding_dim=embedding_dim)
         self.lin = nn.Linear(embedding_dim, 1)
+        if diff_num_params:
+            self.lin2 = nn.Linear(1, 1, bias=False)
 
     def forward(self, x):
         x = self.embedding(x)
@@ -7108,7 +7110,7 @@ class DistributedTest:
 
             # Create a valid model. The constructor initializes the logger that we use later.
             # We never actually use the rest of the model - we only need its logger.
-            net = EmbeddingNetDifferentDimension(0)
+            net = EmbeddingNetDifferentParams(0)
             net = torch.nn.parallel.DistributedDataParallel(
                 net.to(self.rank),
                 device_ids=[self.rank],
@@ -7147,7 +7149,11 @@ class DistributedTest:
         def test_compute_bucket_assignment_by_size_sparse_error_with_logger(self):
             self._test_compute_bucket_assignment_by_size(use_logger=True)
 
-        def _determine_expected_error_verify_model_across_rank(self, group_to_use):
+        def _determine_expected_error_verify_model_across_rank(
+            self,
+            group_to_use,
+            diff_num_params=False
+        ):
             # When running with NCCL backend, we don't expect an error on rank 0,
             # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
             # running with Gloo or with debug mode wrapper, we expect the error
@@ -7163,7 +7169,10 @@ class DistributedTest:
                     expected_err = None
                     ctx = self.assertRaises(RuntimeError)
             else:
-                expected_err = "appears not to match"
+                if diff_num_params:
+                    expected_err = "DDP expects same model across all ranks"
+                else:
+                    expected_err = "appears not to match"
                 ctx = self.assertRaisesRegex(RuntimeError, expected_err)
             return ctx, expected_err
 
@@ -7181,7 +7190,7 @@ class DistributedTest:
             ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
 
             # Create a valid model. The constructor initializes the logger that we use later.
-            net = EmbeddingNetDifferentDimension(0)
+            net = EmbeddingNetDifferentParams(0)
             net = torch.nn.parallel.DistributedDataParallel(
                 net.to(self.rank),
                 device_ids=[self.rank],
@@ -7228,11 +7237,28 @@ class DistributedTest:
         def test_verify_model_across_rank_without_logger(self):
             self._test_verify_model_across_rank(use_logger=False)
 
+        def _run_test_ddp_model_with_diff_params(self, ctx, net, ddp_group, group_gloo):
+            with ctx:
+                net = torch.nn.parallel.DistributedDataParallel(
+                    net.to(self.rank),
+                    device_ids=[self.rank],
+                    process_group=ddp_group
+                )
+                # Should only be run by rank 0, and blocking_wait catches and
+                # reports exception.
+                dist.barrier(ddp_group)
+
+            # can't use verify_ddp_error_logged here because net was never properly constructed
+
+            # Perform gloo-based barrier to ensure one rank doesn't exit test
+            # early which causes failure with Barrier.sync.
+            dist.barrier(group_gloo)
+
         @require_backend(DistTestCases.backend_feature["gpu"])
         @require_backends_available(DistTestCases.backend_feature["gpu"])
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_model_diff_across_ranks(self):
+        def test_ddp_model_diff_shape_across_ranks(self):
             group_gloo = dist.new_group(
                 timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
             )
@@ -7240,27 +7266,44 @@ class DistributedTest:
             # determinism.
             os.environ["NCCL_BLOCKING_WAIT"] = "1"
             group_to_use = dist.new_group(
-                backend=dist.get_backend(), timeout=timedelta(seconds=5)
+                backend=dist.get_backend(), timeout=timedelta(seconds=10)
             )
             torch.cuda.set_device(self.rank)
             ctx, expected_err = self._determine_expected_error_verify_model_across_rank(group_to_use)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
-            net = EmbeddingNetDifferentDimension(self.rank)
-            with ctx:
-                net = torch.nn.parallel.DistributedDataParallel(
-                    net.to(self.rank),
-                    device_ids=[self.rank],
-                    process_group=group_to_use,
-                )
-                # Should only be run by rank 0, and blocking_wait catches and
-                # reports exception.
-                dist.barrier(group_to_use)
-            # can't use verify_ddp_error_logged here because net was never properly constructed
+            net = EmbeddingNetDifferentParams(self.rank)
+            self._run_test_ddp_model_with_diff_params(
+                ctx, net, group_to_use, group_gloo
+            )
 
-            # Perform gloo-based barrier to ensure one rank doesn't exit test
-            # early which causes failure with Barrier.sync.
-            dist.barrier(group_gloo)
+        @require_backend(DistTestCases.backend_feature["gpu"])
+        @require_backends_available(DistTestCases.backend_feature["gpu"])
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_model_diff_num_params_across_ranks(self):
+            group_gloo = dist.new_group(
+                timeout=timedelta(seconds=60), backend=dist.Backend.GLOO
+            )
+            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # determinism.
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            group_to_use = dist.new_group(
+                backend=dist.get_backend(), timeout=timedelta(seconds=10)
+            )
+            torch.cuda.set_device(self.rank)
+            ctx, expected_err = self._determine_expected_error_verify_model_across_rank(
+                group_to_use, diff_num_params=True
+            )
+
+            # Creates network with diff # of param across ranks, reducer should
+            # recognize this and throw appropriate error.
+            net = EmbeddingNetDifferentParams(self.rank, diff_num_params=(self.rank == 1))
+
+
+            self._run_test_ddp_model_with_diff_params(
+                ctx, net, group_to_use, group_gloo,
+            )
 
         def _test_output_unused_in_loss(self, module_cls, gradient_as_bucket_view):
             model = module_cls()
@@ -7750,7 +7793,7 @@ class DistributedTest:
             class SubModule(nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.embedding_net = EmbeddingNetDifferentDimension(0)
+                    self.embedding_net = EmbeddingNetDifferentParams(0)
                     self.lin = TwoLinLayerNet()
                     self.bn = BatchNormNet()
                     self.lin_layer = nn.Linear(4, 10, bias=False)
@@ -7759,7 +7802,7 @@ class DistributedTest:
                     x = self.bn(x)
                     x = self.lin_layer(x)
                     x = self.lin.a(x)  # self.lin.b param unused
-                    # EmbeddingNetDifferentDimension entirely unused: self.embedding_net.embedding and
+                    # EmbeddingNetDifferentParams entirely unused: self.embedding_net.embedding and
                     # self.embedding_net.lin unused.
                     return x
 
