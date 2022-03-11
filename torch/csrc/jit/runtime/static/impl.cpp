@@ -681,11 +681,10 @@ size_t StaticModule::prepareStaticNodeInfos(
     ProcessedFunction* fn = &functions_[node_idx];
 
     // create a new ProcessedNode
-    const auto node_output_idx = node->outputs().empty()
-        // The index is unused if there are no outputs, so just create a
-        // placeholder value.
-        ? std::numeric_limits<uint16_t>::max()
-        : value_to_index.at(node->output(0));
+    c10::optional<uint16_t> node_output_idx;
+    if (!node->outputs().empty()) {
+      node_output_idx = value_to_index.at(node->output(0));
+    }
     nodes.emplace_back(node, fn, std::move(input_indices), node_output_idx);
 
     node_has_out_variant.emplace(node, nodes.back().has_out_variant());
@@ -1822,7 +1821,7 @@ StaticNodeInfo::StaticNodeInfo(
     Node* node,
     ProcessedFunction* fn,
     ProcessedNodeInputs inputs,
-    uint16_t outputs_offset)
+    c10::optional<uint16_t> outputs_offset)
     : node_(node),
       fn_(fn),
       inputs_(std::move(inputs)),

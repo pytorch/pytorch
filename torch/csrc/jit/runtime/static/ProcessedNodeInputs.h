@@ -22,7 +22,7 @@ class ProcessedNodeInputs {
   ProcessedNodeInputs() : ProcessedNodeInputs(0) {}
 
   explicit ProcessedNodeInputs(size_t size) {
-    DCHECK_LT(size, (1 << 16));
+    DCHECK_LT(size, (1 << 15));
     if (size <= kMaxInlineInputs) {
       repr_.inline_repr_.size = size;
     } else {
@@ -30,11 +30,11 @@ class ProcessedNodeInputs {
     }
   }
 
-  uint16_t operator[](uint16_t idx) const {
+  int16_t operator[](int16_t idx) const {
     return (*const_cast<ProcessedNodeInputs*>(this))[idx];
   }
 
-  uint16_t& operator[](uint16_t idx) {
+  int16_t& operator[](int16_t idx) {
     if (C10_LIKELY(repr_.is_inline())) {
       DCHECK_LT(idx, repr_.inline_repr_.size);
       return repr_.inline_repr_.inputs[idx];
@@ -43,7 +43,7 @@ class ProcessedNodeInputs {
     }
   }
 
-  C10_NODISCARD uint16_t size() const {
+  C10_NODISCARD int16_t size() const {
     if (C10_LIKELY(repr_.is_inline())) {
       return repr_.inline_repr_.size;
     } else {
@@ -61,14 +61,12 @@ class ProcessedNodeInputs {
     HeapArrayPtr() = default;
     ~HeapArrayPtr() = default;
 
-    explicit HeapArrayPtr(uint16_t size) : array_(alloc(size)) {}
+    explicit HeapArrayPtr(int16_t size) : array_(alloc(size)) {}
 
     HeapArrayPtr(const HeapArrayPtr& rhs) : array_(alloc(rhs.size())) {
       if (rhs.array_) {
         std::memcpy(
-            array_.get(),
-            rhs.array_.get(),
-            (rhs.size() + 1) * sizeof(uint16_t));
+            array_.get(), rhs.array_.get(), (rhs.size() + 1) * sizeof(int16_t));
       }
     }
 
@@ -83,9 +81,7 @@ class ProcessedNodeInputs {
 
       if (rhs.array_) {
         std::memcpy(
-            array_.get(),
-            rhs.array_.get(),
-            (rhs.size() + 1) * sizeof(uint16_t));
+            array_.get(), rhs.array_.get(), (rhs.size() + 1) * sizeof(int16_t));
       }
       return *this;
     }
@@ -97,16 +93,16 @@ class ProcessedNodeInputs {
       return size() != 0;
     }
 
-    C10_NODISCARD uint16_t size() const {
+    C10_NODISCARD int16_t size() const {
       return array_ ? array_[0] : 0;
     }
 
-    uint16_t operator[](uint16_t idx) const {
+    int16_t operator[](int16_t idx) const {
       DCHECK_LT(idx, size());
       return array_[idx + 1];
     }
 
-    uint16_t& operator[](uint16_t idx) {
+    int16_t& operator[](int16_t idx) {
       DCHECK_LT(idx, size());
       return array_[idx + 1];
     }
@@ -114,13 +110,13 @@ class ProcessedNodeInputs {
    private:
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
-    std::unique_ptr<uint16_t[]> array_;
+    std::unique_ptr<int16_t[]> array_;
 
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
     // NOLINTNEXTLINE(modernize-avoid-c-arrays)
-    static std::unique_ptr<uint16_t[]> alloc(uint16_t num_elts) {
+    static std::unique_ptr<int16_t[]> alloc(int16_t num_elts) {
       if (num_elts) {
-        auto result = std::make_unique<uint16_t[]>(num_elts + 1);
+        auto result = std::make_unique<int16_t[]>(num_elts + 1);
         result[0] = num_elts;
         return result;
       } else {
@@ -129,12 +125,11 @@ class ProcessedNodeInputs {
     }
   };
 
-  // We want ProcessedNode to be able to pack two more `uint16_t`
-  // fields after its ProcessedNodeInputs, and we'll end up being
+  // We want ProcessedNode to be able to pack one more `bool`
+  // field after its ProcessedNodeInputs, and we'll end up being
   // aligned to an 8-byte boundary anyway. We could avoid this pragma
-  // at the cost of having to move ProcessedNode::outputs_offset_ and
-  // ProcessedNode::num_outputs_ into this class, which would be
-  // awkward.
+  // at the cost of having to move ProcessedNode::overlap_detected_ into this
+  // class, which would be awkward.
 #pragma pack(push, 2)
   union Repr {
     C10_NODISCARD bool is_inline() const {
@@ -145,7 +140,7 @@ class ProcessedNodeInputs {
       std::memcpy(&tag, reinterpret_cast<const uint8_t*>(this), 1);
       // HeapArrayPtr will be represented as a plain old pointer,
       // which will have alignment to at least a 2-byte boundary
-      // (because it's uint16_t*) and more likely an 8- or 16-byte
+      // (because it's int16_t*) and more likely an 8- or 16-byte
       // boundary because malloc will tend to just align everything to
       // one of those. So, we just set tag to 1 when inline_repr_ is
       // active so as to be able to differentiate the two.
@@ -216,7 +211,7 @@ class ProcessedNodeInputs {
     struct InlineRepr {
       uint8_t tag = 0x1;
       uint8_t size;
-      uint16_t inputs[kMaxInlineInputs];
+      int16_t inputs[kMaxInlineInputs];
     };
 
     using OutlineRepr = HeapArrayPtr;

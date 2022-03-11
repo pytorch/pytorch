@@ -783,7 +783,7 @@ class TORCH_API StaticNodeInfo {
       Node* n,
       ProcessedFunction* fn,
       ProcessedNodeInputs inputs,
-      uint16_t outputs_offset);
+      c10::optional<uint16_t> outputs_offset);
 
   Node* node() const {
     return node_;
@@ -804,7 +804,7 @@ class TORCH_API StaticNodeInfo {
   Node* node_;
   const ProcessedFunction* fn_;
   ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
+  c10::optional<uint16_t> outputs_offset_;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -817,11 +817,24 @@ class TORCH_API ProcessedNode {
       : node_(other.node_),
         fn_(other.fn_),
         inputs_(other.inputs_),
-        outputs_offset_(other.outputs_offset_),
         values_(values),
         // TODO(T105178680): For this task, we should move
         // block runners out of ProcessedNode.
-        block_runners_(nullptr) {}
+        block_runners_(nullptr) {
+    if (!other.outputs_offset_) {
+      return;
+    }
+    // Apply the outputs_offset to avoid calculating it at runtime.
+    values_ += *other.outputs_offset_;
+    // Adjust the input indices according to values_.
+    for (size_t i = 0; i < inputs_.size(); ++i) {
+      // Check if the adjusted input index points to the same IValue as the
+      // unadjusted ones.
+      DCHECK(
+          &values[inputs_[i]] == &values_[inputs_[i] - *other.outputs_offset_]);
+      inputs_[i] -= *other.outputs_offset_;
+    }
+  }
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -846,12 +859,12 @@ class TORCH_API ProcessedNode {
   // Output is readwrite
   IValue& Output(uint32_t i) {
     DCHECK(i < num_outputs());
-    return values_[outputs_offset_ + i];
+    return values_[i];
   }
 
   C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < num_outputs());
-    return values_[outputs_offset_ + i];
+    return values_[i];
   }
 
   size_t num_outputs() const {
@@ -860,8 +873,7 @@ class TORCH_API ProcessedNode {
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
-    return c10::ArrayRef<const IValue>(
-        values_ + outputs_offset_, num_outputs());
+    return c10::ArrayRef<const IValue>(values_, num_outputs());
   }
 
   C10_NODISCARD uint16_t num_inputs() const {
@@ -906,10 +918,6 @@ class TORCH_API ProcessedNode {
     values_ = values;
   }
 
-  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
-    DCHECK(i < num_outputs());
-    return outputs_offset_ + i;
-  }
   // used in debug mode
   bool verify_no_memory_overlap(bool force_check = false) const;
 
@@ -930,7 +938,6 @@ class TORCH_API ProcessedNode {
   Node* node_;
   const ProcessedFunction* fn_;
   ProcessedNodeInputs inputs_;
-  uint16_t outputs_offset_;
   bool overlap_detected_{false};
   IValue* values_ = nullptr; // unowned
   // For control flow; processed nodes may have sub-blocks which can

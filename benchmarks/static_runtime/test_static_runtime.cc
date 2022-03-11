@@ -1445,7 +1445,7 @@ TEST(StaticRuntime, LeakyReLU) {
 }
 
 static ProcessedNodeInputs createProcessedNodeInputs(
-    c10::ArrayRef<uint16_t> inputs) {
+    c10::ArrayRef<int16_t> inputs) {
   ProcessedNodeInputs result(inputs.size());
   for (const auto idx : c10::irange(inputs.size())) {
     result[idx] = inputs[idx];
@@ -1455,14 +1455,14 @@ static ProcessedNodeInputs createProcessedNodeInputs(
 
 static void checkProcessedNodeInputs(
     const ProcessedNodeInputs& io,
-    c10::ArrayRef<uint16_t> inputs) {
+    c10::ArrayRef<int16_t> inputs) {
   ASSERT_EQ(inputs.size(), io.size());
   for (const auto idx : c10::irange(inputs.size())) {
     EXPECT_EQ(inputs[idx], io[idx]);
   }
 }
 
-static void testProcessedNodeInputsRoundTrip(c10::ArrayRef<uint16_t> inputs) {
+static void testProcessedNodeInputsRoundTrip(c10::ArrayRef<int16_t> inputs) {
   auto io = createProcessedNodeInputs(inputs);
   checkProcessedNodeInputs(io, inputs);
 
@@ -1473,12 +1473,12 @@ static void testProcessedNodeInputsRoundTrip(c10::ArrayRef<uint16_t> inputs) {
 }
 
 TEST(ProcessedNodeInputs, Basic) {
-  std::vector<std::vector<uint16_t>> testCases = {
+  std::vector<std::vector<int16_t>> testCases = {
       {}, // empty
-      {0xABCD, 0x5a5a}, // inline
-      {0x11, 0x22, 0x33, 0x44, 0x55}, // max inline size
-      {0x11, 0x22, 0x33, 0x44, 0x55, 0x66}, // minimum outline size
-      std::vector<uint16_t>(100, 0x5a), // large outline size
+      {-0x11, 0x5a5a}, // inline
+      {0x11, -0x22, 0x33, -0x44, 0x55}, // max inline size
+      {0x11, 0x22, -0x33, -0x44, 0x55, 0x66}, // minimum outline size
+      std::vector<int16_t>(100, 0x5a), // large outline size
   };
 
   for (const auto& values : testCases) {
