@@ -3212,27 +3212,6 @@ def error_inputs_embedding(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(weight, args=(indices,)), error_type=RuntimeError,
                          error_regex="'weight' must be 2-D")
 
-def error_inputs_cov(op_info, device, **kwargs):
-    error_inputs = []
-
-    def construct(msg, tensor, **kw):
-        error_inputs.append(ErrorInput(SampleInput(tensor, kwargs=kw), error_type=RuntimeError,
-                                       error_regex=r'cov\(\):.*' + msg + r'.*'))
-
-    a = torch.rand(2)
-
-    construct(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
-    construct(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
-    construct(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
-    construct(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
-    construct(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
-    construct(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
-    construct(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
-    construct(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
-    construct(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
-
-    return error_inputs
-
 def error_inputs_multinomial(op_info, device, **kwargs):
     x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
     yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
