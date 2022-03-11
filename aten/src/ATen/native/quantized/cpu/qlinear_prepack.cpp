@@ -238,6 +238,9 @@ class QLinearPackWeightFp16 final {
       c10::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
+    // temporarily convert weight back to fp32, needs to be fixed
+    // after fbgemm fixes the interface for their prepacking op (take fp16 input0
+    weight = weight.to(ScalarType::Float);
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
