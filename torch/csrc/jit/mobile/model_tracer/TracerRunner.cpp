@@ -303,12 +303,10 @@ TracerResult trace_run(const std::string& input_module_path) {
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
 
-  {
-    std::lock_guard<std::mutex> guard(CustomClassTracer::getMutex());
-    loaded_classes.insert(
-        custom_class_tracer.getLoadedClasses().begin(),
-        custom_class_tracer.getLoadedClasses().end());
-  }
+  custom_class_tracer.getLoadedClasses().withLock(
+      [&](CustomClassTracer::custom_classes_type& custom_classes) {
+        loaded_classes.insert(custom_classes.begin(), custom_classes.end());
+      });
 
   {
     std::lock_guard<std::mutex> guard(BuildFeatureTracer::getMutex());
