@@ -27,11 +27,11 @@ TEST(Synchronized, TestMultiThreadedExecution) {
   };
 
   std::array<std::thread, 10> threads;
-  for (auto& t : threads) {
+  for (auto& t: threads) {
     t = std::thread(thread_cb);
   }
 
-  for (auto& t : threads) {
+  for (auto& t: threads) {
     t.join();
   }
 
