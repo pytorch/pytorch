@@ -190,7 +190,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_fuse_addmm(graph)
     torch._C._jit_pass_lint(graph)
-    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
+    from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version, is_caffe2_aten_fallback
 
     torch._C._jit_pass_peephole(graph, True)
     torch._C._jit_pass_lower_all_tuples(graph)
@@ -212,13 +212,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_onnx_remove_print(graph)
     torch._C._jit_pass_onnx_preprocess_caffe2(graph)
 
-    # Caffe2-specific optimization
-    is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
-                               torch.onnx._CAFFE2_ATEN_FALLBACK)
     torch.onnx.symbolic_helper._quantized_ops.clear()
     # Unpack quantized weights for conv and linear ops and insert into graph.
-    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback)
-    if is_caffe2_aten_fallback:
+    torch._C._jit_pass_onnx_unpack_quantized_weights(graph, params_dict, is_caffe2_aten_fallback())
+    if is_caffe2_aten_fallback():
         # Insert permutes before and after each conv op to ensure correct order.
         torch._C._jit_pass_onnx_quantization_insert_permutes(graph, params_dict)
 
@@ -1119,14 +1116,13 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
     try:
         import torch
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
+        from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
         import torch.onnx.symbolic_registry as sym_registry
 
         sym_registry.register_version("", opset_version)
 
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
-        is_caffe2_aten_fallback = (operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and
-                                   torch.onnx._CAFFE2_ATEN_FALLBACK)
-        if is_caffe2_aten_fallback and opset_version == 9:
+        if is_caffe2_aten_fallback() and opset_version == 9:
             import torch.onnx.symbolic_caffe2
             torch.onnx.symbolic_caffe2.register_quantized_ops("caffe2", opset_version)
 
@@ -1140,7 +1136,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         domain = ns
         if ns == "aten":
             domain = ""
-        elif ns == "quantized" and is_caffe2_aten_fallback:
+        elif ns == "quantized" and is_caffe2_aten_fallback():
             domain = "caffe2"
 
         if sym_registry.is_registered_op(op_name, domain, opset_version):

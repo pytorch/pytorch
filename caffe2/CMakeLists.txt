@@ -1938,6 +1938,7 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
+  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
   target_compile_definitions(torch_python PRIVATE BUILD_CAFFE2)
   if(USE_NUMPY)
     target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
