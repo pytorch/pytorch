@@ -5,42 +5,41 @@
 namespace caffe2 {
 namespace {
 __global__ void SliceCopyKernel(
-    char* src_offset_bytes,
-    int src_block_size_bytes,
-    char* dst_offset_bytes,
-    int dst_block_size_bytes,
-    int copy_size,
-    int itemsize,
-    int num_blocks) {
+    const char *const src_offset_bytes,
+    const int src_block_size_bytes,
+    char *const dst_offset_bytes,
+    const int dst_block_size_bytes,
+    const int copy_size,
+    const int num_blocks) {
   if ((copy_size % sizeof(int) == 0) &&
       (src_block_size_bytes % sizeof(int) == 0) &&
       (dst_block_size_bytes % sizeof(int) == 0)) {
-    int* src = (int*)src_offset_bytes;
-    int* dst = (int*)dst_offset_bytes;
+    const int* src = (int*)src_offset_bytes;
+    int *const dst = (int*)dst_offset_bytes;
 
-    int src_block_size = src_block_size_bytes / sizeof(int);
-    int dst_block_size = dst_block_size_bytes / sizeof(int);
+    const int src_block_size = src_block_size_bytes / sizeof(int);
+    const int dst_block_size = dst_block_size_bytes / sizeof(int);
 
-    int copyChunks = copy_size / sizeof(int);
+    const int copyChunks = copy_size / sizeof(int);
 
     CUDA_1D_KERNEL_LOOP(index, num_blocks * copyChunks) {
-      int chunk = index % copyChunks;
-      int block = index / copyChunks;
+      const int chunk = index % copyChunks;
+      const int block = index / copyChunks;
 
       dst[block * dst_block_size + chunk] = src[block * src_block_size + chunk];
     }
   } else {
-    char* src = (char*)src_offset_bytes;
-    char* dst = (char*)dst_offset_bytes;
+    const char *const src = (char*)src_offset_bytes;
+    char *const dst = (char*)dst_offset_bytes;
 
-    int src_block_size = src_block_size_bytes / sizeof(char);
-    int dst_block_size = dst_block_size_bytes / sizeof(char);
+    const int src_block_size = src_block_size_bytes / sizeof(char);
+    const int dst_block_size = dst_block_size_bytes / sizeof(char);
 
-    int copyChunks = copy_size / sizeof(char);
+    const int copyChunks = copy_size / sizeof(char);
 
     CUDA_1D_KERNEL_LOOP(index, num_blocks * copyChunks) {
-      int chunk = index % copyChunks;
-      int block = index / copyChunks;
+      const int chunk = index % copyChunks;
+      const int block = index / copyChunks;
 
       dst[block * dst_block_size + chunk] = src[block * src_block_size + chunk];
     }
@@ -149,24 +148,21 @@ bool SliceImplGpu(
   auto itemsize = data.meta().itemsize();
 
   if (!backward) {
-    char* src_bytes = (char*)data.raw_data();
-    char* dst_bytes = (char*)output->raw_mutable_data(data.meta());
+    const char *const src_bytes = (char*)data.raw_data();
+    char *const dst_bytes = (char*)output->raw_mutable_data(data.meta());
 
-    size_t src_nbytes = data.nbytes();
-    size_t dst_nbytes = output->nbytes();
-
-    size_t src_block_size = unit * data.size(dim);
-    size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t src_offset = unit * starts_idx[dim];
+    const size_t src_block_size = unit * data.size(dim);
+    const size_t dst_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
+    const size_t src_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
       return true;
     }
 
-    size_t src_block_size_bytes = itemsize * src_block_size;
-    size_t dst_block_size_bytes = itemsize * dst_block_size;
-    char* src_offset_bytes = src_bytes + itemsize * src_offset;
-    char* dst_offset_bytes = dst_bytes;
+    const size_t src_block_size_bytes = itemsize * src_block_size;
+    const size_t dst_block_size_bytes = itemsize * dst_block_size;
+    const char *const src_offset_bytes = src_bytes + itemsize * src_offset;
+    char *const dst_offset_bytes = dst_bytes;
 
     SliceCopyKernel<<<
         std::min(num_blocks, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -178,29 +174,25 @@ bool SliceImplGpu(
         dst_offset_bytes,
         dst_block_size_bytes,
         dst_block_size_bytes,
-        itemsize,
         num_blocks);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    char* src_bytes = (char*)go->raw_data();
-    char* dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
+    const char *const src_bytes = (char*)go->raw_data();
+    char *const dst_bytes = (char*)gdata->raw_mutable_data(go->meta());
 
-    size_t src_nbytes = go->nbytes();
-    size_t dst_nbytes = gdata->nbytes();
-
-    size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
-    size_t dst_block_size = unit * data.size(dim);
-    size_t dst_offset = unit * starts_idx[dim];
+    const size_t src_block_size = unit * (ends_idx[dim] - starts_idx[dim]);
+    const size_t dst_block_size = unit * data.size(dim);
+    const size_t dst_offset = unit * starts_idx[dim];
 
     if (num_blocks == 0 || dst_block_size == 0) {
       return true;
     }
 
-    size_t src_block_size_bytes = itemsize * src_block_size;
-    size_t dst_block_size_bytes = itemsize * dst_block_size;
+    const size_t src_block_size_bytes = itemsize * src_block_size;
+    const size_t dst_block_size_bytes = itemsize * dst_block_size;
 
-    char* src_offset_bytes = src_bytes;
-    char* dst_offset_bytes = dst_bytes + itemsize * dst_offset;
+    const char *const src_offset_bytes = src_bytes;
+    char *const dst_offset_bytes = dst_bytes + itemsize * dst_offset;
     // Zero out gradient blob before copy since we copy in fewer items than
     // there is space for
     math::Set<float, CUDAContext>(
@@ -224,7 +216,6 @@ bool SliceImplGpu(
         dst_offset_bytes,
         dst_block_size_bytes,
         src_block_size_bytes,
-        itemsize,
         num_blocks);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }

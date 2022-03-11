@@ -439,7 +439,7 @@ bool unmergeOutputsAlisingInputs(Node* subgraphNode) {
 
   std::set<Node*, topo_cmp_node> nodes;
   for (auto o : subgraph->outputs()) {
-    if (alias_db.mayContainAlias({o}, subgraph->inputs())) {
+    if (alias_db.mayContainAlias(o, subgraph->inputs())) {
       collectNodesToUnfuse(o->node(), nodes);
     }
   }

@@ -28,7 +28,7 @@ Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
   alignas(64) std::array<acc_t, vacc_t::size()> acc;
   acc.fill(ident);
   for (const auto k : c10::irange(vstride)) {
-    for (int i = 0; i < vacc_t::size(); ++i) {
+    for (const auto i : c10::irange(vacc_t::size())) {
       acc[i] = reduce(acc[i], values[i * vstride + k]);
     }
   }
@@ -139,7 +139,7 @@ struct OuterSumCastLoadPolicy {
     val.store(values);
 
     alignas(64) acc_t acc[vacc_t::size()];
-    for (int i = 0; i < vacc_t::size(); ++i) {
+    for (const auto i : c10::irange(vacc_t::size())) {
       acc[i] = values[i];
     }
 

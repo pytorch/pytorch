@@ -23,8 +23,7 @@ __device__ void bilinear_interpolate_gradient(
     int& x_low,
     int& x_high,
     int& y_low,
-    int& y_high,
-    const int index /* index for debug only*/) {
+    int& y_high) {
   // deal with cases that inverse elements are out of feature map boundary
   if (y < -1.0 || y > height || x < -1.0 || x > width) {
     // empty
@@ -76,8 +75,7 @@ __device__ void bilinear_interpolate_gradient(
 template <typename T>
 __global__ void RoIAlignBackwardFeature(
     const int nthreads,
-    const T* top_diff,
-    const int num_rois,
+    const T *const top_diff,
     const T spatial_scale,
     const int channels,
     const int height,
@@ -85,18 +83,18 @@ __global__ void RoIAlignBackwardFeature(
     const int pooled_height,
     const int pooled_width,
     const int sampling_ratio,
-    T* bottom_diff,
-    const T* bottom_rois,
+    T *const bottom_diff,
+    const T *const bottom_rois,
     bool continuous_coordinate) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     // (n, c, ph, pw) is an element in the pooled output
-    int pw = index % pooled_width;
-    int ph = (index / pooled_width) % pooled_height;
-    int c = (index / pooled_width / pooled_height) % channels;
-    int n = index / pooled_width / pooled_height / channels;
+    const int pw = index % pooled_width;
+    const int ph = (index / pooled_width) % pooled_height;
+    const int c = (index / pooled_width / pooled_height) % channels;
+    const int n = index / pooled_width / pooled_height / channels;
 
-    const T* offset_bottom_rois = bottom_rois + n * 5;
-    int roi_batch_ind = offset_bottom_rois[0];
+    const T *const offset_bottom_rois = bottom_rois + n * 5;
+    const int roi_batch_ind = offset_bottom_rois[0];
 
     // Do not using rounding; this implementation detail is critical
     T roi_offset = continuous_coordinate ? T(0.5) : 0;
@@ -157,8 +155,7 @@ __global__ void RoIAlignBackwardFeature(
             x_low,
             x_high,
             y_low,
-            y_high,
-            index);
+            y_high);
 
         T g1 = top_diff_this_bin * w1 / count;
         T g2 = top_diff_this_bin * w2 / count;
@@ -206,7 +203,6 @@ C10_EXPORT bool RoIAlignGradientOp<float, CUDAContext>::RunOnDevice() {
            context_.cuda_stream()>>>(
             dY.numel(),
             dY.data<float>(),
-            R.dim32(0),
             spatial_scale_,
             X.dim32(1),
             X.dim32(2),

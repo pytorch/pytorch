@@ -94,17 +94,6 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
 
-  std::string linear_before_inline = R"(
-    graph(%linear, %input, %weight, %bias):
-        %res = prim::CallFunction(%linear, %input, %weight, %bias)
-        return (%res))";
-  std::string prepacked_ops_pattern_before_inline = R"(
-    graph(%linear, %input, %weight, %bias):
-        %output_min_max : None = prim::Constant()
-        %packed_weight_bias = prepacked::linear_clamp_prepack(
-            %weight, %bias, %output_min_max, %output_min_max)
-        %res = prepacked::linear_clamp_run(%input, %packed_weight_bias)
-        return (%res))";
   std::string linear_pattern = R"(
     graph(%input, %weight, %bias):
         %res = aten::linear(%input, %weight, %bias)
@@ -117,31 +106,10 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
         %res = prepacked::linear_clamp_run(%input, %packed_weight_bias)
         return (%res))";
 
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear_value = match_vmap.at(vmap.at("linear"));
-    auto func_name = graph_rewrite_helper::getFuncName(linear_value);
-    if (func_name == "linear") {
-      return true;
-    }
-    return false;
-  };
-
   std::vector<std::pair<std::string, std::string>> value_mappings(
       {{"output_min_max", "res"},
        {"packed_weight_bias", "res"},
        {"res", "res"}});
-
-  SubgraphRewriter linear_call_fn_rewriter;
-  linear_call_fn_rewriter.RegisterRewritePattern(
-      linear_before_inline,
-      prepacked_ops_pattern_before_inline,
-      value_mappings);
-  linear_call_fn_rewriter.runOnGraph(graph, filter);
-
-  value_mappings = {
-      {"output_min_max", "res"}, {"packed_weight_bias", "res"}, {"res", "res"}};
 
   SubgraphRewriter linear_rewriter;
   linear_rewriter.RegisterRewritePattern(
@@ -516,22 +484,22 @@ script::Module optimizeForMobile(
 
 void insertPrePackedOps(std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 void insertPrePackedOps(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 void fusePrePackedLinearConvWithClamp(script::Module& module) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 void FoldPrePackingOps(script::Module& m) {
   TORCH_INTERNAL_ASSERT(
-      "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
+      false, "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
 }
 
 script::Module optimizeForMobile(
@@ -539,6 +507,7 @@ script::Module optimizeForMobile(
     const std::set<MobileOptimizerType>& blocklist,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
+      false,
       "Mobile optimization only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
   return module;
