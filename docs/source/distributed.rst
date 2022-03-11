@@ -808,3 +808,21 @@ following matrix shows how the log level can be adjusted via the combination of 
 +-------------------------+-----------------------------+------------------------+
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
+
+
+.. Distributed modules that are missing specific entries.
+.. Adding them here for tracking purposes until they are more permanently fixed.
+.. py:module:: torch.distributed.algorithms
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks
+.. py:module:: torch.distributed.algorithms.model_averaging
+.. py:module:: torch.distributed.elastic
+.. py:module:: torch.distributed.elastic.utils
+.. py:module:: torch.distributed.elastic.utils.data
+.. py:module:: torch.distributed.launcher
+.. py:module:: torch.distributed.nn
+.. py:module:: torch.distributed.nn.api
+.. py:module:: torch.distributed.nn.jit
+.. py:module:: torch.distributed.nn.jit.templates
+.. py:module:: torch.distributed.pipeline
+.. py:module:: torch.distributed.pipeline.sync
+.. py:module:: torch.distributed.pipeline.sync.skip
