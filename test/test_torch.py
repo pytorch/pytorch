@@ -5303,7 +5303,7 @@ else:
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
     def test_copy_(self, device, dtype):
         def can_cast(src_dtype, dst_dtype):
-            # torch.can_cast(torch.int16, torch.uint8) returns True 
+            # torch.can_cast(torch.int16, torch.uint8) returns True
             # which isn't actually safe-cast.
             # This function returns False in this case.
             def is_unsigned_int(dtype):
