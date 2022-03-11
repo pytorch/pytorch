@@ -1340,6 +1340,42 @@ TEST(StaticRuntime, Ones) {
   testStaticRuntime(script, args, args2);
 }
 
+TEST(StaticRuntime, Zeros) {
+  const auto script = R"JIT(
+    def forward(self,
+                size: List[int],
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool]):
+        a = torch.zeros(size,
+                       dtype=dtype,
+                       layout=layout,
+                       device=device,
+                       pin_memory=pin_memory)
+        return (a.clone())
+  )JIT";
+
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{2, 5};
+  std::vector<IValue> args{
+      size0, at::ScalarType::Int, at::kStrided, cpu, false};
+  std::vector<IValue> args1{
+      size0, at::ScalarType::Float, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{
+      size1, at::ScalarType::Float, at::kStrided, cpu, false};
+  testStaticRuntime(script, args);
+  testStaticRuntime(
+      script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, Linear) {
   const auto linear_script = R"JIT(
     def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
