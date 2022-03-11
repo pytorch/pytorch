@@ -308,12 +308,10 @@ TracerResult trace_run(const std::string& input_module_path) {
         loaded_classes.insert(custom_classes.begin(), custom_classes.end());
       });
 
-  {
-    std::lock_guard<std::mutex> guard(BuildFeatureTracer::getMutex());
-    build_features.insert(
-        build_feature_tracer.getBuildFeatures().begin(),
-        build_feature_tracer.getBuildFeatures().end());
-  }
+  build_feature_tracer.getBuildFeatures().withLock(
+      [&](BuildFeatureTracer::build_feature_type& bf) {
+        build_features.insert(bf.begin(), bf.end());
+      });
 
   TracerResult tracer_result = {
       root_ops,
