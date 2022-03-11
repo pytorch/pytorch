@@ -2074,7 +2074,7 @@ void verify_params_across_processes(
 
   // This incurs extra CPU -> GPU copy and we'd like to initialize tensor on the
   // device itself, but passing .device(params[0].device()) into at::TensorOptions()
-  // builder results in an error. See
+  // builder results in an error. See https://github.com/pytorch/pytorch/issues/74114
   param_size_tensor = param_size_tensor.to(params[0].device());
   // Broadcast and verify parameter size.
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
