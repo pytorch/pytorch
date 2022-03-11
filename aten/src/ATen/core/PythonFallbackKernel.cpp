@@ -12,12 +12,15 @@ namespace {
 //  - It must be empty while python code is executed.
 //  - It should only be set once even for multiple dispatcher calls that do not come
 //    back to python.
+// To achieve this, we ensure that the tls is empty by default and emptied again both when
+// we call into user torch_dispatch or returning back to python after this call.
+
 thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
 
 // RAII guard to make working with the above TLS safer.
-struct MaybeSetTLSStateGuard {
+struct MaybeSetTLSOnEntryGuard {
 public:
-  MaybeSetTLSStateGuard() {
+  MaybeSetTLSOnEntryGuard() {
     if (tls_on_entry.has_value()) {
       value_set_ = false;
     } else {
@@ -25,7 +28,7 @@ public:
       tls_on_entry = c10::impl::tls_local_dispatch_key_set();
     }
   }
-  ~MaybeSetTLSStateGuard() {
+  ~MaybeSetTLSOnEntryGuard() {
     if (value_set_) {
       TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
       tls_on_entry = c10::nullopt;
@@ -37,13 +40,13 @@ private:
 };
 
 // This guard assumes that tls_on_entry has a value.
-struct StashTLSStateGuard {
+struct StashTLSOnEntryGuard {
 public:
-  StashTLSStateGuard(): saved_(tls_on_entry.value()) {
+  StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
     tls_on_entry = c10::nullopt;
   }
 
-  ~StashTLSStateGuard() {
+  ~StashTLSOnEntryGuard() {
     TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());
     tls_on_entry = saved_;
   }
@@ -55,7 +58,7 @@ private:
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
-  StashTLSStateGuard stash_guard;
+  StashTLSOnEntryGuard stash_guard;
 
   // If Python Mode is active, use its PyInterpreter for dispatch
   const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
@@ -98,7 +101,7 @@ void pythonTLSSnapshotFallback(const c10::OperatorHandle& op, c10::DispatchKeySe
   // It is ok for the tls to be already set here.
   // It means that there are multiple calls into the dispatcher not originating from python code.
   // The guard below will properly ignore such calls.
-  MaybeSetTLSStateGuard guard;
+  MaybeSetTLSOnEntryGuard guard;
 
   op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::PythonTLSSnapshot), stack);
 }
