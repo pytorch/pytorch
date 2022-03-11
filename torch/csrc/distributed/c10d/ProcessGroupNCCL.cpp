@@ -584,6 +584,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     ncclDebugLevel = "UNSET";
   }
 
+  init();
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_

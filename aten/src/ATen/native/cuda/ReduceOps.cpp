@@ -6,6 +6,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorCompare.h>
 
+#include <ATen/Functions.h>
 #include <ATen/TensorIterator.h>
 
 namespace at { namespace native {

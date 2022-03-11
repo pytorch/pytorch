@@ -11,7 +11,7 @@ from ._internals import (
     get_split_size,
     validate_non_overlapping_shards_metadata
 )
-from ..metadata import ShardMetadata
+from torch.distributed._shard.metadata import ShardMetadata
 
 from torch.distributed._shard.sharded_tensor.utils import (
     _parse_and_validate_remote_device
