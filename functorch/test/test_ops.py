@@ -1051,7 +1051,7 @@ class TestDecompositionOpInfo(TestCase):
             # Before adding an entry to this table, make sure your decomposition is right :)
             tol_table = {
                 # Due to strange epsilon behaviors, see https://github.com/pytorch/pytorch/issues/73161
-                (torch.float32, aten.native_layer_norm): (1e-3, 1e-3),
+                (torch.float32, aten.native_layer_norm.default): (1e-3, 1e-3),
             }
             if (b.dtype, op) in tol_table:
                 rtol, atol = tol_table[(b.dtype, op)]
@@ -1127,13 +1127,13 @@ class TestDecompositionOpInfo(TestCase):
                 # pytorch_out_64}. In other words, we compare how far the
                 # decomposition and pytorch are from the "ground truth" (i.e.
                 # fp64). If the decomposition results in more error, we error
-                if func in decomposition_table and func not in [torch.ops.aten.detach]:
+                if func in decomposition_table and func not in [torch.ops.aten.detach.default]:
                     # Some functions take a dtype as argument, so we need to
                     # manually change that dtype in order to run it with a
                     # higher precision
                     dtype_arg_table = set([
-                        aten._softmax_backward_data,
-                        aten._log_softmax_backward_data,
+                        aten._softmax_backward_data.default,
+                        aten._log_softmax_backward_data.default,
                     ])
                     arg_string = f"args = {tree_map(unwrap_tensor, args)}\n"
                     arg_string += f"kwargs = {tree_map(unwrap_tensor, kwargs)}"
