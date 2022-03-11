@@ -20,19 +20,19 @@ TEST(Synchronized, TestMultiThreadedExecution) {
   c10::Synchronized<int> iv(0);
   const int kMaxValue = 10000;
 
-  auto thread_cb = [&kMaxValue, &iv]() {
+  auto thread_cb = [&iv]() {
     for (int i = 0; i < kMaxValue; ++i) {
       iv.withLock([](int& iv) { ++iv; });
     }
   };
 
-  std::thread threads[10];
-  for (int i = 0; i < 10; ++i) {
-    threads[i] = std::thread(thread_cb);
+  std::array<std::thread, 10> threads;
+  for (auto& t: threads) {
+    t = std::thread(thread_cb);
   }
 
-  for (int i = 0; i < 10; ++i) {
-    threads[i].join();
+  for (auto& t: threads) {
+    t.join();
   }
 
   iv.withLock([&](int& iv) { EXPECT_EQ(iv, kMaxValue * 10); });
