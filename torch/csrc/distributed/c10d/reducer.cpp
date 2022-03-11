@@ -2057,25 +2057,12 @@ void verify_params_across_processes(
   // broadcast which can cause a crash.
   // See https://github.com/pytorch/pytorch/issues/73547
 
-  auto param_size_data = std::make_unique<std::vector<int64_t>>();
-  param_size_data->push_back(static_cast<int64_t>(params.size()));
-  int64_t data_size = static_cast<int64_t>(param_size_data->size());
-  auto param_size_data_ptr = param_size_data.release();
-  // Make a tensor that contains the parameter size
-  at::Tensor param_size_tensor =
-        at::for_blob(param_size_data_ptr->data(), {data_size})
-            .context(
-                param_size_data_ptr,
-                [](void* ctx) {
-                  delete static_cast<std::vector<int64_t>*>(ctx);
-                })
-            .options(at::TensorOptions().dtype(at::kLong))
-            .make_tensor();
+  at::TensorOptions param_size_options;
+  param_size_options = param_size_options.dtype(at::kLong);
+  param_size_options = param_size_options.device(params[0].device());
+  at::Tensor param_size_tensor = at::tensor(
+    {static_cast<int64_t>(params.size())}, std::move(param_size_options));
 
-  // This incurs extra CPU -> GPU copy and we'd like to initialize tensor on the
-  // device itself, but passing .device(params[0].device()) into at::TensorOptions()
-  // builder results in an error. See https://github.com/pytorch/pytorch/issues/74114
-  param_size_tensor = param_size_tensor.to(params[0].device());
   // Broadcast and verify parameter size.
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
   process_group->broadcast(param_size_vec)->wait();
