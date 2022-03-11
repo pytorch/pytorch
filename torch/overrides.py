@@ -33,6 +33,9 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr)
 
+
+
+
 __all__ = [
     "get_ignored_functions",
     "get_overridable_functions",
@@ -42,7 +45,6 @@ __all__ = [
     "is_tensor_like",
     "is_tensor_method_or_property",
     "wrap_torch_function",
-    "get_similar_functions_helper"
 ]
 
 @functools.lru_cache(None)
@@ -273,42 +275,6 @@ def get_default_nowrap_functions() -> Set[Callable]:
         Tensor._grad.__get__,
     }
 
-def get_similar_functions_helper(name : str) -> List[str]:
-    """
-    Helper function for get_testing_overrides that takes in the name
-    of a function and returns a list of the names of the default, inplace,
-    dunder, inplace dunder and reverse dunder methods
-
-    Parameters
-    ----------
-    name : string
-        Name of function given by func.__name__
-
-    Returns
-    -------
-    names : list
-        names of default, inplace, dunder, inplace dunder and reverse dunder
-        methods
-    """
-    # Generate methods like __add__ and add_ by default from add
-    names = [
-        name,  # Default method
-        name + "_",  # Inplace variant
-        "__" + name + "__",  # Dunder method
-        "__i" + name + "__",  # Inplace dunder method
-        "__r" + name + "__",  # Reverse dunder method
-    ]
-
-    if name.startswith("bitwise_"):
-        # bitwise_<op> have dunder methods of the form __<op>__
-        # And so on.
-        subname = name[len("bitwise_"):]
-        names.extend([
-            "__" + subname + "__",
-            "__i" + subname + "__",
-            "__r" + subname + "__"
-        ])
-    return names
 
 @functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
@@ -937,7 +903,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
-        torch.slice_scatter: lambda input, src, dim, start, end, step: -1,
+        torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
         torch.sign: lambda input, out=None: -1,
@@ -1096,8 +1062,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
-        Tensor._autocast_to_reduced_precision: lambda self: -1,
-        Tensor._autocast_to_full_precision: lambda self: -1,
+        Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
+        Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
@@ -1213,7 +1179,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.share_memory_: lambda self: -1,
         Tensor.short: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.size: lambda self: -1,
-        Tensor.slice_scatter: lambda self, src, dim, start, end, step: -1,
+        Tensor.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         Tensor.sparse_dim: lambda self: -1,
         Tensor.sparse_mask: lambda self, mask: -1,
         Tensor.sparse_resize_: lambda self, size1, size2, dense_dim: -1,
@@ -1242,11 +1208,37 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }
 
+    from torch.testing._internal.common_methods_invocations import op_db
+
+    ret_opinfo = {}
+    for op in op_db:
+        if op.override_lambda:
+            ret_opinfo[op.op] = op.override_lambda
+
+    ret.update(ret_opinfo)
+
     ret2 = {}
     ignored = get_ignored_functions()
 
     for k, v in ret.items():
-        names = get_similar_functions_helper(k.__name__)
+        # Generate methods like __add__ and add_ by default from add
+        names = [
+            k.__name__,  # Default method
+            k.__name__ + "_",  # Inplace variant
+            "__" + k.__name__ + "__",  # Dunder method
+            "__i" + k.__name__ + "__",  # Inplace dunder method
+            "__r" + k.__name__ + "__",  # Reverse dunder method
+        ]
+
+        if k.__name__.startswith("bitwise_"):
+            # bitwise_<op> have dunder methods of the form __<op>__
+            # And so on.
+            subname = k.__name__[len("bitwise_"):]
+            names.extend([
+                "__" + subname + "__",
+                "__i" + subname + "__",
+                "__r" + subname + "__"
+            ])
 
         for name in names:
             func = getattr(Tensor, name, None)

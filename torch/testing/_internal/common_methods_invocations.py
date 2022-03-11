@@ -623,15 +623,11 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  # the following metadata relates to ExpandedWeights support and is checked in test_expanded_weights.py
                  supports_expanded_weight=False,
-                 # FIXME: this should be changed to default to True
-                 # when all lambdas from torch/overrides have been ported to OpInfos
-                 # in order to throw errors that alert the user to fill in override_lambda
-                 supports_overrides=False,  # whether the op supports overriding
-                 override_lambda=None,  # a lambda function that has the same signature as the real function
-                                        # and returns -1. This must be set if supports_overrides=True
-                                        # Used to test API coverage for a type that defines ``__torch_function__``
-                                        # Optimally this would be generated with inspect.signature but that is blocked by
-                                        # Issue #28233.
+                 # the following metadata relates to ``__torch_function__`` overriding and is used in torch/overrides.py
+                 # takes a lambda function that has the same signature as the real function and returns -1.
+                 # Used to test API coverage for a type that defines ``__torch_function__``
+                 # Optimally this would be generated with inspect.signature but that is blocked by Issue #28233.
+                 override_lambda=None,
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -795,11 +791,6 @@ class OpInfo(object):
         self.test_neg_view = test_neg_view
         self.supports_expanded_weight = supports_expanded_weight
 
-        self.supports_overrides = supports_overrides or override_lambda
-        if supports_overrides:
-            assert not (override_lambda is None), (
-                "override_lambda= should be provided if supports_overrides=True, if this operator does not support "
-                "overriding please set supports_overrides=False")
         self.override_lambda = override_lambda
 
     def __call__(self, *args, **kwargs):
@@ -8480,7 +8471,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_addmm,
-           supports_overrides=True,
            override_lambda=lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,),
     OpInfo('addmm',
            # When alpha=beta=1 as compile-time constants, JIT will decompose addmm into mm and add.
