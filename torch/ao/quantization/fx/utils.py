@@ -13,6 +13,7 @@ from torch.fx.graph import (
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 import operator
+import warnings
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -111,12 +112,15 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Union[Callable, str], Dict[str, Any]]:
+def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
     ''' Given an activation_post_process module,
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    compute_dtype = None
+    if hasattr(activation_post_process, "compute_dtype"):
+        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
@@ -134,9 +138,17 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
+    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # dynamic quantization
+        node_type = "call_function"
+        quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
-        raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
-    assert quantize_op is not None
+        warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
+        return None
     return node_type, quantize_op, qparams
 
 def quantize_node(
@@ -146,7 +158,8 @@ def quantize_node(
         modules: Dict[str, torch.nn.Module],
         quantized_graph: Graph,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        is_input: bool) -> Node:
+        is_input: bool,
+        output_prefix: str = "_output") -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.
@@ -173,7 +186,7 @@ def quantize_node(
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
         first_linear_use_or_first_use = in_node
-        prefix = "_output"
+        prefix = output_prefix
 
     if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
         module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
@@ -184,7 +197,10 @@ def quantize_node(
         module_path = ""
     root_module = modules['']
     graph = quantized_graph
-    node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
+    maybe_quantize_node_info = get_quantize_node_info(obs_module)
+    assert maybe_quantize_node_info is not None, \
+        f"Expecting quantize node info not to be None, observer: {obs_module}"
+    node_type, quantize_op, qparams = maybe_quantize_node_info
     inputs = [in_node]
 
     for key, value in qparams.items():

@@ -396,7 +396,7 @@ bool disableUnsafeMathOp(const char* op_name) {
   return fast_ops.count(op_name) > 0;
 }
 
-std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
+SROperator getOutOfPlaceOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SROperatorRegistry()->Has(op_name) && !disableUnsafeMathOp(op_name)) {
     return SROperatorRegistry()->Create(op_name)->Generate(n);
@@ -795,6 +795,7 @@ SROperator aten_stack(Node* n) {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "stack expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
@@ -2288,6 +2289,66 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto size = p_node->Input(0).toDimVector();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+      const auto device = p_node->Input(3).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(4).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::ones(size, dtype, layout, device, pin_memory);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::ones_out(size, out_t);
+  };
+});
+
+// device & pin_memory matter only when CUDA is enabled.
+static bool hasTensorWithOptions(
+    const IValue& ivalue,
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout) {
+  if (!ivalue.isTensor()) {
+    return false;
+  }
+  const auto& tensor = ivalue.toTensor();
+  if (dtype == tensor.dtype().toScalarType() &&
+      layout == tensor.options().layout_opt()) {
+    return true;
+  }
+  VLOG(1) << "tensor exists, but tensor options were different";
+  return false;
+}
+
+REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto size = p_node->Input(0).toDimVector();
+    const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+    const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+    if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
+      p_node->Output(0) = at::native::zeros(size, dtype, layout);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::zeros_out(size, out_t);
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"))) {
@@ -2368,6 +2429,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "concat expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
