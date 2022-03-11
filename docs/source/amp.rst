@@ -4,18 +4,16 @@
 Automatic Mixed Precision package - torch.amp
 =============================================
 
-.. automodule:: torch.amp
-.. currentmodule:: torch.amp
-
 .. Both modules below are missing doc entry. Adding them here for now.
 .. This does not add anything to the rendered page
 .. py:module:: torch.cpu
 .. py:module:: torch.cpu.amp
+.. py:module:: torch.cuda.amp
 
 .. automodule:: torch.amp
 .. currentmodule:: torch.amp
 
-:class:`torch.autocast` provides convenience methods for mixed precision,
+:class:`torch.amp` provides convenience methods for mixed precision,
 where some operations use the ``torch.float32`` (``float``) datatype and other operations
 use lower precision floating point datatype (``lower_precision_fp``): ``torch.float16`` (``half``) or ``torch.bfloat16``. Some ops, like linear layers and convolutions,
 are much faster in ``lower_precision_fp``. Other ops, like reductions, often require the dynamic
