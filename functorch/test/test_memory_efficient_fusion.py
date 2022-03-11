@@ -68,27 +68,22 @@ def run_and_compare_activation(fn, shape):
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
 class TestMemoryEfficientOpAuthoring(TestCase):
-    @unittest.skip("broken after 3/9 upstream update")
     def test_gelu_bias(self):
         with torch.jit.fuser("fuser2"):
             run_and_compare_activation(gelu_bias, 1024)
 
-    @unittest.skip("broken after 3/9 upstream update")
     def test_mish(self):
         with torch.jit.fuser("fuser2"):
             run_and_compare_activation(mish, 1024)
 
-    @unittest.skip("broken after 3/9 upstream update")
     def test_swish(self):
         with torch.jit.fuser("fuser2"):
             run_and_compare_activation(swish, 1024)
 
-    @unittest.skip("broken after 3/9 upstream update")
     def test_hard_sigmoid(self):
         with torch.jit.fuser("fuser2"):
             run_and_compare_activation(hard_sigmoid, 1024)
 
-    @unittest.skip("broken after 3/9 upstream update")
     def test_hard_swish(self):
         with torch.jit.fuser("fuser2"):
             run_and_compare_activation(hard_swish, 1024)

@@ -109,9 +109,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
     def test_make_fx_no_decompose(self, device):
-        # FIXME: reinstate tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(x):
             return torch.tanh(x).sum()
 
@@ -125,9 +122,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     def test_nnc_jit(self, device):
-        # FIXME: reinstantiatie tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(x):
             return torch.sin(x)
 
@@ -137,9 +131,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(jit_f(inp), f(inp))
 
     def test_nnc_scalar(self, device):
-        # FIXME: reinstantiatie tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(x):
             return torch.sin(x)
 
@@ -149,9 +140,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(jit_f(inp), f(inp))
 
     def test_nnc_pytrees(self, device):
-        # FIXME: reinstantiatie tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(x):
             return [torch.sin(x[0])]
 
@@ -161,9 +149,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(jit_f(inp), f(inp))
 
     def test_external_calls(self, device):
-        # FIXME: reinstantiatie tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(a, b):
             return torch.mv(a, b)
         jit_f = nnc_jit(f)
@@ -171,9 +156,6 @@ class TestPythonKey(TestCase):
         self.assertEqual(jit_f(*inp), f(*inp))
 
     def test_nnc_passthrough(self, device):
-        # FIXME: reinstantiatie tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(x, y):
             return x + y, y
         inp = (torch.randn(3), torch.randn(3))
@@ -308,7 +290,6 @@ class TestAOTAutograd(TestCase):
         inps = [torch.randn((), requires_grad=True)]
         self.verify_aot_autograd(foo, inps)
 
-    # @unittest.expectedFailure
     def test_grad_context(self):
         def foo(x):
             return x * 2
@@ -385,17 +366,13 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('linalg.householder_product'),
         xfail('logit'),
         xfail('matrix_exp'),
+        xfail('trace'),
         xfail('trapezoid'),
         xfail('trapz'),
-        xfail('trace'),
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         xfail('block_diag'),
     })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
-
-        # FIXME: reinstantiatie tests
-        return self.skipTest("broken after 3/9 upstream update")
-
         def f(args, kwargs):
             return op.op(*args, **kwargs)
         if not op.supports_autograd:
