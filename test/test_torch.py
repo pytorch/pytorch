@@ -1746,23 +1746,6 @@ else:
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
 
-    # FIXME: port to ErrorInputs
-    def test_cov_error(self, device):
-        def check(msg, *args, **kwargs):
-            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
-                torch.cov(*args, **kwargs)
-
-        a = torch.rand(2)
-        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
-        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
-        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
-        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
-        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
-        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
-        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
-        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
-        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
-
     @skipIfNoSciPy
     @dtypes(*get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
