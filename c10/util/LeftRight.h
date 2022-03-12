@@ -1,5 +1,4 @@
 #include <c10/macros/Macros.h>
-#include <c10/util/Synchronized.h>
 #include <array>
 #include <atomic>
 #include <functional>
@@ -193,9 +192,13 @@ class LeftRight final {
 // read-write lock to protect T (data).
 template <class T>
 class RWSafeLeftRightWrapper final {
+  using mutexType = std::mutex;
+  using rLockType = std::unique_lock<std::mutex>;
+  using wLockType = std::unique_lock<std::mutex>;
+
  public:
   template <class... Args>
-  explicit RWSafeLeftRightWrapper(const Args&... args) : data_{args...} {}
+  explicit RWSafeLeftRightWrapper(const Args&... args) : _data{args...} {}
 
   // RWSafeLeftRightWrapper is not copyable or moveable since LeftRight
   // is not copyable or moveable.
@@ -206,17 +209,19 @@ class RWSafeLeftRightWrapper final {
 
   template <typename F>
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
-    return data_.withLock(
-        [&readFunc](T const& data) { return readFunc(data); });
+    rLockType lock(mutex_);
+    return readFunc(_data);
   }
 
   template <typename F>
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
-    return data_.withLock([&writeFunc](T& data) { return writeFunc(data); });
+    wLockType lock(mutex_);
+    return writeFunc(_data);
   }
 
  private:
-  c10::Synchronized<T> data_;
+  T _data;
+  mutable mutexType mutex_;
 };
 
 } // namespace c10
