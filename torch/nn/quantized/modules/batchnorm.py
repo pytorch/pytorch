@@ -34,6 +34,10 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
             device=bn.weight.device,
             dtype=bn.weight.dtype
         )
+        qbn.weight = bn.weight
+        qbn.bias = bn.bias
+        qbn.running_mean = bn.running_mean
+        qbn.running_var = bn.running_var
         qbn.scale = output_scale
         qbn.zero_point = output_zero_point
         return qbn
