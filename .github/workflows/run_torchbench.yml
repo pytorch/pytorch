@@ -46,8 +46,11 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           pushd "${PWD}"/benchmark
+          pip uninstall -y torch torchvision torchtext
+          pip uninstall -y torch torchvision torchtext
+          pip uninstall -y torch torchvision torchtext
           pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html
-          python install.py
+          python install.py  --models hf_Bert hf_GPT2 hf_Bart hf_BigBird hf_DistilBert hf_GPT2 hf_Longformer hf_Reformer hf_T5
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch
