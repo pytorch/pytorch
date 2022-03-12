@@ -14,10 +14,10 @@
 // removed a bunch of slice variants for simplicity...
 
 #pragma once
+#include <ATen/core/ivalue.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/SmallVector.h>
-#include <c10/util/ArrayRef.h>
-#include <ATen/core/ivalue.h>
 #include <array>
 #include <iterator>
 #include <vector>
@@ -70,29 +70,27 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-ArrayRef(const T* data, size_t length)
-      : Data(data), Length(length) {
+  ArrayRef(const T* data, size_t length) : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
   /// Construct an ArrayRef from a range.
-ArrayRef(const T* begin, const T* end)
-      : Data(begin), Length(end - begin) {
+  ArrayRef(const T* begin, const T* end) : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }
 
-// Contruct multipy::ArrayRef from at::ArrayRef
-// TODO: Remove once we replace IValue
-ArrayRef(at::ArrayRef<T> at_arrayref)
-: Data(at_arrayref.data()), Length(at_arrayref.size()){
-   debugCheckNullptrInvariant();
-}
-// Contruct multipy::ArrayRef from c10::ivalue::TupleElements
-// TODO: Remove once we replace IValue
-ArrayRef(c10::ivalue::TupleElements tupleElements): ArrayRef(tupleElements.asArrayRef()){
-
-   debugCheckNullptrInvariant();
-}
+  // Contruct multipy::ArrayRef from at::ArrayRef
+  // TODO: Remove once we replace IValue
+  ArrayRef(at::ArrayRef<T> at_arrayref)
+      : Data(at_arrayref.data()), Length(at_arrayref.size()) {
+    debugCheckNullptrInvariant();
+  }
+  // Contruct multipy::ArrayRef from c10::ivalue::TupleElements
+  // TODO: Remove once we replace IValue
+  ArrayRef(c10::ivalue::TupleElements tupleElements)
+      : ArrayRef(tupleElements.asArrayRef()) {
+    debugCheckNullptrInvariant();
+  }
   /// Construct an ArrayRef from a SmallVector. This is templated in order to
   /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
   /// copy-construct an ArrayRef.
@@ -183,15 +181,16 @@ ArrayRef(c10::ivalue::TupleElements tupleElements): ArrayRef(tupleElements.asArr
   }
 
   /// front - Get the first element.
-const T& front() const {
+  const T& front() const {
     MULTIPY_CHECK(
         !empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
-const T& back() const {
-    MULTIPY_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
+  const T& back() const {
+    MULTIPY_CHECK(
+        !empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
 
@@ -201,16 +200,11 @@ const T& back() const {
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
-ArrayRef<T> slice(size_t N, size_t M)
-      const {
+  ArrayRef<T> slice(size_t N, size_t M) const {
     MULTIPY_CHECK(
         N + M <= size(),
-        "ArrayRef: invalid slice, N = " +
-        std::to_string(N) +
-        "; M = " +
-        std::to_string(M) +
-        "; size = " +
-        std::to_string(size()));
+        "ArrayRef: invalid slice, N = " + std::to_string(N) + "; M = " +
+            std::to_string(M) + "; size = " + std::to_string(size()));
     return ArrayRef<T>(data() + N, M);
   }
 
@@ -227,13 +221,11 @@ ArrayRef<T> slice(size_t N, size_t M)
   }
 
   /// Vector compatibility
-const T& at(size_t Index) const {
+  const T& at(size_t Index) const {
     MULTIPY_CHECK(
         Index < Length,
-        "ArrayRef: invalid index Index = " +
-        std::to_string(Index) +
-        "; Length = " +
-        std::to_string(Length));
+        "ArrayRef: invalid index Index = " + std::to_string(Index) +
+            "; Length = " + std::to_string(Length));
     return Data[Index];
   }
 

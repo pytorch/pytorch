@@ -4,7 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/deploy/ArrayRef.h>
-#include <torch/csrc/deploy/Optional.hpp>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 
 /* Torch Deploy intentionally embeds multiple copies of c++ libraries
    providing python bindings necessary for torch::deploy users in the same
@@ -32,16 +32,16 @@
 
 */
 #define TORCH_DEPLOY_TRY try {
-#define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                        \
-  }                                                                            \
-  catch (std::exception & err) {                                               \
-        throw std::runtime_error(                                               \
-            "Exception Caught inside torch::deploy embedded library: \n"  +    \
-            std::string(err.what()));                                          \
-  }                                                                            \
-  catch (...) {                                                                \
-        throw std::runtime_error(                                               \
-            "Unknown Exception Caught inside torch::deploy embedded library"); \
+#define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                    \
+  }                                                                        \
+  catch (std::exception & err) {                                           \
+    throw std::runtime_error(                                              \
+        "Exception Caught inside torch::deploy embedded library: \n" +     \
+        std::string(err.what()));                                          \
+  }                                                                        \
+  catch (...) {                                                            \
+    throw std::runtime_error(                                              \
+        "Unknown Exception Caught inside torch::deploy embedded library"); \
   }
 namespace torch {
 namespace deploy {

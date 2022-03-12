@@ -53,7 +53,7 @@
 // Get PAGE_SIZE and PAGE_MASK.
 #include <sys/user.h>
 
-#include <torch/csrc/deploy/Optional.hpp>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 #include <torch/csrc/deploy/irange.h>
 
 #include <fmt/format.h>
@@ -653,7 +653,8 @@ multipy::optional<TLSIndex> slow_find_tls_symbol_offset(const char* sym_name) {
 multipy::optional<TLSIndex> SystemLibraryImpl::tls_sym(const char* name) const {
   if (!sym(name)) {
     return multipy::nullopt; // before we do a bunch of slow lookups to find the
-                        // module_id, check that this even defines the symbol
+                             // module_id, check that this even defines the
+                             // symbol
   }
   if (handle_ == RTLD_DEFAULT) {
     return slow_find_tls_symbol_offset(name);

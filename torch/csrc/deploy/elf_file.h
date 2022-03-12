@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/deploy/Optional.hpp>
-#include <torch/csrc/deploy/mem_file.h>
-#include <torch/csrc/deploy/Exception.h>
-#include <vector>
 #include <elf.h>
+#include <torch/csrc/deploy/Exception.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
+#include <torch/csrc/deploy/mem_file.h>
+#include <vector>
 
 namespace torch {
 namespace deploy {
