@@ -2714,8 +2714,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
 
-# instantiate_parametrized_tests(DistributedDataParallelTest)
-
 if __name__ == "__main__":
     assert (
         not torch.cuda._initialized
