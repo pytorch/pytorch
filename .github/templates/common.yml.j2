@@ -309,6 +309,25 @@ concurrency:
             test-reports-*.zip
 {%- endmacro -%}
 
+{%- macro upload_cores(artifact_name="coredumps", config=None, shard=None, use_s3=True) -%}
+{%- if use_s3 %}- uses: !{{ upload_artifact_s3_action }}
+        name: Store Core dumps on S3
+{%- else %}- uses: actions/upload-artifact@v2
+        name: Store Core dumps on Github
+{%- endif %}
+        if: failure()
+        with:
+{%- if config != "" and shard != "" %}
+          name: !{{ artifact_name }}-!{{ config }}-!{{ shard }}
+{%- else %}
+          name: !{{ artifact_name }}
+{%- endif %}
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
+{%- endmacro -%}
+
 {%- macro render_test_results() -%}
       - name: Install render_test_results dependencies
         if: always()
