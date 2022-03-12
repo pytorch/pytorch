@@ -46,6 +46,7 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           pushd "${PWD}"/benchmark
+          pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html
           python install.py
       - name: Run TorchBench
         run: |
