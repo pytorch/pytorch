@@ -482,6 +482,15 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-distributed-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
@@ -737,6 +746,15 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
@@ -992,6 +1010,15 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-2
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
