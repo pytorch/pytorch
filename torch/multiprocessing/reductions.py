@@ -312,6 +312,18 @@ def rebuild_storage_filename(cls, manager, handle, size):
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 
+def rebuild_typed_storage_filename(cls, manager, handle, size, dtype):
+    storage: torch._TypedStorage = storage_from_cache(cls, handle)
+    if storage is not None:
+        return storage._shared_decref()
+    byte_size = size * torch._utils._element_size(dtype)
+    untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename(manager, handle, byte_size)
+    storage = torch._TypedStorage(
+        wrap_storage=untyped_storage,
+        dtype=dtype)
+    shared_cache[handle] = StorageWeakRef(storage)
+    return storage._shared_decref()
+
 
 def rebuild_storage_empty(cls):
     return cls()
@@ -337,7 +349,11 @@ def reduce_storage(storage):
     elif get_sharing_strategy() == 'file_system':
         metadata = storage._share_filename_()
         cache_key = metadata[1]
-        rebuild = rebuild_storage_filename
+        if isinstance(storage, torch._UntypedStorage):
+            rebuild = rebuild_storage_filename
+        else:
+            rebuild = rebuild_typed_storage_filename
+            metadata += (storage.dtype,)
         storage._shared_incref()
     elif storage.size() == 0:
         # This is special cased because Empty tensors
