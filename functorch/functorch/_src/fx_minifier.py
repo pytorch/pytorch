@@ -205,7 +205,7 @@ def minifier(fail_f: fx.GraphModule, inps, module_fails):
     failing_fx = fx.GraphModule(fail_f, failing_graph)
     print(f"""
 inps = {[(i.shape, i.dtype) for i in inps]}
-inps = [torch.empty(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
+inps = [torch.zeros(())] + [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
 {failing_fx.code}
 f = torch.jit.script(forward)
 with torch.jit.fuser("fuser2"):
@@ -228,6 +228,37 @@ with torch.jit.fuser("fuser2"):
     for _ in range(5):
         nf(*inps)
     ''')
+    p = subprocess.Popen(["PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py"],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+    out, err = p.communicate()
+    if p.returncode != 0:
+        err = err.decode('utf-8')
+        print(err)
+        return True
+    return False
+
+
+def check_nvfuser_correctness_subprocess(f, inps):
+    f.to_folder("temp")
+    with open("_temp.py", 'w') as fil:
+        fil.write(f'''
+import torch
+from temp import FxModule
+f = FxModule().cuda()
+inps = {[(i.shape, i.dtype) for i in inps]}
+inps = [torch.randn(shape, dtype=dtype, device='cuda')
+        if dtype.is_floating_point else torch.ones(shape, dtype=dtype, device='cuda')
+        for shape, dtype in inps]
+
+ref = f(*inps)
+nv_f = torch.jit.script(f)
+with torch.jit.fuser("fuser2"):
+    for _ in range(5):
+        res = nv_f(*inps)
+for a, b in zip(ref, res):
+    if not torch.allclose(a, b, atol=0.1):
+        exit(1)
+''')
     p = subprocess.Popen(["PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py"],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     out, err = p.communicate()

@@ -9,6 +9,17 @@ from .partitioners import draw_graph, min_cut_rematerialization_partition
 import time
 
 
+
+# These canonicalizations are needed here (and not decompositions), as the ops
+# we're trying to canonicalize to CompositeImplicitAutograd.
+def _canonicalize(fx_g):
+    for node in fx_g.graph.nodes:
+        if node.target == torch.ops.aten._to_copy:
+            node.target = torch.ops.aten.to
+    fx_g.recompile()
+    return fx_g
+
+
 def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
     """
     Compiles the :attr:`fx_g` with Torchscript compiler.
@@ -273,7 +284,7 @@ def print_compile(fx_g, _):
 
 
 def memory_efficient_fusion(
-    fn: Union[Callable, nn.Module], static_argnums: Optional[Tuple[int]] = None
+    fn: Union[Callable, nn.Module], static_argnums: Optional[Tuple[int]] = None, **kwargs
 ):
     """
     Wrapper function over :func:`aot_function` and :func:`aot_module` to perform
@@ -290,6 +301,7 @@ def memory_efficient_fusion(
             that takes one ore more arguments. Must return one or more Tensors.
         static_argnums (Optional[Tuple[Int]]): An option tuple of ints to mark
             the arguments of the function as static.
+        **kwargs: Any other overrides you want to make to the settings
 
     Returns:
         Returns a ``Callable``  or ``nn.Module`` that retains the eager behavior
@@ -306,6 +318,7 @@ def memory_efficient_fusion(
         "decompositions": default_decompositions,
         "static_argnums": static_argnums,
     }
+    config.update(kwargs)
     if isinstance(fn, torch.nn.Module):
         return aot_module(fn, **config)
     else:
@@ -322,7 +335,7 @@ def debug_compile(fx_g, inps):
 
 import torch
 import torch.fx as fx
-from functorch.compile import minifier, check_nvfuser_subprocess
+from functorch.compile import minifier, check_nvfuser_subprocess, check_nvfuser_correctness_subprocess
 
 inps = {[(i.shape, i.dtype) for i in inps]}
 inps = [torch.ones(shape, dtype=dtype, device='cuda') for (shape, dtype) in inps]
@@ -330,6 +343,7 @@ from foo import FxModule
 mod = FxModule().cuda()
 
 with torch.jit.fuser("fuser2"):
+  # check_nvfuser_subprocess can be replaced with check_nvfuser_correctness_subprocess
   minifier(fx.symbolic_trace(mod), inps, check_nvfuser_subprocess)
 """
     )
