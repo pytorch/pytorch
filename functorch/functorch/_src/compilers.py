@@ -9,7 +9,6 @@ from .partitioners import draw_graph, min_cut_rematerialization_partition
 import time
 
 
-
 # These canonicalizations are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g):

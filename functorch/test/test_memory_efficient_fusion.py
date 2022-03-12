@@ -88,8 +88,6 @@ def hard_mish(x):
 # evo_norm_inp = [(128, 2048, 8, 8)]
 
 
-
-
 def run_and_compare_activation(self, fn, inps):
     with torch.jit.fuser("fuser1"):
         device = "cuda"
@@ -110,11 +108,9 @@ def run_and_compare_activation(self, fn, inps):
             res = mem_optimized_fn(*res_args)
             res.sum().backward()
 
-
         self.assertEqual(ref, res)
         for ref_arg, res_arg in zip(ref_args, res_args):
             self.assertEqual(ref_arg.grad, res_arg.grad)
-
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
@@ -140,7 +136,7 @@ class TestMemoryEfficientOpAuthoring(TestCase):
             eps = 1e-5
             mean = torch.mean(x, dim, keepdim=True)
             centered = x - mean
-            var = torch.sum(centered * centered, dim, keepdim=True )/ x.size(-1)
+            var = torch.sum(centered * centered, dim, keepdim=True) / x.size(-1)
             rvar = 1./torch.sqrt(var+eps)
             normed = (x-mean) * rvar
             return normed * weight + bias
@@ -149,7 +145,6 @@ class TestMemoryEfficientOpAuthoring(TestCase):
         ln_size = 16
         layer_norm_inps = [(bs, ln_size), (ln_size,), (ln_size,)]
         run_and_compare_activation(self, layer_norm, layer_norm_inps)
-
 
     def test_rmsnorm(self):
         class T5LayerNorm(nn.Module):
@@ -177,7 +172,6 @@ class TestMemoryEfficientOpAuthoring(TestCase):
         t5_norm = T5LayerNorm(hidden)
         t5_norm_inputs = [(bs, seq, hidden)]
         run_and_compare_activation(self, t5_norm, t5_norm_inputs)
-
 
     # TODO - Assertion failure
     # def test_hard_mish(self):
