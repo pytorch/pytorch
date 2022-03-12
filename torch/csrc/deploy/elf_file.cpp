@@ -1,6 +1,6 @@
-#include <torch/csrc/deploy/irange.h>
-#include <torch/csrc/deploy/elf_file.h>
 #include <torch/csrc/deploy/Exception.h>
+#include <torch/csrc/deploy/elf_file.h>
+#include <torch/csrc/deploy/irange.h>
 
 namespace torch {
 namespace deploy {

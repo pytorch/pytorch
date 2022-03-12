@@ -10,8 +10,8 @@
 #include <iostream>
 #include <vector>
 
-#include <torch/csrc/deploy/irange.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/irange.h>
 
 #define ERROR(msg_fmt, ...) \
   throw std::runtime_error(fmt::format(msg_fmt, ##__VA_ARGS__))
