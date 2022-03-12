@@ -782,7 +782,7 @@ def maybe_insert_observers_before_graph_output(
                 if arg_idx in output_quantized_idxs:
                     output_target_dtype = output_quantized_idxs[arg_idx]
                 else:
-                    output_target_dtype = torch.quint8
+                    output_target_dtype = torch.float
                 k, inner_node = inner_v
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
                     inner_node, output_target_dtype, node_name_to_target_dtype,
