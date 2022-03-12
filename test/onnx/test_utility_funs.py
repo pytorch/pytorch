@@ -15,6 +15,7 @@ from torch.onnx.symbolic_helper import (_set_opset_version,
                                         _unpack_list,
                                         parse_args)
 import torch.utils.cpp_extension
+from autograd_helper import CustomFunction as CustomFunction2
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
 from verify import verify
@@ -956,7 +957,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # Test aten export of op with symbolic for aten
         x = torch.randn(100, 128)
         y = torch.randn(100, 128)
-        model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+        model = torch.nn.PairwiseDistance(p=2, eps=1e-6)
 
         graph, _, __ = self._model_to_graph(model, (x, y),
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
@@ -965,7 +966,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "aten::pairwise_distance")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
@@ -1037,6 +1039,36 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                            input_names=["batch"], dynamic_axes={"batch": [0, 1]})
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "prim::PythonOp")
+
+    def test_autograd_module_name(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input) + CustomFunction2.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(model, batch,
+                                           input_names=["batch"], dynamic_axes={"batch": [0, 1]})
+        iter = graph.nodes()
+        autograd1 = next(iter)
+        autograd2 = next(iter)
+        self.assertEqual(autograd1.kind(), "prim::PythonOp")
+        self.assertEqual(autograd2.kind(), "prim::PythonOp")
+        self.assertNotEqual(autograd1.s("module"), autograd2.s("module"))
 
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
