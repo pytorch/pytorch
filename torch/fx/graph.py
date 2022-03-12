@@ -337,15 +337,19 @@ class CodeGen(object):
 
             typename = _type_repr(o)
 
-            # This is a generic type, e.g. typing.List[torch.Tensor]
+            origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
+            origin_typename = add_global(_type_repr(origin_type), origin_type)
+
             if hasattr(o, '__origin__'):
-                origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
-                origin_typename = add_global(_type_repr(origin_type), origin_type)
+                # This is a generic type, e.g. typing.List[torch.Tensor]
+                if hasattr(o, '__args__'):
+                    # Assign global names for each of the inner type variables.
+                    args = [type_repr(arg) for arg in o.__args__]
 
-                # Assign global names for each of the inner type variables.
-                args = [type_repr(arg) for arg in o.__args__]
-
-                return f'{origin_typename}[{",".join(args)}]'
+                    return f'{origin_typename}[{",".join(args)}]'
+                else:
+                    # Bare type, such as `typing.Tuple` with no subscript
+                    return origin_typename
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
