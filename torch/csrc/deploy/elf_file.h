@@ -2,9 +2,9 @@
 
 #include <c10/util/Optional.h>
 #include <elf.h>
-#include <vector>
-#include <torch/csrc/deploy/mem_file.h>
 #include <torch/csrc/deploy/Exception.h>
+#include <torch/csrc/deploy/mem_file.h>
+#include <vector>
 
 namespace torch {
 namespace deploy {

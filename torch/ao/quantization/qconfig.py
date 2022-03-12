@@ -113,7 +113,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32, compute_dtype=torch.float16),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
