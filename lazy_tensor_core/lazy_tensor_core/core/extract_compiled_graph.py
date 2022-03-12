@@ -1,13 +1,15 @@
 from lazy_tensor_core import _LAZYC
 from lazy_tensor_core.core.tensor_factory_functions import tensor_factory_functions
+import lazy_tensor_core.debug.metrics as metrics
 import dataclasses
 from typing import List, Dict, Any, Callable
 import copy
 from torch import fx
 import torch
 import itertools
+import os
 
-debug = False
+debug = os.environ.get("debug_extract_compiled_graph") is not None
 
 @dataclasses.dataclass
 class GraphInputMatcher:
@@ -117,6 +119,16 @@ def force_lazy_device(model: fx.GraphModule):
 
     model.recompile()
 
+def get_fallback_ops():
+    fallback_ops = []
+    for opname in metrics.counter_names():
+        if "aten::" not in opname:
+            continue
+        val = int(metrics.counter_value(opname))
+        if val > 0:
+            fallback_ops.append(f"{opname}={val}")
+
+    return fallback_ops
 
 def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     """
@@ -132,12 +144,20 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     force_lazy_device(lazy_model)
 
     # This line executes lazy tracing and enable us extracting compiled graph later
+    metrics.reset_metrics()
     lazy_out = lazy_model(*lazy_args)
+    fallback_ops = get_fallback_ops()
+    metrics.reset_metrics()
+
+    if len(fallback_ops) > 0:
+        raise RuntimeError(f"Fail to extact the compiled graph because of fallback: {','.join(fallback_ops)}")
+
     if not isinstance(lazy_out, (tuple, list)):
         lazy_out = (lazy_out,)
 
     return_value_handler = ReturnValueHandler(lazy_out)
     if debug:
+        print("Fx code:\n", model.code)
         print("LTC IR:", _LAZYC._get_ltc_tensors_text(lazy_out))
 
     graph_input_tensor_ids, graph_input_ivalues = _LAZYC._get_ltc_tensors_ts_device_data_node(lazy_out)
