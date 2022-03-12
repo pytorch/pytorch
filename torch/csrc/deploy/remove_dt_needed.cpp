@@ -11,7 +11,7 @@
 #include <vector>
 
 #include <fmt/format.h>
-#include <torch/csrc/deploy/irange.h>
+#include <torch/csrc/deploy/irange.h> // @manual
 
 #define ERROR(msg_fmt, ...) \
   throw std::runtime_error(fmt::format(msg_fmt, ##__VA_ARGS__))

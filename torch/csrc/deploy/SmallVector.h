@@ -13,11 +13,9 @@
 // ATen: modified from llvm::SmallVector.
 // used std::is_trivially_{copy,move}_constructible
 // replaced iterator_range constructor with inline Container&& constructor
-// replaced LLVM_NODISCARD, LLVM_LIKELY, and LLVM_UNLIKELY with multipy equivalents
-// removed LLVM_GSL_OWNER
-// added SmallVector::at
-// added operator<< for std::ostream
-// added to export SmallVectorBase
+// replaced LLVM_NODISCARD, LLVM_LIKELY, and LLVM_UNLIKELY with multipy
+// equivalents removed LLVM_GSL_OWNER added SmallVector::at added operator<< for
+// std::ostream added to export SmallVectorBase
 
 #pragma once
 
@@ -1439,13 +1437,17 @@ namespace std {
 
 /// Implement std::swap in terms of SmallVector swap.
 template <typename T>
-inline void swap(multipy::SmallVectorImpl<T>& LHS, multipy::SmallVectorImpl<T>& RHS) {
+inline void swap(
+    multipy::SmallVectorImpl<T>& LHS,
+    multipy::SmallVectorImpl<T>& RHS) {
   LHS.swap(RHS);
 }
 
 /// Implement std::swap in terms of SmallVector swap.
 template <typename T, unsigned N>
-inline void swap(multipy::SmallVector<T, N>& LHS, multipy::SmallVector<T, N>& RHS) {
+inline void swap(
+    multipy::SmallVector<T, N>& LHS,
+    multipy::SmallVector<T, N>& RHS) {
   LHS.swap(RHS);
 }
 
