@@ -19,6 +19,7 @@ import importlib
 import glob
 import collections
 import random
+import traceback
 
 def set_seeds(seed=1337):
     torch.manual_seed(seed)
@@ -323,6 +324,17 @@ def to_device(tensors, device):
     except ImportError:
         pass
 
+    try:
+        import detectron2.structures
+        if (
+            isinstance(tensors, detectron2.structures.instances.Instances)
+        ):
+            # an Instances is a py class that holds a pred_classes and pred_boxes torch tensor,
+            # so convert it to a tuple for compatibility with downstream check_results
+            tensors = (tensors.pred_classes, tensors.pred_boxes.tensor)
+    except ImportError:
+        pass
+
     if isinstance(tensors, tuple) or isinstance(tensors, list):
         return tuple(to_device(i, device) for i in tensors)
     elif isinstance(tensors, dict):
@@ -433,6 +445,7 @@ def check_eval_correctness(args, benchmark, lazy_benchmark, name):
             return False
     except Exception as e:
         print(f"ERROR: {name}: {e}")
+        traceback.print_exc()
         save_error(name, args.test, e, args.output_dir)
         return False
     return True
@@ -661,6 +674,7 @@ if __name__ == "__main__" :
 
         except Exception as e:
             print(f"ERROR: {current_name}: {e}")
+            traceback.print_exc()
             save_error(current_name, args.test, e, args.output_dir)
             exit(13)
         exit(0)
