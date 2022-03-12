@@ -2,12 +2,12 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
-#include <torch/csrc/deploy/irange.h>
 #include <libgen.h>
+#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/csrc/deploy/deploy.h>
+#include <torch/csrc/deploy/irange.h>
 #include <torch/script.h>
 #include <torch/torch.h>
-#include <torch/csrc/deploy/ArrayRef.h>
 
 #include <future>
 #include <iostream>
@@ -188,8 +188,9 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
     session2.createMovable(obj);
   } catch (std::runtime_error& error) {
     EXPECT_TRUE(
-        std::string(error.what()).find(
-            "Cannot create movable from an object that lives in different session") !=
+        std::string(error.what())
+            .find(
+                "Cannot create movable from an object that lives in different session") !=
         std::string::npos);
   }
 }
