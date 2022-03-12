@@ -8,10 +8,8 @@ CustomClassTracer::CustomClassTracer() {
   auto recorder_cb =
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
     std::string name = fn.name();
-    getLoadedClasses().withLock(
-        [&name](CustomClassTracer::custom_classes_type& custom_classes) {
-          custom_classes.insert(name);
-        });
+    std::lock_guard<std::mutex> guard(getMutex());
+    getLoadedClasses().insert(name);
     return nullptr;
   };
 
@@ -19,10 +17,14 @@ CustomClassTracer::CustomClassTracer() {
                                       .scopes({at::RecordScope::CUSTOM_CLASS}));
 }
 
-c10::Synchronized<CustomClassTracer::custom_classes_type>& CustomClassTracer::
-    getLoadedClasses() {
-  static c10::Synchronized<custom_classes_type> loaded_classes;
+CustomClassTracer::custom_classes_type& CustomClassTracer::getLoadedClasses() {
+  static custom_classes_type loaded_classes;
   return loaded_classes;
+}
+
+std::mutex& CustomClassTracer::getMutex() {
+  static std::mutex m;
+  return m;
 }
 
 } // namespace mobile
