@@ -91,7 +91,7 @@ InterpreterManager::InterpreterManager(
     std::shared_ptr<Environment> env)
     : resources_(nInterp) {
   TORCH_DEPLOY_TRY
-  for (const auto i : c10::irange(nInterp)) {
+  for (const auto i : multipy::irange(nInterp)) {
     instances_.emplace_back(this, env);
     auto I = instances_.back().acquireSession();
     // make torch.version.interp be the interpreter id
