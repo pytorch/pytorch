@@ -187,8 +187,9 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
     session2.createMovable(obj);
   } catch (std::runtime_error& error) {
     EXPECT_TRUE(
-        std::string(error.what()).find(
-            "Cannot create movable from an object that lives in different session") !=
+        std::string(error.what())
+            .find(
+                "Cannot create movable from an object that lives in different session") !=
         std::string::npos);
   }
 }
