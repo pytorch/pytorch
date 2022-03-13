@@ -12,33 +12,60 @@ NumPy Compatibility
 
    **TL;DR:**
 
-   - Be explicit about obtaining and using NumPy arrays
+   - Be explicit about obtaining and using NumPy arrays, ``.numpy()`` will always ensure valid arrays
    - `This tutorial`_ shows a more concrete example of interoperability between
      NumPy and PyTorch
 
-At the onset it should be stressed that PyTorch tensors and NumPy arrays are
-fundamentally different types. However, in the interests of being accessible to
-the wider scientific python ecosystem, there are implicit and explicit
-conversion methods. The major considerations to keep in mind are:
+PyTorch tensors and NumPy arrays are fundamentally different types, backed by
+differing implementations. However, interoperability with NumPy is a top
+priority for PyTorch, given that it allows for the bidirectional exchange of
+data with external libraries which do not support PyTorch explicitly.
 
-- **Where** is the structure allocated?
-    * This may be on a compute device (e.g. a GPU) or the CPU
-- **What** is the underlying data?
-    * In particular, several functions will either return a copy or a view
-- **How** are modifications to the data handled?
-    * The data returned may be read-only, or may be writable
+Views, Copies and Data
+----------------------
+
+Both PyTorch Tensors and NumPy arrays correspond to blobs of memory on a compute
+device. To convert from one object type to another, for any data, we have the
+following options:
+
+- We can obtain a **view** of it (reinterpreting an existing blob)
+- We can **create** a new blob of memory (allocating new storage)
+- We can make a **copy** (also allocates new storage)
 
 From the end-user perspective, it is most desirable to have zero copy methods,
 however, for exploratory analyses and their visualizations in particular, it is
 often more important to have guaranteed conversions, even if copies are created.
 
+.. doctest::
+
+  >>> a_np = np.ones(3)
+  >>> b_fnp = torch.from_numpy(a_np)
+  >>> np.shares_memory(a_np, b_torch.numpy())
+   False
+  >>> np.shares_memory(a_np, b_fnp)
+  True
+
+.. warning::
+
+   Do not use ``id`` to check for shared memory, as ``id`` is a CPython only
+   implementation detail guaranteed to be unique. Also, for larger arrays,
+   :ref:`np.shares_memory <numpy::std:doc:reference/generated/numpy.shares_memory>` can be slow.
+
 Basic interoperability
 ----------------------
 
-NumPy arrays have no conception of the GPU, and so all conversions require a
-``cpu`` tensor. Similarly, the **computational graph** cannot be represented in
-```numpy``, and so the pre-requisite to have an operation or object without one,
-i.e. only leaf nodes are supported.
+When discussing compatibility of data structures and functions, the major considerations to keep in mind are:
+
+- **Where** is the structure allocated?
+    * This may be on a compute device (e.g. GPU, TPU) or the CPU.
+- **What** does a function return?
+    * This will either be a copy, view or a new instance.
+- **How** are modifications to the data handled?
+    * The data may be read-only, or may be writable
+
+The **computational graph** [#cgdef]_ cannot be represented in ``numpy``, and so
+the pre-requisite to have an operation or object without one, i.e. only leaf
+nodes are supported.
 
 .. doctest::
 
@@ -48,11 +75,15 @@ i.e. only leaf nodes are supported.
    >>> b_torch.numpy()
    array([1., 1., 1.], dtype=float32)
 
-PyTorch will raise exceptions instead of allowing operations that may lead to
-incorrect results. As the conversion to a NumPy array may potentially be a lossy
-operation (the computational graph), there are no inbuilt operations to do
-something which unconditionally returns a NumPy array. Practically speaking, a
-function can be created locally to return a NumPy array, for say, visualizations.
+Although this returned object is *equal* to a NumPy array, it is not equivalent
+to an existing array, which means that it does not share the same memory as an
+existing object. We can obtain a **view** or interpretation of a Tensor from
+NumPy array as well.
+
+The conversion to a NumPy array may potentially be a lossy operation (the
+computational graph), and so there are also no inbuilt operations to
+unconditionally return a NumPy array. Practically speaking, a function can be
+created locally to return a NumPy array, for say, visualizations.
 
 .. code-block:: python
 
@@ -73,9 +104,8 @@ Operations
 ----------
 
 All ``torch`` operators will helpfully fail with a ``TypeError`` if called with
-``numpy`` arrays. However, for **numpy functions**, using a ``torch.Tensor`` with
-an ``np.ndarray`` will return a ``torch.Tensor`` without creating any additional
-copies.
+``numpy`` arrays. However, for **numpy operators**, using a ``torch.Tensor``
+with an ``np.ndarray`` will return a ``torch.Tensor``.
 
  - Due to the :meth:`torch.Tensor.__array__()` implementation, a
    ``np.ndarray`` which shares memory with the ``torch.Tensor`` is used for the
@@ -107,28 +137,30 @@ As a concrete example, consider the following snippet:
    >>> np.add(a_np, b_torch)
    tensor([2., 2., 2.], dtype=torch.float64)
 
-To recognize the root cause of the errors and the legitimacy of the results above, we will recall that:
+.. dropdown:: Code path and extended explanation
 
-- The `Python data model`_ specifies that the ``__radd__`` function is to be
-  called when the operands do not both implement ``__add__``, so as a Tensor
-  does not support addition with an ``ndarray``, it is the concatenation
-  opration which is called instead of addition. This explains the result of
-  ``a_np + b_torch``
-- For ``b_torch + a_np``, it is ``a_np.__add__`` which is called, and this takes
-  an "array-like", so a view of the Tensor is converted to a NumPy array (a
-  no-op); subsequently, the returned object is still a Tensor, because of the
-  ``__array_wrap__`` and ``__array_priority__``
+              - The `Python data model`_ specifies that the ``__radd__`` function is to be
+                called when the operands do not both implement compatible ``__add__``, so as a
+                Tensor does not support addition with an ``ndarray``, it is the concatenation
+                opration which is called instead of addition. This explains the result of
+                ``a_np + b_torch``--> ``a_np.__add__(b_torch)``--> **NotImplemented** -->
+                ``a_np.__radd__(b_torch)`` which returns a Tensor.
 
-Recall that ``torch.Tensor.__array_priority__`` is higher than the NumPy
-default of ``0``, which means in keeping with `NEP 13`_ the returned object
-from a NumPy function will be a PyTorch Tensor.
+              - For ``b_torch + a_np``, it is ``a_np.__add__`` which is called, and this takes
+                an "array-like", so a view of the Tensor is converted to a NumPy array (a
+                no-op); subsequently, the returned object is still a Tensor, because of the
+                ``__array_wrap__`` and ``__array_priority__``
 
-.. note::
+              Recall that ``torch.Tensor.__array_priority__`` is higher than the NumPy
+              default of ``0``, which means in keeping with `NEP 13`_ the returned object
+              from a NumPy function will be a PyTorch Tensor.
 
-   The semantics of this conversion is defined formally in NumPy `NEP 18`_. In
-   particular, the dunder methods are described in `Version 3 of the NumPy Array
-   Interface`_. The exact order in which NumPy attempts to convert a foreign
-   object is described in the `interoperability with NumPy`_ document.
+              .. note::
+
+                    The semantics of this conversion is defined formally in NumPy `NEP 18`_. In
+                    particular, the dunder methods are described in `Version 3 of the NumPy Array
+                    Interface`_. The exact order in which NumPy attempts to convert a foreign
+                    object is described in the `interoperability with NumPy`_ document.
 
 If it is absolutely necessary to write functions where the input objects are not
 unconditionally known to be either PyTorch tensors or NumPy arrays, it is
@@ -217,7 +249,7 @@ For a NumPy ``ndarray`` to be convertible to a PyTorch tensor:
 - Array strides must be multiples of the Torch element byte size
 - Must have a ``dtype`` which is one of ``float64 float32 float16 complex64
   complex128 int64 int32 int16 int8 uint8 and bool``
- - Non-writable arrays will result in undefined behavior, and should be avoided
+- Non-writable arrays will result in undefined behavior, and should be avoided
    + Copies should be made instead
 
 Concretely, these may be expressed as:
@@ -250,6 +282,8 @@ To obtain a **view** of the data, :meth:`torch.from_numpy()` can be used.
    tensor([ 22.,  2., 23.], dtype=torch.float64)
    >>> np.array_equal(b_torch.numpy(), a_np)
    True
+   >>> np.shares_memory(a_np, b_torch)
+   True
 
 - :meth:`torch.from_numpy()` is guaranteed to share memory with NumPy.
 - :meth:`torch.as_tensor()` will try to stay away from copy operations, it
@@ -272,18 +306,60 @@ source to construct and return a ``torch.Tensor``.
 
    >>> a_np = np.array([1, 2, 3], dtype = np.float64)
    >>> b_torch = torch.tensor(a_np)
-   >>> b_torch
-   tensor([1., 2., 3.], dtype=torch.float64)
-   >>> b_torch[2] = 23
-   >>> np.array_equal(b_torch.numpy(), a_np)
+   >>> np.shares_memory(a_np, b_torch)
    False
-   >>> c_np = b_torch.numpy().copy() # new memory
+
+Alternatively, calling ``copy``  after conversion will also make a copy.
+
+.. doctest::
+
+   >>> a_np = np.array([1, 2, 3], dtype = np.float64)
+   >>> b_fnp = torch.from_numpy(a_np)
+   >>> b_fnp
+   tensor([1., 2., 3.], dtype=torch.float64)
+   >>> np.shares_memory(a_np, b_fnp)
+   True
+   >>> np.shares_memory(a_np, b_fnp.numpy())
+   True
+   >>> np.shares_memori(a_np, b_fnp.numpy().copy())
+   False
+
+The DLPack interface
+^^^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+   This requires NumPy v1.23
+
+
+Since both PyTorch tensors and NumPy arrays have the ``__dlpack__`` method
+defined, we can use the ``from_dlpack`` methods to obtain a view of the data.
+
+.. doctest::
+
+   >>> b_torch = torch.ones(3)
+   >>> np.shares_memory(np.from_dlpack(b_torch), b_torch.numpy())
+   True
+   >>> a_np = np.ones(3)
+   >>> np.shares_memory(torch.from_dlpack(a_np).numpy(), a_np)
+   True
+
+.. dropdown:: Fine print and references
+
+   - `DLPack specification`_
+   - `NumPy DLPack implementation`_
+   - `PyTorch DLPack implementation`_
+
+   .. warning::
+
+      The specification calls for a read-only view, but PyTorch does not support
+      immutable arrays (`see issue 44027`_).
 
 Calling NumPy Functions on PyTorch
 ----------------------------------
 
-Operators aside, NumPy functions can be called on PyTorch tensors as well. This
-is because NumPy ``ufuncs`` or universal functions (described fully `in the
+Operators aside, **most** NumPy functions can be called on CPU PyTorch tensors as well.
+This is because NumPy ``ufuncs`` or universal functions (described fully `in the
 NumPy documentation`_), take "array-like" inputs, and return tensor objects due
 to the dunder method ``__array_wrap__``.
 
@@ -296,6 +372,12 @@ to the dunder method ``__array_wrap__``.
    >>> np.arctan2(b_torch, 1)
    tensor([0.1974, 0.3805, 0.5404], dtype=torch.float64)
 
+.. warning:: Important exceptions
+
+   Calling a NumPy function which calls a method on the object passed will fail.
+   This includes: ``np.sum``, ``np.mean``, ``np.min``, ``np.max``, ``np.std``,
+   ``np.amin``, ``np.amax``.
+
 Essentially, the code execution path is similar to the operator resolution, that is:
 
 - The PyTorch tensor is converted to a NumPy array
@@ -303,12 +385,15 @@ Essentially, the code execution path is similar to the operator resolution, that
 - A PyTorch tensor is returned
 
 Conversely, no PyTorch functions will work on any NumPy array without explictly
-generating either a tensor `or a subclass`_.
+generating either a tensor `or a subclass`_. This is by design, as the NumPy
+array is not equivalent to a Torch tensor without additional guidance (e.g.
+Torch tensors may live on non-CPU compute devices).
 
 Indexing
 ^^^^^^^^
 
-Indexing operations typically work as expected.
+Indexing operations will typically work as expected. This includes both "fancy"
+and "simple" indexing operations as defined in `NEP 21`_.
 
 .. doctest::
 
@@ -358,36 +443,86 @@ NumPy arrays may have negative strides, which is not true for PyTorch tensors.
 Conclusions
 -----------
 
-For the most part, implicit conversions between NumPy and PyTorch tensors are
-possible, though they remain slightly convoluted  and thus should not be
-recommended.
+NumPy compatibility is a moving target, but aside from the edge cases documented here, the PyTorch project, like Python itself strives to provide the "least surprising" result via implicit conversions.
 
-Historical Aside
-^^^^^^^^^^^^^^^^
+That said, recall from ``import this``, the Zen of Python:
 
-`NEP 13`_ and `NEP 18`_, define ``__array_ufunc__`` and ``__array_function__``
-respectively. Neither of these have been implemented in PyTorch, and since these
-mechanisms have largely been replaced by newer approaches, they are unlikely to
-be included.
+    Explicit is better than implict
 
-The Array API
-~~~~~~~~~~~~~
+So the recommended solution is to always explicitly convert PyTorch tensors and
+NumPy arrays as required.
 
-The main source of confusion is that the existing NumPy API is far too forgiving
-about accepting foreign objects. To address this, `NEP 47`_ defines the
-``array_api`` namespace and associated functions, which will ensure either
-stricter compatibility or the guarantee of a not implemented error.
+.. warning::
 
+   This document is for vanilla PyTorch tensors and does not cover `extended tensors`_.
+
+.. dropdown:: Optional details
+
+   **Historical Aside**
+
+   `NEP 13`_ and `NEP 18`_, define ``__array_ufunc__`` and ``__array_function__``
+   respectively. Neither of these have been implemented in PyTorch, and since these
+   mechanisms have largely been replaced by newer approaches, they are unlikely to
+   be included.
+
+   **The Array API**
+
+   The existing NumPy API is far too forgiving about accepting foreign objects
+   which can be coerced to an ``array_like``. To address this, `NEP 47`_ defines
+   the ``array_api`` namespace and associated functions in keeping with the `Python
+   array API standard`_. Eventual adoption of this standard will ensure more usage
+   consistency.
+
+   **Tracking provenance**
+
+   Given a NumPy array which is a view of existing data, it may be required to
+   determine its provenance. This can be obtained by calling ``base``. ``base``
+   will default to returning ``None`` when called on an object which owns its own
+   memory, i.e. is not a view.
+
+   .. doctest::
+
+    >>> a_np = np.ones(3)
+    >>> b_torch = torch.ones(3)
+    >>> np.from_dlpack(b_torch).base
+    <capsule object "numpy_dltensor" at ...>
+    >>> a_np.base is None
+    True
+
+   Note that the results of ``base`` cannot be relied on for more than one level of
+   indirection. This means that given a tensor which shares memory with a NumPy
+   array, calling ``base`` will return a tensor, not the underlying array.
+
+   .. doctest::
+
+    >>> np.shares_memory(torch.from_numpy(a_np), a_np)
+    True
+    >>> np.shares_memory(torch.from_numpy(a_np).numpy(), a_np)
+    True
+    >>> torch.from_numpy(a_np).numpy().base # Unintuitive
+    tensor([1., 1., 1.], dtype=torch.float64)
+
+.. rubric:: **Footnotes**
+
+.. [#cgdef] A computational graph is used whenever gradients are to be computed. It consists (roughly) of a series of operations and data in a directed acyclic graph. This is described in more detail in `the introduction to torch.autograd tutorial`_
 
 .. _This tutorial: https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html
 .. _Version 3 of the NumPy Array Interface: https://numpy.org/doc/stable/reference/arrays.interface.html
 .. _NEP 18: https://numpy.org/neps/nep-0018-array-function-protocol.html
 .. _Python data model: https://docs.python.org/3/reference/datamodel.html#emulating-numeric-types
-.. _ NumPy-PyTorch cheatsheet: https://pytorch-for-numpy-users.wkentaro.com/
+.. _NumPy-PyTorch cheatsheet: https://pytorch-for-numpy-users.wkentaro.com/
 .. _in the NumPy documentation: https://numpy.org/doc/stable/reference/ufuncs.html
 .. _or a subclass: https://pytorch.org/docs/stable/notes/extending.html#subclassing-torch-tensor
 .. _NEP 47: https://numpy.org/neps/nep-0047-array-api-standard.html
 .. _NEP 13: https://numpy.org/neps/nep-0013-ufunc-overrides.html
 .. _NEP 18: https://numpy.org/neps/nep-0018-array-function-protocol.html
+.. _NEP 21: https://numpy.org/neps/nep-0021-advanced-indexing.html
 .. _NEP 37: https://numpy.org/neps/nep-0037-array-module.html
 .. _interoperability with NumPy: https://numpy.org/devdocs/user/basics.interoperability.html
+.. _the introduction to torch.autograd tutorial: https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html
+.. _Python array API standard: https://data-apis.org/array-api/latest/purpose_and_scope.html#this-api-standard
+.. _DLPack specification: https://dmlc.github.io/dlpack/latest/python_spec.html
+.. _NumPy DLPack implementation: https://numpy.org/devdocs/reference/generated/numpy.from_dlpack.html
+.. _PyTorch DLPack implementation: https://pytorch.org/docs/stable/dlpack.html
+.. _see issue 44027: https://github.com/pytorch/pytorch/issues/44027_
+.. _extended tensors: https://pytorch.org/docs/stable/notes/extending.html#extending-torch_
