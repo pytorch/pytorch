@@ -3185,6 +3185,55 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+def error_inputs_aminmax(op_info, device, **kwargs):
+
+    # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
+    shape = (S, 0, S)
+    err_msg1 = "cannot compute aminmax over an empty dimension as the operation has no identity"
+    yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_type=RuntimeError,
+                     error_regex=err_msg1)
+
+    # Error Inputs for tensors with more than 64 dimension
+    sizes = [1] * 65
+    err_msg2 = "only tensors with up to 64 dims are supported"
+    yield ErrorInput(SampleInput(torch.randn(sizes, device=device), kwargs={'dim': -1}),
+                     error_type=RuntimeError, error_regex=err_msg2)
+    yield ErrorInput(SampleInput(torch.randn(sizes, device=device), kwargs={'dim': 64}),
+                     error_type=RuntimeError, error_regex=err_msg2)
+
+    # Error Inputs for mixed devices
+    shape = (M)
+    err_msg3 = ""
+    if torch.cuda.is_available():
+        values = torch.randn(shape).cuda()
+        indices = torch.cuda.LongTensor()
+        yield ErrorInput(SampleInput(torch.randn(shape, device=device),
+                         kwargs={'dim': 0, 'out': (values, indices)}),
+                         error_type=RuntimeError, error_regex=err_msg3)
+
+    # Error Inputs for repeated 'dim' 
+    dims = [(0, 0), (0, -4)]
+    err_msg4 = "apperas multiple times in the list of dims"
+    x = torch.randn(S, S, S, S, device=device)
+    # for dim in dims:
+    #     yield ErrorInput(SampleInput(x, kwargs={'dim': dim}), error_type=RuntimeError,
+    #                      error_regex=err_msg4)
+ 
+    # Error Input for illegal dtype
+    input5 = torch.randn(L, L, dtype=torch.float32, device=device)
+    valid_values = torch.empty(L, dtype=torch.float32, device=device)
+    valid_indices = torch.empty(L, dtype=torch.long, device=device)
+    illegal_values = torch.empty(L, dtype=torch.int, device=device)
+    illegal_indices = torch.empty(L, dtype=torch.double, device=device)
+    err_msg5 = "Expected out tensor to have dtype float, but got double instead"
+    yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (valid_values, illegal_indices)}),
+                     error_type=RuntimeError, error_regex=err_msg5)
+
+    # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
+    err_msg6 = "Dimension out of range"
+    yield ErrorInput(SampleInput(torch.rand(shape, device=device), kwargs={'dim': 1}),
+                     error_type=IndexError, error_regex=err_msg6)
+
 def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -10762,7 +10811,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_aminmax),
+           sample_inputs_func=sample_inputs_aminmax,
+           error_inputs_func=error_inputs_aminmax),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
                torch.as_strided(x, size, stride, storage_offset=storage_offset),
