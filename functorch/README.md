@@ -170,7 +170,7 @@ Note: `vmap` imposes restrictions on the code that it can be used on.
 For more details, please read its docstring.
 
 `vmap(func)(*inputs)` is a transform that adds a dimension to all Tensor
-operations in `func`. `vmap(func)` returns a few function that maps `func` over
+operations in `func`. `vmap(func)` returns a new function that maps `func` over
 some dimension (default: 0) of each Tensor in `inputs`.
 
 `vmap` is useful for hiding batch dimensions: one can write a function `func`
