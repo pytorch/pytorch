@@ -3167,6 +3167,51 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
             )
 
 
+def error_inputs_amax_amin(op_info, device, **kwargs):
+
+    # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
+    shape = (S, 0, S)
+    err_msg1 = "Specify the reduction dim with the 'dim' argument."
+    yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_type=RuntimeError,
+                     error_regex=err_msg1)
+
+    # Error Inputs for tensors with more than 64 dimension
+    sizes = [1] * 65
+    err_msg2 = "only tensors with up to 64 dims are supported"
+    yield ErrorInput(SampleInput(torch.randn(sizes, device=device), kwargs={'dim': -1}),
+                     error_type=RuntimeError, error_regex=err_msg2)
+    yield ErrorInput(SampleInput(torch.randn(sizes, device=device), kwargs={'dim': 64}),
+                     error_type=RuntimeError, error_regex=err_msg2)
+
+    # Error Inputs for mixed devices
+    shape = (M)
+    err_msg3 = "Expected all tensors to be on the same device"
+    if torch.cuda.is_available():
+        values = torch.randn(shape).cuda()
+        yield ErrorInput(SampleInput(torch.randn(shape),
+                         kwargs={'dim': 0, 'out': values}),
+                         error_type=RuntimeError, error_regex=err_msg3)
+
+    # Error Inputs for repeated 'dim'
+    dims = [(0, 0), (0, -4)]
+    err_msg4 = "dim 0 appears multiple times in the list of dims"
+    x = torch.randn(S, S, S, S, device=device)
+    for dim in dims:
+        yield ErrorInput(SampleInput(x, kwargs={'dim': dim}), error_type=RuntimeError,
+                         error_regex=err_msg4)
+
+    # Error Input for illegal dtype
+    input5 = torch.randn(L, L, dtype=torch.float32, device=device)
+    illegal_values = torch.empty(L, dtype=torch.int, device=device)
+    err_msg5 = "Expected the dtype for input and out to match"
+    yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': illegal_values}),
+                     error_type=RuntimeError, error_regex=err_msg5)
+
+    # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
+    err_msg6 = "Dimension out of range"
+    yield ErrorInput(SampleInput(torch.rand(shape, device=device), kwargs={'dim': 1}),
+                     error_type=IndexError, error_regex=err_msg6)
+
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), {}),
@@ -3211,14 +3256,6 @@ def error_inputs_aminmax(op_info, device, **kwargs):
                          kwargs={'dim': 0, 'out': (values, indices)}),
                          error_type=RuntimeError, error_regex=err_msg3)
 
-    # Error Inputs for repeated 'dim' 
-    dims = [(0, 0), (0, -4)]
-    err_msg4 = "apperas multiple times in the list of dims"
-    x = torch.randn(S, S, S, S, device=device)
-    # for dim in dims:
-    #     yield ErrorInput(SampleInput(x, kwargs={'dim': dim}), error_type=RuntimeError,
-    #                      error_regex=err_msg4)
- 
     # Error Input for illegal dtype
     input5 = torch.randn(L, L, dtype=torch.float32, device=device)
     valid_values = torch.empty(L, dtype=torch.float32, device=device)
@@ -14981,6 +15018,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
+        error_inputs_func=error_inputs_amax_amin,
     ),
     ReductionOpInfo(
         'amin',
@@ -14992,6 +15030,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
         ),
+        error_inputs_func=error_inputs_amax_amin,
     ),
     ReductionOpInfo(
         'argmax',
