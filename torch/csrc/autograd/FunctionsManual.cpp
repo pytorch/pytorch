@@ -232,15 +232,6 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
   return self_scaled * scale_v;
 }
 
-// Tensor norm_jvp(
-//     const Tensor& self_p, const Tensor& self_t,
-//     const optional<Scalar> & p_, const Tensor& result, IntArrayRef dim, bool keepdim) {
-//   // Looks like we need to do some reduction?
-//   size_t ndim = self.sizes().size();
-//   double p = p_.value_or(2.0).toDouble();
-
-// }
-
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
   auto dim = opt_dim.value_or(IntArrayRef({}));
   return norm_backward(grad, self, scalar_ord, norm, dim, keepdim);
@@ -732,48 +723,13 @@ at::Tensor clamp_jvp(
   const Tensor& max_p, const Tensor& max_t
 ) {
   if (min_p.defined() && max_p.defined()) {
-    // We assume self_p is more likely to be tensor-subclass-like than max_p or min_p
-    const auto scalar_zero = at::scalar_tensor(0., self_p.options());
-
-    const auto self_gt_min = self_p > min_p;
-    const auto self_lt_max = self_p < max_p;
-
-    if (areAnyTensorSubclassLike({max_p})) {
-      const auto& pred_self = self_gt_min.logical_and(self_lt_max);
-
-      const auto self_lte_min = self_gt_min.logical_not();
-      const auto min_lte_max = min_p <= max_p;
-      const auto pred_min = self_lte_min.logical_and(min_lte_max);
-
-      const auto max_lt_min = min_lte_max.logical_not();
-      const auto self_gte_max = self_lt_max.logical_not();
-      const auto& pred_max = areAnyTensorSubclassLike({min_p}) ?
-        self_gte_max.logical_or(max_lt_min) :
-        self_gte_max.logical_or_(max_lt_min);
-
-      return where(pred_self, self_t, scalar_zero) + where(pred_min, min_t, scalar_zero) + where(pred_max, max_t, scalar_zero);
-    } else {
-      // Get the negation before we modify self_lt_max in-place
-      const auto self_lte_min = self_gt_min.logical_not();
-      const auto pred_self = self_gt_min.logical_and_(self_lt_max);
-
-      const auto min_lte_max = min_p <= max_p;
-      const auto pred_min = self_lte_min.logical_and_(min_lte_max);
-
-      const auto max_lt_min = min_lte_max.logical_not();
-      const auto self_gte_max = self_lt_max.logical_not();
-      const auto& pred_max = areAnyTensorSubclassLike({min_p}) ?
-        self_gte_max.logical_or(max_lt_min) :
-        self_gte_max.logical_or_(max_lt_min);
-
-      return where(pred_self, self_t, scalar_zero) + where(pred_min, min_t, scalar_zero) + where(pred_max, max_t, scalar_zero);
-    }
+    return where(min_p > max_p, max_t, where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
   } else if (min_p.defined()) {
     return where(self_p > min_p, self_t, min_t);
   } else if (max_p.defined()) {
     return where(self_p < max_p, self_t, max_t);
   } else {
-    return self_t; // is this correct?
+    return self_t;
   }
 }
 
