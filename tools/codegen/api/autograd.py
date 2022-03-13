@@ -363,7 +363,6 @@ def match_differentiability_info(
                                         return False
                                 if ch == "(":
                                     level += 1
-                            assert level == 1, "Parenthesis aren't balanced"
                             return True
                         is_single_method_on_self_t = check_parens_nest_level_gt_zero(between_parens)
                     directly_do_inplace = is_single_method_on_self_t and op_name == info.name
