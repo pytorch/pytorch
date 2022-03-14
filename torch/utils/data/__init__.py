@@ -18,7 +18,7 @@ from torch.utils.data.dataset import (
     TensorDataset,
     random_split,
 )
-from torch.utils.data.datapipe import (
+from torch.utils.data.datapipes.datapipe import (
     DFIterDataPipe,
     IterDataPipe,
     MapDataPipe,
@@ -31,7 +31,7 @@ from torch.utils.data.dataloader import (
     default_convert,
 )
 from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data._decorator import (
+from torch.utils.data.datapipes._decorator import (
     argument_validation,
     functional_datapipe,
     guaranteed_datapipes_determinism,
