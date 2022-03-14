@@ -7,6 +7,7 @@ import functools
 import inspect
 import math
 import numbers
+import io
 import operator
 import os
 import pickle
@@ -1026,6 +1027,24 @@ class TestFX(JitTestCase):
         # Test scriptability
         traced_scripted = torch.jit.script(traced)
         self.assertEqual(traced_scripted(torch.rand(4)), 2)
+
+    def test_tuple_no_subscript(self):
+        def foo(x : Tuple):
+            return x[0]
+
+        traced = torch.fx.symbolic_trace(foo)
+        x = (torch.randn(5, 3),)
+        torch.testing.assert_allclose(traced(x), x[0])
+
+        bio = io.BytesIO()
+
+        torch.save(traced, bio)
+
+        bio.seek(0)
+
+        loaded = torch.load(bio)
+
+        torch.testing.assert_allclose(loaded(x), x[0])
 
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
