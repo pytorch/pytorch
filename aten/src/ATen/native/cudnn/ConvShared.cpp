@@ -494,6 +494,7 @@ Tensor cudnn_convolution_relu(
   }
 
   auto& ctx = at::globalContext();
+  bool benchmark = ctx.benchmarkCuDNN();
   bool allow_tf32 = ctx.allowTF32CuDNN();
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -516,7 +517,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -532,7 +533,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -554,6 +555,11 @@ Tensor cudnn_convolution_add_relu(
   auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
   const Tensor input = input_t.contiguous(memory_format);
   const Tensor weight = weight_t.contiguous(memory_format);
+  Tensor z = z_t;
+  if (z.suggest_memory_format() != memory_format) {
+    z = z.to(memory_format);
+  }
+  z = z.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
   Tensor output_t = at::detail::empty_cuda(
@@ -566,6 +572,7 @@ Tensor cudnn_convolution_add_relu(
 
   auto& ctx = at::globalContext();
   bool allow_tf32 = ctx.allowTF32CuDNN();
+  bool benchmark = ctx.benchmarkCuDNN();
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -581,14 +588,14 @@ Tensor cudnn_convolution_add_relu(
       output_t,
       input,
       weight,
-      z_t,
+      z,
       _alpha,
       _bias,
       stride,
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -597,14 +604,14 @@ Tensor cudnn_convolution_add_relu(
       output_t,
       input,
       weight,
-      z_t,
+      z,
       _alpha,
       _bias,
       stride,
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );
