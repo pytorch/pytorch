@@ -26,8 +26,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  )
         >>>
         >>>  # Register a post-localSGD communication hook.
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  state = PostLocalSGDState(process_group=None, subgroup=None, start_localSGD_iter=100)
         >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
         >>>  # Create a post-localSGD optimizer that wraps a local optimizer.
@@ -42,14 +41,11 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  # In the first 100 steps, DDP runs global gradient averaging at every step.
         >>>  # After 100 steps, DDP runs gradient averaging within each subgroup (intra-node by default),
         >>>  # and post-localSGD optimizer runs global model averaging every 4 steps after applying the local optimizer.
-        >>>  for step in range(0, 20):
+        >>>  for step in range(0, 200):
         >>>     opt.zero_grad()
         >>>     loss = loss_fn(output, labels)
         >>>     loss.backward()
         >>>     opt.step()
-
-    .. warning ::
-        `PostLocalSDGOptimizer` is experimental and subject to change.
     """
 
     def __init__(

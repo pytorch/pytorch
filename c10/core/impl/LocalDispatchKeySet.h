@@ -117,6 +117,20 @@ class C10_API ExcludeDispatchKeyGuard {
   DispatchKeySet exclude_;
 };
 
+struct C10_API ForceDispatchKeyGuard {
+ public:
+  ForceDispatchKeyGuard(c10::impl::LocalDispatchKeySet key_set)
+      : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+    c10::impl::_force_tls_local_dispatch_key_set(key_set);
+  }
+  ~ForceDispatchKeyGuard() {
+    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
+  }
+
+ private:
+  c10::impl::LocalDispatchKeySet saved_keyset_;
+};
+
 // Non-RAII API for manipulating the thread-local dispatch state.
 // Please prefer the RAII API.  The non-RAII API may be useful when
 // the included/excluded state of a given DispatchKey must span

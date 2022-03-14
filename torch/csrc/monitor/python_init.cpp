@@ -85,31 +85,127 @@ void initMonitorBindings(PyObject* module) {
 
   auto m = rootModule.def_submodule("_monitor");
 
-  py::enum_<Aggregation>(m, "Aggregation")
-      .value("VALUE", Aggregation::NONE)
-      .value("MEAN", Aggregation::MEAN)
-      .value("COUNT", Aggregation::COUNT)
-      .value("SUM", Aggregation::SUM)
-      .value("MAX", Aggregation::MAX)
-      .value("MIN", Aggregation::MIN)
+  py::enum_<Aggregation>(
+      m,
+      "Aggregation",
+      R"DOC(
+        These are types of aggregations that can be used to accumulate stats.
+      )DOC")
+      .value(
+          "VALUE",
+          Aggregation::NONE,
+          R"DOC(
+            VALUE returns the last value to be added.
+          )DOC")
+      .value(
+          "MEAN",
+          Aggregation::MEAN,
+          R"DOC(
+            MEAN computes the arithmetic mean of all the added values.
+          )DOC")
+      .value(
+          "COUNT",
+          Aggregation::COUNT,
+          R"DOC(
+            COUNT returns the total number of added values.
+          )DOC")
+      .value(
+          "SUM",
+          Aggregation::SUM,
+          R"DOC(
+            SUM returns the sum of the added values.
+          )DOC")
+      .value(
+          "MAX",
+          Aggregation::MAX,
+          R"DOC(
+            MAX returns the max of the added values.
+          )DOC")
+      .value(
+          "MIN",
+          Aggregation::MIN,
+          R"DOC(
+            MIN returns the min of the added values.
+          )DOC")
       .export_values();
 
-  py::class_<Stat<double>>(m, "Stat")
-      .def("add", &Stat<double>::add)
-      .def("get", &Stat<double>::get)
-      .def_property_readonly("name", &Stat<double>::name)
-      .def_property_readonly("count", &Stat<double>::count);
+  py::class_<Stat<double>>(
+      m,
+      "Stat",
+      R"DOC(
+        Stat is used to compute summary statistics in a performant way over
+        fixed intervals. Stat logs the statistics as an Event once every
+        ``window_size`` duration. When the window closes the stats are logged
+        via the event handlers as a ``torch.monitor.Stat`` event.
 
-  py::class_<IntervalStat<double>, Stat<double>>(m, "IntervalStat")
-      .def(py::init<
-           std::string,
-           std::vector<Aggregation>,
-           std::chrono::milliseconds>());
+        ``window_size`` should be set to something relatively high to avoid a
+        huge number of events being logged. Ex: 60s. Stat uses millisecond
+        precision.
 
-  py::class_<FixedCountStat<double>, Stat<double>>(m, "FixedCountStat")
-      .def(py::init<std::string, std::vector<Aggregation>, int64_t>());
+        If ``max_samples`` is set, the stat will cap the number of samples per
+        window by discarding `add` calls once ``max_samples`` adds have
+        occurred. If it's not set, all ``add`` calls during the window will be
+        included. This is an optional field to make aggregations more directly
+        comparable across windows when the number of samples might vary.
 
-  py::class_<Event>(m, "Event")
+        When the Stat is destructed it will log any remaining data even if the
+        window hasn't elapsed.
+      )DOC")
+      .def(
+          py::init<
+              std::string,
+              std::vector<Aggregation>,
+              std::chrono::milliseconds,
+              int64_t>(),
+          py::arg("name"),
+          py::arg("aggregations"),
+          py::arg("window_size"),
+          py::arg("max_samples") = std::numeric_limits<int64_t>::max(),
+          R"DOC(
+           Constructs the ``Stat``.
+          )DOC")
+      .def(
+          "add",
+          &Stat<double>::add,
+          py::arg("v"),
+          R"DOC(
+            Adds a value to the stat to be aggregated according to the
+            configured stat type and aggregations.
+          )DOC")
+      .def(
+          "get",
+          &Stat<double>::get,
+          R"DOC(
+            Returns the current value of the stat, primarily for testing
+            purposes. If the stat has logged and no additional values have been
+            added this will be zero.
+          )DOC")
+      .def_property_readonly(
+          "name",
+          &Stat<double>::name,
+          R"DOC(
+            The name of the stat that was set during creation.
+          )DOC")
+      .def_property_readonly(
+          "count",
+          &Stat<double>::count,
+          R"DOC(
+            Number of data points that have currently been collected. Resets
+            once the event has been logged.
+          )DOC");
+
+  py::class_<Event>(
+      m,
+      "Event",
+      R"DOC(
+        Event represents a specific typed event to be logged. This can represent
+        high-level data points such as loss or accuracy per epoch or more
+        low-level aggregations such as through the Stats provided through this
+        library.
+
+        All Events of the same type should have the same name so downstream
+        handlers can correctly process them.
+      )DOC")
       .def(
           py::init([](const std::string& name,
                       std::chrono::system_clock::time_point timestamp,
@@ -122,14 +218,47 @@ void initMonitorBindings(PyObject* module) {
           }),
           py::arg("name"),
           py::arg("timestamp"),
-          py::arg("data"))
-      .def_readwrite("name", &Event::name)
-      .def_readwrite("timestamp", &Event::timestamp)
-      .def_readwrite("data", &Event::data);
+          py::arg("data"),
+          R"DOC(
+           Constructs the ``Event``.
+          )DOC")
+      .def_readwrite(
+          "name",
+          &Event::name,
+          R"DOC(
+            The name of the ``Event``.
+          )DOC")
+      .def_readwrite(
+          "timestamp",
+          &Event::timestamp,
+          R"DOC(
+            The timestamp when the ``Event`` happened.
+          )DOC")
+      .def_readwrite(
+          "data",
+          &Event::data,
+          R"DOC(
+            The structured data contained within the ``Event``.
+          )DOC");
 
-  m.def("log_event", &logEvent);
+  m.def(
+      "log_event",
+      &logEvent,
+      py::arg("event"),
+      R"DOC(
+        log_event logs the specified event to all of the registered event
+        handlers. It's up to the event handlers to log the event out to the
+        corresponding event sink.
 
-  py::class_<data_value_t> dataClass(m, "data_value_t");
+        If there are no event handlers registered this method is a no-op.
+      )DOC");
+
+  py::class_<data_value_t> dataClass(
+      m,
+      "data_value_t",
+      R"DOC(
+        data_value_t is one of of ``str``, ``float``, ``int``, ``bool``.
+      )DOC");
 
   py::implicitly_convertible<std::string, data_value_t>();
   py::implicitly_convertible<double, data_value_t>();
@@ -137,17 +266,36 @@ void initMonitorBindings(PyObject* module) {
   py::implicitly_convertible<bool, data_value_t>();
 
   py::class_<PythonEventHandler, std::shared_ptr<PythonEventHandler>>
-      eventHandlerClass(m, "PythonEventHandler");
-  m.def("register_event_handler", [](std::function<void(const Event&)> f) {
-    auto handler = std::make_shared<PythonEventHandler>(f);
-    registerEventHandler(handler);
-    return handler;
-  });
+      eventHandlerClass(m, "EventHandlerHandle", R"DOC(
+        EventHandlerHandle is a wrapper type returned by
+        ``register_event_handler`` used to unregister the handler via
+        ``unregister_event_handler``. This cannot be directly initialized.
+      )DOC");
+  m.def(
+      "register_event_handler",
+      [](std::function<void(const Event&)> f) {
+        auto handler = std::make_shared<PythonEventHandler>(f);
+        registerEventHandler(handler);
+        return handler;
+      },
+      py::arg("callback"),
+      R"DOC(
+        register_event_handler registers a callback to be called whenever an
+        event is logged via ``log_event``. These handlers should avoid blocking
+        the main thread since that may interfere with training as they run
+        during the ``log_event`` call.
+      )DOC");
   m.def(
       "unregister_event_handler",
       [](std::shared_ptr<PythonEventHandler> handler) {
         unregisterEventHandler(handler);
-      });
+      },
+      py::arg("handler"),
+      R"DOC(
+        unregister_event_handler unregisters the ``EventHandlerHandle`` returned
+        after calling ``register_event_handler``. After this returns the event
+        handler will no longer receive events.
+      )DOC");
 }
 
 } // namespace monitor

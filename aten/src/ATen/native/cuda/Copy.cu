@@ -1,4 +1,5 @@
-#include <ATen/Functions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -9,6 +10,12 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -223,8 +230,25 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    void* ptr = (dst_device == kCPU ? dst : src);
-    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ptr, stream));
+    // we use both the storage context and the tensor data pointer as the key
+    // for the caching host allocator. This allows us to better attribute the
+    // events to the original tensor allocation correctly. The cases we seek to
+    // handle are:
+
+    // 1: a user can pass a pinned memory tensor with an alternative
+    // context, for example if allocating memory directly from the pinned memory
+    // allocator and constructing a tensor with torch::from_blob.
+
+    // 2: a user can pass a tensor with a different base pointer to the original
+    // allocation (via slicing).
+    const auto& dst_tensor = iter.tensor(0);
+    const auto& src_tensor = iter.tensor(1);
+    const auto& host_tensor = (dst_device == kCPU ? dst_tensor : src_tensor);
+    auto* ptr = (dst_device == kCPU ? dst : src);
+    auto* ctx = host_tensor.storage().data_ptr().get_context();
+    // TODO: warn on the return value.
+    CachingHostAllocator_recordEvent(ptr, ctx, stream);
+
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }

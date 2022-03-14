@@ -40,7 +40,7 @@ jobs:
     name: docker-build (${{ matrix.docker_image_short_name }})
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(true) }}
       - name: Pull Docker image
         run: |

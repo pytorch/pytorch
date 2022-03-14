@@ -4,7 +4,7 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -66,7 +66,7 @@ class TestMultiForward(FSDPTest):
             optim.zero_grad()
 
         if wrap_fsdp:
-            get_full_params(model)
+            return get_full_params(model)
 
         return list(model.parameters())
 
