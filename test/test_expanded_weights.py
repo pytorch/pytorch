@@ -199,7 +199,7 @@ class TestExpandedWeightFunctional(TestCase):
 
     @ops(filter(lambda op: op.name == "nn.functional.embedding", op_db), dtypes=OpDTypes.supported)
     def test_embedding(self, device, dtype, op):
-        sample_inputs = op.sample_inputs
+        sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             sample_input_copy1 = SampleInput(sample_input.args[0].clone(),
                                              args=(sample_input.input.clone(),),
@@ -209,7 +209,7 @@ class TestExpandedWeightFunctional(TestCase):
                                              kwargs=sample_input.kwargs)
             res1 = run_op(op, sample_input_copy1.input, *sample_input_copy1.args, **sample_input_copy1.kwargs)
             res2 = run_op(op, sample_input_copy2.input, *sample_input_copy2.args, **sample_input_copy2.kwargs)
-            self.assertEqual(res1, res2, msg=sample_input.kwargs().__str__())
+            self.assertEqual(res1, res2, msg=sample_input.kwargs.__str__())
 
     def test_small_model(self, device):
         def convnet(num_classes):
