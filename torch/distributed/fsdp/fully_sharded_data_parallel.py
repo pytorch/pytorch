@@ -191,18 +191,18 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        fsdp_auto_wrap_policy: (Optional [callable]):
+        auto_wrap_policy: (Optional [callable]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
             ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
-            an example of ``fsdp_auto_wrap_policy`` callable, this policy wraps layers
+            an example of ``auto_wrap_policy`` callable, this policy wraps layers
             with parameter sizes larger than 100M. Users can supply the customized
-            ``fsdp_auto_wrap_policy`` callable that should accept following arguments:
+            ``auto_wrap_policy`` callable that should accept following arguments:
             ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
             extra customized arguments could be added to the customized
-            ``fsdp_auto_wrap_policy`` callable as well.
+            ``auto_wrap_policy`` callable as well.
 
             Example::
 
@@ -227,15 +227,15 @@ class FullyShardedDataParallel(nn.Module):
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        fsdp_auto_wrap_policy: Optional[Callable] = None,
+        auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        # if fsdp_auto_wrap_policy is specified, submodules should not be
+        # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
-        if fsdp_auto_wrap_policy is not None:
+        if auto_wrap_policy is not None:
             self._check_wrapped(
                 module,
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
@@ -243,7 +243,7 @@ class FullyShardedDataParallel(nn.Module):
             )
             _recursive_wrap(
                 module,
-                auto_wrap_policy=fsdp_auto_wrap_policy,
+                auto_wrap_policy=auto_wrap_policy,
                 wrapper_cls=FullyShardedDataParallel,
                 # Note that we have the recursive_wrap skip wrapping for
                 # the outermost (this) module otherwise it will result in a
@@ -253,10 +253,6 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=process_group,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
-                # Note that recursive_wap should not call FSDP with wrapping
-                # enabled, as this recursive call handles all wrapping,
-                # including for nested children.
-                fsdp_auto_wrap_policy=None,
             )
 
         self.process_group = process_group or _get_default_group()
