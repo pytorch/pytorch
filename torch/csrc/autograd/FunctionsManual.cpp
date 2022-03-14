@@ -289,8 +289,13 @@ Tensor norm_jvp(
   }
 }
 
-Tensor norm_jvp(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm) {
-  return norm_jvp(grad, self, p_, norm, {}, true);
+Tensor norm_jvp(const Tensor& self_p, const Tensor& self_t, const optional<Scalar> & p_, Tensor norm) {
+  return norm_jvp(self_p, self_t, p_, norm, {}, true);
+}
+
+Tensor linalg_vector_norm_jvp(const Tensor& self_p, const Tensor& self_t, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
+  auto dim = opt_dim.value_or(IntArrayRef({}));
+  return norm_jvp(self_p, self_t, scalar_ord, norm, dim, keepdim);
 }
 
 Tensor linalg_vector_norm_backward(Tensor grad, const Tensor& self, const Scalar& scalar_ord, Tensor norm, const optional<IntArrayRef>& opt_dim, bool keepdim) {
