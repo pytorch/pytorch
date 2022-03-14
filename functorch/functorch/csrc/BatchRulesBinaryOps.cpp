@@ -110,11 +110,16 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     check_randomness(randomness, (tensor_bdim || other_bdim));
     if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
       auto shape = tensor_value.sizes();
-      VmapDimVector shapeVec(shape.begin(), shape.end());
-      shapeVec.insert(shapeVec.begin(), maybe_layer->batchSize());
-      tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
+      VmapDimVector shapeVec(1, maybe_layer->batchSize());
+      shapeVec.reserve(shape.size() + 1);
+      shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
+
+      // not taken care of with binary batch rule, which assumes at least one input is batched
+      tensor_value = tensor_value.expand(shapeVec);
       tensor_bdim = 0;
     } else if (randomness == RandomnessType::Same && !tensor_bdim && !other_bdim) {
+
+      // avoids unnecessary checks and batch rule assuming output is batched
       return Func(tensor_value, other_value, std::forward<T>(extra_args)...);
     }
     auto res = _binary_pointwise_batch_rule<F, Func, T...>(
