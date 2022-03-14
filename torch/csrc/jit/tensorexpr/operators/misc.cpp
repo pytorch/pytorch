@@ -703,8 +703,8 @@ Tensor computeStack(
         int64_t dim_ = c10::get<int64_t>(argDim);
         auto dim = normalizeAndCheckIndex(dim_, axes.size());
         auto inputBuf = inputList[0];
-        std::vector<ExprHandle> newAxes(axes.begin(), axes.begin() + dim);
-        newAxes.insert(newAxes.end(), axes.begin() + dim + 1, axes.end());
+        std::vector<ExprHandle> inputAxes(axes.begin(), axes.begin() + dim);
+        inputAxes.insert(inputAxes.end(), axes.begin() + dim + 1, axes.end());
         // We construct a tensor expression performing the stacking.
         // The expression we build here is a cascading compare-select that
         // essentially represents:
@@ -716,14 +716,14 @@ Tensor computeStack(
         // where k corresponds to the index of the stacking dimension, and N is
         // the number of inputs.
         ExprHandle load =
-            promoteToDtype(tensorOrConstant(inputList[0], newAxes), highType);
+            promoteToDtype(tensorOrConstant(inputList[0], inputAxes), highType);
 
         for (size_t ii = 1; ii < inputList.size(); ++ii) {
           auto input = inputList[ii];
           load = CompareSelect::make(
               axes.at(dim),
               Cast::make(axes.at(dim).dtype(), int64_t(ii)),
-              promoteToDtype(tensorOrConstant(input, newAxes), highType),
+              promoteToDtype(tensorOrConstant(input, inputAxes), highType),
               load,
               kEQ);
         }
