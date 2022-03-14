@@ -166,6 +166,33 @@ class TestSparseCSR(TestCase):
             self.assertEqual(torch.tensor(values, dtype=dtype), sparse.values())
 
     @dtypes(*get_all_dtypes())
+    def test_sparse_csr_batch_constructor(self, device, dtype):
+        batch_shape = (2, 3)
+        crow_indices = torch.tensor([0, 2, 4], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
+        for index_dtype in [torch.int32, torch.int64]:
+            sparse = torch.sparse_csr_tensor(crow_indices.to(index_dtype),
+                                             col_indices.to(index_dtype),
+                                             values,
+                                             size=(*batch_shape, 2, 10),
+                                             dtype=dtype,
+                                             device=device)
+            self.assertEqual((*batch_shape, 2, 10), sparse.shape)
+            self.assertEqual(crow_indices.to(index_dtype), sparse.crow_indices())
+            self.assertEqual(col_indices.to(index_dtype), sparse.col_indices())
+            self.assertEqual(values, sparse.values())
+
+    @dtypes(*get_all_dtypes())
+    def test_sparse_csr_batch_constructor_shape_inference(self, device, dtype):
+        batch_shape = (2, 3)
+        crow_indices = torch.tensor([0, 2, 4], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
+        sparse = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
+        self.assertEqual((*batch_shape, crow_indices.shape[-1] - 1, col_indices.max() + 1), sparse.shape)
+
+    @dtypes(*get_all_dtypes())
     def test_sparse_csr_constructor_from_lists(self, device, dtype):
         # without size
         sparse = torch.sparse_csr_tensor([0, 2, 4],
