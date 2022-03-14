@@ -658,6 +658,37 @@ static void _trace_post_record(
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
         jit::tracer::setValueTrace(tensor, value);
+
+        // create subgraph
+        auto shared_graph = std::make_shared<torch::jit::Graph>(graph->current_scope());
+        node->g_(torch::jit::attr::Subgraph, shared_graph);
+
+        // manipulate subgraph
+        //
+        auto subgraph = node->g(torch::jit::attr::Subgraph);
+        std::unordered_map<Value*, Value*> value_map;
+        auto value_map_func = [&](Value* v) { return value_map.at(v); };
+        // add inputs
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
+          auto new_input = subgraph->addInput();
+          new_input->copyMetadata(node->inputs().at(i));
+          value_map[node->inputs().at(i)] = new_input;
+        }
+        // fix controlflow
+        auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+        for (; it != graph->nodes().end(); ++it) {
+          torch::jit::Node* clonenode = *it;
+          auto* new_node = subgraph->insertNode(subgraph->createClone(clonenode, value_map_func));
+          for (size_t i = 0; i < clonenode->outputs().size(); ++i) {
+            value_map[clonenode->outputs()[i]] = new_node->outputs()[i];
+          }
+        }
+        // add outputs
+        for (size_t i = 0; i < node->outputs().size(); ++i) {
+        }
+
+        // print subgraph
+        subgraph->print(std::cout, 0);
       }
     }
   }
