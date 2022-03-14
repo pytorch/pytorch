@@ -1248,9 +1248,6 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
             modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
 
-    def input_output_observed(self) -> bool:
-        return False
-
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,

@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
 
@@ -206,8 +207,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   std::unique_ptr<KinetoObserverContext> newOpEvent() {
     std::lock_guard<std::mutex> guard(state_mutex_);
-    op_events_.emplace_back();
-    return std::make_unique<KinetoObserverContext>(&op_events_.back());
+    return std::make_unique<KinetoObserverContext>(op_events_.emplace_back());
   }
 
   void reportMemoryUsage(
@@ -217,16 +217,17 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       int64_t total_reserved,
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
-      memory_events_.push_back(
-          {getTimeUs(),
-           ptr,
-           alloc_size,
-           total_allocated,
-           total_reserved,
-           at::RecordFunction::currentThreadId(),
-           torch::profiler::impl::kineto::kineto_ids(),
-           device.type(),
-           device.index()});
+      std::lock_guard<std::mutex> guard(state_mutex_);
+      memory_events_.emplace_back(
+          getTimeUs(),
+          ptr,
+          alloc_size,
+          total_allocated,
+          total_reserved,
+          at::RecordFunction::currentThreadId(),
+          torch::profiler::impl::kineto::kineto_ids(),
+          device.type(),
+          device.index());
     }
   }
 
@@ -285,6 +286,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
           .nBytes(e.alloc_size)
           .startThreadId(e.threadID);
     }
+    memory_events_.clear();
 
     for (const auto& e : op_events_) {
       if (e.end_us_ < e.start_us_) {
@@ -612,8 +614,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   uint64_t start_time_;
   std::set<torch::profiler::impl::ActivityType> activities_;
-  std::deque<OpEventData> op_events_;
-  std::deque<MemoryEventData> memory_events_;
+  torch::profiler::impl::AppendOnlyList<OpEventData, 1024> op_events_;
+  torch::profiler::impl::AppendOnlyList<MemoryEventData, 1024> memory_events_;
   torch::profiler::impl::kineto::TraceWrapper cpu_trace_;
   std::vector<KinetoEvent> kineto_events_;
   // Optional, if event post-processing is enabled.
