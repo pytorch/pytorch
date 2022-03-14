@@ -6,8 +6,8 @@
 from torch import Generator as Generator, Tensor as Tensor
 from torch import default_generator as default_generator, randperm as randperm
 from torch.utils.data.datapipes._typing import _DataPipeMeta
-from typing import Any, Callable, Dict, List, Optional, TypeVar
-from torch.utils.data import DataChunk, Dataset, IterableDataset
+from typing import Any, Callable, Dict, Generic, Iterator, List, Optional, TypeVar
+from torch.utils.data import Dataset, IterableDataset
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -31,6 +31,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     def shuffle(self, *, indices: Optional[List] = None) -> MapDataPipe: ...
     # Functional form of 'ZipperMapDataPipe'
     def zip(self, *datapipes: MapDataPipe[T_co]) -> MapDataPipe: ...
+
 
 class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     functions: Dict[str, Callable] = ...
@@ -76,5 +77,24 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     # Functional form of 'ZipperIterDataPipe'
     def zip(self, *datapipes: IterDataPipe) -> IterDataPipe: ...
 
+
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self): ...
+
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self) -> T:  # type: ignore[misc]
+        for i in self.items:
+            yield i
