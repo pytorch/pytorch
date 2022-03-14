@@ -3471,6 +3471,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_topk_int32_k(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, k):
+                return torch.topk(x, k)
+
+        x = torch.arange(1., 6.)
+        k = torch.tensor(3, dtype=torch.int32)
+        self.run_test(Model(), (x, k))
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
