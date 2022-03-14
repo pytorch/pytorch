@@ -57,11 +57,15 @@ extensions = [
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
+    'sphinx_panels'
 ]
 
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
+
+# Theme has bootstrap already
+panels_add_bootstrap_css = False
 
 # autosectionlabel throws warnings if section names are duplicated.
 # The following tells autosectionlabel to not throw a warning for
@@ -129,8 +133,6 @@ coverage_ignore_functions = [
 
 coverage_ignore_classes = [
     # torch.cuda
-    "ComplexDoubleTensor",
-    "ComplexFloatTensor",
     "BFloat16Storage",
     "BFloat16Tensor",
     "BoolStorage",
