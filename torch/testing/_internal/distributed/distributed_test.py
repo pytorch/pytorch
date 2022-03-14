@@ -7158,6 +7158,13 @@ class DistributedTest:
             # rather, it will be taken down by NCCL_ASYNC_ERROR_HANDLING. When
             # running with Gloo or with debug mode wrapper, we expect the error
             # to be caught inline.
+            # All ranks report same error when there is a # of parameter
+            # mismatch since we use allgather in the impl.
+            if diff_num_params:
+                expected_err = "DDP expects same model across all ranks"
+                ctx = self.assertRaisesRegex(RuntimeError, expected_err)
+                return ctx, expected_err
+
             is_detail_dbg_mode = (
                 dist.get_debug_level() == dist.DebugLevel.DETAIL
             )
@@ -7169,10 +7176,7 @@ class DistributedTest:
                     expected_err = None
                     ctx = self.assertRaises(RuntimeError)
             else:
-                if diff_num_params:
-                    expected_err = "DDP expects same model across all ranks"
-                else:
-                    expected_err = "appears not to match"
+                expected_err = "appears not to match"
                 ctx = self.assertRaisesRegex(RuntimeError, expected_err)
             return ctx, expected_err
 
