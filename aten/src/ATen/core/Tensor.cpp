@@ -6,7 +6,6 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/MethodOperators.h>
-#include <ATen/Functions.h>
 #else
 #include <ATen/ops/contiguous_ops.h>
 #include <ATen/ops/fill.h>
