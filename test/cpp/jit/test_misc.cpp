@@ -47,6 +47,7 @@
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
@@ -2948,6 +2949,27 @@ graph(%x.1 : Tensor):
         ->check("aten::add")
         ->check("aten::relu")
         ->run(*g);
+  }
+}
+
+TEST(TestFunctionExecutor, RunDecompositionTest) {
+  GraphFunction* func;
+  std::once_flag flag1;
+  for (bool unbiased : {true, false}) {
+    std::call_once(flag1, [&]() {
+      // NB: take reference to schema here, `auto schema =` will not work
+      auto& schema = getOperatorForLiteral(
+                         "aten::var(Tensor self, bool unbiased=True) -> Tensor")
+                         ->schema();
+      auto maybe_func = GetDecompositionFunction(schema);
+      TORCH_INTERNAL_ASSERT(maybe_func);
+      func = *maybe_func;
+    });
+    auto input = at::rand({4, 4});
+    Stack stack = {input, unbiased};
+    func->run(stack);
+    at::Tensor out = pop(stack).toTensor();
+    ASSERT_TRUE(at::allclose(out, input.var(unbiased)));
   }
 }
 
