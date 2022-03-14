@@ -1,9 +1,8 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
