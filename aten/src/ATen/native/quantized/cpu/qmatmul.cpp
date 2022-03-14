@@ -51,31 +51,49 @@ Tensor qmatmul(
     const int64_t output_zero_point) {
   check_inputs(qa, qb);
 
-  const size_t num_dims = qa.dim();
-  const size_t b_num_dims = qb.dim();
+  const int64_t num_dims = qa.dim();
+  const int64_t b_num_dims = qb.dim();
 
   TORCH_CHECK(
       num_dims == b_num_dims,
       "MatMul operands should have the same dimensionality. (", num_dims,
       " and ", b_num_dims, " provided)");
   TORCH_CHECK(
-      num_dims == 2,
-      "Quantized Matmul currently only suports operands which are 2-dimensional. (",
+      num_dims >= 2,
+      "Quantized Matmul currently only suports operands which are at least 2-dimensional. (",
       num_dims, " provided)");
 
-  const int64_t m = qa.size(0);
-  const int64_t k = qa.size(1);
-  const int64_t b_k = qb.size(0);
-  const int64_t n = qb.size(1);
+  const int64_t m = qa.size(num_dims - 2);
+  const int64_t k = qa.size(num_dims - 1);
+  const int64_t b_k = qb.size(num_dims - 2);
+  const int64_t n = qb.size(num_dims - 1);
 
   TORCH_CHECK(
       b_k == k,
       "For Quantized Matmul, the size of tensor a (", k,
-      ") at dimension ", 1, " must match the size of tensor b (",
-      b_k, ") at dimension ", 0, ".");
+      ") at dimension ", num_dims - 1, " must match the size of tensor b (",
+      b_k, ") at dimension ", num_dims - 2, ".");
+
+  std::vector<int64_t> out_size_vec(num_dims);
+  size_t num_matmuls = 1;
+  for (int64_t i = 0; i < num_dims - 2; i++) {
+    const int64_t dim = qa.size(i);
+    const int64_t qb_dim = qb.size(i);
+
+    TORCH_CHECK(
+        dim == qb_dim,
+        "For Quantized Matmul, the size of tensor a (", dim,
+        ") must match the size of tensor b (", qb_dim,
+        ") at dimension ", i);
+
+    out_size_vec[i] = dim;
+    num_matmuls *= dim;
+  }
+  out_size_vec[num_dims - 2] = m;
+  out_size_vec[num_dims - 1] = n;
 
   Tensor out = at::_empty_affine_quantized(
-      {m, n},
+      IntArrayRef(out_size_vec),
       at::device(kCPU)
           .dtype(qa.scalar_type())
           .memory_format(qa.suggest_memory_format()),
@@ -101,19 +119,16 @@ Tensor qmatmul(
     ruy::Matrix<underlying_t> qa_matrix;
     ruy::MakeSimpleLayout(
         m, k, ruy::Order::kRowMajor, qa_matrix.mutable_layout());
-    qa_matrix.set_data(qa_data);
     qa_matrix.set_zero_point(qa.q_zero_point());
 
     ruy::Matrix<underlying_t> qb_matrix;
     ruy::MakeSimpleLayout(
         k, n, ruy::Order::kRowMajor, qb_matrix.mutable_layout());
-    qb_matrix.set_data(qb_data);
     qb_matrix.set_zero_point(qb.q_zero_point());
 
     ruy::Matrix<underlying_t> out_matrix;
     ruy::MakeSimpleLayout(
         m, n, ruy::Order::kRowMajor, out_matrix.mutable_layout());
-    out_matrix.set_data(out_data);
     out_matrix.set_zero_point(output_zero_point);
 
     // Requantization explanation:
@@ -131,7 +146,20 @@ Tensor qmatmul(
     mul_params.set_multiplier_fixedpoint(multiplier_fixedpoint);
     mul_params.set_multiplier_exponent(multiplier_exponent);
 
-    ruy::Mul(qa_matrix, qb_matrix, mul_params, &context, &out_matrix);
+    const size_t qa_stride = m * k;
+    const size_t qb_stride = k * n;
+    const size_t out_stride = m * n;
+
+    for (size_t i = 0; i < num_matmuls; i++) {
+      qa_matrix.set_data(qa_data);
+      qb_matrix.set_data(qb_data);
+      out_matrix.set_data(out_data);
+      ruy::Mul(qa_matrix, qb_matrix, mul_params, &context, &out_matrix);
+
+      qa_data += qa_stride;
+      qb_data += qb_stride;
+      out_data += out_stride;
+    }
   });
 
   return out;
