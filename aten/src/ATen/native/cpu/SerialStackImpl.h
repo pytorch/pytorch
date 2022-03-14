@@ -1,10 +1,11 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
