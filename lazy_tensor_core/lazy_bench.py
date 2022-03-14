@@ -61,12 +61,14 @@ log = logging.getLogger(__name__)
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
 SKIP = {
-    "densenet121": "OOMs on eager CUDA CI machine (T4 GPU)",
-    "timm_nfnet": "OOMs on eager CUDA CI machine (T4 GPU)",
+    "densenet121": "Disabled by torchbench upstream due to OOM on T4 CI machine",
+    "timm_nfnet": "Disabled by torchbench upstream due to OOM on T4 CI machine",
     "moco": "Distributed/ProcessGroupNCCL: Tensors must be CUDA and dense",
+    "tacotron2": "Disabled by torchbench upstream due to OOM on T4 CI machine",
 }
 SKIP_TRAIN_ONLY = {
-    "squeezenet1_1": "OOMs on eager CUDA CI machine (T4 GPU)",
+    "squeezenet1_1": "Disabled by torchbench upstream due to OOM on T4 CI machine",
+    "demucs": "Disabled by torchbench upstream due to OOM on T4 CI machine",
 }
 
 current_name = ""
