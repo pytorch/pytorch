@@ -1,11 +1,11 @@
 import functools
-from typing import Dict, Callable, Optional, TypeVar
+from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn
 from torch.utils.data.dataset import Dataset, IterableDataset
 
-
+T = TypeVar('T')
 T_co = TypeVar('T_co', covariant=True)
 
 UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
@@ -206,3 +206,21 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
                 self.__dict__[k] = deserialize_fn(v)
             else:
                 self.__dict__[k] = v
+
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self) -> T:  # type: ignore[misc]
+        for i in self.items:
+            yield i
