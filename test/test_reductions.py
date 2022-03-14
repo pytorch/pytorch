@@ -452,7 +452,7 @@ class TestReductions(TestCase):
         sizes = [1] * 65
         x = torch.randn(sizes, device=device)
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
-               torch.amin, torch.amax, torch.norm]
+               torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, 64)
@@ -1735,7 +1735,7 @@ class TestReductions(TestCase):
     @onlyNativeDeviceTypes
     def test_repeated_dim(self, device):
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
-               torch.amin, torch.amax, torch.norm]
+               torch.norm]
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
@@ -1835,10 +1835,6 @@ class TestReductions(TestCase):
             torch.max(x, dim=0, out=(illegal_values, valid_indices))
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(illegal_values, valid_indices))
-        with self.assertRaisesRegex(RuntimeError, rmsg):
-            torch.amax(x, dim=0, out=illegal_values)
-        with self.assertRaisesRegex(RuntimeError, rmsg):
-            torch.amin(x, dim=0, out=illegal_values)
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.max(x, dim=0, out=(valid_values, illegal_indices))
         with self.assertRaisesRegex(RuntimeError, rmsg):
@@ -3128,8 +3124,8 @@ as the input tensor excluding its innermost dimension'):
             # Check if function raises error on specified zero'd dimension as reduction dim.
             self.assertRaisesRegex(IndexError, "Expected reduction dim", lambda: fn(master_input, dim=1))
 
-    # Tests to ensure that the reduction operators, amax and amix throws errors for zero-dim
-    # tensors (i.e. empty tensors)
+    # Tests to ensure that the reduction operators, amax and amix works fine for zero-dim
+    # tensors (i.e. empty tensors), if 'dim' arg provided.
     def test_amax_amin_zero_dim_tensors(self, device):
         shape = (2, 0, 4)
 
@@ -3140,13 +3136,7 @@ as the input tensor excluding its innermost dimension'):
             (torch.amin, np.amin)
         ]
 
-        err_msg = "Specify the reduction dim with the 'dim' argument"
-
         for fn, numpy_fn in test_functions:
-
-            # Cases that raises error (i.e. if dim arg is not provided)
-            with self.assertRaisesRegex(RuntimeError, err_msg):
-                fn(master_input)
 
             # Tests to check if reduction happens along the specified dim.
             self.assertEqual(torch.empty((2, 0), device=device), fn(master_input, dim=2))
