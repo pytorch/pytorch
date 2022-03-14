@@ -11,7 +11,6 @@ from torch.utils.data.sampler import (
 from torch.utils.data.dataset import (
     ChainDataset,
     ConcatDataset,
-    DataChunk,
     Dataset,
     IterableDataset,
     Subset,
@@ -22,6 +21,7 @@ from torch.utils.data.datapipes.datapipe import (
     DFIterDataPipe,
     IterDataPipe,
     MapDataPipe,
+    DataChunk,
 )
 from torch.utils.data.dataloader import (
     DataLoader,

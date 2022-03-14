@@ -4,8 +4,8 @@
 # classes/objects here, even though we are not injecting extra code into them at the moment.
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
-from typing import Any, Callable, Dict, List, Optional, TypeVar
-from torch.utils.data import DataChunk, Dataset, IterableDataset
+from typing import Any, Callable, Dict, Generic, Iterator, List, Optional, TypeVar
+from torch.utils.data import Dataset, IterableDataset
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -20,6 +20,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     @classmethod
     def register_datapipe_as_function(cls, function_name: Any, cls_to_register: Any): ...
     ${MapDataPipeMethods}
+
 
 class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     functions: Dict[str, Callable] = ...
@@ -38,5 +39,24 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     def set_reduce_ex_hook(cls, hook_fn: Any) -> None: ...
     ${IterDataPipeMethods}
 
+
 class DFIterDataPipe(IterDataPipe):
     def _is_dfpipe(self): ...
+
+
+class DataChunk(list, Generic[T]):
+    def __init__(self, items):
+        super().__init__(items)
+        self.items = items
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
+        return res
+
+    def __iter__(self) -> Iterator[T]:
+        for i in super().__iter__():
+            yield i
+
+    def raw_iterator(self) -> T:  # type: ignore[misc]
+        for i in self.items:
+            yield i
