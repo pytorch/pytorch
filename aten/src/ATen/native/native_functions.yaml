@@ -5333,7 +5333,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
-    CPU, CUDA: to_dense
+    CPU, CUDA: dense_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
 
@@ -5474,13 +5474,13 @@
   variants: function, method
 
 - func: to_sparse.sparse_dim(Tensor self, int sparse_dim) -> Tensor
-  variants: method
+  variants: function, method
   dispatch:
     CPU, CUDA: dense_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
 
 - func: to_sparse(Tensor self) -> Tensor
-  variants: method
+  variants: function, method
   dispatch:
     CPU, CUDA: dense_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
