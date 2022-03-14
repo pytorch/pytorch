@@ -188,7 +188,7 @@ jobs:
         shell: bash
         id: parse-ref
         run: ./.github/scripts/parse_ref.py
-      - name: Build-arm-v7a
+      - name: Build-arm_v7a
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
@@ -229,12 +229,10 @@ jobs:
           # shellcheck disable=SC1105
           ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
-          # Copy dist folder back
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-arm-v7a
-          docker cp "${container_name}:/var/lib/jenkins/workspace/dist" "${GITHUB_WORKSPACE}/." || echo "Dist folder not found"
-          docker commit "${container_name}" "${COMMIT_DOCKER_IMAGE}"
-          time docker push "${COMMIT_DOCKER_IMAGE}"
-      - name: Build-arm-v8a
+          # Copy install binaries back
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
+          docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
+      - name: Build-arm_v8a
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
@@ -275,11 +273,9 @@ jobs:
           # shellcheck disable=SC1105
           ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
-          # Copy dist folder back
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-arm-v8a
-          docker cp "${container_name}:/var/lib/jenkins/workspace/dist" "${GITHUB_WORKSPACE}/." || echo "Dist folder not found"
-          docker commit "${container_name}" "${COMMIT_DOCKER_IMAGE}"
-          time docker push "${COMMIT_DOCKER_IMAGE}"
+          # Copy install binaries back
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
+          docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
       - name: Build-x86_32
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -321,11 +317,9 @@ jobs:
           # shellcheck disable=SC1105
           ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
-          # Copy dist folder back
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-x86_32
-          docker cp "${container_name}:/var/lib/jenkins/workspace/dist" "${GITHUB_WORKSPACE}/." || echo "Dist folder not found"
-          docker commit "${container_name}" "${COMMIT_DOCKER_IMAGE}"
-          time docker push "${COMMIT_DOCKER_IMAGE}"
+          # Copy install binaries back
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_x86_32"
+          docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_x86_32"
       - name: Build-x86_64
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -367,73 +361,24 @@ jobs:
           # shellcheck disable=SC1105
           ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
-          # Copy dist folder back
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-x86_64
-          docker cp "${container_name}:/var/lib/jenkins/workspace/dist" "${GITHUB_WORKSPACE}/." || echo "Dist folder not found"
-          docker commit "${container_name}" "${COMMIT_DOCKER_IMAGE}"
-          time docker push "${COMMIT_DOCKER_IMAGE}"
+          # Copy install binaries back
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_x86_64"
+          docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_x86_64"
       - name: Build final artifact
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           set -eux
 
-          docker_image_libtorch_android_x86_32="${DOCKER_IMAGE}-x86_32"
-          docker_image_libtorch_android_x86_64="${DOCKER_IMAGE}-x86_64"
-          docker_image_libtorch_android_arm_v7a="${DOCKER_IMAGE}-arm-v7a"
-          docker_image_libtorch_android_arm_v8a="${DOCKER_IMAGE}-arm-v8a"
-
-          echo "docker_image_commit: ${DOCKER_IMAGE}"
-          echo "docker_image_libtorch_android_x86_32: ${docker_image_libtorch_android_x86_32}"
-          echo "docker_image_libtorch_android_x86_64: ${docker_image_libtorch_android_x86_64}"
-          echo "docker_image_libtorch_android_arm_v7a: ${docker_image_libtorch_android_arm_v7a}"
-          echo "docker_image_libtorch_android_arm_v8a: ${docker_image_libtorch_android_arm_v8a}"
-
           # x86_32
-          time docker pull "${docker_image_libtorch_android_x86_32}" >/dev/null
           export id_x86_32
-          id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_x86_32}")
-
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "${id_x86_32}" bash) 2>&1
-
-          # arm-v7a
-          time docker pull "${docker_image_libtorch_android_arm_v7a}" >/dev/null
-          export id_arm_v7a
-          id_arm_v7a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_arm_v7a}")
-
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "${id_arm_v7a}" bash) 2>&1
-
-          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
-          docker cp "${id_arm_v7a}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
-
-          # x86_64
-          time docker pull "${docker_image_libtorch_android_x86_64}" >/dev/null
-          export id_x86_64
-          id_x86_64=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_x86_64}")
-
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "${id_x86_64}" bash) 2>&1
-
-          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_x86_64"
-          docker cp "${id_x86_64}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_x86_64"
-
-          # arm-v8a
-          time docker pull "${docker_image_libtorch_android_arm_v8a}" >/dev/null
-          export id_arm_v8a
-          id_arm_v8a=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${docker_image_libtorch_android_arm_v8a}")
-
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace") | docker exec -u jenkins -i "$id_arm_v8a" bash) 2>&1
-
-          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
-          docker cp "${id_arm_v8a}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
+          id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}-x86_32")
 
           # Putting everything together
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_x86_32"
 
           # run gradle buildRelease
           # shellcheck disable=SC1105
@@ -460,9 +405,6 @@ jobs:
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
 
-          output_image="${DOCKER_IMAGE}-android-x86_32-gradle"
-          docker commit "${id_x86_32}" "${output_image}"
-          time docker push "${output_image}"
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
