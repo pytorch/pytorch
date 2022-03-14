@@ -11,10 +11,10 @@
 #define JITERATOR_HOST_DEVICE
 #endif
 
-// jiterator_code_stringify macro is used to define code (for CPU/ROCm)
+// jiterator_also_stringify_as macro is used to define code (for CPU/ROCm)
 // and generate code string for `jiterator` (only when compiling for CUDA).
 // Usage :
-//      jiterator_code_stringify(
+//      jiterator_also_stringify_as(
 //          jiterator_code(template <typename T> T identity(T x) { return x; }),
 //          identity_string);
 // This will define the template `identity` as present in code and
@@ -28,11 +28,11 @@
 #if defined(__CUDACC__)
     // CPU and CUDA case
     #define stringify_code(...) #__VA_ARGS__
-    #define jiterator_code_stringify(code, str_name)                    \
+    #define jiterator_also_stringify_as(code, str_name)                    \
         code /* define the function */                                  \
         const std::string str_name = std::string(stringify_code(code));
 #else
     // CPU only or CPU and ROCm case
     // Only needs the function
-    #define jiterator_code_stringify(code, str_name) code
+    #define jiterator_also_stringify_as(code, str_name) code
 #endif
