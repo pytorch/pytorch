@@ -1,6 +1,6 @@
 #include <Python.h>
-#include <torch/csrc/deploy/Exception.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
