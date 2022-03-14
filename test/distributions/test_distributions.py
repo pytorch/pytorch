@@ -3111,12 +3111,12 @@ class TestDistributions(TestCase):
                 'alpha': torch.tensor([1, 1, 1])
             }),
             (StudentT, {
-                'df': torch.tensor([1, 1]),
-                'scale': torch.tensor([1, 1, 1])
+                'df': torch.tensor([1., 1.]),
+                'scale': torch.tensor([1., 1., 1.])
             }),
             (StudentT, {
-                'df': torch.tensor([1, 1]),
-                'loc': torch.tensor([1, 1, 1])
+                'df': torch.tensor([1., 1.]),
+                'loc': torch.tensor([1., 1., 1.])
             })
         ]
 
