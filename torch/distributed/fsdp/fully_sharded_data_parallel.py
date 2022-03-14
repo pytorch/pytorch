@@ -4,6 +4,7 @@ import traceback
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
+from math import inf
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -1757,6 +1758,67 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 m._require_backward_grad_sync = old_flag
 
+    @property
+    def params_with_grad(self) -> List[Parameter]:
+        """
+        Recursively returns a list of all module parameters that have a gradient.
+        """
+        return [p for p in self.parameters() if p.grad is not None]
+
+    @torch.no_grad()
+    def clip_grad_norm_(
+        self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
+    ) -> None:
+        """
+        Clip all gradients at this point in time. The norm is computed over all
+        gradients together, as if they were concatenated into a single vector.
+        Gradients are modified in-place.
+
+        Args:
+            max_norm (float or int): max norm of the gradients
+            norm_type (float or int): type of the used p-norm. Can be ``'inf'``
+                for infinity norm.
+
+        Returns:
+            Total norm of the parameters (viewed as a single vector).
+
+        .. note:: This is analogous to `torch.nn.utils.clip_grad_norm_` but
+            handles the partitioning and multiple devices per rank under the
+            hood. The default torch util is not applicable here, because each
+            rank only has a partial view of all the grads in the model, so
+            calling it for FSDP models would lead to different scaling being
+            applied per subset of model parameters.
+
+        .. warning:: This needs to be called on all ranks, since synchronization
+            primitives will be used.
+        """
+        # Call `_lazy_init` to ensure the stream synchronization is done appropriately.
+        self._lazy_init()
+        assert self._is_root, "clip_grad_norm should only be called on the root (parent) instance"
+        self._assert_state(TrainingState_.IDLE)
+
+        max_norm = float(max_norm)
+        norm_type = float(norm_type)
+        # Computes the max norm for this shard's gradients and sync's across workers
+        local_norm = _calc_grad_norm(self.params_with_grad, norm_type).cuda()  # type: ignore[arg-type]
+        if norm_type == inf:
+            total_norm = local_norm
+            dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group)
+        else:
+            total_norm = local_norm ** norm_type
+            dist.all_reduce(total_norm, group=self.process_group)
+            total_norm = total_norm ** (1.0 / norm_type)
+
+        if self.cpu_offload:
+            total_norm = total_norm.cpu()
+
+        clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
+        if clip_coef < 1:
+            # multiply by clip_coef, aka, (max_norm/total_norm).
+            for p in self.params_with_grad:
+                assert p.grad is not None
+                p.grad.detach().mul_(clip_coef.to(p.grad.device))
+
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
     """Try to infer CUDA device from module parameters."""
@@ -1799,3 +1861,28 @@ def p_assert(cond: Any, s: Any) -> None:
     if not cond:
         print(s)
         raise AssertionError
+
+def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
+    r"""Calculate gradient norm of an iterable of parameters.
+    Returns:
+        Total norm of the parameters (viewed as a single vector).
+    """
+    parameters = [p for p in parameters if p.grad is not None]
+
+    if len(parameters) == 0:
+        return torch.tensor(0.0)
+    if p == inf:
+        local_norm = torch.tensor(max(par.grad.detach().abs().max() for par in parameters))
+    else:
+        # Compute the norm in full precision no matter what
+        local_norm = torch.linalg.norm(
+            torch.stack(
+                [
+                    torch.linalg.norm(par.grad.detach(), p, dtype=torch.float32)
+                    for par in parameters
+                ]
+            ),
+            p,
+        )
+    local_norm.to(dtype=parameters[0].dtype)
+    return local_norm
