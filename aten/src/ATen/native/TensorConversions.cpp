@@ -252,6 +252,43 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+  TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
+  if (dtype) {
+    return tensor.to(*dtype).clone();
+  }
+  return tensor.clone();
+}
+
+Tensor dense_to_sparse_csr(const Tensor& self) {
+  return self.to_sparse().to_sparse_csr();
+}
+
+Tensor csr_to_sparse_csr(const Tensor& self) {
+  return self;
+}
+
+Tensor coo_to_sparse_csr(const Tensor& self) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.coalesce();
+  auto row_indices = coalesced_self.indices()[0];
+  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, self.size(0), out_int32);
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      coalesced_self.indices()[1].contiguous(),
+      coalesced_self.values(),
+      coalesced_self.sizes(),
+      coalesced_self.scalar_type(),
+      coalesced_self.layout(),
+      coalesced_self.device());
+}
+
+
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
 inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
