@@ -27,6 +27,23 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 
 #ifdef USE_RUY_QMATMUL
 
+// Adopted from Ruy:
+// https://github.com/google/ruy/blob/2d950b3bfa7ebfbe7a97ecb44b1cc4da5ac1d6f0/ruy/test.h#L1602
+void QuantizeMultiplier(double scale,
+                        int* multiplier_fixedpoint,
+                        int* multiplier_exponent) {
+  TORCH_CHECK(scale > 0, "Quantization scale (", scale, ") must be positive.");
+  const double q = std::frexp(scale, multiplier_exponent);
+  auto q_fixed = static_cast<std::int64_t>(std::round(q * (1ll << 31)));
+  TORCH_CHECK(q_fixed <= (1ll << 31));
+  if (q_fixed == (1ll << 31)) {
+    q_fixed /= 2;
+    ++*multiplier_exponent;
+  }
+  TORCH_CHECK(q_fixed <= std::numeric_limits<std::int32_t>::max());
+  *multiplier_fixedpoint = static_cast<std::int32_t>(q_fixed);
+}
+
 Tensor qmatmul(
     const Tensor& qa,
     const Tensor& qb,
@@ -57,10 +74,14 @@ Tensor qmatmul(
       ") at dimension ", 1, " must match the size of tensor b (",
       b_k, ") at dimension ", 0, ".");
 
-  Tensor out = at::empty(
+  Tensor out = at::_empty_affine_quantized(
       {m, n},
-      at::device(kCPU).dtype(c10::kInt).memory_format(
-          qa.suggest_memory_format()));
+      at::device(kCPU)
+          .dtype(qa.scalar_type())
+          .memory_format(qa.suggest_memory_format()),
+      output_scale,
+      output_zero_point,
+      c10::nullopt);
 
   const Tensor& qa_contig = qa.contiguous();
   const Tensor& qb_contig = qb.contiguous();
@@ -74,7 +95,8 @@ Tensor qmatmul(
         qa_contig.data_ptr<scalar_t>());
     const underlying_t* qb_data = reinterpret_cast<const underlying_t*>(
         qb_contig.data_ptr<scalar_t>());
-    int32_t* out_data = out.data_ptr<int32_t>();
+    underlying_t* out_data =
+        reinterpret_cast<underlying_t*>(out.data_ptr<scalar_t>());
 
     ruy::Matrix<underlying_t> qa_matrix;
     ruy::MakeSimpleLayout(
@@ -88,25 +110,31 @@ Tensor qmatmul(
     qb_matrix.set_data(qb_data);
     qb_matrix.set_zero_point(qb.q_zero_point());
 
-    ruy::Matrix<int32_t> out_matrix;
+    ruy::Matrix<underlying_t> out_matrix;
     ruy::MakeSimpleLayout(
         m, n, ruy::Order::kRowMajor, out_matrix.mutable_layout());
     out_matrix.set_data(out_data);
+    out_matrix.set_zero_point(output_zero_point);
 
-    ruy::MulParams<int32_t, int32_t> mul_params;
+    // Requantization explanation:
+    // https://github.com/google/gemmlowp/blob/e844ffd17118c1e17d94e1ba4354c075a4577b88/doc/quantization.md
+    const double requantization_scale_inv =
+        (qa.q_scale() * qb.q_scale()) / output_scale;
+
+    ruy::MulParams<int32_t, underlying_t> mul_params;
+
+    int multiplier_fixedpoint;
+    int multiplier_exponent;
+    QuantizeMultiplier(requantization_scale_inv,
+                       &multiplier_fixedpoint,
+                       &multiplier_exponent);
+    mul_params.set_multiplier_fixedpoint(multiplier_fixedpoint);
+    mul_params.set_multiplier_exponent(multiplier_exponent);
+
     ruy::Mul(qa_matrix, qb_matrix, mul_params, &context, &out_matrix);
   });
 
-  // Requantization explanation:
-  // https://github.com/google/gemmlowp/blob/e844ffd17118c1e17d94e1ba4354c075a4577b88/doc/quantization.md
-  const double requantization_scale =
-      output_scale / (qa.q_scale() * qb.q_scale());
-
-  return at::quantize_per_tensor(
-      out.toType(c10::kFloat),
-      requantization_scale,
-      output_zero_point,
-      qa.scalar_type());
+  return out;
 }
 
 #else // ifdef USE_RUY_QMATMUL
