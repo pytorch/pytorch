@@ -191,12 +191,25 @@ class TestExpandedWeightFunctional(TestCase):
                 sample_input = SampleInput(sample_input.args[0].clone(),
                                            args=(sample_input.input.clone(),),
                                            kwargs=sample_input.kwargs)
-                print(sample_input.kwargs)
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
             expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
             normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
-            self.assertEqual(expanded_weight_result, normal_result)
+            self.assertEqual(expanded_weight_result, normal_result, msg=(sample_input.kwargs.__str__()))
+
+    @ops(filter(lambda op: op.name == "nn.functional.embedding", op_db), dtypes=OpDTypes.supported)
+    def test_embedding(self, device, dtype, op):
+        sample_inputs = op.sample_inputs
+        for sample_input in sample_inputs:
+            sample_input_copy1 = SampleInput(sample_input.args[0].clone(),
+                                             args=(sample_input.input.clone(),),
+                                             kwargs=sample_input.kwargs)
+            sample_input_copy2 = SampleInput(sample_input.args[0].clone(),
+                                             args=(sample_input.input.clone(),),
+                                             kwargs=sample_input.kwargs)
+            res1 = run_op(op, sample_input_copy1.input, *sample_input_copy1.args, **sample_input_copy1.kwargs)
+            res2 = run_op(op, sample_input_copy2.input, *sample_input_copy2.args, **sample_input_copy2.kwargs)
+            self.assertEqual(res1, res2, msg=sample_input.kwargs().__str__())
 
     def test_small_model(self, device):
         def convnet(num_classes):
