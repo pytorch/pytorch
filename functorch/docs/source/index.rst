@@ -63,3 +63,4 @@ For a whirlwind tour of how to use the transforms, please check out `this sectio
    notebooks/per_sample_grads.ipynb
    notebooks/neural_tangent_kernels.ipynb
    notebooks/aot_autograd_optimizations.ipynb
+   notebooks/minifier.ipynb
