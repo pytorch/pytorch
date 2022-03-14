@@ -4530,7 +4530,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.histogramdd,
-    r"""
+           r"""
 histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
 
 Computes a multi-dimensional histogram of the values in a tensor.

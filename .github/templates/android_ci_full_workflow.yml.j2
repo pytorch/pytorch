@@ -152,7 +152,7 @@ on:
           output_image="${DOCKER_IMAGE}-android-x86_32-gradle"
           docker commit "${id_x86_32}" "${output_image}"
           time docker push "${output_image}"
-      !{{ common_android.upload_androind_binary_size("prebuilt", "${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz") }}
+      !{{ common_android.upload_android_binary_size("prebuilt", "${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz") }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Store PyTorch Android Build Artifacts on S3
         with:
