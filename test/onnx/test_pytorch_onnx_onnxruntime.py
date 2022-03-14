@@ -24,7 +24,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -2688,8 +2688,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
-    # Enable test when fix for allowzero is in ORT
-    @skipForAllOpsetVersions()
+    @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
         class ReshapeModel(torch.nn.Module):
@@ -3470,6 +3469,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_topk_int32_k(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, k):
+                return torch.topk(x, k)
+
+        x = torch.arange(1., 6.)
+        k = torch.tensor(3, dtype=torch.int32)
+        self.run_test(Model(), (x, k))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
