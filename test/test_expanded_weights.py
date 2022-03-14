@@ -11,7 +11,7 @@ from torch.nn.utils._per_sample_grad import call_for_per_sample_grads
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import OpDTypes, instantiate_device_type_tests, ops
 from torch.testing._internal.common_nn import TestBase, module_tests, new_module_tests
-from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, make_tensor, run_tests
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.nn.utils._expanded_weights import ExpandedWeight
 from torch.nn.utils._expanded_weights.expanded_weights_utils import forward_helper, set_grad_sample_if_exists, \
@@ -197,19 +197,36 @@ class TestExpandedWeightFunctional(TestCase):
             normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result, msg=(sample_input.kwargs.__str__()))
 
-    @ops(filter(lambda op: op.name == "nn.functional.embedding", op_db), dtypes=OpDTypes.supported)
-    def test_embedding(self, device, dtype, op):
-        sample_inputs = op.sample_inputs(device, dtype)
-        for sample_input in sample_inputs:
-            sample_input_copy1 = SampleInput(sample_input.args[0].clone(),
-                                             args=(sample_input.input.clone(),),
-                                             kwargs=sample_input.kwargs)
-            sample_input_copy2 = SampleInput(sample_input.args[0].clone(),
-                                             args=(sample_input.input.clone(),),
-                                             kwargs=sample_input.kwargs)
-            res1 = run_op(op, sample_input_copy1.input, *sample_input_copy1.args, **sample_input_copy1.kwargs)
-            res2 = run_op(op, sample_input_copy2.input, *sample_input_copy2.args, **sample_input_copy2.kwargs)
-            self.assertEqual(res1, res2, msg=sample_input.kwargs.__str__())
+    def test_expanded_weight_error(self, device):
+        batch_size = 3
+        sample_input = make_tensor((batch_size, 4), dtype=torch.float32, device=device, requires_grad=True)
+        sample_weight = make_tensor((4), dtype=torch.float32, device=device, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, r"Expanded Weights encountered but cannot handle function"):
+            torch.add(sample_input, ExpandedWeight(sample_weight, batch_size))
+
+    def test_embedding_one(self, device):
+        kwargs = {'max_norm': 1., 'padding_idx': 0}
+        weight = torch.randn(5, 5, dtype=torch.double, device=device) + 2
+        weight_clone = weight.clone()
+        idx = torch.randint(5, (3, 3), device=device)
+        self.assertEqual(weight, weight_clone)
+        res1 = torch.nn.functional.embedding(idx, weight, **kwargs)
+        self.assertNotEqual(weight, weight_clone)
+        res2 = torch.nn.functional.embedding(idx, weight_clone, **kwargs)
+        self.assertEqual(weight, weight_clone)
+        self.assertEqual(res1, res2)
+
+    def test_embedding_two(self, device):
+        kwargs = {'max_norm': 1., 'padding_idx': 0, 'sparse': True, 'scale_grad_by_freq': True}
+        weight = torch.randn(5, 5, dtype=torch.double, device=device) + 2
+        weight_clone = weight.clone()
+        idx = torch.randint(5, (3, 3), device=device)
+        self.assertEqual(weight, weight_clone)
+        res1 = torch.nn.functional.embedding(idx, weight, **kwargs)
+        self.assertNotEqual(weight, weight_clone)
+        res2 = torch.nn.functional.embedding(idx, weight_clone, **kwargs)
+        self.assertEqual(weight, weight_clone)
+        self.assertEqual(res1, res2)
 
     def test_small_model(self, device):
         def convnet(num_classes):
