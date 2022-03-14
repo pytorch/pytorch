@@ -3,9 +3,7 @@
 #include <cstring>
 
 #include <libgen.h>
-#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/csrc/deploy/deploy.h>
-#include <torch/csrc/deploy/irange.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
@@ -103,7 +101,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  for (const auto i : multipy::irange(ninterp)) {
+  for (const auto i : c10::irange(ninterp)) {
     (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
@@ -112,7 +110,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (const auto i : multipy::irange(ninterp)) {
+  for (const auto i : c10::irange(ninterp)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 
@@ -147,11 +145,11 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  for (const auto i : multipy::irange(nthreads)) {
+  for (const auto i : c10::irange(nthreads)) {
     (void)i;
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (const auto j : multipy::irange(100)) {
+      for (const auto j : c10::irange(100)) {
         (void)j;
         model({input.alias()}).toTensor();
       }
@@ -159,7 +157,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
       return result;
     }));
   }
-  for (const auto i : multipy::irange(nthreads)) {
+  for (const auto i : c10::irange(nthreads)) {
     outputs.push_back(futures[i].get());
   }
 
@@ -167,7 +165,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (const auto i : multipy::irange(nthreads)) {
+  for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
@@ -250,13 +248,13 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  for (const auto n : multipy::irange(trials)) {
+  for (const auto n : c10::irange(trials)) {
     (void)n;
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
     at::parallel_for(0, nthreads, 1, [&](int64_t begin, int64_t end) {
-      for (const auto i : multipy::irange(begin, end)) {
+      for (const auto i : c10::irange(begin, end)) {
         auto I = m.allInstances()[i].acquireSession();
         try {
           I.fromIValue(t);
@@ -302,7 +300,7 @@ TEST(TorchpyTest, FxModule) {
 
   std::vector<at::Tensor> outputs;
   auto input = torch::ones({5, 10});
-  for (const auto i : multipy::irange(nthreads)) {
+  for (const auto i : c10::irange(nthreads)) {
     (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
@@ -315,7 +313,7 @@ TEST(TorchpyTest, FxModule) {
   auto ref_output = ref_model.forward({input.alias()}).toTensor();
 
   // Compare all to reference
-  for (const auto i : multipy::irange(nthreads)) {
+  for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
@@ -334,7 +332,7 @@ def get_tensor():
   auto I2 = manager.acquireOne();
 
   auto objOnI =
-      I.global("test_module", "get_tensor")(multipy::ArrayRef<at::IValue>{});
+      I.global("test_module", "get_tensor")(at::ArrayRef<at::IValue>{});
   auto replicated = I.createMovable(objOnI);
   auto objOnI2 = I2.fromMovable(replicated);
 
@@ -347,7 +345,7 @@ def get_tensor():
 thread_local int in_another_module = 5;
 TEST(TorchpyTest, SharedLibraryLoad) {
   torch::deploy::InterpreterManager manager(2);
-  auto no_args = multipy::ArrayRef<torch::deploy::Obj>();
+  auto no_args = at::ArrayRef<torch::deploy::Obj>();
   for (auto& interp : manager.allInstances()) {
     auto I = interp.acquireSession();
 
@@ -455,7 +453,7 @@ result = torch.Tensor([1,2,3])
 #if HAS_NUMPY
 TEST(TorchpyTest, TestNumpy) {
   torch::deploy::InterpreterManager m(2);
-  auto noArgs = multipy::ArrayRef<torch::deploy::Obj>();
+  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
   auto I = m.acquireOne();
   auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
   auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});
