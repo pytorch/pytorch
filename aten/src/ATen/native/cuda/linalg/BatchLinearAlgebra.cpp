@@ -3100,8 +3100,7 @@ std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 struct DispatchInitializer {
   DispatchInitializer() {
-    cuda::detail::LinalgDispatch disp{ _solve_helper_cuda,
-                                       _symeig_helper_cuda,
+    cuda::detail::LinalgDispatch disp{ _symeig_helper_cuda,
                                        _linalg_qr_helper_cuda,
                                        _cholesky_solve_helper_cuda,
                                        legacy_lstsq_cuda,
