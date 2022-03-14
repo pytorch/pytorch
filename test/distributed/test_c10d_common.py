@@ -9,7 +9,7 @@ import time
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from contextlib import contextmanager, suppress
+from contextlib import suppress
 
 import torch
 import torch.distributed as dist

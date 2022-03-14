@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from datetime import timedelta
 from itertools import product
 from unittest import mock
@@ -49,11 +49,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     sandcastle_skip,
-    instantiate_parametrized_tests,
-    parametrize,
     sandcastle_skip_if,
 )
-from torch.utils.checkpoint import checkpoint
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
