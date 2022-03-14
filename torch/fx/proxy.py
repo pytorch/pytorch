@@ -20,7 +20,7 @@ class TracerBase:
     # Feature flag for assert tracing
     trace_asserts : bool = False
     # Feature flag for proxying accesses to buffer values
-    proxy_buffer_attributes : bool = True
+    proxy_buffer_attributes : bool = False
 
     @compatibility(is_backward_compatible=True)
     def create_node(self, kind : str, target : Target,
