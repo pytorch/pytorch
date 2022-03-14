@@ -64,6 +64,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -276,6 +284,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -474,6 +490,15 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
@@ -532,6 +557,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -730,6 +763,15 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-2
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
