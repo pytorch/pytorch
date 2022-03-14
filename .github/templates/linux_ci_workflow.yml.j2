@@ -38,7 +38,7 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{% block build %}
+{% block build +%}
   build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
@@ -148,7 +148,7 @@ jobs:
           docker system prune -af
 {%- endblock %}
 {%- if not exclude_test %}
-{% block test %}
+{% block test +%}
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
     if: ${{ github.repository_owner == 'pytorch' }}

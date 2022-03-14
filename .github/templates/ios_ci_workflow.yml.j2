@@ -40,7 +40,7 @@ env:
 !{{ common.set_xcode_version(xcode_version) }}
 
 jobs:
-{% block build %}
+{% block build +%}
   build:
     # NOTE: These builds will not run successfully without running on `pytorch/pytorch` due to the limitations
     #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
@@ -179,6 +179,6 @@ jobs:
             fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
 {%- endif -%}
-{% endblock %}
+{% endblock +%}
 
 !{{ common.concurrency(build_environment) }}
