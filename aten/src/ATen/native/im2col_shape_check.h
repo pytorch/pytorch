@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
 
 namespace at {
