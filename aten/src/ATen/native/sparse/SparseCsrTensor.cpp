@@ -78,8 +78,11 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       crow_indices.dim() == col_indices.dim(),
       "Number of dimensions of crow_indices and col_indices must be the same.");
   TORCH_CHECK(
-      col_indices.dim() == values.dim(),
+      crow_indices.dim() == values.dim(),
       "Number of dimensions of indices and values must be the same.");
+  TORCH_CHECK(
+      crow_indices.dim() == size.size() - 1,
+      "Number of dimensions of indices must be one less than the number of dimensions of the provided size.");
 
   // Note, this check also enforces `crow_indices.size(-1) >= 1`
   TORCH_CHECK(

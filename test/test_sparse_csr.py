@@ -422,6 +422,11 @@ class TestSparseCSR(TestCase):
             torch.sparse_csr_tensor(crow_indices, col_indices, values.repeat(2, 1), size,
                                     device=device)
 
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Number of dimensions of indices must be one less"):
+            torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(2, 1), values.repeat(2, 1), size,
+                                    device=device)
+
     def test_factory_indices_invariants_check(self, device):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]
