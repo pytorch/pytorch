@@ -1,6 +1,6 @@
-#include <c10/util/irange.h>
 #include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/elf_file.h>
+#include <torch/csrc/deploy/irange.h>
 
 namespace torch {
 namespace deploy {
@@ -21,7 +21,7 @@ ElfFile::ElfFile(const char* filename) : memFile_(filename) {
   strtabSection_ = toSection(&shdrList_[strtabSecNo]);
 
   sections_.reserve(numSections_);
-  for (const auto i : c10::irange(numSections_)) {
+  for (const auto i : multipy::irange(numSections_)) {
     sections_.emplace_back(toSection(&shdrList_[i]));
   }
 }

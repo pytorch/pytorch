@@ -78,7 +78,7 @@ TEST(TorchDeployGPUTest, TensorRT) {
   auto makeModel = p.loadPickle("make_trt_module", "model.pkl");
   {
     auto I = makeModel.acquireSession();
-    auto model = I.self(at::ArrayRef<at::IValue>{});
+    auto model = I.self(multipy::ArrayRef<at::IValue>{});
     auto input = at::ones({1, 2, 3}).cuda();
     auto output = input * 2;
     ASSERT_TRUE(
@@ -91,7 +91,7 @@ TEST(TorchDeployGPUTest, TensorRT) {
 #if HAS_NUMPY
 TEST(TorchpyTest, TestNumpy) {
   torch::deploy::InterpreterManager m(2);
-  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
+  auto noArgs = multipy::ArrayRef<torch::deploy::Obj>();
   auto I = m.acquireOne();
   auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
   auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});

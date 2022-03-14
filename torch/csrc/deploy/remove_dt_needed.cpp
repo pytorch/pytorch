@@ -10,8 +10,8 @@
 #include <iostream>
 #include <vector>
 
-#include <c10/util/irange.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/irange.h> // @manual
 
 #define ERROR(msg_fmt, ...) \
   throw std::runtime_error(fmt::format(msg_fmt, ##__VA_ARGS__))
@@ -48,7 +48,7 @@ int main(int argc, const char** argv) {
   auto program_headers = (Elf64_Phdr*)(data + header->e_phoff);
   auto n_program_headers = header->e_phnum;
   Elf64_Dyn* dynamic = nullptr;
-  for (const auto i : c10::irange(n_program_headers)) {
+  for (const auto i : multipy::irange(n_program_headers)) {
     const Elf64_Phdr* phdr = &program_headers[i];
     if (phdr->p_type == PT_DYNAMIC) {
       dynamic = reinterpret_cast<Elf64_Dyn*>(data + phdr->p_offset);

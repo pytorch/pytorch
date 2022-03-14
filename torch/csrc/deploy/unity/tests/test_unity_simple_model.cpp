@@ -1,5 +1,6 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
+#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/csrc/deploy/unity/tests/test_unity.h>
 #include <torch/csrc/deploy/unity/xar_environment.h>
 
@@ -18,7 +19,7 @@ TEST(UnityTest, TestUnitySimpleModel) {
 
   auto I = m.acquireOne();
 
-  auto noArgs = at::ArrayRef<Obj>();
+  auto noArgs = multipy::ArrayRef<Obj>();
   auto input = I.global("torch", "randn")({32, 256});
   auto model = I.global("simple_model", "SimpleModel")(noArgs);
 

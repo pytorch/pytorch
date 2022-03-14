@@ -9,6 +9,7 @@
 #include <pybind11/functional.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
 #include <cassert>
@@ -324,7 +325,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return torch::jit::toTypeInferredIValue(unwrap(obj));
   }
 
-  Obj call(Obj obj, at::ArrayRef<Obj> args) override {
+  Obj call(Obj obj, multipy::ArrayRef<Obj> args) override {
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       m_args[i] = unwrap(args[i]);
@@ -332,7 +333,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return wrap(call(unwrap(obj), m_args));
   }
 
-  Obj call(Obj obj, at::ArrayRef<IValue> args) override {
+  Obj call(Obj obj, multipy::ArrayRef<IValue> args) override {
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       m_args[i] = torch::jit::toPyObject(args[i]);
