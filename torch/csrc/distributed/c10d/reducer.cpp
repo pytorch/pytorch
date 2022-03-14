@@ -2060,8 +2060,10 @@ void verify_params_across_processes(
   at::TensorOptions param_size_options;
   param_size_options = param_size_options.dtype(at::kLong);
   param_size_options = param_size_options.device(params[0].device());
+  // Note: Not using tensor building API because of
+  // https://github.com/pytorch/pytorch/issues/74114
   at::Tensor param_size_tensor = at::tensor(
-    {static_cast<int64_t>(params.size())}, std::move(param_size_options));
+    {static_cast<int64_t>(params.size())}, param_size_options);
 
   // Broadcast and verify parameter size.
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
