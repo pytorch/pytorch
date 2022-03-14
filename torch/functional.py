@@ -9,7 +9,7 @@ from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
-from ._jit_internal import boolean_dispatch, List
+from ._jit_internal import boolean_dispatch
 from ._jit_internal import _overload as overload
 
 Tensor = torch.Tensor
@@ -1340,14 +1340,7 @@ else:
         pass
 
 
-def norm(
-    input: Tensor,
-    p: Union[float, str] = "fro",
-    dim: Optional[Union[float, Tuple[float, ...], List[float]]] = None,
-    keepdim: bool = False,
-    out: Optional[Tensor] = None,
-    dtype: Optional[torch.dtype] = None
-) -> Tensor:  # noqa: F811
+def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
