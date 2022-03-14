@@ -421,14 +421,14 @@ class TestNumericSuiteEager(QuantizationTestCase):
         q_model(self.img_data_2d[0][0])
         q_model = convert(q_model)
         act_compare_dict = compare_model_outputs(model, q_model, self.img_data_2d[0][0])
-        self.assertEqual(len(act_compare_dict), 7)
+        self.assertEqual(len(act_compare_dict), 5)
         expected_act_compare_dict_keys = {
             "mycat.stats",
             "myadd.stats",
             "mymul.stats",
             "myadd_relu.stats",
-            "my_scalar_add.stats",
-            "my_scalar_mul.stats",
+            #"my_scalar_add.stats", # empty
+            #"my_scalar_mul.stats", # empty
             "quant.stats",
         }
         self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
