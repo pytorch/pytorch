@@ -2,10 +2,7 @@
 
 #include <elf.h>
 #include <torch/csrc/deploy/Exception.h>
-<<<<<<< HEAD
-=======
 #include <torch/csrc/deploy/interpreter/Optional.hpp>
->>>>>>> 3135c76b7e ([torch::deploy] replace c10::optional with generic optional of boost)
 #include <torch/csrc/deploy/mem_file.h>
 #include <vector>
 

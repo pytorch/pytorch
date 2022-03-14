@@ -1,9 +1,6 @@
 #pragma once
 
-<<<<<<< HEAD
-=======
 #include <errno.h>
->>>>>>> 3135c76b7e ([torch::deploy] replace c10::optional with generic optional of boost)
 #include <fcntl.h>
 #include <string.h>
 #include <sys/mman.h>
