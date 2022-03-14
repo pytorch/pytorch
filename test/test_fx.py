@@ -686,6 +686,38 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    def test_trace_buffer_slice(self):
+        bs, d_hid = 10, 23
+
+        class ExampleCode(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mm_param = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+                self.lin = torch.nn.Linear(d_hid, d_hid)
+                self.register_buffer('buffer', torch.randn(bs + 100, d_hid))
+
+            def forward(self, x):
+                x = torch.mm(x, self.mm_param)
+                skip_connection = x
+                x = torch.relu(x)
+                x = torch.mm(x, self.mm_param) + self.buffer[:x.shape[0]]
+                x = self.lin(x)
+                x = torch.relu(x)
+                x = x + skip_connection
+                x = torch.mm(x, self.mm_param2)
+                x = self.lin(x)
+                return x
+
+
+        ec = ExampleCode()
+
+        traced = torch.fx.symbolic_trace(ec)
+
+        x = torch.randn(bs, d_hid)
+        torch.testing.assert_allclose(ec(x), traced(x))
+
+
     def test_node_tagging(self):
         class TaggingTracer(Tracer):
             def create_node(self, kind : str, target : Union[str, Callable],
@@ -1064,6 +1096,24 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_torch_op_overloads(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.add.Tensor(a, a)
+                return b
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        gm.graph.lint()
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
+        for node in gm.graph.nodes:
+            if node.op == 'call_function':
+                assert isinstance(node.target, torch._ops.OpOverload)
+                assert node.target.__name__ == 'add.Tensor'
+
     def test_pickle_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -1245,6 +1295,18 @@ class TestFX(JitTestCase):
         g.erase_node(neg)
 
         self.assertTrue(neg not in relu.users)
+
+    def test_remove_uses_with_custom_filter(self):
+        g : torch.fx.Graph = Graph()
+        x : torch.fx.Node = g.placeholder('x')
+        relu : torch.fx.Node = g.call_function(torch.relu, (x,))
+        neg : torch.fx.Node = g.call_function(torch.neg, (relu,))
+        g.output(neg)
+
+        neg.replace_all_uses_with(relu, lambda x: x != neg)
+
+        self.assertTrue(neg in relu.users)
+
 
     def test_nonetype_annotation(self):
         eb = torch.nn.EmbeddingBag(3, 4)
@@ -1932,6 +1994,28 @@ class TestFX(JitTestCase):
         b.update_kwarg('input', y)
         new_gm = torch.fx.GraphModule(torch.nn.Module(), graph)
         self.assertEqual(new_gm(inp_x, inp_y), torch.relu(inp_y))
+
+    def test_immutable_list_pytree_ops(self):
+        rand_tensor = torch.randn(5, 3)
+        l = immutable_list([3, [rand_tensor, 42]])
+
+        flattened, spec = pytree.tree_flatten(l)
+        assert flattened == [3, rand_tensor, 42]
+
+        unflattened = pytree.tree_unflatten(flattened, spec)
+        assert unflattened == l
+        assert isinstance(unflattened, immutable_list)
+
+    def test_immutable_dict_pytree_ops(self):
+        rand_tensor = torch.randn(5, 3)
+        d = immutable_dict({'a': 3, 'b': [rand_tensor, 42]})
+
+        flattened, spec = pytree.tree_flatten(d)
+        assert flattened == [3, rand_tensor, 42]
+
+        unflattened = pytree.tree_unflatten(flattened, spec)
+        assert unflattened == d
+        assert isinstance(unflattened, immutable_dict)
 
     def test_move_before(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -3669,9 +3753,9 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
-        "max_pool1d_with_indices": CONTROL_FLOW,
-        "max_pool2d_with_indices": CONTROL_FLOW,
-        "max_pool3d_with_indices": CONTROL_FLOW,
+        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
+        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,
