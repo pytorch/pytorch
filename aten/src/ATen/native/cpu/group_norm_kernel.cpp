@@ -83,17 +83,76 @@ void GroupNormKernelImplInternal(
   });
 }
 
-// helper functions:
 template <typename T>
-static inline T reduce_add(const vec::Vectorized<T>& vec) {
-  constexpr int K = vec::Vectorized<T>::size();
-  T vec_arr[K];
-  vec.store(vec_arr);
-  T acc = T(0);
-  for (const auto i : c10::irange(K)) {
-    acc += vec_arr[i];
+std::tuple<T, T> ColumnwiseMoments(
+    const T* X_data,
+    int64_t HxW,
+    int64_t C,
+    int64_t D) {
+  using Vec = vec::Vectorized<T>;
+  constexpr int64_t K = Vec::size();
+  const int64_t inner_size = D / K * K;
+  Vec acc0_vec{0}, acc1_vec{0};
+  for (const auto m : c10::irange(HxW)) {
+    const T* X_ptr = X_data + m * C;
+    int64_t d = 0;
+    for (; d < inner_size; d += K) {
+      Vec x_vec = Vec::loadu(X_ptr + d);
+      acc0_vec += x_vec;
+      acc1_vec += x_vec * x_vec;
+    }
+    if (D - d > 0) {
+      Vec x_vec = Vec::loadu(X_ptr + d, D - d);
+      acc0_vec += x_vec;
+      acc1_vec += x_vec * x_vec;
+    }
   }
-  return acc;
+  // horizontal add fast path
+  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec);
+  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec);
+  return std::tuple<T, T>(mean_val, rstd_val);
+}
+
+template <typename T = BFloat16>
+std::tuple<float, float> ColumnwiseMoments(
+    const BFloat16* X_data,
+    int64_t HxW,
+    int64_t C,
+    int64_t D) {
+  using bVec = vec::Vectorized<BFloat16>;
+  using fVec = vec::Vectorized<float>;
+  constexpr int64_t K = bVec::size();
+  const int64_t inner_size = D / K * K;
+  fVec acc0_fvec{0}, acc1_fvec{0}, zero{0};
+  for (const auto m : c10::irange(HxW)) {
+    const BFloat16* X_ptr = X_data + m * C;
+    int64_t d = 0;
+    for (; d < inner_size; d += K) {
+      bVec x_bvec = bVec::loadu(X_ptr + d);
+      fVec x_fvec0, x_fvec1;
+      std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+      acc0_fvec += x_fvec0 + x_fvec1;
+      acc1_fvec += x_fvec0 * x_fvec0 + x_fvec1 * x_fvec1;
+    }
+    if (D - d > 0) {
+      bVec x_bvec = bVec::loadu(X_ptr + d, D - d);
+      fVec x_fvec0, x_fvec1;
+      std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+      if (D - d > fVec::size()) {
+        x_fvec1 = fVec::set(zero, x_fvec1, D - d - fVec::size());
+        acc0_fvec += x_fvec0 + x_fvec1;
+        acc1_fvec += x_fvec0 * x_fvec0 + x_fvec1 * x_fvec1;
+      } else {
+        x_fvec0 = fVec::set(zero, x_fvec0, D - d);
+        acc0_fvec += x_fvec0;
+        acc1_fvec += x_fvec0 * x_fvec0;
+      }
+    }
+  }
+  // horizontal add fast path
+  float mean_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc0_fvec);
+  float rstd_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc1_fvec);
+  return std::tuple<float, float>(mean_val, rstd_val);
 }
 
 template <typename T>
@@ -120,12 +179,13 @@ void GroupNormKernelImplChannelsLastInternal(
   T* Y_data = Y.data_ptr<T>();
   T* mean_data = mean.data_ptr<T>();
   T* rstd_data = rstd.data_ptr<T>();
-  const T s = T(1) / static_cast<T>(D * HxW);
+
+  using T_ACC = vec::vec_scalar_t<T>;
+  using Vec = vec::Vectorized<T_ACC>;
+
+  const T s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
   const bool gamma_null = (gamma_data == nullptr);
   const bool beta_null = beta_data == nullptr;
-
-  using Vec = vec::Vectorized<T>;
-  constexpr int64_t K = Vec::size();
 
   // NB: About algorithm choosen:
   //
@@ -150,7 +210,6 @@ void GroupNormKernelImplChannelsLastInternal(
     Tensor buffer = at::empty({N * G, 2 * D}, X.options());
     T* buffer_data = buffer.data_ptr<T>();
 
-    const int64_t inner_size = D / K * K;
     at::parallel_for(0, N * G, 1, [&](int64_t begin, int64_t end) {
       int64_t n{0}, g{0};
       data_index_init(begin, n, N, g, G);
@@ -162,28 +221,16 @@ void GroupNormKernelImplChannelsLastInternal(
         // So it is better to reduce with a vec across all HxW plain,
         // and do a horizontal add just once for each {n, g}.
         //
-        Vec acc0_vec{0}, acc1_vec{0};
-        for (const auto m : c10::irange(HxW)) {
-          const T* X_ptr = X_data + n * HxW * C + m * C + g * D;
-          int64_t d = 0;
-          for (; d < inner_size; d += K) {
-            Vec x_vec = Vec::loadu(X_ptr + d);
-            acc0_vec += x_vec;
-            acc1_vec += x_vec * x_vec;
-          }
-          if (D - d > 0) {
-            Vec x_vec = Vec::loadu(X_ptr + d, D - d);
-            acc0_vec += x_vec;
-            acc1_vec += x_vec * x_vec;
-          }
-        }
-        // horizontal add
-        T mean_val = reduce_add(acc0_vec);
-        T rstd_val = reduce_add(acc1_vec);
+        T_ACC mean_val, rstd_val;
+        std::tie(mean_val, rstd_val) = ColumnwiseMoments(
+                X_data + n * HxW * C + g * D,
+                HxW,
+                C,
+                D);
 
         mean_val *= s;
-        rstd_val = std::max(rstd_val * s - mean_val * mean_val, T(0));
-        rstd_val = T(1) / std::sqrt(rstd_val + eps);
+        rstd_val = std::max(rstd_val * s - mean_val * mean_val, T_ACC(0));
+        rstd_val = T_ACC(1) / std::sqrt(rstd_val + eps);
         mean_data[i] = mean_val;
         rstd_data[i] = rstd_val;
 
@@ -265,7 +312,7 @@ void GroupNormKernelImplChannelsLastInternal(
     // step-2: compute mean and rstd
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {
-        T mean_val{0}, rstd_val{0};
+        T_ACC mean_val{0}, rstd_val{0};
         for (const auto d : c10::irange(D)) {
           for (const auto t : c10::irange(num_threads)) {
             T* buffer_ptr = buffer_data + t * N * 2 * C + n * 2 * C;
@@ -274,10 +321,10 @@ void GroupNormKernelImplChannelsLastInternal(
            }
         }
         mean_val *= s;
-        rstd_val = std::max(rstd_val * s - mean_val * mean_val, T(0));
-        rstd_val = T(1) / std::sqrt(rstd_val + eps);
-        mean_data[n * G + g] = mean_val;
-        rstd_data[n * G + g] = rstd_val;
+        rstd_val = std::max(rstd_val * s - mean_val * mean_val, T_ACC(0));
+        rstd_val = T_ACC(1) / std::sqrt(rstd_val + eps);
+        mean_data[n * G + g] = T(mean_val);
+        rstd_data[n * G + g] = T(rstd_val);
       }
     }
 
@@ -346,7 +393,7 @@ void GroupNormKernelImpl(
     Tensor& rstd) {
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GroupNormKernelImpl", [&]() {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
         GroupNormKernelImplInternal<scalar_t>(
             X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
@@ -354,7 +401,7 @@ void GroupNormKernelImpl(
     }
     case at::MemoryFormat::ChannelsLast:
     case at::MemoryFormat::ChannelsLast3d: {
-      AT_DISPATCH_FLOATING_TYPES(X.scalar_type(), "GroupNormKernelImpl", [&]() {
+      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
         GroupNormKernelImplChannelsLastInternal<scalar_t>(
             X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
       });
@@ -585,8 +632,8 @@ void GroupNormBackwardKernelImpl(
     Tensor& dX,
     Tensor& dgamma,
     Tensor& dbeta) {
-  AT_DISPATCH_FLOATING_TYPES(
-      X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
         GroupNormBackwardKernelImplInternal<scalar_t>(
             dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
       });
