@@ -3224,7 +3224,6 @@ struct DispatchInitializer {
                                        _symeig_helper_cuda,
                                        _linalg_qr_helper_cuda,
                                        _cholesky_solve_helper_cuda,
-                                       legacy_lstsq_cuda,
                                        _linalg_inv_out_helper_cuda};
     cuda::detail::registerLinalgDispatch(disp);
   };

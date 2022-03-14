@@ -75,7 +75,6 @@ struct LinalgDispatch {
    std::tuple<Tensor, Tensor> (*symeig_helper)(const Tensor& self, bool eigenvectors, bool upper);
    std::tuple<Tensor, Tensor> (*qr_helper)(const Tensor& input, c10::string_view mode);
    Tensor (*cholesky_solve_helper)(const Tensor& self, const Tensor& A, bool upper);
-   std::tuple<Tensor, Tensor> (*legacy_lstsq)(const Tensor &B, const Tensor &A);
    Tensor& (*inv_out_helper)(Tensor &result, Tensor& infos_lu, Tensor& infos_getri);
 };
 C10_EXPORT void registerLinalgDispatch(const LinalgDispatch&);

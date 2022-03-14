@@ -36,7 +36,6 @@ cuda::detail::LinalgDispatch disp = {_solve_helper_cuda,
                                      _symeig_helper_cuda,
                                      _linalg_qr_helper_cuda,
                                      _cholesky_solve_helper_cuda,
-                                     legacy_lstsq_cuda,
                                      _linalg_inv_out_helper_cuda};
 
 at::DynamicLibrary& getTorchLinalgLibrary() {
@@ -167,12 +166,6 @@ Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& in
     return disp.inv_out_helper(result, infos_lu, infos_getri);
 }
 
-std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.legacy_lstsq != legacy_lstsq_cuda, "Can't find legacy_lstsq_cuda");
-    return disp.legacy_lstsq(B, A);
-}
-
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
     getTorchLinalgLibrary();
     TORCH_CHECK(disp.cholesky_solve_helper != _cholesky_solve_helper_cuda, "Can't find _cholesky_solve_helper_cuda");
@@ -198,23 +191,5 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
 }
 
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/
-
-std::tuple<Tensor&, Tensor&> legacy_lstsq_out_cuda(
-    const Tensor& B, const Tensor& A, Tensor& B_out, Tensor& A_out) {
-  const auto dtype = A.scalar_type();
-  TORCH_CHECK(B.scalar_type() == dtype, "exepected A and B dtypes to match but found ",
-              A.scalar_type(), " and ", B.scalar_type());
-  TORCH_CHECK(A_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", A_out.scalar_type());
-  TORCH_CHECK(B_out.scalar_type() == dtype, "A_out to have scalar type ", dtype,
-              " but found", B_out.scalar_type());
-  Tensor A_tmp, B_tmp;
-  std::tie(B_tmp, A_tmp) = native::legacy_lstsq_cuda(B, A);
-  resize_output(A_out, A_tmp.sizes());
-  A_out.copy_(A_tmp);
-  resize_output(B_out, B_tmp.sizes());
-  B_out.copy_(B_tmp);
-  return std::tuple<Tensor&, Tensor&>(B_out, A_out);
-}
 
 }} // namespace at::native
