@@ -703,7 +703,8 @@ class TestAutocast(JitTestCase):
         # freezing should pre-cast the constant self.x to remove one autocast call
         FileCheck().check_count("aten::_autocast_to_reduced_precision", 1, True).run(frozen_mod.graph)
 
-        # TODO - why does this pass?
+        # the runtime autocasting pass will re-insert the second autocast call,
+        # but constant propagation will merge it with the constant that it's casting.
         frozen_mod(y)
         optimized_graph = frozen_mod.graph_for(y)
         FileCheck().check_count("aten::_autocast_to_reduced_precision", 1, True).run(optimized_graph)
