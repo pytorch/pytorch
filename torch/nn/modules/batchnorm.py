@@ -125,7 +125,7 @@ class _BatchNorm(_NormBase):
         track_running_stats: bool = True,
         device=None,
         dtype=None
-    ):
+    ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(_BatchNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
