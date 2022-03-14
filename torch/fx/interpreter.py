@@ -5,6 +5,7 @@ from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+import inspect
 
 @compatibility(is_backward_compatible=True)
 class Interpreter:
@@ -407,7 +408,8 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.placeholder(target), self.tracer)
+        default_value = next(iter(args)) if args else inspect.Signature.empty
+        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:
