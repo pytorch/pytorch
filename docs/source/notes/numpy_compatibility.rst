@@ -49,7 +49,7 @@ often more important to have guaranteed conversions, even if copies are created.
 
    Do not use ``id`` to check for shared memory, as ``id`` is a CPython only
    implementation detail guaranteed to be unique. Also, for larger arrays,
-   :ref:`np.shares_memory <numpy::std:doc:reference/generated/numpy.shares_memory>` can be slow.
+   ``np.shares_memory`` can be slow.
 
 Basic interoperability
 ----------------------
