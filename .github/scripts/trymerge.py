@@ -352,6 +352,19 @@ class GitHubPR:
     def get_comment_author_association(self, num: int = -1) -> str:
         return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
 
+    def get_diff_revision(self) -> Optional[str]:
+        rc = RE_DIFF_REV.search(self.get_body())
+        return rc.group(1) if rc is not None else None
+
+    def has_internal_changes(self) -> bool:
+        checkrun_name = "Meta Internal-Only Changes Check"
+        if self.get_diff_revision() is None:
+            return False
+        checks = self.get_checkrun_conclusions()
+        if checks is None or checkrun_name not in checks:
+            return False
+        return checks[checkrun_name] != "SUCCESS"
+
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
         approved_by = self.get_approved_by()
@@ -385,6 +398,8 @@ class GitHubPR:
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
+        if self.has_internal_changes():
+            raise RuntimeError("This PR must be landed via phabricator")
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -457,6 +472,8 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
             print(f"Skipping rule {rule_name} due to non-matching files: {non_matching_files}")
             continue
         print(f"Matched rule {rule_name} for {pr.pr_num}")
+        if pr.has_internal_changes():
+            raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 

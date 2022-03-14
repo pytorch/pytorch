@@ -2312,6 +2312,43 @@ REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
   };
 });
 
+// device & pin_memory matter only when CUDA is enabled.
+static bool hasTensorWithOptions(
+    const IValue& ivalue,
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout) {
+  if (!ivalue.isTensor()) {
+    return false;
+  }
+  const auto& tensor = ivalue.toTensor();
+  if (dtype == tensor.dtype().toScalarType() &&
+      layout == tensor.options().layout_opt()) {
+    return true;
+  }
+  VLOG(1) << "tensor exists, but tensor options were different";
+  return false;
+}
+
+REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto size = p_node->Input(0).toDimVector();
+    const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+    const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+    if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
+      p_node->Output(0) = at::native::zeros(size, dtype, layout);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::zeros_out(size, out_t);
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"))) {
