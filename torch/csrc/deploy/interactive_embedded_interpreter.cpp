@@ -3,7 +3,6 @@
  * state of the embedding interpreter interactively.
  */
 #include <c10/util/Flags.h>
-#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/csrc/deploy/path_environment.h>
 

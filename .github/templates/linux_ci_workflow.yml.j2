@@ -6,36 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if on_pull_request %}
-  pull_request:
-{%- endif %}
-  push:
-{%- if enable_doc_jobs and is_scheduled %}
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-{%- endif %}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-{%- if not is_scheduled %}
-    branches:
-      - master
-      - main
-      - release/*
-{%- endif %}
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, enable_doc_jobs) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
