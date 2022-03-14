@@ -40,10 +40,10 @@ often more important to have guaranteed conversions, even if copies are created.
 
   >>> a_np = np.ones(3)
   >>> b_fnp = torch.from_numpy(a_np)
-  >>> np.shares_memory(a_np, b_torch.numpy())
-   False
   >>> np.shares_memory(a_np, b_fnp)
   True
+  >>> np.shares_memory(a_np, b_fnp.numpy().copy())
+  False
 
 .. warning::
 
@@ -70,8 +70,10 @@ nodes are supported.
 .. doctest::
 
    >>> b_torch = torch.ones(3)
-   >>> assert(b_torch.requires_grad == False)
-   >>> assert(b_torch.is_cuda == False)
+   >>> b_torch.requires_grad == False
+   True
+   >>> b_torch.is_cuda == False
+   True
    >>> b_torch.numpy()
    array([1., 1., 1.], dtype=float32)
 
@@ -207,11 +209,11 @@ Essentially these can be expressed as:
 .. code-block:: python
 
    # t is a torch.Tensor
-   assert(t.layout == torch.strided) # Dense
-   assert(t.is_cuda == False) # CPU
-   assert(t.requires_grad == False) # No autograd
-   assert(t.is_conj() == False) # Not conjugate
-   assert(t.is_neg() == False) # Not negative
+   assert t.layout == torch.strided # Dense
+   assert t.is_cuda == False # CPU
+   assert t.requires_grad == False # No autograd
+   assert t.is_conj() == False # Not conjugate
+   assert t.is_neg() == False # Not negative
 
 The :meth:`torch.numpy()` method  and the :doc:`np.asarray()
 <numpy:reference/generated/numpy.asarray>` function returns a **view** of the
@@ -258,9 +260,9 @@ Concretely, these may be expressed as:
 
    >>> a_np = np.ones(4).reshape(2, 2)
    >>> b_torch = torch.tensor(a_np)
-   >>> assert(a_np.dtype.byteorder == '=') # Native byte order
+   >>> a_np.dtype.byteorder == '=' # Native byte order
    True
-   >>> assert(a_np.flags.writeable == True) # Not read only
+   >>> a_np.flags.writeable == True # Not read only
    True
    >>> np.equal([stride % b_torch.element_size() for stride in a_np.strides], np.zeros(len(a_np.strides))) # Multiples of torch element byte size
    array([ True,  True])
@@ -279,7 +281,7 @@ To obtain a **view** of the data, :meth:`torch.from_numpy()` can be used.
    tensor([ 1.,  2., 23.], dtype=torch.float64)
    >>> a_np[0] = 22
    >>> b_torch # view, changes with a_np
-   tensor([ 22.,  2., 23.], dtype=torch.float64)
+   tensor([22.,  2., 23.], dtype=torch.float64)
    >>> np.array_equal(b_torch.numpy(), a_np)
    True
    >>> np.shares_memory(a_np, b_torch)
@@ -321,7 +323,7 @@ Alternatively, calling ``copy``  after conversion will also make a copy.
    True
    >>> np.shares_memory(a_np, b_fnp.numpy())
    True
-   >>> np.shares_memori(a_np, b_fnp.numpy().copy())
+   >>> np.shares_memory(a_np, b_fnp.numpy().copy())
    False
 
 The DLPack interface
@@ -335,14 +337,12 @@ The DLPack interface
 Since both PyTorch tensors and NumPy arrays have the ``__dlpack__`` method
 defined, we can use the ``from_dlpack`` methods to obtain a view of the data.
 
-.. doctest::
+.. code-block:: python
 
-   >>> b_torch = torch.ones(3)
-   >>> np.shares_memory(np.from_dlpack(b_torch), b_torch.numpy())
-   True
-   >>> a_np = np.ones(3)
-   >>> np.shares_memory(torch.from_dlpack(a_np).numpy(), a_np)
-   True
+   b_torch = torch.ones(3)
+   np.shares_memory(np.from_dlpack(b_torch), b_torch.numpy()) # True
+   a_np = np.ones(3)
+   np.shares_memory(torch.from_dlpack(a_np).numpy(), a_np) # True
 
 .. dropdown:: Fine print and references
 
@@ -367,7 +367,7 @@ to the dunder method ``__array_wrap__``.
 
    >>> a_np = np.array([1, 2, 3], dtype=np.float64) / 5
    >>> np.arctan2(a_np, 1) # No equivalent torch function
-   array([0.19866933, 0.38941834, 0.56464247])
+   array([0.19739556, 0.38050638, 0.5404195 ])
    >>> b_torch = torch.tensor(a_np)
    >>> np.arctan2(b_torch, 1)
    tensor([0.1974, 0.3805, 0.5404], dtype=torch.float64)
@@ -452,7 +452,7 @@ That said, recall from ``import this``, the Zen of Python:
 So the recommended solution is to always explicitly convert PyTorch tensors and
 NumPy arrays as required.
 
-.. warning::
+.. note::
 
    This document is for vanilla PyTorch tensors and does not cover `extended tensors`_.
 
@@ -480,14 +480,12 @@ NumPy arrays as required.
    will default to returning ``None`` when called on an object which owns its own
    memory, i.e. is not a view.
 
-   .. doctest::
+   .. code-block:: python
 
-    >>> a_np = np.ones(3)
-    >>> b_torch = torch.ones(3)
-    >>> np.from_dlpack(b_torch).base
-    <capsule object "numpy_dltensor" at ...>
-    >>> a_np.base is None
-    True
+    a_np = np.ones(3)
+    b_torch = torch.ones(3)
+    np.from_dlpack(b_torch).base # <capsule object "numpy_dltensor" at ...>
+    a_np.base is None # True
 
    Note that the results of ``base`` cannot be relied on for more than one level of
    indirection. This means that given a tensor which shares memory with a NumPy
@@ -495,6 +493,8 @@ NumPy arrays as required.
 
    .. doctest::
 
+    >>> a_np = np.ones(3)
+    >>> b_torch = torch.ones(3)
     >>> np.shares_memory(torch.from_numpy(a_np), a_np)
     True
     >>> np.shares_memory(torch.from_numpy(a_np).numpy(), a_np)
