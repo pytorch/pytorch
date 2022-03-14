@@ -20,11 +20,6 @@ from ... import Generator, Tensor
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
-UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
-                              'groupby',   # As it returns DataChunks
-                              '_dataframes_as_tuples',  # As it unpacks DF
-                              'trace_as_dataframe',  # As it used to mark DF for tracing
-                              ]
 
 class DataChunk(list, Generic[T]):
     def __init__(self, items):

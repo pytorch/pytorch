@@ -1,9 +1,18 @@
 import functools
-from typing import Dict, Callable, Optional
+from typing import Dict, Callable, Optional, TypeVar
 
-from torch.utils.data._typing import _DataPipeMeta
+from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn
-from torch.utils.data.dataset import IterableDataset, T_co, UNTRACABLE_DATAFRAME_PIPES, Dataset
+from torch.utils.data.dataset import Dataset, IterableDataset
+
+
+T_co = TypeVar('T_co', covariant=True)
+
+UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
+                              'groupby',   # As it returns DataChunks
+                              '_dataframes_as_tuples',  # As it unpacks DF
+                              'trace_as_dataframe',  # As it used to mark DF for tracing
+                              ]
 
 
 class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
