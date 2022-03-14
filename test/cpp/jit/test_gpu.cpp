@@ -18674,7 +18674,7 @@ TEST_F(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
 
   auto x_add_bias = add(x, bias);
   auto x_bcast = broadcast(x_add_bias, {false, false, true, false});
-  auto y = unaryOp(UnaryOpType::Gelu, x_bcast);
+  auto y = gelu(x_bcast);
   fusion.addOutput(y);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);

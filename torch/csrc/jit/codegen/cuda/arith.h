@@ -161,9 +161,6 @@ TORCH_CUDA_CU_API TensorView* floor(TensorView*);
 // frac
 TORCH_CUDA_CU_API Val* frac(Val*);
 TORCH_CUDA_CU_API TensorView* frac(TensorView*);
-// gelu
-TORCH_CUDA_CU_API Val* gelu(Val*);
-TORCH_CUDA_CU_API TensorView* gelu(TensorView*);
 // silu
 TORCH_CUDA_CU_API Val* silu(Val*);
 TORCH_CUDA_CU_API TensorView* silu(TensorView*);

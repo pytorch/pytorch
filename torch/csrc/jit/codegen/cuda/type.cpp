@@ -298,8 +298,6 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "floor";
     case UnaryOpType::Frac:
       return "frac";
-    case UnaryOpType::Gelu:
-      return "gelu";
     case UnaryOpType::Silu:
       return "silu";
     case UnaryOpType::Lgamma:

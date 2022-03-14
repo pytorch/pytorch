@@ -1043,7 +1043,7 @@ class IrParser {
             std::tie(format, list_val) = getConsistentValues(
                 MemoryFormat::Contiguous(),
                 value_map[node->inputs()[0]->unique()]);
-            auto operand = list_val.front();
+            auto operand = list_val.front()->as<TensorView>();
             list_val.pop_front();
             auto& beta = value_map[node->inputs()[1]->unique()];
             auto& threshold = value_map[node->inputs()[2]->unique()];
@@ -2475,23 +2475,18 @@ class IrParser {
             std::list<Val*> list_val;
             std::tie(format, list_val) = getConsistentValues(
                 c10::nullopt, value_map[node->inputs()[0]->unique()]);
-            auto self = list_val.front();
+            auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
             auto approximate = constant_as<std::string>(node->input(1));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate parameter is required.");
-            const auto kApproximate = approximate.value();
+            const auto kTanhGelu =
+                at::native::get_gelutype_enum(approximate.value()) ==
+                at::native::GeluType::Tanh;
 
-            Val* out = nullptr;
-            if (at::native::get_gelutype_enum(kApproximate) ==
-                at::native::GeluType::Tanh) {
-              out = fast_gelu(self);
-            } else {
-              out = unaryOp(UnaryOpType::Gelu, self);
-            }
-
+            auto out = (kTanhGelu) ? tanh_gelu(self) : gelu(self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(out, format));
           },
@@ -2511,25 +2506,21 @@ class IrParser {
                 c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
-            auto grad_out = list_val.front();
+            auto grad_out = list_val.front()->as<TensorView>();
             list_val.pop_front();
-            auto self = list_val.front();
+            auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
             auto approximate = constant_as<std::string>(node->input(2));
             TORCH_INTERNAL_ASSERT(
                 approximate.has_value(),
                 "The approximate parameter is required.");
-            const auto kApproximate = approximate.value();
+            const auto kTanhGelu =
+                at::native::get_gelutype_enum(approximate.value()) ==
+                at::native::GeluType::Tanh;
 
-            Val* grad_in = nullptr;
-            if (at::native::get_gelutype_enum(kApproximate) ==
-                at::native::GeluType::Tanh) {
-              grad_in = fast_gelu_backward(grad_out, self);
-            } else {
-              grad_in = gelu_backward(grad_out, self);
-            }
-
+            auto grad_in = (kTanhGelu) ? tanh_gelu_backward(grad_out, self)
+                                       : gelu_backward(grad_out, self);
             value_map.emplace(
                 node->output()->unique(), ValueHolder(grad_in, format));
           },
@@ -2549,9 +2540,9 @@ class IrParser {
                 c10::nullopt,
                 value_map[node->inputs()[0]->unique()],
                 value_map[node->inputs()[1]->unique()]);
-            auto grad_out = list_val.front();
+            auto grad_out = list_val.front()->as<TensorView>();
             list_val.pop_front();
-            auto self = list_val.front();
+            auto self = list_val.front()->as<TensorView>();
             list_val.pop_front();
 
             auto grad_in = tanh_backward(grad_out, self);
