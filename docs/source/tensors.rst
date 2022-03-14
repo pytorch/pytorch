@@ -32,7 +32,7 @@ Data type                               dtype                                   
 Boolean                                 ``torch.bool``                              :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
 quantized 8-bit integer (unsigned)      ``torch.quint8``                            :class:`torch.ByteTensor`     /
 quantized 8-bit integer (signed)        ``torch.qint8``                             :class:`torch.CharTensor`     /
-quantized 32-bit integer (signed)       ``torch.qfint32``                           :class:`torch.IntTensor`      /
+quantized 32-bit integer (signed)       ``torch.qint32``                            :class:`torch.IntTensor`      /
 quantized 4-bit integer (unsigned) [3]_ ``torch.quint4x2``                          :class:`torch.ByteTensor`     /
 ======================================= =========================================== ============================= ================================
 
