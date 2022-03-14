@@ -193,12 +193,12 @@ def get_method_definitions(file_path: Union[str, List[str]],
 
 
 # Defined outside of main() so they can be imported by TorchData
-iterDP_file_path: str = "datapipes/iter"
+iterDP_file_path: str = "iter"
 iterDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
 iterDP_deprecated_files: Set[str] = set()
 iterDP_method_to_special_output_type: Dict[str, str] = {"demux": "List[IterDataPipe]", "fork": "List[IterDataPipe]"}
 
-mapDP_file_path: str = "datapipes/map"
+mapDP_file_path: str = "map"
 mapDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
 mapDP_deprecated_files: Set[str] = set()
 mapDP_method_to_special_output_type: Dict[str, str] = {}
