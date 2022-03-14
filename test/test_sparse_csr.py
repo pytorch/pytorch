@@ -347,49 +347,52 @@ class TestSparseCSR(TestCase):
                                     torch.tensor([1, 2, 3, 4]))
 
     def test_factory_shape_invariants_check(self, device):
-        crow_indices = [0, 2, 4]
-        col_indices = [0, 1, 0, 1]
-        values = [1, 2, 3, 4]
+        crow_indices = torch.tensor([0, 2, 4], device=device)
+        col_indices =  torch.tensor([0, 1, 0, 1], device=device)
+        values = torch.tensor([1, 2, 3, 4], device=device)
         size = (2, 10)
-        torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), size,
-                                device=device)
+        torch.sparse_csr_tensor(crow_indices, col_indices, values, size, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"size of a CSR tensor must be of length 2, but got: 3"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values),
-                                    size=(2, 10, 2),
+        with self.assertRaisesRegex(RuntimeError, r"size of a batched CSR tensor must have length >= 2, but got: 1"):
+            torch.sparse_csr_tensor(crow_indices, col_indices, values,
+                                    size=(2,),
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"crow_indices must have dim\=1 but got crow_indices\.dim\(\)\=2"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices).repeat(2, 1),
-                                    torch.tensor(col_indices),
-                                    torch.tensor(values),
+        with self.assertRaisesRegex(RuntimeError, r"crow_indices must have dim >= 1 but got crow_indices\.dim\(\)\ = 0"):
+            torch.sparse_csr_tensor(torch.zeros((), device=device, dtype=torch.int64),
+                                    col_indices,
+                                    values,
                                     size,
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"col_indices must have dim\=1 but got col_indices\.dim\(\)\=2"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices),
-                                    torch.tensor(col_indices).repeat(2, 1),
-                                    torch.tensor(values),
+        with self.assertRaisesRegex(RuntimeError, r"col_indices must have dim >= 1 but got col_indices\.dim\(\)\ = 0"):
+            torch.sparse_csr_tensor(crow_indices,
+                                    torch.zeros((), device=device, dtype=torch.int64),
+                                    values,
                                     size,
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"values must have dim\=1 but got values\.dim\(\)\=2"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices),
-                                    torch.tensor(col_indices),
-                                    torch.tensor(values).repeat(2, 1),
+        with self.assertRaisesRegex(RuntimeError, r"values must have dim >= 1 but got values\.dim\(\)\ = 0"):
+            torch.sparse_csr_tensor(crow_indices,
+                                    col_indices,
+                                    torch.zeros((), device=device, dtype=torch.int64),
                                     size,
                                     device=device)
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"crow_indices\.numel\(\) must be size\(0\) \+ 1, but got: 3"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values), (1, 1),
+                                    r"crow_indices\.size\(-1\) must be equal to size\[-2\] \+ 1 \(that is 2\), but got: 3"):
+            torch.sparse_csr_tensor(crow_indices, col_indices, values, (1, 1),
                                     device=device)
 
 
         with self.assertRaisesRegex(RuntimeError,
-                                    r"col_indices and values must have equal sizes, " +
-                                    r"but got col_indices\.numel\(\): 3, values\.numel\(\): 4"):
-            torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 1, 0]), torch.tensor(values), size,
+                                    r"Number of dimensions of crow_indices and col_indices must be the same"):
+            torch.sparse_csr_tensor(crow_indices, col_indices.repeat(2, 1), values, size,
+                                    device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"Number of dimensions of indices and values must be the same"):
+            torch.sparse_csr_tensor(crow_indices, col_indices, values.repeat(2, 1), size,
                                     device=device)
 
     def test_factory_indices_invariants_check(self, device):
@@ -408,7 +411,7 @@ class TestSparseCSR(TestCase):
 
         with self.assertRaisesRegex(RuntimeError,
                                     r"at position i \= 2," +
-                                    r" this condition crow_indices\[i - 1\] <\= crow_indices\[i\] fails"):
+                                    r" the condition crow_indices\[i - 1\] <\= crow_indices\[i\] fails"):
             torch.sparse_csr_tensor(torch.tensor([0, 5, 4]), torch.tensor(col_indices), torch.tensor(values), size,
                                     device=device)
 
@@ -416,7 +419,7 @@ class TestSparseCSR(TestCase):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, -1, 0, 1]), torch.tensor(values), size,
                                     device=device)
 
-        with self.assertRaisesRegex(RuntimeError, r"size\(1\) should be greater than col_indices\.max\(\)"):
+        with self.assertRaisesRegex(RuntimeError, r"size\[-1\] should be greater than col_indices\.max\(\)"):
             torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor([0, 11, 0, 1]), torch.tensor(values), size,
                                     device=device)
 

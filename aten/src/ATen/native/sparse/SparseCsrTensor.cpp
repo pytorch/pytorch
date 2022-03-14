@@ -74,19 +74,17 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       "values must have dim >= 1 but got values.dim() = ",
       values.dim());
 
-  auto batch_ndim_crow_indices = crow_indices.dim() - 1;
-  auto batch_ndim_col_indices = col_indices.dim() - 1;
   TORCH_CHECK(
-      batch_ndim_crow_indices == batch_ndim_col_indices,
-      "Number of batch dimensions in crow_indices and col_indices must be the same.");
+      crow_indices.dim() == col_indices.dim(),
+      "Number of dimensions of crow_indices and col_indices must be the same.");
   TORCH_CHECK(
-      values.dim() - batch_ndim_col_indices >= 1,
-      "Number of batch dimensions of indices must be less than or equal to the number of dimensions in values.");
+      col_indices.dim() == values.dim(),
+      "Number of dimensions of indices and values must be the same.");
 
   // Note, this check also enforces `crow_indices.size(-1) >= 1`
   TORCH_CHECK(
       crow_indices.size(-1) == (size[size.size() - 2] + 1),
-      "crow_indices.size(-1) must be size[-2] + 1, but got: ",
+      "crow_indices.size(-1) must be equal to size[-2] + 1 (that is ", size[size.size() - 2] + 1, "), but got: ",
       crow_indices.size(-1));
   TORCH_CHECK(
       col_indices.numel() == values.numel(),
@@ -102,17 +100,18 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
     auto batch_stride = crow_indices_cpu.dim() >= 2 ? crow_indices_cpu.stride(-2) : 0;
     for (const auto batch_id : c10::irange(batchCount(crow_indices_cpu))) {
       TORCH_CHECK(
-          crow_indices_data_ptr[batch_id*batch_stride] == 0, ": (Batch element ", batch_id, ")",
+          crow_indices_data_ptr[batch_id*batch_stride] == 0,
+          "(Batch element ", batch_id, ") ",
           ": 0th value of crow_indices must be 0, but it is ", crow_indices_data_ptr[batch_id*batch_stride]);
       TORCH_CHECK(
           crow_indices_data_ptr[batch_id*batch_stride + crow_indices.size(-1) - 1] == col_indices.size(-1),
-          ": (Batch element ", batch_id, ")",
+          "(Batch element ", batch_id, ") ",
           "last value of crow_indices should be equal to the length of col_indices.");
 
       for (int i =  1; i <= size[size.size() - 2]; i++) {
         TORCH_CHECK(
             crow_indices_data_ptr[batch_id*batch_stride + i - 1] <= crow_indices_data_ptr[batch_id*batch_stride + i],
-            ": (Batch element ", batch_id, ")",
+            "(Batch element ", batch_id, ") ",
             "at position i = ", i, ", the condition crow_indices[i - 1] <= crow_indices[i] fails");
       }
     }
