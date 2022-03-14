@@ -685,10 +685,6 @@ class TestAutocast(JitTestCase):
         optimized_graph = frozen_mod.graph_for(x, y)
         FileCheck().check_count("aten::_autocast_to_reduced_precision", 2, True).run(optimized_graph)
 
-        mymod = torch.jit.script(TestModule().eval())
-        optimized_graph=mymod.graph_for(x, y)
-        print(optimized_graph)
-
     @unittest.skipIf(not TEST_CUDA, "No cuda")
     def test_jit_freeze_autocast_constants(self):
         class TestModule(torch.nn.Module):
