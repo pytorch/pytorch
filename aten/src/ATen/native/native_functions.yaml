@@ -5486,7 +5486,7 @@
     SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
 
 - func: to_sparse_csr(Tensor self) -> Tensor
-  variants: method
+  variants: function, method
   dispatch:
     CPU, CUDA: dense_to_sparse_csr
     SparseCPU, SparseCUDA: coo_to_sparse_csr

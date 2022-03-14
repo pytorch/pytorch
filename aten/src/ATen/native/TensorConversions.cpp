@@ -284,10 +284,9 @@ Tensor coo_to_sparse_csr(const Tensor& self) {
       coalesced_self.values(),
       coalesced_self.sizes(),
       coalesced_self.scalar_type(),
-      coalesced_self.layout(),
+      c10::kSparseCsr,
       coalesced_self.device());
 }
-
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
