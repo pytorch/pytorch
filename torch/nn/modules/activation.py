@@ -1031,7 +1031,7 @@ class MultiheadAttention(Module):
           returns attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
           :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
-          head of shape :math:`(num_{heads}, L, S)` when input is unbatched or :math:`(N, num_{heads}, L, S)`.
+          head of shape :math:`(\text{num\_heads}, L, S)` when input is unbatched or :math:`(N, \text{num\_heads}, L, S)`.
 
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
