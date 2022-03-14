@@ -50,7 +50,32 @@
    {
       "name": "superuser",
       "patterns": ["*"],
-      "approved_by": ["albanD", "jbschlosser", "suo", "osalpekar", "malfet", "seemethere", "ezyang"],
+      "approved_by": [
+         "albanD",
+         "anjali411",
+         "bdhirsh",
+         "cpuhrsch",
+         "dagitses",
+         "ejguan",
+         "ezyang",
+         "gchanan",
+         "george-qi",
+         "jbschlosser",
+         "malfet",
+         "mikaylagawarecki",
+         "mruberry",
+         "ngimel",
+         "NivekT",
+         "osalpekar",
+         "saketh-are",
+         "samdow",
+         "seemethere",
+         "soulitzer",
+         "suo",
+         "VitalyFedyunin",
+         "wenleix",
+         "zou3519"
+      ],
       "mandatory_checks_name": ["Facebook CLA Check"]
    }
 ]
