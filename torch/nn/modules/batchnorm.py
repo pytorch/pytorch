@@ -1,4 +1,4 @@
-from typing import Optional, Any
+from typing import Any, Optional, Union
 
 import torch
 from torch import Tensor
@@ -31,7 +31,7 @@ class _NormBase(Module):
         momentum: float = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
-        device=None,
+        device: Optional[Union[torch.device, str]] = None,
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
@@ -118,13 +118,13 @@ class _NormBase(Module):
 class _BatchNorm(_NormBase):
     def __init__(
         self,
-        num_features,
-        eps=1e-5,
-        momentum=0.1,
-        affine=True,
-        track_running_stats=True,
-        device=None,
-        dtype=None
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+        track_running_stats: bool = True,
+        device: Optional[Union[torch.device, str]] = None,
+        dtype: Optional[torch.dtype] = None
     ):
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(_BatchNorm, self).__init__(

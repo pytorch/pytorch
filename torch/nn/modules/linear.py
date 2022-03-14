@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import torch
 from torch import Tensor
@@ -29,7 +30,7 @@ class Identity(Module):
         torch.Size([128, 20])
 
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(Identity, self).__init__()
 
     def forward(self, input: Tensor) -> Tensor:

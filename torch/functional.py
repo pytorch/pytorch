@@ -1,5 +1,5 @@
 from typing import (
-    Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
+    List, Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
 
 import torch
@@ -137,7 +137,7 @@ def broadcast_shapes(*shapes):
 
 
 
-def split(tensor, split_size_or_sections, dim=0):
+def split(tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0) -> Tensor:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
@@ -187,7 +187,7 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(*args):
+def einsum(*args: Any) -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -1340,7 +1340,14 @@ else:
         pass
 
 
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
+def norm(
+    input: Tensor,
+    p: Union[float, str] = "fro",
+    dim: Optional[Union[float, Tuple[float, ...], List[float]]] = None,
+    keepdim: bool = False,
+    out: Optional[Tensor] = None,
+    dtype: Optional[torch.dtype] = None
+) -> Tensor:  # noqa: F811
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
