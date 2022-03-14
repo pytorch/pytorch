@@ -405,6 +405,20 @@ class TestSummonFullParams(FSDPTest):
             param.device == torch.device("cuda", torch.cuda.current_device())
         )
 
+    @skip_if_lt_x_gpu(2)
+    def test_raises_rank0_with_writeback(self):
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
+        )
+
+        with self.assertRaisesRegex(ValueError, "is not supported"):
+            with fsdp_model.summon_full_params(rank0_only=True, writeback=True):
+                pass
+
 
 instantiate_parametrized_tests(TestSummonFullParams)
 instantiate_parametrized_tests(TestSummonFullParamsNoShard)
