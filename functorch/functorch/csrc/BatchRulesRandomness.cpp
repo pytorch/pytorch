@@ -70,7 +70,7 @@ Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, c
   check_randomness(randomness, other_bdim.has_value());
 
   if (!self_bdim && other_bdim) {
-    vmapIncompatibleInplaceError("inplace arithmetic");
+    vmapIncompatibleInplaceError("inplace bernoulli");
   }
 
   // compute max logical rank
@@ -136,11 +136,12 @@ Tensor unary_pointwise_random_batch_rule(const Tensor& tensor, ExtraArgs... extr
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness, tensor_bdim.has_value());
   auto shape = tensor_value.sizes();
-  VmapDimVector shapeVec(shape.begin(), shape.end());
-  shapeVec.insert(shapeVec.begin(), maybe_layer->batchSize());
+  VmapDimVector shapeVec(1, maybe_layer->batchSize());
+  shapeVec.reserve(shape.size() + 1);
+  shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
 
   if (randomness == RandomnessType::Different && !tensor_bdim) {
-    tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
+    tensor_value = tensor_value.expand(shapeVec);
   }
   auto out = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
   if (randomness == RandomnessType::Same && !tensor_bdim) {
@@ -169,7 +170,7 @@ Tensor tensor_like_random_batch_rule(const Tensor& self, ExtraArgs... extra_args
     VmapDimVector shapeVec(1, maybe_layer->batchSize());
     shapeVec.reserve(shape.size() + 1);
     shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-    tensor_value = tensor_value.unsqueeze(0).expand(shapeVec);
+    tensor_value = tensor_value.expand(shapeVec);
   }
 
   auto res = Func(tensor_value, std::forward<ExtraArgs>(extra_args)...);
