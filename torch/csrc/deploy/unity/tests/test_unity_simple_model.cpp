@@ -1,8 +1,8 @@
 #include <fmt/format.h>
 #include <gtest/gtest.h>
+#include <torch/csrc/deploy/ArrayRef.h>
 #include <torch/csrc/deploy/unity/tests/test_unity.h>
 #include <torch/csrc/deploy/unity/xar_environment.h>
-#include <torch/csrc/deploy/ArrayRef.h>
 
 namespace torch {
 namespace deploy {

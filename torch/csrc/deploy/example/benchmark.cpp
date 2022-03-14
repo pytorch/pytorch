@@ -2,8 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
-#include <torch/csrc/deploy/irange.h>
 #include <torch/csrc/deploy/ArrayRef.h>
+#include <torch/csrc/deploy/irange.h>
 #include <torch/script.h>
 
 #include <pthread.h>
