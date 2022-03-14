@@ -41,7 +41,6 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 
 <!-- tocstop -->
 
-
 ## More About PyTorch
 
 At a granular level, PyTorch is a library that consists of the following components:
