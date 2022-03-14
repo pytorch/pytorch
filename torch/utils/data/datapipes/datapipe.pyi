@@ -5,7 +5,7 @@
 
 from torch import Generator as Generator, Tensor as Tensor
 from torch import default_generator as default_generator, randperm as randperm
-from torch.utils.data._typing import _DataPipeMeta
+from torch.utils.data.datapipes._typing import _DataPipeMeta
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from torch.utils.data import DataChunk, Dataset, IterableDataset
 
