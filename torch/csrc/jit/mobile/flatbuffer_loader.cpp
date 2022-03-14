@@ -553,16 +553,6 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
   return type;
 }
 
-mobile::Module parse_and_initialize_mobile_module(
-    std::shared_ptr<char> data,
-    size_t,
-    c10::optional<at::Device>) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
-  mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
-  m.set_delete_memory(std::move(data));
-  return m;
-}
-
 mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
     c10::optional<at::Device>) {
@@ -570,9 +560,20 @@ mobile::Module initialize_mobile_module(
   return m;
 }
 
-mobile::Module load_mobile_module_from_file(
-    const std::string& filename,
-    c10::optional<c10::Device> device) {
+mobile::Module parse_and_initialize_mobile_module(
+    std::shared_ptr<char> data,
+    size_t,
+    c10::optional<at::Device>) {
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  mobile::Module m = initialize_mobile_module(flatbuffer_module);
+  m.set_delete_memory(std::move(data));
+  return m;
+}
+
+std::shared_ptr<char> read_file(const std::string& filename) {
 #if defined(HAVE_MMAP)
   int fd = open(filename.c_str(), O_RDONLY);
   struct stat statbuf {};
@@ -591,7 +592,66 @@ mobile::Module load_mobile_module_from_file(
   fread(data.get(), size, 1, f);
   fclose(f);
 #endif
-  return parse_and_initialize_mobile_module(std::move(data), size, device);
+  return data;
+}
+
+mobile::Module load_mobile_module_from_file(
+    const std::string& filename,
+    c10::optional<c10::Device> device) {
+  auto data = read_file(filename);
+  return parse_and_initialize_mobile_module(
+      std::move(data), /*size=*/0, device);
+}
+
+std::shared_ptr<char> read_stream(std::istream& in) {
+  // get size of the stream and reset to orig
+  std::streampos orig_pos = in.tellg();
+  in.seekg(orig_pos, std::ios::end);
+  const long size = in.tellg();
+  in.seekg(orig_pos, in.beg);
+
+  // read stream
+  std::shared_ptr<char> data(static_cast<char*>(malloc(size)), free); // NOLINT
+  in.read(data.get(), size);
+
+  in.seekg(orig_pos, in.beg);
+  return data;
+}
+
+mobile::Module load_mobile_module_from_stream(
+    std::istream& in,
+    c10::optional<c10::Device> device) {
+  auto data = read_stream(in);
+  return parse_and_initialize_mobile_module(
+      std::move(data), /*size=*/0, device);
+}
+
+mobile::Module load_mobile_module(
+    const std::string& filename,
+    const c10::optional<at::Device>,
+    ExtraFilesMap& extra_files) {
+  auto data = read_file(filename);
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  mobile::Module m = initialize_mobile_module(flatbuffer_module);
+  parseExtraFiles(flatbuffer_module, extra_files);
+  return m;
+}
+
+mobile::Module load_mobile_module(
+    std::istream& in,
+    const c10::optional<at::Device>,
+    ExtraFilesMap& extra_files) {
+  auto data = read_stream(in);
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  mobile::Module m = initialize_mobile_module(flatbuffer_module);
+  parseExtraFiles(flatbuffer_module, extra_files);
+  return m;
 }
 
 } // namespace jit
