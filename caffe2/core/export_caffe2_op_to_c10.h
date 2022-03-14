@@ -176,7 +176,7 @@ inline FunctionSchema make_function_schema_for_c10(
  *   caffe2.
  * - all operators must call C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10 and
  *   C10_EXPORT_CAFFE2_OP_TO_C10_CPU .
- * - calling C10_EXPORT_CAFFE2_OP_TO_C10_CUDA is optional and can be omitted i f
+ * - calling C10_EXPORT_CAFFE2_OP_TO_C10_CUDA is optional and can be omitted if
  *   you don't want to expose the operator for CUDA operations.
  * - caffe2 arguments must come after caffe2 inputs, in other words, any tensor
  *   inputs must precede any non-tensor inputs.
