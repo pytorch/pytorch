@@ -32,7 +32,7 @@ class _NormBase(Module):
         affine: bool = True,
         track_running_stats: bool = True,
         device: Optional[Union[torch.device, str]] = None,
-        dtype=None
+        dtype: Optional[torch.dtype] = None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(_NormBase, self).__init__()
