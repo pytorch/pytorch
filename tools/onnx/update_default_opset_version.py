@@ -15,6 +15,7 @@ import pathlib
 import re
 import sys
 import subprocess
+from subprocess import DEVNULL
 
 
 pytorch_dir = pathlib.Path(__file__).parent.parent.parent.resolve()
@@ -32,8 +33,7 @@ for tag in onnx_tags.splitlines():
     if match:
         tag_tups.append(tuple(int(x) for x in match.groups()))
 
-min_tup = sorted(tag_tups)[0]
-version_str = "{}.{}.{}".format(*min_tup)
+version_str = "{}.{}.{}".format(*min(tag_tups))
 
 print("Using ONNX release", version_str)
 
@@ -42,7 +42,7 @@ head_commit = subprocess.check_output(("git", "log", "--max-count=1", "--format=
 
 new_default = None
 
-subprocess.check_call(("git", "checkout", f"v{version_str}"), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.check_call(("git", "checkout", f"v{version_str}"), stdout=DEVNULL, stderr=DEVNULL)
 try:
     from onnx import helper  # type: ignore[import]
     for version in helper.VERSION_TABLE:
@@ -53,7 +53,7 @@ try:
     if not new_default:
         sys.exit(f"failed to find version {version_str} in onnx.helper.VERSION_TABLE at commit {onnx_commit}")
 finally:
-    subprocess.check_call(("git", "checkout", head_commit), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(("git", "checkout", head_commit), stdout=DEVNULL, stderr=DEVNULL)
 
 os.chdir(pytorch_dir)
 
@@ -66,11 +66,13 @@ def read_sub_write(path: str, prefix_pat: str) -> None:
         f.write(content_str)
     print("modified", path)
 
-read_sub_write("torch/onnx/symbolic_helper.py", r"(_default_onnx_opset_version = )\d+")
-read_sub_write("torch/onnx/__init__.py", r"(opset_version \(int, default )\d+")
+read_sub_write(os.path.join("torch", "onnx", "symbolic_helper.py"),
+               r"(_default_onnx_opset_version = )\d+")
+read_sub_write(os.path.join("torch", "onnx", "__init__.py"),
+               r"(opset_version \(int, default )\d+")
 
 print("Updating operator .expect files")
 subprocess.check_call(("python", "setup.py", "develop"),
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-subprocess.check_call(("python", "test/onnx/test_operators.py", "--accept"),
-                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                      stdout=DEVNULL, stderr=DEVNULL)
+subprocess.check_call(("python", os.path.join("test", "onnx", "test_operators.py"), "--accept"),
+                      stdout=DEVNULL, stderr=DEVNULL)
