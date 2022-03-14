@@ -25,7 +25,6 @@
 #include <ATen/ops/_linalg_inv_out_helper_native.h>
 #include <ATen/ops/_linalg_qr_helper_native.h>
 #include <ATen/ops/_solve_helper_native.h>
-#include <ATen/ops/_symeig_helper_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
@@ -2369,6 +2368,80 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::stri
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
+#if !AT_MAGMA_ENABLED()
+  TORCH_CHECK(
+    false,
+    "Calling torch.linalg.eigh/eigvalsh on a CUDA tensor requires compiling ",
+    "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == kCPU);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == kCPU);
+
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+
+  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
+  magma_vec_t jobz = compute_eigenvectors ? MagmaVec : MagmaNoVec;
+
+  magma_int_t n = magma_int_cast(vectors.size(-1), "n");
+  auto lda = std::max<magma_int_t>(1, n);
+  auto batch_size = batchCount(vectors);
+
+  auto vectors_stride = matrixStride(vectors);
+  auto values_stride = values.size(-1);
+
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<value_t>();
+  auto infos_data = infos.data_ptr<magma_int_t>();
+
+  scalar_t* wA;
+  ALLOCATE_ARRAY(wA, scalar_t, lda * lda);
+
+  // Run once, first to get the optimum work sizes.
+  // Since we deal with batches of matrices with the same dimensions, doing this outside
+  // the loop saves (batch_size - 1) workspace queries which would provide the same result
+  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
+  magma_int_t lwork = -1;
+  scalar_t wkopt;
+  magma_int_t liwork = -1;
+  magma_int_t iwkopt;
+  magma_int_t lrwork = -1;
+  value_t rwkopt;
+  magmaSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_data, lda, values_data,
+    wA, lda, &wkopt, lwork, &rwkopt, lrwork, &iwkopt, liwork, infos_data);
+
+  scalar_t* work;
+  magma_int_t* iwork;
+  lwork = magma_int_cast(std::max<int64_t>(1, real_impl<scalar_t, value_t>(wkopt)), "work_size");
+  liwork = magma_int_cast(std::max<int64_t>(1, iwkopt), "iwork_size");
+  ALLOCATE_ARRAY(work, scalar_t, lwork);
+  ALLOCATE_ARRAY(iwork, magma_int_t, liwork);
+
+  value_t* rwork = nullptr;
+  c10::Storage storage_rwork;
+  if (vectors.is_complex()) {
+    lrwork = magma_int_cast(std::max<int64_t>(1, rwkopt), "rwork_size");
+    storage_rwork = pin_memory<value_t>(lrwork);
+    rwork = static_cast<value_t*>(storage_rwork.data());
+  }
+
+  for (decltype(batch_size) i = 0; i < batch_size; i++) {
+    scalar_t* vectors_working_ptr = &vectors_data[i * vectors_stride];
+    value_t* values_working_ptr = &values_data[i * values_stride];
+    magma_int_t* info_working_ptr = &infos_data[i];
+    magmaSyevd<scalar_t, value_t>(jobz, uplo, n, vectors_working_ptr, lda, values_working_ptr,
+      wA, lda, work, lwork, rwork, lrwork, iwork, liwork, info_working_ptr);
+    // The current behaviour for Linear Algebra functions to raise an error if something goes wrong
+    // or input doesn't satisfy some requirement
+    // therefore return early since further computations will be wasted anyway
+    if (*info_working_ptr != 0) {
+      return;
+    }
+  }
+#endif
+}
 
 // This is a type dispatch function for 'apply_magma_eigh'
 // For small inputs result is computed on CPU

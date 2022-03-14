@@ -33,7 +33,6 @@ namespace native {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
 cuda::detail::LinalgDispatch disp = {_solve_helper_cuda,
-                                     _symeig_helper_cuda,
                                      _linalg_qr_helper_cuda,
                                      _cholesky_solve_helper_cuda,
                                      legacy_lstsq_cuda,
@@ -183,12 +182,6 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::stri
     getTorchLinalgLibrary();
     TORCH_CHECK(disp.qr_helper != _linalg_qr_helper_cuda, "Can't find _linalg_qr_helper_cuda");
     return disp.qr_helper(input, mode);
-}
-
-std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.symeig_helper != _symeig_helper_cuda, "Can't find _symeig_helper_cuda");
-    return disp.symeig_helper(self, eigenvectors, upper);
 }
 
 std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
