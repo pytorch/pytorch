@@ -73,9 +73,7 @@
           # shellcheck disable=SC1105
           ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
-          # Copy dist folder back
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}-!{{ container_suffix }}
-          docker cp "${container_name}:/var/lib/jenkins/workspace/dist" "${GITHUB_WORKSPACE}/." || echo "Dist folder not found"
-          docker commit "${container_name}" "${COMMIT_DOCKER_IMAGE}"
-          time docker push "${COMMIT_DOCKER_IMAGE}"
+          # Copy install binaries back
+          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_!{{ container_suffix }}"
+          docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_!{{ container_suffix }}"
 {%- endmacro -%}
