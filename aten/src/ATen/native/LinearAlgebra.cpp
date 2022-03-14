@@ -416,6 +416,7 @@ Tensor linalg_matrix_power_impl(
     const Tensor& self,
     int64_t n,
     c10::optional<Tensor> _out) {
+  NoTF32Guard disable_tf32;
   auto out = _out.value_or(Tensor());
 
   squareCheckInputs(self, "linalg.matrix_power");
