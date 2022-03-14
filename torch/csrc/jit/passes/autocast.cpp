@@ -18,9 +18,7 @@ namespace jit {
 
 namespace {
 
-// TODO: Turn on autocast by default. default turned off to avoid tests failures
-// as we prototype the support
-bool autocast_enabled = false;
+bool autocast_enabled = true;
 
 struct AutocastContext {
   bool gpu_enabled = false;
