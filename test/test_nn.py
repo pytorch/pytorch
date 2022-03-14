@@ -4147,37 +4147,38 @@ class TestNN(NNTestCase):
 
 
     def test_weight_norm(self):
-        input = torch.randn(3, 5)
-        m = nn.Linear(5, 7)
-        expected_output = m(input)
+        for dtype in [torch.float, torch.bfloat16]:
+            input = torch.randn(3, 40, dtype=dtype)
+            m = nn.Linear(40, 50).to(dtype=dtype)
+            expected_output = m(input)
 
-        # add weight normalization
-        m = torch.nn.utils.weight_norm(m)
-        self.assertEqual(m.weight_v.size(), m.weight.size())
-        self.assertEqual(m.weight_g.size(), (7, 1))
-        self.assertEqual(m(input), expected_output)
-
-        # remove weight norm
-        m = torch.nn.utils.remove_weight_norm(m)
-        self.assertFalse(hasattr(m, 'weight_g'))
-        self.assertFalse(hasattr(m, 'weight_v'))
-        self.assertEqual(m(input), expected_output)
-
-        # test with dim=1
-        m = torch.nn.utils.weight_norm(m, dim=1)
-        self.assertEqual(m.weight_v.size(), m.weight.size())
-        self.assertEqual(m.weight_g.size(), (1, 5))
-        self.assertEqual(m(input), expected_output)
-
-        # test with dim=None
-        m = nn.Linear(5, 7)
-        expected_output = m(input)
-        m = torch.nn.utils.weight_norm(m, dim=None)
-        self.assertEqual(m(input), expected_output)
-
-        with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+            # add weight normalization
             m = torch.nn.utils.weight_norm(m)
-            m = torch.nn.utils.weight_norm(m)
+            self.assertEqual(m.weight_v.size(), m.weight.size())
+            self.assertEqual(m.weight_g.size(), (50, 1))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # remove weight norm
+            m = torch.nn.utils.remove_weight_norm(m)
+            self.assertFalse(hasattr(m, 'weight_g'))
+            self.assertFalse(hasattr(m, 'weight_v'))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # test with dim=1
+            m = torch.nn.utils.weight_norm(m, dim=1)
+            self.assertEqual(m.weight_v.size(), m.weight.size())
+            self.assertEqual(m.weight_g.size(), (1, 40))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # test with dim=None
+            m = nn.Linear(40, 50).to(dtype=dtype)
+            expected_output = m(input)
+            m = torch.nn.utils.weight_norm(m, dim=None)
+            self.assertEqual(m(input), expected_output)
+
+            with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+                m = torch.nn.utils.weight_norm(m)
+                m = torch.nn.utils.weight_norm(m)
 
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
@@ -9158,28 +9159,6 @@ class TestNN(NNTestCase):
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
-    def test_pixel_shuffle_nhwc_cpu(self):
-        input = torch.randn(3, 18, 4, 4, device='cpu')
-        input = input.contiguous(memory_format=torch.channels_last).requires_grad_()
-        grad = torch.randn(3, 18, 4, 4, device='cpu')
-        ps = torch.nn.PixelShuffle(3)
-        pus = torch.nn.PixelUnshuffle(3)
-
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_ps = torch.nn.PixelShuffle(3)
-        ref_pus = torch.nn.PixelUnshuffle(3)
-
-        out = pus(ps(input))
-        out.backward(grad)
-        ref_out = ref_pus(ref_ps(ref_input))
-        ref_out.backward(ref_grad)
-
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(input.grad, ref_input.grad)
-
     # These tests should be OpInfo'd
     def test_elu_inplace_on_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -10901,6 +10880,30 @@ class TestNN(NNTestCase):
         out_t = m(in_t)
         expected_out_t = torch.tensor([[[[2.5]]]])
         self.assertEqual(expected_out_t, out_t)
+
+    def test_upsampling_bfloat16(self, dtype=torch.bfloat16):
+        def helper(size, scale_factor, mode, device):
+            inputf = torch.randn(size, device=device, dtype=torch.float, requires_grad=True)
+            input = inputf.to(dtype).detach().requires_grad_(True)
+            m = nn.Upsample(scale_factor=scale_factor, mode=mode)
+
+            outf = m(inputf)
+            out = m(input)
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqualIgnoreType(out, outf, atol=0.1, rtol=0.0)
+
+            out.sum().backward()
+            outf.sum().backward()
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(input.grad, inputf.grad.to(dtype), atol=0.1, rtol=0)
+
+        for device in ['cpu']:
+            helper([3, 20, 30], 2, 'nearest', device)
+            helper([3, 20, 11, 7], 2, 'nearest', device)
+            helper([3, 20, 11, 7, 3], 2, 'nearest', device)
+            helper([3, 20, 30], 2, 'linear', device)
+            helper([3, 20, 11, 7], 2, 'bilinear', device)
+            helper([3, 20, 11, 7, 3], 2, 'trilinear', device)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_interpolate_illegal_memory_access(self):

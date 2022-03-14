@@ -3512,60 +3512,6 @@ Examples::
 """,
 )
 
-native_pixel_shuffle = _add_docstr(
-    torch.native_pixel_shuffle,
-    r"""
-native_pixel_shuffle(input, upscale_factor) -> Tensor
-
-Native kernel level implementation of the `pixel_shuffle`.
-This function might become private in future releases, use with caution.
-
-Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
-tensor of shape :math:`(*, C, H \times r, W \times r)`, where r is the :attr:`upscale_factor`.
-
-See :class:`~torch.nn.PixelShuffle` for details.
-
-Args:
-    input (Tensor): the input tensor
-    upscale_factor (int): factor to increase spatial resolution by
-
-Examples::
-
-    >>> input = torch.randn(1, 9, 4, 4)
-    >>> output = torch.nn.functional.native_pixel_shuffle(input, 3)
-    >>> print(output.size())
-    torch.Size([1, 1, 12, 12])
-""",
-)
-
-native_pixel_unshuffle = _add_docstr(
-    torch.native_pixel_unshuffle,
-    r"""
-native_pixel_unshuffle(input, downscale_factor) -> Tensor
-
-Native kernel level implementation of the `pixel_unshuffle`.
-This function might become private in future releases, use with caution.
-
-Reverses the :class:`~torch.nn.PixelShuffle` operation by rearranging elements in a
-tensor of shape :math:`(*, C, H \times r, W \times r)` to a tensor of shape
-:math:`(*, C \times r^2, H, W)`, where r is the :attr:`downscale_factor`.
-
-See :class:`~torch.nn.PixelUnshuffle` for details.
-
-Args:
-    input (Tensor): the input tensor
-    downscale_factor (int): factor to increase spatial resolution by
-
-Examples::
-
-    >>> input = torch.randn(1, 1, 12, 12)
-    >>> output = torch.nn.functional.native_pixel_unshuffle(input, 3)
-    >>> print(output.size())
-    torch.Size([1, 9, 4, 4])
-""",
-)
-
-
 channel_shuffle = _add_docstr(
     torch.channel_shuffle,
     r"""
