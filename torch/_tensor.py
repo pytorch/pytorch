@@ -866,6 +866,9 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.storage_type, (self,), self)
+
         # NB: this returns old fashioned _TypedStorage, e.g., FloatStorage, as it
         # would be pretty pointless otherwise (it would always return
         # _UntypedStorage)
