@@ -256,8 +256,6 @@ class Module:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
-        super().__init__()
-
         torch._C._log_api_usage_once("python.nn_module")
 
         self.training = True
