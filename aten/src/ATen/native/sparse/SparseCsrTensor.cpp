@@ -9,11 +9,13 @@
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/native/LinearAlgebraUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+// #include <ATen/ops/_batch_dim_native.h>
 #include <ATen/ops/_nnz_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
@@ -56,29 +58,39 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
 
   // Shape and Strides invariants
   TORCH_CHECK(
-      size.size() == 2,
-      "size of a CSR tensor must be of length 2, but got: ",
+      size.size() >= 2,
+      "size of a batched CSR tensor must have length >= 2, but got: ",
       size.size());
   TORCH_CHECK(
-      crow_indices.dim() == 1,
-      "crow_indices must have dim=1 but got crow_indices.dim()=",
+      crow_indices.dim() >= 1,
+      "crow_indices must have dim >= 1 but got crow_indices.dim() = ",
       crow_indices.dim());
   TORCH_CHECK(
-      col_indices.dim() == 1,
-      "col_indices must have dim=1 but got col_indices.dim()=",
+      col_indices.dim() >= 1,
+      "col_indices must have dim >= 1 but got col_indices.dim() = ",
       col_indices.dim());
   TORCH_CHECK(
-      values.dim() == 1,
-      "values must have dim=1 but got values.dim()=",
+      values.dim() >= 1,
+      "values must have dim >= 1 but got values.dim() = ",
       values.dim());
-  // Note, this check also enforces `crow_indices.numel() >= 1`
+
+  auto batch_ndim_crow_indices = crow_indices.dim() - 1;
+  auto batch_ndim_col_indices = col_indices.dim() - 1;
   TORCH_CHECK(
-      crow_indices.numel() == (size[0] + 1),
-      "crow_indices.numel() must be size(0) + 1, but got: ",
-      crow_indices.numel());
+      batch_ndim_crow_indices == batch_ndim_col_indices,
+      "Number of batch dimensions in crow_indices and col_indices must be the same.");
+  TORCH_CHECK(
+      values.dim() - batch_ndim_col_indices >= 1,
+      "Number of batch dimensions of indices must be less than or equal to the number of dimensions in values.");
+
+  // Note, this check also enforces `crow_indices.size(-1) >= 1`
+  TORCH_CHECK(
+      crow_indices.size(-1) == (size[size.size() - 2] + 1),
+      "crow_indices.size(-1) must be size[-2] + 1, but got: ",
+      crow_indices.size(-1));
   TORCH_CHECK(
       col_indices.numel() == values.numel(),
-      "col_indices and values must have equal sizes, but got col_indices.numel(): ",
+      "col_indices and values must have the same number of elements, but got col_indices.numel(): ",
       col_indices.numel(),
       ", values.numel(): ",
       values.numel());
@@ -86,22 +98,27 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
   // Indices invariants
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
     Tensor crow_indices_cpu = crow_indices.to(kCPU);
-    auto crow_indices_accessor = crow_indices_cpu.accessor<index_t, 1>();
-    TORCH_CHECK(
-        crow_indices_accessor[0] == 0, "0th value of crow_indices must be 0.");
-
-    TORCH_CHECK(
-        crow_indices_accessor[crow_indices.numel() - 1] == col_indices.numel(),
-        "last value of crow_indices should be equal to the length of col_indices.");
-
-    for (int i =  1; i <= size[0]; i++) {
+    auto crow_indices_data_ptr = crow_indices_cpu.data_ptr<index_t>();
+    auto batch_stride = crow_indices_cpu.dim() >= 2 ? crow_indices_cpu.stride(-2) : 0;
+    for (const auto batch_id : c10::irange(batchCount(crow_indices_cpu))) {
       TORCH_CHECK(
-          crow_indices_accessor[i - 1] <= crow_indices_accessor[i],
-          "at position i = ", i, ", this condition crow_indices[i - 1] <= crow_indices[i] fails");
+          crow_indices_data_ptr[batch_id*batch_stride] == 0, ": (Batch element ", batch_id, ")",
+          ": 0th value of crow_indices must be 0, but it is ", crow_indices_data_ptr[batch_id*batch_stride]);
+      TORCH_CHECK(
+          crow_indices_data_ptr[batch_id*batch_stride + crow_indices.size(-1) - 1] == col_indices.size(-1),
+          ": (Batch element ", batch_id, ")",
+          "last value of crow_indices should be equal to the length of col_indices.");
+
+      for (int i =  1; i <= size[size.size() - 2]; i++) {
+        TORCH_CHECK(
+            crow_indices_data_ptr[batch_id*batch_stride + i - 1] <= crow_indices_data_ptr[batch_id*batch_stride + i],
+            ": (Batch element ", batch_id, ")",
+            "at position i = ", i, ", the condition crow_indices[i - 1] <= crow_indices[i] fails");
+      }
     }
     if (col_indices.numel() > 0) {
       TORCH_CHECK(0 <= col_indices.min().item<index_t>(), "col_indices.min() should be greater or equal to zero");
-      TORCH_CHECK(size[1] > col_indices.max().item<index_t>(), "size(1) should be greater than col_indices.max()");
+      TORCH_CHECK(size[size.size() - 1] > col_indices.max().item<index_t>(), "size[-1] should be greater than col_indices.max()");
     }
   });
 
@@ -213,13 +230,16 @@ Tensor sparse_csr_tensor(
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  std::array<int64_t, 2> size = {0, 0};
-  if (col_indices.numel() > 0) {
-    AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
-      size[0] = crow_indices.numel() - 1;
-      size[1] = col_indices.max().item<index_t>() + 1;
-    });
-  }
+  // std::array<int64_t, 2> size = {0, 0};
+  auto size = DimVector(IntArrayRef(col_indices.sizes().data(), col_indices.dim() - 1));
+  size.push_back(crow_indices.size(-1) - 1);
+  size.push_back(col_indices.max().item<int64_t>() + 1);
+  // if (col_indices.numel() > 0) {
+  //   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
+  //     size[0] = crow_indices.numel() - 1;
+  //     size[1] = col_indices.max().item<index_t>() + 1;
+  //   });
+  // }
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);
 
@@ -316,6 +336,10 @@ Tensor crow_indices_sparse_csr(const Tensor& self) {
 Tensor col_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->col_indices().alias();
 }
+
+// int64_t _batch_dim_sparse_csr(const Tensor& self) {
+//   return get_sparse_csr_impl(self)->batch_dim();
+// }
 
 bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
