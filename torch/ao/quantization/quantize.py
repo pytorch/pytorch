@@ -10,13 +10,14 @@ from torch.nn.intrinsic import _FusedModule
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_static_quant_module_mappings,
+    get_default_static_quant_reference_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
     no_observer_set,
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
-
+from .utils import get_qparam_dict
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.ao.quantization.qconfig import (
     add_module_to_qconfig_obs_ctr,
@@ -156,7 +157,10 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
-        if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
+        # TODO remove Dropout special after codebase stable
+        if type(child) in [nn.Dropout]:
+            continue
+        elif type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
@@ -469,7 +473,7 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -500,7 +504,7 @@ def convert(
     if not inplace:
         module = copy.deepcopy(module)
     _convert(
-        module, mapping, inplace=True,
+        module, mapping, inplace=True, is_reference=is_reference,
         convert_custom_config_dict=convert_custom_config_dict)
     if remove_qconfig:
         _remove_qconfig(module)
@@ -508,7 +512,7 @@ def convert(
 
 def _convert(
         module, mapping=None, inplace=False,
-        convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class
 
@@ -519,10 +523,12 @@ def _convert(
                  Modules
         inplace: carry out model transformations in-place, the original module
                  is mutated
+        is_reference: a flag to enable quantized reference module
 
     """
     if mapping is None:
-        mapping = get_default_static_quant_module_mappings()
+        mapping = get_default_static_quant_reference_module_mappings() if is_reference \
+            else get_default_static_quant_module_mappings()
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
     custom_module_class_mapping = convert_custom_config_dict.get("observed_to_quantized_custom_module_class", {})
@@ -536,7 +542,7 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     convert_custom_config_dict)
+                     is_reference, convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():
@@ -562,7 +568,15 @@ def swap_module(mod, mapping, custom_module_class_mapping):
             new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)
             swapped = True
         elif type(mod) in mapping:
-            new_mod = mapping[type(mod)].from_float(mod)
+            qmod = mapping[type(mod)]
+            if hasattr(qmod, '_IS_REFERENCE') and qmod._IS_REFERENCE:
+                assert mod.qconfig is not None
+                weight_post_process = mod.qconfig.weight()
+                weight_post_process(mod.weight)
+                weight_qparams = get_qparam_dict(weight_post_process)
+                new_mod = qmod.from_float(mod, weight_qparams)
+            else:
+                new_mod = qmod.from_float(mod)
             swapped = True
 
         if swapped:

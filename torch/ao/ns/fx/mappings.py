@@ -74,12 +74,14 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Linear,
             nnq.Linear,
             nni.LinearReLU,
+            nni.LinearBn1d,
             nniq.LinearReLU,
             nniqd.LinearReLU,
             nnqat.Linear,
             nnqatd.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
+            nniqat.LinearBn1d,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
@@ -376,8 +378,17 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # dropout
         set([
             nn.Dropout,
-            F.dropout,
             nnq.Dropout,
+        ]),
+        # F.dropout
+        set([
+            F.dropout,
+            toq.dropout,
+        ]),
+        # matmul
+        set([
+            torch.matmul,
+            toq.matmul,
         ]),
     ]
 
@@ -434,6 +445,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.instance_norm,
         F.layer_norm,
         F.leaky_relu,
+        F.dropout,
         F.silu,
         F.mish,
         # TODO(future PR): implement shadowing for binary ops and
@@ -460,6 +472,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.instance_norm,
         toq.layer_norm,
         toq.leaky_relu,
+        toq.dropout,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # toq.add,
@@ -549,6 +562,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nni.ConvReLU2d,
         nni.ConvReLU3d,
         nni.LinearReLU,
+        nni.LinearBn1d,
         nni.ConvBn1d,
         nni.ConvBn2d,
         nni.ConvBn3d,
@@ -561,6 +575,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqat.LinearBn1d,
         nniqd.LinearReLU,
     ])
 

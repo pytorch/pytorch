@@ -1,5 +1,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
@@ -230,14 +231,10 @@ Tensor cudnn_convolution_forward(
   checkAllSameGPU(c, {input, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*input, *weight);
-  auto output_t = at::native::empty_cuda(
-                    conv_output_size(input->sizes(), weight->sizes(),
-                                     padding, stride, dilation),
-                    /*dtype=*/input->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(input->sizes(), weight->sizes(),
+                       padding, stride, dilation),
+      input->options().memory_format(memory_format));
 
   if (output_t.numel() == 0) {
     return output_t;
@@ -312,13 +309,8 @@ Tensor cudnn_convolution_backward_input(
   checkAllSameGPU(c, {grad_output, weight});
 
   auto memory_format = cudnn_conv_suggest_memory_format(*grad_output, *weight);
-  auto grad_input_t = at::native::empty_cuda(
-                    input_size,
-                    /*dtype=*/grad_output->scalar_type(),
-                    /*layout=*/c10::nullopt,
-                    /*device=*/kCUDA,
-                    /*pin_memory=*/c10::nullopt,
-                    /*memory_format=*/memory_format);
+  Tensor grad_input_t = at::detail::empty_cuda(
+      input_size, grad_output->options().memory_format(memory_format));
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -493,19 +485,16 @@ Tensor cudnn_convolution_relu(
   const Tensor weight = weight_t.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      /*dtype=*/input.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
 
   auto& ctx = at::globalContext();
+  bool benchmark = ctx.benchmarkCuDNN();
   bool allow_tf32 = ctx.allowTF32CuDNN();
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -528,7 +517,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -544,7 +533,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -566,22 +555,24 @@ Tensor cudnn_convolution_add_relu(
   auto memory_format = cudnn_conv_suggest_memory_format(input_t, weight_t);
   const Tensor input = input_t.contiguous(memory_format);
   const Tensor weight = weight_t.contiguous(memory_format);
+  Tensor z = z_t;
+  if (z.suggest_memory_format() != memory_format) {
+    z = z.to(memory_format);
+  }
+  z = z.contiguous(memory_format);
 
   // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
+  Tensor output_t = at::detail::empty_cuda(
       conv_output_size(
           input.sizes(), weight.sizes(), padding, stride, dilation),
-      /*dtype=*/input.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/memory_format);
+      input.options().memory_format(memory_format));
   if (output_t.numel() == 0) {
     return output_t;
   }
 
   auto& ctx = at::globalContext();
   bool allow_tf32 = ctx.allowTF32CuDNN();
+  bool benchmark = ctx.benchmarkCuDNN();
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -597,14 +588,14 @@ Tensor cudnn_convolution_add_relu(
       output_t,
       input,
       weight,
-      z_t,
+      z,
       _alpha,
       _bias,
       stride,
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -613,14 +604,14 @@ Tensor cudnn_convolution_add_relu(
       output_t,
       input,
       weight,
-      z_t,
+      z,
       _alpha,
       _bias,
       stride,
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );

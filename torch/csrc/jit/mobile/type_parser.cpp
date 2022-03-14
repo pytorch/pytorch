@@ -6,7 +6,6 @@
 #include <ATen/core/type_factory.h>
 #include <c10/util/string_view.h>
 #include <torch/csrc/jit/frontend/parser_constants.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/custom_class.h>
 
 using torch::jit::valid_single_char_tokens;

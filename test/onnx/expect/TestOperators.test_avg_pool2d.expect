@@ -3,8 +3,8 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    output: "1"
+    input: "onnx::Pad_0"
+    output: "onnx::AveragePool_1"
     name: "Pad_0"
     op_type: "Pad"
     attribute {
@@ -31,7 +31,7 @@ graph {
     }
   }
   node {
-    input: "1"
+    input: "onnx::AveragePool_1"
     output: "2"
     name: "AveragePool_1"
     op_type: "AveragePool"
@@ -56,9 +56,9 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
-    name: "0"
+    name: "onnx::Pad_0"
     type {
       tensor_type {
         elem_type: 1

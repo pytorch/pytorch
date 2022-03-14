@@ -1,9 +1,11 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <cstdint>
 
 namespace at {
+class Tensor;
+
 namespace native {
 
 using forward_fn = void (*)(const Tensor&, const Tensor&);
@@ -16,6 +18,7 @@ DECLARE_DISPATCH(backward_fn, log_softmax_backward_lastdim_kernel);
 
 using forward_fn_with_dim = void(*)(const Tensor &, const Tensor &, const int64_t);
 DECLARE_DISPATCH(forward_fn_with_dim, softmax_kernel);
+DECLARE_DISPATCH(forward_fn_with_dim, log_softmax_kernel);
 
 }
 }
