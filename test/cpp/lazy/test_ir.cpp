@@ -78,7 +78,7 @@ TEST(IrTest, MetaDataTest) {
   FLAGS_torch_lazy_ir_debug = restore_FLAGS_torch_lazy_ir_debug;
 }
 
-TEST(IrTest, TsNode) {
+TEST(IrTest, TsNodeTest) {
   NodePtr node1 = MakeNode<TsNode>(
       OpKind(at::aten::view),
       Shape(),
@@ -96,6 +96,9 @@ TEST(IrTest, TsNode) {
   const TsNode* leafptr = NodeCast<TsNode>(node1.get(), OpKind(at::aten::view));
   EXPECT_TRUE(leafptr != nullptr);
 }
+
+// TODO(@ansley): Wait for backend to be landed 
+// TEST(IrTest, DynamicShapeTest) {}
 
 } // namespace lazy
 } // namespace torch
