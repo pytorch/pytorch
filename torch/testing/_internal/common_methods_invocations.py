@@ -3183,15 +3183,6 @@ def error_inputs_amax_amin(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(torch.randn(sizes, device=device), kwargs={'dim': 64}),
                      error_type=RuntimeError, error_regex=err_msg2)
 
-    # Error Inputs for mixed devices
-    shape = (M)
-    err_msg3 = "Expected all tensors to be on the same device"
-    if torch.cuda.is_available():
-        values = torch.randn(shape).cuda()
-        yield ErrorInput(SampleInput(torch.randn(shape),
-                         kwargs={'dim': 0, 'out': values}),
-                         error_type=RuntimeError, error_regex=err_msg3)
-
     # Error Inputs for repeated 'dim'
     dims = [(0, 0), (0, -4)]
     err_msg4 = "dim 0 appears multiple times in the list of dims"
@@ -3246,21 +3237,9 @@ def error_inputs_aminmax(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(torch.randn(sizes, device=device), kwargs={'dim': 64}),
                      error_type=RuntimeError, error_regex=err_msg2)
 
-    # Error Inputs for mixed devices
-    shape = (M)
-    err_msg3 = ""
-    if torch.cuda.is_available():
-        values = torch.randn(shape).cuda()
-        indices = torch.cuda.LongTensor()
-        yield ErrorInput(SampleInput(torch.randn(shape, device=device),
-                         kwargs={'dim': 0, 'out': (values, indices)}),
-                         error_type=RuntimeError, error_regex=err_msg3)
-
     # Error Input for illegal dtype
     input5 = torch.randn(L, L, dtype=torch.float32, device=device)
     valid_values = torch.empty(L, dtype=torch.float32, device=device)
-    valid_indices = torch.empty(L, dtype=torch.long, device=device)
-    illegal_values = torch.empty(L, dtype=torch.int, device=device)
     illegal_indices = torch.empty(L, dtype=torch.double, device=device)
     err_msg5 = "Expected out tensor to have dtype float, but got double instead"
     yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (valid_values, illegal_indices)}),
