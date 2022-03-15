@@ -344,3 +344,83 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 
   return __int_as_float(old);
 }
+
+// Atomic maximum implementation.
+
+inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
+  return AtomicFPOp<at::Half>()(address, val,
+                                [](at::Half bsum, at::Half val) {
+                                  return max(bsum, val);
+                                });
+}
+
+inline __device__ at::BFloat16 gpuAtomicMax(at::BFloat16 * address, at::BFloat16 val) {
+  return AtomicFPOp<at::BFloat16>()(address, val,
+                                    [](at::BFloat16 bsum, at::BFloat16 val) {
+                                      return max(bsum, val);
+                                    });
+}
+
+inline __device__ double gpuAtomicMax(double * address, double val) {
+  return AtomicFPOp<double>()(address, val,
+                              [](double val, unsigned long long int assumed) {
+                                return __double_as_longlong(max(val, __longlong_as_double(assumed)));
+                              });
+}
+
+// Dont use a templated function for this since the addition function defaults to the CUDA built-in.
+inline __device__ float gpuAtomicMax(float * address, float val) {
+  unsigned int* address_as_ull = (unsigned int*)address;
+  unsigned int old = *address_as_ull;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+                    __float_as_int(max(val, __int_as_float(assumed))));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+  } while (assumed != old);
+
+  return __int_as_float(old);
+}
+
+// Atomic minimum implementation.
+
+inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
+  return AtomicFPOp<at::Half>()(address, val,
+                                [](at::Half bsum, at::Half val) {
+                                  return min(bsum, val);
+                                });
+}
+
+inline __device__ at::BFloat16 gpuAtomicMin(at::BFloat16 * address, at::BFloat16 val) {
+  return AtomicFPOp<at::BFloat16>()(address, val,
+                                    [](at::BFloat16 bsum, at::BFloat16 val) {
+                                      return min(bsum, val);
+                                    });
+}
+
+inline __device__ double gpuAtomicMin(double * address, double val) {
+  return AtomicFPOp<double>()(address, val,
+                              [](double val, unsigned long long int assumed) {
+                                return __double_as_longlong(min(val, __longlong_as_double(assumed)));
+                              });
+}
+
+// Dont use a templated function for this since the addition function defaults to the CUDA built-in.
+inline __device__ float gpuAtomicMin(float * address, float val) {
+  unsigned int* address_as_ull = (unsigned int*)address;
+  unsigned int old = *address_as_ull;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+                    __float_as_int(min(val, __int_as_float(assumed))));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+  } while (assumed != old);
+
+  return __int_as_float(old);
+}
