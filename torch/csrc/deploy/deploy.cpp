@@ -1,4 +1,3 @@
-#include <c10/util/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/csrc/deploy/elf_file.h>
 #include <torch/cuda.h>
@@ -46,7 +45,7 @@ const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
 };
 
 static bool writeDeployInterpreter(FILE* dst) {
-  TORCH_INTERNAL_ASSERT(dst);
+  MULTIPY_INTERNAL_ASSERT(dst);
   const char* payloadStart = nullptr;
   size_t size = 0;
   bool customLoader = false;
@@ -83,7 +82,7 @@ static bool writeDeployInterpreter(FILE* dst) {
     payloadStart = libStart;
   }
   size_t written = fwrite(payloadStart, 1, size, dst);
-  TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
+  MULTIPY_INTERNAL_ASSERT(size == written, "expected written == size");
   return customLoader;
 }
 
@@ -214,9 +213,9 @@ using dlopen_t = void* (*)(const char*, int);
 // function.
 static dlopen_t find_real_dlopen() {
   void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
-  TORCH_INTERNAL_ASSERT(libc);
+  MULTIPY_INTERNAL_ASSERT(libc);
   auto dlopen_ = (dlopen_t)dlsym(libc, "dlopen");
-  TORCH_INTERNAL_ASSERT(dlopen_);
+  MULTIPY_INTERNAL_ASSERT(dlopen_);
   return dlopen_;
 }
 
@@ -227,7 +226,7 @@ Interpreter::Interpreter(
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char libraryName[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(libraryName);
-  TORCH_INTERNAL_ASSERT(fd != -1, "failed to create temporary file");
+  MULTIPY_INTERNAL_ASSERT(fd != -1, "failed to create temporary file");
   libraryName_ = libraryName;
   FILE* dst = fdopen(fd, "wb");
 
@@ -343,12 +342,12 @@ void PythonMethodWrapper::setArgumentNames(
     return;
   }
 
-  TORCH_INTERNAL_ASSERT(iArgumentNames.isList());
+  MULTIPY_INTERNAL_ASSERT(iArgumentNames.isList());
   auto argumentNames = iArgumentNames.toListRef();
 
   argumentNamesOut.reserve(argumentNames.size());
   for (auto& argumentName : argumentNames) {
-    TORCH_INTERNAL_ASSERT(argumentName.isString());
+    MULTIPY_INTERNAL_ASSERT(argumentName.isString());
     argumentNamesOut.push_back(argumentName.toStringRef());
   }
 }
