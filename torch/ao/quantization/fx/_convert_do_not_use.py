@@ -1,7 +1,6 @@
 from typing import Any, Dict, List, Optional, Set, Callable, Tuple
 import torch
 import copy
-import warnings
 from torch.fx import (
     GraphModule,
 )
@@ -177,26 +176,6 @@ def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGrap
 
     quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
     return quantized
-
-def maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph):
-    """ If the arg is a dequantize Node, or a list/tuple/dict of dequantize Node,
-    we'll recursively remove the dequantize Node
-    """
-    if isinstance(arg, Node) and \
-       arg.op == "call_method" and \
-       arg.target == "dequantize":
-        quantize_node = arg.args[0]
-        # we only replace the specific use since dequantize could be used by other nodes
-        # as well
-        node.replace_input_with(arg, quantize_node)
-    elif isinstance(arg, (list, tuple)):
-        for arg_element in arg:
-            maybe_recursive_remove_dequantize(arg_element, node, graph)
-    elif isinstance(arg, dict):
-        for arg_element in arg.values():
-            maybe_recursive_remove_dequantize(arg_element, node, graph)
-    else:
-        warnings.warn(f"Unsupported node type in recursive remove dequantize: {type(arg)}")
 
 def get_module_path_and_prefix(
         obs_node: Node,
@@ -669,6 +648,7 @@ def _convert_do_not_use(
     # additional state to override inputs to be quantized, if specified
     # by the user
     placeholder_node_seen_cnt = 0
+    output_node_seen_cnt = 0
     input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
         "input_quantized_idxs", [])
     output_quantized_idxs: List[int] = prepare_custom_config_dict.get(
@@ -693,26 +673,19 @@ def _convert_do_not_use(
                 # floating point inputs in reference quantized models
                 insert_dequantize_node(node, model.graph)
         elif node.op == "output":
-            # If the argument is empty we don't need to do anything
-            if len(output_quantized_idxs) == 0:
-                continue
-            # Result are kept quantized if the user specified the
-            # output_quantized_idxs override.
-            # Remove the dequantize operator for the node in the end if any
-            return_node = node
-            output = node.args[0]
-            # outputs can be Node, list, tuple, dict, other cases are not supported yet
-            if isinstance(output, (list, tuple)):
-                for idx in output_quantized_idxs:
-                    maybe_recursive_remove_dequantize(output[idx], return_node, model.graph)
-            elif isinstance(output, (Node, dict)):
-                # we treat dict as a single argument currently, but it can be extended
-                # to support {"key": dtype} after we change output_quantized_idxs to
-                # dict
-                if 0 in output_quantized_idxs:
-                    maybe_recursive_remove_dequantize(output, return_node, model.graph)
-            else:
-                warnings.warn(f"Unsupported node type for output_quantized_idxs: {type(output)}")
+            cur_output_node_idx = output_node_seen_cnt
+            output_node_seen_cnt += 1
+            if cur_output_node_idx in output_quantized_idxs:
+                # Result are kept quantized if the user specified the
+                # output_quantized_idxs override.
+                # Remove the dequantize operator in the end
+                maybe_dequantize_node = node.args[0]
+                if isinstance(maybe_dequantize_node, Node) and \
+                   maybe_dequantize_node.op == "call_method" and \
+                   maybe_dequantize_node.target == "dequantize":
+                    quantize_node = maybe_dequantize_node.args[0]
+                    maybe_dequantize_node.replace_all_uses_with(quantize_node)
+                    model.graph.erase_node(maybe_dequantize_node)
         elif node.op == "call_module":
             if is_activation_post_process(modules[node.target]):
                 observed_node = node.args[0]
@@ -735,11 +708,7 @@ def _convert_do_not_use(
                     statically_quantized_custom_module_nodes)
 
     preserved_attributes = set(convert_custom_config_dict.get("preserved_attributes", []))
-    model = QuantizedGraphModule(model, copy.deepcopy(model.graph), preserved_attributes)
-
-    # remove deadcode after converting observers to quant/dequant ops
-    model.graph.eliminate_dead_code()
-
+    model = QuantizedGraphModule(model, model.graph, preserved_attributes)
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = duplicate_dequantize_node(model)
