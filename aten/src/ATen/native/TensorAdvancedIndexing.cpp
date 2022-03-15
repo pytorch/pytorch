@@ -86,7 +86,7 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
   } else if (reduce == "amin") {
   return native::SCATTER_GATHER_OP::REDUCE_MINIMUM;
   } else {
-    TORCH_CHECK(false, "reduce argument must be either add or multiply.");
+    TORCH_CHECK(false, "reduce argument must be either add, sum, multiply, prod, mean, amax or amin.");
   }
 }
 
@@ -126,8 +126,7 @@ void scatter_meta_impl(
     int64_t dim,
     const Tensor& index,
     const c10::optional<Tensor>& src = nullopt,
-    const c10::optional<c10::string_view> reduce = nullopt
-    ) {
+    const c10::optional<c10::string_view> reduce = nullopt) {
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
@@ -186,9 +185,7 @@ TORCH_META_FUNC2(scatter_reduce, two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
- const c10::optional<int64_t> output_size) {
-  (void) output_size;
+ const c10::string_view reduce) {
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -1307,7 +1304,6 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce,
- const c10::optional<int64_t> output_size,
  const Tensor& out) {
 
   scatter_impl(self, dim, index, src, out,

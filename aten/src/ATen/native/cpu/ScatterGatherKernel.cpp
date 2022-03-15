@@ -430,6 +430,8 @@ void scatter_reduce_cpu_kernel(const Tensor& self, const int64_t dim, const Tens
     cpu_scatter_gather_base_kernel<>()(self, dim, index, src,
                                        "scatter_reduce_multiply_", reduce_multiply);
     break;
+  default:
+    break;
   }
 }
 
@@ -443,6 +445,8 @@ void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, con
   case SCATTER_GATHER_OP::REDUCE_MULTIPLY :
     cpu_scatter_gather_base_kernel<>()(self, dim, index, value,
                                        "scatter_scalar_reduce_multiply_", reduce_multiply);
+    break;
+  default:
     break;
   }
 }

@@ -490,6 +490,8 @@ void scatter_reduce_cuda_kernel(const Tensor& self, const int64_t dim, const Ten
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
                                        "scatter_reduce_cuda_multiply_", reduce_multiply);
     break;
+  default:
+    break;
   }
 }
 
@@ -504,6 +506,8 @@ void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, co
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_multiply_", reduce_multiply);
     break;
+  default:
+      break;
   }
 }
 
