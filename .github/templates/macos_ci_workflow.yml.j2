@@ -23,6 +23,7 @@ env:
 jobs:
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}
@@ -67,6 +68,7 @@ jobs:
 {% block test +%}
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
