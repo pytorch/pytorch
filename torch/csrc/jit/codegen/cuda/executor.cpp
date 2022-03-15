@@ -864,14 +864,17 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
               << "Inputs:" << std::endl;
     for (const auto& input : inputs) {
       if (input.isTensor()) {
-        std::cout << input.toTensor().scalar_type() << " "
-                  << input.toTensor().sizes() << std::endl;
+        const auto& input_tensor = input.toTensor();
+        std::cout << "  " << input_tensor.scalar_type() << " "
+                  << input.toTensor().sizes()
+                  << " (strides = " << input.toTensor().strides() << ")"
+                  << std::endl;
       }
     }
     std::cout << "Outputs:" << std::endl;
     for (const auto& output : allocated_outputs) {
       std::cout << "  " << output.scalar_type() << " " << output.sizes()
-                << std::endl;
+                << " (strides = " << output.strides() << ")" << std::endl;
     }
     std::cout << "Reduction and semaphore buffers:" << std::endl;
     for (const auto& buffer : global_buffers.buffers) {
