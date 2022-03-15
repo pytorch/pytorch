@@ -11389,9 +11389,9 @@ class TestNN(NNTestCase):
         outf = loss_cpu(inputf, target)
         outd = loss_cpu(inputd, target)
         self.assertEqual(outf, outd, exact_dtype=False)
-        
+
     def test_cross_entropy_loss_zero_div(self):
-        #Test for issue #73165
+        # Test for issue #73165
         input_1 = torch.rand([5, 0], dtype=torch.float32)
         input_2 = torch.rand([5, 0], dtype=torch.float32)
         torch.nn.CrossEntropyLoss()(input_1, input_2)
