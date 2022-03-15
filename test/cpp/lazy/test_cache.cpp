@@ -24,10 +24,11 @@ class CacheNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
-  const Shape& shape(size_t i) const override { return Shape(); }
-  c10::ArrayRef<Shape> shapes() const override { return {}; }
+  const Shape& shape(size_t i) const override { return shape_; }
+  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
  private:
   std::string str_;
+  Shape shape_;
 };
 
 TEST(CacheTest, BasicTest) {
