@@ -347,13 +347,12 @@ TransformerImpl::TransformerImpl(TransformerOptions options_ ) : options(std::mo
 void TransformerImpl::reset() {
   // set up encoder
   if (options.custom_encoder().is_empty()) {
-    LayerNorm norm(LayerNormOptions({options.d_model()}));
     TransformerEncoder trans_encoder(TransformerEncoderOptions(
       TransformerEncoderLayerOptions(options.d_model(), options.nhead())
       .dim_feedforward(options.dim_feedforward())
       .dropout(options.dropout())
       .activation(options.activation()), options.num_encoder_layers())
-        .norm(AnyModule(norm)));
+        .norm(AnyModule()));
 
     this->encoder = AnyModule(trans_encoder);
   }
@@ -365,13 +364,12 @@ void TransformerImpl::reset() {
   // set up decoder
   if (options.custom_decoder().is_empty()) {
 
-    LayerNorm norm(LayerNormOptions({options.d_model()}));
     TransformerDecoder trans_decoder(TransformerDecoderOptions(
       TransformerDecoderLayerOptions(options.d_model(), options.nhead())
       .dim_feedforward(options.dim_feedforward())
       .dropout(options.dropout())
       .activation(options.activation()), options.num_decoder_layers())
-        .norm(AnyModule(norm)));
+        .norm(AnyModule()));
 
     this->decoder = AnyModule(trans_decoder);
   }
