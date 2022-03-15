@@ -1121,13 +1121,11 @@ void transformer_test_helper(bool is_cuda, bool use_callable_activation) {
     }
 
     // transformer with customized encoder/decoder
-    LayerNorm enorm(LayerNormOptions({4}));
     TransformerEncoder encoder(TransformerEncoderOptions(
-      TransformerEncoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 2).norm(AnyModule(enorm)));
+      TransformerEncoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 2).norm(AnyModule()));
 
-    LayerNorm dnorm(LayerNormOptions({4}));
     TransformerDecoder decoder(TransformerDecoderOptions(
-      TransformerDecoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 1).norm(AnyModule(dnorm)));
+      TransformerDecoderLayerOptions(4, 2).dim_feedforward(16).dropout(0.0), 1).norm(AnyModule()));
 
     Transformer model_cus(TransformerOptions()
       .d_model(4)
