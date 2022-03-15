@@ -704,17 +704,15 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule, qconfig_map: Dict[st
         torch.mul: torch.ops.quantized.mul_relu,
     }
     binary_ops_to_lower = [operator.add, torch.add, operator.mul, torch.mul, torch.matmul]
-
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
-
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
         # We search for the pattern backwards, starting with the quantize node
         # Quantize node args: (func, scale, zp, dtype)
         if n.op != "call_function" or n.target != torch.quantize_per_tensor:
             continue
         q_node = n
-        (bop_node, scale_node, zero_point_node, dtype) = q_node.args
+        (bop_node, scale_node, zero_point_node, _) = q_node.args
         # Handle cases where the module is wrapped in a ReLU
         if bop_node.op == "call_function" and bop_node.target in (torch.nn.functional.relu, torch.relu) or\
                 bop_node.op == "call_module" and type(modules[str(bop_node.target)]) == torch.nn.ReLU:
@@ -727,26 +725,22 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule, qconfig_map: Dict[st
         if bop_node.op != "call_function" or bop_node.target not in binary_ops_to_lower:
             continue
 
-        # remove dequant node
-        arg0 = bop_node.args[0]
-        arg1 = bop_node.args[1]
-        dq_node0, dq_node1 = None, None
-        if is_dequantize_node(arg0):
-            dq_node0 = arg0
-        if is_dequantize_node(arg1):
-            dq_node1 = arg1
+        # Step 1: Remove dequant nodes, skip lowering if neither arg is dequant
+        if len(bop_node.args) != 2:
+            continue
+        (arg0, arg1) = bop_node.args
+        dq_node0 = arg0 if is_dequantize_node(arg0) else None
+        dq_node1 = arg1 if is_dequantize_node(arg1) else None
         if dq_node0 is None and dq_node1 is None:
             continue
         for dq_node in [dq_node0, dq_node1]:
             if dq_node is None:
                 continue
-            # dequantize node is only used once, this is enforced by `is_match`
-            # TODO: is this still true?
             dn_input = dq_node.args[0]
             dq_node.replace_all_uses_with(dn_input)
             model.graph.erase_node(dq_node)
 
-        # swap binary op to quantized binary op
+        # Step 2: Swap binary op to quantized binary op
         assert bop_node.target in qbin_op_mapping
         binop_to_qbinop = qbin_op_mapping if relu_node is None else qbin_relu_op_mapping
         qbin_op = binop_to_qbinop[bop_node.target]
@@ -756,8 +750,7 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule, qconfig_map: Dict[st
         # (x, y, scale, zero_point)
         # add scale and zero_point arguments for Tensor - Tensor operation
         if dq_node0 is not None and dq_node1 is not None:
-            qop_node_args.extend([q_node.args[1], q_node.args[2]])
-
+            qop_node_args.extend([scale_node, zero_point_node])
         # insert a call to quantized binary op and remove the original binary op
         with model.graph.inserting_after(q_node):
             qop_node = create_node_from_old_node_preserve_meta(
@@ -766,12 +759,10 @@ def _lower_quantized_binary_op(model: QuantizedGraphModule, qconfig_map: Dict[st
                 bop_node)
             q_node.replace_all_uses_with(qop_node)
 
-        # remove quantize node
+        # Step 3: Remove quantize node, binary op node, and relu node if any
         model.graph.erase_node(q_node)
-        # remove relu node if any
         if relu_node is not None:
             model.graph.erase_node(relu_node)
-        # remove binary op node
         model.graph.erase_node(bop_node)
 
 def special_pattern_replacement(model: QuantizedGraphModule):
