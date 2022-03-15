@@ -82,7 +82,7 @@ class ComputeCodegenUnboxedKernels:
     def __call__(self, f: NativeFunction) -> str:
         # We unconditionally generate function wrappers,
         sig_group = CppSignatureGroup.from_native_function(
-            f, method=(Variant.method in f.variants)
+            f, method=False
         )
 
         sig = sig_group.most_faithful_signature()
@@ -90,9 +90,34 @@ class ComputeCodegenUnboxedKernels:
         # escape double quote in schema, get rid of extra double quotes
         schema = cpp_string(str(sig.func))[1:-1]
 
+        # arguments
+        args = sig.arguments()
+        connector = ",\n\t\t"
+        args_code = []
+        for arg in args:
+            if not arg.default:
+                arg_cpp = "c10::IValue(c10::nullopt)"
+            elif arg.default.startswith('{'):
+                arg_cpp = f"c10::IntArrayRef({arg.default})"
+            else:
+                arg_cpp = f"c10::IValue({arg.default})"
+            args_code.append(f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})""")
+
+        returns = f.func.returns
+        returns_code = []
+        for ret in returns:
+            returns_code.append(f"""c10::Argument("{ret.name if ret.name else ""}")""")
         return f"""
+// aten::{schema}
 OperatorGenerator(
-    TORCH_SELECTIVE_SCHEMA("aten::{schema}"),
+    "aten::{f.func.name.name}",
+    "{f.func.name.overload_name}",
+    {{
+        {connector.join(args_code)}
+    }},
+    {{
+        {connector.join(returns_code)}
+    }},
     [](Stack & stack) {{
         RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
         at::unboxing::{unboxing.name(f)}(stack);
@@ -133,7 +158,7 @@ def gen_unboxing(
         native_functions,
         key_fn=key_func,
         env_callable=lambda fn: {"unboxed_ops": [ComputeCodegenUnboxedKernels()(fn)]},
-        num_shards=5,
+        num_shards=10,
         sharded_keys={"unboxed_ops"},
     )
 
