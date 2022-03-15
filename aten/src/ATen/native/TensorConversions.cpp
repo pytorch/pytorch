@@ -262,15 +262,15 @@ Tensor dense_to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype
   return tensor.clone();
 }
 
-at::sparse_csr::SparseCsrTensor dense_to_sparse_csr(const Tensor& self) {
+Tensor dense_to_sparse_csr(const Tensor& self) {
   return self.to_sparse().to_sparse_csr();
 }
 
-at::sparse_csr::SparseCsrTensor csr_to_sparse_csr(const at::sparse_csr::SparseCsrTensor& self) {
+Tensor csr_to_sparse_csr(const Tensor& self) {
   return self;
 }
 
-at::sparse_csr::SparseCsrTensor coo_to_sparse_csr(const at::sparse::SparseTensor& self) {
+Tensor coo_to_sparse_csr(const Tensor& self) {
   TORCH_CHECK(
       self.dim() == 2,
       "Only 2D tensors can be converted to the CSR format but got shape: ",
