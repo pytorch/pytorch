@@ -105,6 +105,8 @@ For fixes that are to go into a release after the release branch has been cut we
 An example of this would look like:
 * https://github.com/pytorch/pytorch/issues/51886
 
+Please also make sure to add milestone target to the PR/issue, especially if it needs to be considered for inclusion into the dot release.
+
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
 ## Promoting RCs to Stable
