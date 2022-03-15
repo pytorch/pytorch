@@ -504,7 +504,9 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
         parent_name, module_name = _parent_name(ref_node.target)
         setattr(named_modules[parent_name], module_name, q_module)
 
-def _lower_static_weighted_ref_functional(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
+def _lower_static_weighted_ref_functional(
+        model: QuantizedGraphModule,
+        qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
     """
@@ -579,7 +581,9 @@ def _lower_static_weighted_ref_functional(model: QuantizedGraphModule, qconfig_m
         if relu_node is not None:
             model.graph.erase_node(relu_node)
 
-def _lower_dynamic_weighted_ref_functional(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
+def _lower_dynamic_weighted_ref_functional(
+        model: QuantizedGraphModule,
+        qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and replace functional reference patterns with their dynamically
     quantized versions.
@@ -689,7 +693,9 @@ def _lower_dynamic_weighted_ref_functional(model: QuantizedGraphModule, qconfig_
         if relu_node is not None:
             model.graph.erase_node(relu_node)
 
-def _lower_quantized_binary_op(model: QuantizedGraphModule, qconfig_map: Dict[str, QConfigAny]):
+def _lower_quantized_binary_op(
+        model: QuantizedGraphModule,
+        qconfig_map: Dict[str, QConfigAny]):
     qbin_op_mapping: Dict[Union[Callable, str], Callable] = {
         operator.add: torch.ops.quantized.add,
         torch.add: torch.ops.quantized.add,
