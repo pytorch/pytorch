@@ -370,7 +370,194 @@ __global__ void radixFindKthValues(
   if (tidx == 0) {
     semaphores[slice_idx] = 0;
   }
-};
+}
+
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+template <typename Bitwise, typename IndexType>
+C10_LAUNCH_BOUNDS_1(RADIX_DIGITS)  // one thread per digit
+__global__ computeBlockwiseWithinKCounts(
+  Bitwise* desires,          // size: num_slices
+  IndexType* counts,         // size: num_slices * blocks_per_slice * radix_digits
+  IndexType blocks_per_slice,
+  int current_bit,
+  bool largest,
+  // outputs:
+  IndexType* withinKCounts   // size: num_slices * blocks_per_slice == num_blocks
+) {
+  // This kernel should be launched with the same number of blocks as the `radixFindKthValues` kernel.
+  int tidx = threadIdx.x;
+  IndexType block_idx = getLinearBlockId<IndexType>();
+
+  Bitwise desired = doLdg(desires + slice_idx);
+  Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
+
+  // if largest, then only threads that has tidx > desired_digit are active
+  // if !largest, then only threads that has tidx < desired_digit are active
+  // each active thread will read the count for its corresponding, and
+  // do warp reduction followed by shared memory reduction to get the total count
+  // non-active thread should not load, and non-active warp should not do reduction.
+  bool warp_is_active, thread_is_active;
+  int warp = tidx / C10_WARP_SIZE;
+  if (largest) {
+    int end_of_warp = warp * C10_WARP_SIZE + C10_WARP_SIZE - 1;
+    warp_is_active = end_of_warp > desired_digit;
+    thread_is_active = tidx > desired_digit;
+  } else {
+    int start_of_warp = warp * C10_WARP_SIZE;
+    warp_is_active = start_of_warp < desired_digit;
+    thread_is_active = tidx < desired_digit;
+  }
+  IndexType count = 0;
+  if (warp_is_active) {
+    if (thread_is_active) {
+      count = doLdg(counts + block_idx * RADIX_DIGITS + tidx);
+    }
+    for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
+      count += WARP_SHFL_DOWN(val, offset);
+    }
+  }
+
+  constexpr int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
+  __shared__ IndexType warp_counts[num_warps];
+  if (tidx % C10_WARP_SIZE == 0) {
+    warp_counts[warp] = count;
+  }
+  __syncthreads();
+  static_assert(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE,
+    "Assuming only 1 warp is needed for final reduction");
+  if (warp != 0) {
+    return;
+  }
+  count = 0;
+  if (tidx < num_warps) {
+    count = warp_counts[tidx];
+  }
+  for (int offset = num_warps / 2; offset > 0; offset /= 2) {
+    count += WARP_SHFL_DOWN(val, offset);
+  }
+  if (tidx == 0) {
+    withinKCounts[block_idx] += count;
+  }
+}
+
+template <typename Bitwise, typename IndexType>
+__global__ computeBlockwiseKthCounts(
+  Bitwise* desires,            // size: num_slices
+  IndexType* counts,           // size: num_slices * blocks_per_slice * radix_digits
+  IndexType num_blocks,        // the number of blocks used by `radixFindKthValues` kernel
+  // outputs:
+  IndexType* kthCounts         // size: num_slices * blocks_per_slice == num_blocks
+) {
+  CUDA_KERNEL_LOOP_TYPE(idx, num_blocks, IndexType) {
+    IndexType slice_idx = idx / blocks_per_slice;
+    Bitwise desired = doLdg(desires + slice_idx);
+    Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, 0, RADIX_BITS);
+    kthCounts[idx] = doLdg(counts + idx * RADIX_DIGITS + desired_digit);
+  }
+}
+
+template <typename T, typename IndexType, int Dim>
+C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
+__global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
+                           IndexType inputSliceSize,
+                           IndexType outputSliceSize, // aka `k`
+                           bool largest,
+
+                           IndexType numInputSlices,
+                           IndexType inputWithinSliceStride,
+
+                           at::cuda::detail::TensorInfo<T, IndexType> topK,
+                           IndexType topKWithinSliceStride,
+
+                           at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
+                           IndexType indicesWithinSliceStride,
+                           
+                           int items_per_thread,
+                           IndexType blocks_per_slice,
+
+                           T *kthValues,
+                           IndexType* withinKCounts,
+                           IndexType* kthCounts) {
+
+  int items_per_block = items_per_thread * BLOCK_THREADS;
+  int tidx = threadIdx.x;
+  IndexType block_idx = getLinearBlockId<IndexType>();
+  IndexType slice_idx = block_idx / blocks_per_slice;
+  IndexType blk_idx_in_slice = block_idx % blocks_per_slice;
+  if (slice_idx >= num_slices) {
+    return;
+  }
+
+  items_per_thread = (blk_idx_in_slice + 1 < blocks_per_slice)
+      ? items_per_thread
+      : at::ceil_div((int64_t)(slice_size - blk_idx_in_slice * items_per_block), (int64_t)BLOCK_THREADS);
+
+  // Find the start offset for our slice
+  IndexType sliceStartIndex =
+    at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice, input);
+  IndexType topKSliceStartIndex =
+    at::cuda::detail::IndexToOffset<T, IndexType, Dim>::get(slice, topK);
+  IndexType indicesSliceStartIndex =
+    at::cuda::detail::IndexToOffset<int64_t, IndexType, Dim>::get(slice, indices);
+
+  T* inputSliceStart = &input.data[sliceStartIndex];
+  T* topKSliceStart = &topK.data[topKSliceStartIndex];
+  int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
+
+  // Find the k-th highest element in our input
+  T kthValue = kthValues[slice];
+
+  // Find the start index in output tensor of this block
+  IndexType startWithinK = 0;
+  if (blk_idx_in_slice > 0) {
+    startWithinK = withinKCounts[block_idx - 1];
+  }
+  IndexType startKth = withinKCounts[slice_idx * blocks_per_slice + blocks_per_slice - 1];
+  if (blk_idx_in_slice > 0) {
+    startKth += kthCounts[block_idx - 1];
+  }
+
+  // Read input, select topk out and write
+  typedef cub::BlockScan<IndexType, BLOCK_THREADS> BlockScan;
+  __shared__ BlockScan::TempStorage temp_storage;
+  for (int i = 0; i < items_per_thread; ++i) {
+    // Find the start offset for this slice
+    IndexType idx = blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx;
+    T val;
+    int withinK = 0;
+    int kth = 0;
+    if (idx < slice_size) {
+      val = doLdg(inputSliceStart + idx * withinSliceStride);
+      withinK = (largest ? val > kthValue : val < kthValue);
+      kth = (val == kthValue);
+    }
+
+    IndexType withinKIndex;
+    IndexType numWithinK;
+    BlockScan(temp_storage.scan_storage).ExclusiveSum(withinK, withinKIndex, numWithinK);
+    __syncthreads();
+    if (withinK) {
+      IndexType offset = withinKIndex + startWithinK;
+      topKSliceStartIndex[offset * topKWithinSliceStride] = val;
+      indicesSliceStart[offset * indicesWithinSliceStride] = idx;
+    }
+    startWithinK += numWithinK;
+
+    if (startKth < outputSliceSize) {
+      IndexType kthIndex;
+      IndexType numKth;
+      BlockScan(temp_storage.scan_storage).ExclusiveSum(kth, kthIndex, numKth);
+      __syncthreads();
+      if (kth) {
+        IndexType offset = kthIndex + startKth;
+        topKSliceStartIndex[offset * topKWithinSliceStride] = val;
+        indicesSliceStart[offset * indicesWithinSliceStride] = idx;
+      }
+      startKth += numKth;
+    }
+  }
+}
+#endif
 
 int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   // occupancy of this kernel is limited by registers per threads
@@ -410,6 +597,7 @@ void launch(
 
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
     IndexType indicesWithinSliceStride) {
+  auto stream = c10::cuda::getCurrentCUDAStream();
 
   // configure items_per_thread based on device architecture and input size
   int items_per_thread = get_items_per_thread(numInputSlices, inputSliceSize);
@@ -428,12 +616,12 @@ void launch(
   TORCH_CHECK(blocks_per_slice <= std::numeric_limits<uint32_t>::max(), "blocks_per_slice larger than uint32 maximum is not supported");
   auto semaphores_buffer = allocator.allocate(numInputSlices * sizeof(uint32_t));
   uint32_t* semaphores = reinterpret_cast<uint32_t*>(semaphores_buffer.get());
-  AT_CUDA_CHECK(cudaMemsetAsync(semaphores, 0, numInputSlices * sizeof(uint32_t), c10::cuda::getCurrentCUDAStream()));
+  AT_CUDA_CHECK(cudaMemsetAsync(semaphores, 0, numInputSlices * sizeof(uint32_t), stream));
 
   auto ks_to_find_buffer = allocator.allocate(numInputSlices * sizeof(IndexType));
   IndexType* ks_to_find = reinterpret_cast<IndexType*>(ks_to_find_buffer.get());
   IndexType k_to_find = largest ? inputSliceSize - outputSliceSize + 1: outputSliceSize;
-  fill<IndexType><<<std::min((numInputSlices + 511) / 512, (IndexType)65535), 512, 0, c10::cuda::getCurrentCUDAStream()>>>(
+  fill<IndexType><<<std::min((numInputSlices + 511) / 512, (IndexType)65535), 512, 0, stream>>>(
     ks_to_find, k_to_find, numInputSlices);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -443,6 +631,15 @@ void launch(
   auto counts_buffer = allocator.allocate(num_blocks * RADIX_DIGITS * sizeof(IndexType));
   IndexType* counts = reinterpret_cast<IndexType*>(counts_buffer.get());
 
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+  auto withinKCounts_buffer = allocator.allocate(num_blocks * sizeof(IndexType));
+  IndexType* withinKCounts = reinterpret_cast<IndexType*>(withinKCounts_buffer.get());
+  AT_CUDA_CHECK(cudaMemsetAsync(withinKCounts, 0, num_blocks * sizeof(IndexType), stream));
+
+  auto kthCounts_buffer = allocator.allocate(num_blocks * sizeof(IndexType));
+  IndexType* kthCounts = reinterpret_cast<IndexType*>(kthCounts_buffer.get());
+#endif
+
   Bitwise desiredMask = 0;
   dim3 grid;
   TORCH_INTERNAL_ASSERT(getGridFromTiles(num_blocks, grid), "Too many slices for topk");
@@ -450,7 +647,7 @@ void launch(
 
   // iterate radix bits for multiple passes
   for (int current_bit = sizeof(T) * 8 - RADIX_BITS; current_bit >= 0; current_bit -= RADIX_BITS) {
-    radixFindKthValues<T, IndexType, Bitwise, Dim><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+    radixFindKthValues<T, IndexType, Bitwise, Dim><<<grid, block, 0, stream>>>(
         input,
         inputSliceSize,
         ks_to_find,
@@ -465,15 +662,41 @@ void launch(
         counts,
         kthValues);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+    computeBlockwiseWithinKCounts<Bitwise, IndexType><<<grid, RADIX_DIGITS, 0, stream>>>(
+      desires, counts, blocks_per_slice, current_bit, largest, withinKCounts);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    if (current_bit == 0) {
+      IndexType grid = std::min((numInputSlices + 255) / 256, (IndexType)65535);
+      computeBlockwiseKthCounts<Bitwise, IndexType><<<grid, 256, 0, stream>>>(
+        desires, counts, num_blocks, kthCounts);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+#endif
     desiredMask = at::cuda::Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS);
   }
 
+#if CUB_SUPPORTS_SCAN_BY_KEY()
+  // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
+  using counting_iter_t = cub::CountingInputIterator<IndexType, IndexType>;
+  counting_iter_t blk_idx_iter(0);
+  auto get_slice_idx = [=]__device__(IndexType blk)->IndexType { return blk / blocks_per_slice; };
+  using slice_idx_iter_t = cub::TransformInputIterator<IndexType, decltype(get_slice_idx), counting_iter_t>;
+  slice_idx_iter_t slice_idx_iter(blk_idx_iter, get_slice_idx);
+  cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks);
+  cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks);
+  // copy topk values to output tensor
+  gatherTopK<T, IndexType, Dim><<<grid, block, 0, stream>>>(
+    input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
+    topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
+    blocks_per_slice, kthValues, withinKCounts, kthCounts);
+#else
   // Find topk values based on kth values
   {
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)C10_WARP_SIZE) * (int64_t)C10_WARP_SIZE, (int64_t)1024));
-    sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+    sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, stream>>>(
         input,
         inputSliceSize,
         outputSliceSize,
@@ -487,6 +710,7 @@ void launch(
         kthValues);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
+#endif
 }
 
 } // namespace mbtopk
