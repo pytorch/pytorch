@@ -3328,7 +3328,7 @@ else:
                                             [True, False, True, False, True]], device=device))
 
     # FIXME: move to test_scatter_gather_ops.py
-    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
     def test_scatter_reduce(self, device, dtype):
         shapes = [((5, 10, 20), (5, 10, 20), (5, 10, 20)),
                   ((5, 10, 20), (2, 3, 4), (5, 10, 20)),
@@ -3341,8 +3341,8 @@ else:
                "amin": lambda t, v: torch.min(t, v, out=t)}
 
         for self_shape, idx_shape, src_shape in shapes:
-            input = torch.randn(self_shape, dtype=dtype, device=device)
-            src = torch.randn(src_shape, dtype=dtype, device=device)
+            input = make_tensor(self_shape, dtype=dtype, device=device)
+            src = make_tensor(src_shape, dtype=dtype, device=device)
             for dim in range(len(self_shape)):
                 index = torch.randint(0, self_shape[dim], idx_shape, dtype=torch.long, device=device)
                 for reduce in reduces:
@@ -3365,7 +3365,10 @@ else:
                         counts[i, j, k] += 1
 
                     if (reduce == "mean"):
-                        expected /= counts
+                        if expected.is_floating_point():
+                            expected /= counts
+                        else:
+                            expected.div_(counts, rounding_mode="floor")
 
                     self.assertTrue(torch.allclose(output, expected))
 
