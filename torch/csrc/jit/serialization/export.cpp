@@ -1163,8 +1163,8 @@ void GraphEncoder::EncodeIntermediateValueInfo(
     const Value* v) {
   // Motivation is to encode ValueInfo for onnx local function nodes.
   auto n = v->node();
-  if (n->kind().is_onnx()) {
-    // Encode value info only for non-onnx nodes.
+  if (n->kind().is_onnx() || n->kind().is_aten()) {
+    // Encode value info only for non-onnx or non-ATen nodes.
     return;
   }
   if (n->owningGraph() != graph_.get()) {

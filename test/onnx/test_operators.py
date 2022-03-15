@@ -1018,6 +1018,7 @@ class TestOperators(TestCase):
         y = torch.randn(1, 8)
         self.assertONNX(model, (x, y), opset_version=_onnx_opset_version, input_names=['input_1', 'input_2'],
                         dynamic_axes={"input_1": {0: "dim_0"}, 'input_2': {0: "dim_1", 1: "dim_2"}},
+                        keep_initializers_as_inputs=False,
                         operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
 
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)

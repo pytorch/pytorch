@@ -26,7 +26,13 @@ graph {
   }
   node {
     output: "5"
+<<<<<<< HEAD
     op_type: "Constant"
+=======
+    output: "6"
+    name: "ATen_0"
+    op_type: "ATen"
+>>>>>>> Update tests to match current behavior
     attribute {
       name: "value"
       t {

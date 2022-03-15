@@ -286,7 +286,7 @@ def warn_on_static_input_change(input_states):
 
 def _resolve_args_by_export_type(arg_name, arg_value, operator_export_type):
     # This helper method resolves the arguments that are ignored when export_type != operator_export_type.ONNX
-    if operator_export_type is not operator_export_type.ONNX:
+    if operator_export_type is not operator_export_type.ONNX and torch.onnx._CAFFE2_ATEN_FALLBACK:
         if arg_value is True:
             warnings.warn("`{}' can be set to True only when 'operator_export_type' is "
                           "`ONNX`. Since 'operator_export_type' is not set to 'ONNX', "
@@ -956,7 +956,8 @@ def _add_attribute(node, key, value, aten):
     name, kind = m.group(1), m.group(2)
     if _is_onnx_list(value):
         kind += "s"
-    if aten:
+    from torch.onnx.symbolic_helper import is_caffe2_aten_fallback
+    if aten and is_caffe2_aten_fallback():
         if isinstance(value, torch.Tensor):
             # Caffe2 proto does not support tensor attribute.
             if value.numel() > 1:

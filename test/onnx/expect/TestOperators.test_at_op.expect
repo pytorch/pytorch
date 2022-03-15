@@ -6,6 +6,7 @@ graph {
     input: "x"
     input: "x"
     output: "1"
+    name: "ATen_0"
     op_type: "ATen"
     attribute {
       name: "operator"
