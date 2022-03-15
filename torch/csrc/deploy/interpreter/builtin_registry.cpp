@@ -1,6 +1,6 @@
 #include <Python.h>
-#include <c10/util/Exception.h>
 #include <fmt/format.h>
+#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/interpreter/builtin_registry.h>
 
 namespace torch {
@@ -55,10 +55,10 @@ BuiltinRegistry* BuiltinRegistry::get() {
 }
 
 void BuiltinRegistry::runPreInitialization() {
-  TORCH_INTERNAL_ASSERT(!Py_IsInitialized());
+  MULTIPY_INTERNAL_ASSERT(!Py_IsInitialized());
   sanityCheck();
   PyImport_FrozenModules = BuiltinRegistry::getAllFrozenModules();
-  TORCH_INTERNAL_ASSERT(PyImport_FrozenModules != nullptr);
+  MULTIPY_INTERNAL_ASSERT(PyImport_FrozenModules != nullptr);
 
   appendCPythonInittab();
 }
@@ -83,7 +83,7 @@ sys.meta_path.insert(0, F())
 )PYTHON";
 
 void BuiltinRegistry::runPostInitialization() {
-  TORCH_INTERNAL_ASSERT(Py_IsInitialized());
+  MULTIPY_INTERNAL_ASSERT(Py_IsInitialized());
   std::string metaPathSetupScript(metaPathSetupTemplate);
   std::string replaceKey = "<<<DEPLOY_BUILTIN_MODULES_CSV>>>";
   auto itr = metaPathSetupScript.find(replaceKey);
@@ -91,7 +91,7 @@ void BuiltinRegistry::runPostInitialization() {
     metaPathSetupScript.replace(itr, replaceKey.size(), getBuiltinModulesCSV());
   }
   int r = PyRun_SimpleString(metaPathSetupScript.c_str());
-  TORCH_INTERNAL_ASSERT(r == 0);
+  MULTIPY_INTERNAL_ASSERT(r == 0);
 }
 
 void BuiltinRegistry::registerBuiltin(
@@ -152,14 +152,14 @@ void BuiltinRegistry::sanityCheck() {
   auto* cpythonInternalFrozens = getItem("cpython_internal");
   // Num frozen builtins shouldn't change (unless modifying the underlying
   // cpython version)
-  TORCH_INTERNAL_ASSERT(
+  MULTIPY_INTERNAL_ASSERT(
       cpythonInternalFrozens != nullptr &&
           cpythonInternalFrozens->numModules == NUM_FROZEN_PY_BUILTIN_MODULES,
       "Missing python builtin frozen modules");
 
   auto* frozenpython = getItem("frozenpython");
 #ifdef FBCODE_CAFFE2
-  TORCH_INTERNAL_ASSERT(
+  MULTIPY_INTERNAL_ASSERT(
       frozenpython != nullptr, "Missing frozen python modules");
 #else
   auto* frozentorch = getItem("frozentorch");
@@ -167,7 +167,7 @@ void BuiltinRegistry::sanityCheck() {
   // and frozentorch contains stdlib+torch, while in fbcode they are separated
   // due to thirdparty2 frozenpython. No fixed number of torch modules to check
   // for, but there should be at least one.
-  TORCH_INTERNAL_ASSERT(
+  MULTIPY_INTERNAL_ASSERT(
       frozenpython != nullptr && frozentorch != nullptr &&
           frozenpython->numModules + frozentorch->numModules >
               NUM_FROZEN_PY_STDLIB_MODULES + 1,

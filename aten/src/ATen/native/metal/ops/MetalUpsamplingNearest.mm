@@ -58,28 +58,9 @@ Tensor upsample_nearest2d_vec(
                       sourceImage:X
                  destinationImage:Y];
   } else {
-    NSUInteger sh = scale_h.value() * 10000;
-    NSUInteger sw = scale_w.value() * 10000;
-    id<MTLComputePipelineState> state =
-        [[MetalContext sharedInstance] specializedPipelineState:"resize_nearest"
-                                                      Constants:@[
-                                                        @(output_height),
-                                                        @(output_width),
-                                                        @(sh),
-                                                        @(sw),
-                                                        @(nbatch),
-                                                        @(channels),
-                                                      ]];
-    id<MTLComputeCommandEncoder> encoder =
-        [commandBuffer.buffer computeCommandEncoder];
-    [encoder setComputePipelineState:state];
-    [encoder setTexture:[X texture] atIndex:0];
-    [encoder setTexture:[Y texture] atIndex:1];
-    const auto& launchParams =
-        mpscnn::spatialPointwiseKernelLaunchParams(state, Y);
-    [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
-            threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
-    [encoder endEncoding];
+      TORCH_CHECK(
+          false,
+          "MPSCNNUpsamplingNearest is only available on iOS 11.0 and above");
   }
   auto output = makeTensor(std::move(mt), input.options());
   return output;

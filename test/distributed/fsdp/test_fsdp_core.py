@@ -96,7 +96,8 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    def test_nested_all_wrapped_model(self, cpu_offload, backward_prefetch, sharding_strategy):
+    @parametrize("clip_norm_type", [2.0, None])
+    def test_nested_all_wrapped_model(self, cpu_offload, backward_prefetch, sharding_strategy, clip_norm_type):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -106,11 +107,14 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    norm_type=clip_norm_type,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    def test_transformer_parameterized(self, cpu_offload, backward_prefetch, sharding_strategy):
+    @parametrize("clip_norm_type", [2.0, None])
+    def test_transformer_parameterized(self, cpu_offload, backward_prefetch, sharding_strategy, clip_norm_type):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -119,6 +123,8 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    norm_type=clip_norm_type,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
@@ -138,6 +144,7 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
@@ -158,6 +165,7 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
     def _dummy_ddp_fn(self, model):
@@ -165,7 +173,8 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
-    def test_mixture_of_experts(self, cpu_offload, backward_prefetch, sharding_strategy):
+    @parametrize("clip_norm_type", [2.0, None])
+    def test_mixture_of_experts(self, cpu_offload, backward_prefetch, sharding_strategy, clip_norm_type):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -177,6 +186,8 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    norm_type=clip_norm_type,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
@@ -192,6 +203,7 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
 
