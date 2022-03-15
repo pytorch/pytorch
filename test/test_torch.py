@@ -3327,6 +3327,55 @@ else:
                                             [False, True, False, True, False],
                                             [True, False, True, False, True]], device=device))
 
+    # FIXME: move to test_scatter_gather_ops.py
+    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    def test_scatter_reduce(self, device, dtype):
+        shapes = [((5, 10, 20), (5, 10, 20), (5, 10, 20)),
+                  ((5, 10, 20), (2, 3, 4), (5, 10, 20)),
+                  ((5, 10, 20), (2, 3, 4), (3, 5, 10))]
+        reduces = ["sum", "prod", "mean", "amax", "amin"]
+        fns = {"sum": lambda t, v: t.add_(v),
+               "prod": lambda t, v: t.mul_(v),
+               "mean": lambda t, v: t.add_(v),
+               "amax": lambda t, v: torch.max(t, v, out=t),
+               "amin": lambda t, v: torch.min(t, v, out=t)}
+
+        for self_shape, idx_shape, src_shape in shapes:
+            input = torch.randn(self_shape, dtype=dtype, device=device)
+            src = torch.randn(src_shape, dtype=dtype, device=device)
+            for dim in range(len(self_shape)):
+                index = torch.randint(0, self_shape[dim], idx_shape, dtype=torch.long, device=device)
+                for reduce in reduces:
+                    output = input.scatter_reduce(dim, index, src, reduce)
+                    expected = input.clone().detach()
+                    counts = torch.ones(self_shape, dtype=dtype, device=device)
+                    op = fns[reduce]
+                    for i, j, k in itertools.product(range(idx_shape[0]), range(idx_shape[1]), range(idx_shape[2])):
+                        v = src[i, j, k]
+                        m = index[i, j, k]
+
+                        if dim == 0:
+                            i = m
+                        elif dim == 1:
+                            j = m
+                        else:
+                            k = m
+
+                        op(expected[i, j, k], v)
+                        counts[i, j, k] += 1
+
+                    if (reduce == "mean"):
+                        expected /= counts
+
+                    self.assertTrue(torch.allclose(output, expected))
+
+        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
+            torch.scatter_reduce(input, 4, index, src, "sum")
+
+        with self.assertRaisesRegex(RuntimeError, "Index tensor must have the same number of dimensions as self"):
+            index2 = torch.randint(0, 5, (10, ), dtype=torch.long, device=device)
+            torch.scatter_reduce(input, 0, index2, src, "sum")
+
     # FIXME: find a test suite for the masked scatter operator
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
@@ -5756,69 +5805,6 @@ class TestTorch(TestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r"the unspecified dimension size -1 can be any value and is ambiguous"):
             torch.randn(2, 0).unflatten(1, (2, -1, 0))
-
-    # FIXME: move to test_scatter_gather_ops.py
-    def test_scatter_reduce(self):
-        dtype = device = None
-        output_size = 10
-        shape = [5, 10, 20]
-        reduces = ["sum", "prod", "mean", "amax", "amin"]
-        fills = {"sum": 0, "prod": 1, "mean": 0, "amax": -(2 ** 31), "amin": 2 ** 31 - 1}
-        fns = {"sum": lambda t, v: t.add_(v),
-               "prod": lambda t, v: t.mul_(v),
-               "mean": lambda t, v, n: t.mul_(n).add_(v).div_(n + 1),
-               "amax": lambda t, v: torch.max(t, v, out=t),
-               "amin": lambda t, v: torch.min(t, v, out=t)}
-
-        index = torch.randint(0, output_size, shape, dtype=torch.long, device=device)
-        input = torch.randn(shape, dtype=dtype, device=device)
-
-        for reduce in reduces:
-            for dim in range(len(shape)):
-                output = input.scatter_reduce(dim, index, reduce, output_size=output_size)
-
-                # Check that output is of the correct size
-                output_shape = copy.copy(shape)
-                output_shape[dim] = output_size
-                self.assertEqual(output.shape, output_shape)
-
-                expected = torch.zeros(output_shape, dtype=dtype, device=device)
-                expected.fill_(fills[reduce])
-                counts = torch.zeros(output_shape, dtype=dtype, device=device)
-                for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
-                    v = input[i, j, k]
-                    m = index[i, j, k]
-
-                    if dim == 0:
-                        i = m
-                    elif dim == 1:
-                        j = m
-                    else:
-                        k = m
-
-                    op = fns[reduce]
-                    if (reduce == "mean"):
-                        op(expected[i, j, k], v, counts[i, j, k])
-                    else:
-                        op(expected[i, j, k], v)
-                    counts[i, j, k] += 1
-
-                if (reduce == "amin" or reduce == "amax"):
-                    expected.masked_fill_(counts == 0, 0)
-
-                self.assertTrue(torch.allclose(output, expected))
-
-        with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
-            torch.scatter_reduce(input, 4, index, "sum")
-
-        with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
-            index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
-            torch.scatter_reduce(input, 0, index2, "sum")
-
-        with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
-            input2 = torch.randn(10, dtype=dtype, device=device)
-            index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
-            torch.scatter_reduce(input2, 0, index2, "sum", output_size=2)
 
     def test_structseq_repr(self):
         a = torch.arange(250).reshape(5, 5, 10)
