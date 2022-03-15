@@ -3173,9 +3173,9 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
     shape = (S, 0, S)
     err_msg_amax_amin = "Specify the reduction dim with the 'dim' argument."
     err_msg_aminmax = "cannot compute aminmax over an empty dimension as the operation has no identity"
-    if op_info in ['amax', 'amin']:
+    if op_info.name in ['amax', 'amin']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_amax_amin)
-    elif op_info in ['aminmax']:
+    elif op_info.name in ['aminmax']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_aminmax)
 
     # Error Inputs for tensors with more than 64 dimension
@@ -3187,7 +3187,7 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
                      error_regex=err_msg1)
 
     # Error Inputs for repeated 'dim'
-    if op_info in ['amax', 'amin']:
+    if op_info.name in ['amax', 'amin']:
         dims = [(0, 0), (0, -4)]
         err_msg2 = "dim 0 appears multiple times in the list of dims"
         x = torch.randn(S, S, S, S, device=device)
@@ -3201,20 +3201,19 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
     illegal_values = torch.empty(L, dtype=torch.int, device=device)
 
     err_msg_amax_amin2 = "Expected the dtype for input and out to match"
-    err_msg_aminmax2 = "Expected out tensor to have dtype float, but got int instead"
+    err_msg_aminmax2 = "Expected out tensor to have dtype float, but got double instead"
 
-    if op_info in ['amax', 'amin']:
+    if op_info.name in ['amax', 'amin']:
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': illegal_values}),
                          error_regex=err_msg_amax_amin2)
-    elif op_info in ['aminmax']:
+    elif op_info.name in ['aminmax']:
         yield ErrorInput(SampleInput(input5, kwargs={'dim': 0, 'out': (max_values, min_values)}),
                          error_regex=err_msg_aminmax2)
 
     # Error Inputs for functions to raise an error on specified zero'd dimension as reduction dim
     err_msg3 = "Expected reduction dim 1 to have non-zero size"
     yield ErrorInput(SampleInput(torch.rand(shape, device=device), kwargs={'dim': 1}),
-                     error_type=IndexError,
-                     error_regex=err_msg3)
+                     error_type=IndexError, error_regex=err_msg3)
 
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
