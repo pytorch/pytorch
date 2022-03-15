@@ -701,7 +701,7 @@ SparseCsrTensor coo_to_sparse_csr(const SparseTensor& self) {
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
   bool out_int32 = (row_indices.scalar_type() == at::kInt);
-  auto crow_indices = at::native::_convert_indices_from_coo_to_csr(
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices, self.size(0), out_int32);
   return at::native::_sparse_csr_tensor_unsafe(
       crow_indices,
