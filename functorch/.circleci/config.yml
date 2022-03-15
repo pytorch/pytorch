@@ -42,7 +42,7 @@ jobs:
   unittest_linux_cpu:
     <<: *binary_common
     machine:
-      image: "ubuntu-1604:202007-01"
+      image: "ubuntu-2004:202104-01"
     resource_class: xlarge
     steps:
       - checkout
@@ -80,7 +80,8 @@ jobs:
   unittest_linux_gpu:
     <<: *binary_common
     machine:
-      image: ubuntu-1604-cuda-10.2:202012-01
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
     resource_class: gpu.nvidia.medium
     steps:
       - checkout
