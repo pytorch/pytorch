@@ -82,9 +82,7 @@ def to_numpy(elem):
 def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
                     keep_initializers_as_inputs=True, dynamic_axes=None,
                     input_names=None, output_names=None,
-                    fixed_batch_size=False, training=None,
-                    onnx_shape_inference=True):
-    # export the model to ONNX
+                    fixed_batch_size=False, training=None):
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
     torch.onnx._export(model, input_copy, f,
@@ -93,8 +91,7 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        keep_initializers_as_inputs=keep_initializers_as_inputs,
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
-                       fixed_batch_size=fixed_batch_size, training=training,
-                       onnx_shape_inference=onnx_shape_inference)
+                       fixed_batch_size=fixed_batch_size, training=training)
 
     # compute onnxruntime output prediction
     so = onnxruntime.SessionOptions()
@@ -177,8 +174,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    do_constant_folding=do_constant_folding,
                                    keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                    dynamic_axes=dynamic_axes, input_names=input_names,
-                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training,
-                                   onnx_shape_inference=self.onnx_shape_inference)
+                                   output_names=output_names, fixed_batch_size=fixed_batch_size, training=training)
         # compute onnxruntime output prediction
         if remained_onnx_input_idx is not None:
             input_onnx = []
@@ -289,10 +285,9 @@ def set_rng_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
 
-class _TestONNXRuntime(unittest.TestCase):
+class _TestONNXRuntime:
     opset_version = -1  # Sub-classes must override
     keep_initializers_as_inputs = True  # For IR version 3 type export.
-    onnx_shape_inference = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -10734,67 +10729,42 @@ def setup_rnn_tests():
 setup_rnn_tests()
 
 
-TestONNXRuntime_opset7 = type(str("TestONNXRuntime_opset7"),
-                              (unittest.TestCase,),
-                              dict(_TestONNXRuntime.__dict__, opset_version=7))
+def MakeTestCase(opset_version: int, keep_initializers_as_inputs: bool = True) -> type:
+    name = f"TestONNXRuntime_opset{opset_version}"
+    if not keep_initializers_as_inputs:
+        name += "_IRv4"
+    return type(str(name),
+                (unittest.TestCase,),
+                dict(_TestONNXRuntime.__dict__,
+                     opset_version=opset_version,
+                     keep_initializers_as_inputs=keep_initializers_as_inputs))
 
-TestONNXRuntime_opset8 = type(str("TestONNXRuntime_opset8"),
-                              (unittest.TestCase,),
-                              dict(_TestONNXRuntime.__dict__, opset_version=8))
 
-TestONNXRuntime_opset9 = type(str("TestONNXRuntime_opset9"),
-                              (unittest.TestCase,),
-                              dict(_TestONNXRuntime.__dict__, opset_version=9))
+TestONNXRuntime_opset7 = MakeTestCase(7)
 
-TestONNXRuntime_opset9_IRv4 = type(str("TestONNXRuntime_opset9_IRv4"),
-                                   (unittest.TestCase,),
-                                   dict(_TestONNXRuntime.__dict__,
-                                        keep_initializers_as_inputs=False))
+TestONNXRuntime_opset8 = MakeTestCase(8)
 
-TestONNXRuntime_opset10 = type(str("TestONNXRuntime_opset10"),
-                               (unittest.TestCase,),
-                               dict(_TestONNXRuntime.__dict__, opset_version=10))
+TestONNXRuntime_opset9 = MakeTestCase(9)
 
-TestONNXRuntime_opset10_IRv4 = type(str("TestONNXRuntime_opset10_IRv4"),
-                                    (unittest.TestCase,),
-                                    dict(_TestONNXRuntime.__dict__, opset_version=10,
-                                         keep_initializers_as_inputs=False))
+TestONNXRuntime_opset9_IRv4 = MakeTestCase(9, keep_initializers_as_inputs=False)
 
-TestONNXRuntime_opset11 = type(str("TestONNXRuntime_opset11"),
-                               (unittest.TestCase,),
-                               dict(_TestONNXRuntime.__dict__, opset_version=11))
+TestONNXRuntime_opset10 = MakeTestCase(10)
 
-TestONNXRuntime_opset11_IRv4 = type(str("TestONNXRuntime_opset11_IRv4"),
-                                    (unittest.TestCase,),
-                                    dict(_TestONNXRuntime.__dict__, opset_version=11,
-                                         keep_initializers_as_inputs=False))
+TestONNXRuntime_opset10_IRv4 = MakeTestCase(10, keep_initializers_as_inputs=False)
 
-TestONNXRuntime_opset12 = type(str("TestONNXRuntime_opset12"),
-                               (unittest.TestCase,),
-                               dict(_TestONNXRuntime.__dict__, opset_version=12))
+TestONNXRuntime_opset11 = MakeTestCase(11)
 
-TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
-                                    (unittest.TestCase,),
-                                    dict(_TestONNXRuntime.__dict__, opset_version=12,
-                                         keep_initializers_as_inputs=False))
+TestONNXRuntime_opset11_IRv4 = MakeTestCase(11, keep_initializers_as_inputs=False)
 
-TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
-                               (unittest.TestCase,),
-                               dict(_TestONNXRuntime.__dict__, opset_version=13,
-                                    keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))
+TestONNXRuntime_opset12 = MakeTestCase(12)
 
-TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
-                               (unittest.TestCase,),
-                               dict(_TestONNXRuntime.__dict__, opset_version=14,
-                                    keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))
+TestONNXRuntime_opset12_IRv4 = MakeTestCase(12, keep_initializers_as_inputs=False)
 
-TestONNXRuntime_opset15 = type(str("TestONNXRuntime_opset15"),
-                               (unittest.TestCase,),
-                               dict(_TestONNXRuntime.__dict__, opset_version=15,
-                                    keep_initializers_as_inputs=False,
-                                    onnx_shape_inference=True))
+TestONNXRuntime_opset13 = MakeTestCase(13, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset14 = MakeTestCase(14, keep_initializers_as_inputs=False)
+
+TestONNXRuntime_opset15 = MakeTestCase(15, keep_initializers_as_inputs=False)
 
 
 if __name__ == "__main__":
