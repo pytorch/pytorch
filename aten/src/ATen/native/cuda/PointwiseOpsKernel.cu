@@ -11,7 +11,7 @@
 namespace at { namespace native {
 
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcmul_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "addcmul_cuda", [&]() {
     // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
     // and do math in fp32 for better accuracy.
     using accscalar_t = at::acc_type<scalar_t, true>;
@@ -23,7 +23,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcdiv_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.common_dtype(), "addcdiv_cuda", [&]() {
     // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
     // and do math in fp32 for better accuracy.
     using accscalar_t = at::acc_type<scalar_t, true>;
