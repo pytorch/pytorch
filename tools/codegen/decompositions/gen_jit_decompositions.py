@@ -30,7 +30,7 @@ DECOMP_CENTER = r"""
 )";
 
 const std::string& GetSerializedDecompositions() {
-    return decomp_funcs;
+  return decomp_funcs;
 }
 
 const OperatorMap<std::string>& GetDecompositionMapping() {
@@ -45,16 +45,17 @@ DECOMP_END = r"""
   return decomposition_mapping;
 }
 
-}
-}"""
+} // namespace jit
+} // namespace torch
+"""
 
 
 DECOMPOSITION_UTIL_FILE_NAME = "decomposition_registry_util.cpp"
 
-def gen_serialized_decompisitions():
+def gen_serialized_decompisitions() -> str:
     return "\n".join([scripted_func.code for scripted_func in decomposition_table.values()])
 
-def gen_decomposition_mappings():
+def gen_decomposition_mappings() -> str:
     decomposition_mappings = []
     for schema, scripted_func in decomposition_table.items():
         decomposition_mappings.append(
@@ -62,7 +63,7 @@ def gen_decomposition_mappings():
         )
     return "\n".join(decomposition_mappings)
 
-def write_decomposition_util_file(path):
+def write_decomposition_util_file(path: str) -> None:
     decomposition_str = gen_serialized_decompisitions()
     decomposition_mappings = gen_decomposition_mappings()
     file_components = [DECOMP_HEADER, decomposition_str, DECOMP_CENTER, decomposition_mappings, DECOMP_END]
