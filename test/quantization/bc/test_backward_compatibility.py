@@ -376,7 +376,6 @@ class TestSerialization(TestCase):
         self._test_obs(ref_model, input_size=[5, 5], generate=False, check_numerics=False)
 
     @skipIfNoFBGEMM
-    @unittest.skip("temporarily skipping, adding a fix in next PR")
     def test_linear_relu_package_quantization_transforms(self):
         m = LinearReluFunctional(4).eval()
         self._test_package(m, input_size=(1, 1, 4, 4), generate=False)
