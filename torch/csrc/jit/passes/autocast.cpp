@@ -12,6 +12,7 @@
 
 #include <stack>
 #include <unordered_set>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -147,17 +148,23 @@ void castTensorInputs(
   const auto graph = node->owningGraph();
 
   std::unordered_set<Value*> casted_inputs;
+  // need to also keep the inputs in order, otherwise tracing fails
+  // sanity checks because casting ops are inserted in random order
+  std::vector<Value*> casted_inputs_ordered;
   for (auto input : node->inputs()) {
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
     if (input_tensor_type && input->node()->kind() != cast_op) {
-      casted_inputs.insert(input);
+      auto has_inserted = casted_inputs.insert(input);
+      if (has_inserted.second) {
+        casted_inputs_ordered.push_back(input);
+      }
     }
   }
 
   WithInsertPoint insert_point(node);
 
-  for (auto input : casted_inputs) {
+  for (auto input : casted_inputs_ordered) {
     if (cast_op == aten::_autocast_to_full_precision) {
       const auto new_input = graph->insert(
           cast_op,
