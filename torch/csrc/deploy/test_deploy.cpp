@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
+#include <c10/util/irange.h>
 #include <libgen.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
@@ -181,14 +182,13 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
   auto obj = session1.fromMovable(replicatedObj);
   // should throw an error when trying to access obj from different session
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(session2.createMovable(obj), std::runtime_error);
+  EXPECT_THROW(session2.createMovable(obj), c10::Error);
   try {
     session2.createMovable(obj);
-  } catch (std::runtime_error& error) {
+  } catch (c10::Error& error) {
     EXPECT_TRUE(
-        std::string(error.what())
-            .find(
-                "Cannot create movable from an object that lives in different session") !=
+        error.msg().find(
+            "Cannot create movable from an object that lives in different session") !=
         std::string::npos);
   }
 }
@@ -197,15 +197,15 @@ TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(manager.loadPackage("some garbage path"), std::runtime_error);
+  EXPECT_THROW(manager.loadPackage("some garbage path"), c10::Error);
 
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(p.loadPickle("some other", "garbage path"), std::runtime_error);
+  EXPECT_THROW(p.loadPickle("some other", "garbage path"), c10::Error);
 
   auto model = p.loadPickle("model", "model.pkl");
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(model(at::IValue("unexpected input")), std::runtime_error);
+  EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }
 
 TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
@@ -238,7 +238,7 @@ TEST(TorchpyTest, TensorSharingNotAllowed) {
   auto t = obj.toIValue().toTensor();
   // try to feed it to the other interpreter, should error
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_THROW(I1.global("torch", "sigmoid")({t}), std::runtime_error);
+  ASSERT_THROW(I1.global("torch", "sigmoid")({t}), c10::Error);
 }
 
 TEST(TorchpyTest, TaggingRace) {
@@ -259,7 +259,7 @@ TEST(TorchpyTest, TaggingRace) {
         try {
           I.fromIValue(t);
           success++;
-        } catch (const std::runtime_error& e) {
+        } catch (const c10::Error& e) {
           failed++;
         }
       }
@@ -279,7 +279,7 @@ TEST(TorchpyTest, DisarmHook) {
   torch::deploy::InterpreterManager m(1);
   auto I = m.acquireOne();
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_THROW(I.fromIValue(t), std::runtime_error); // NOT a segfault
+  ASSERT_THROW(I.fromIValue(t), c10::Error); // NOT a segfault
 }
 
 TEST(TorchpyTest, RegisterModule) {
@@ -379,7 +379,7 @@ TEST(TorchpyTest, SharedLibraryLoad) {
     try {
       I.global("libtest_deploy_lib", "raise_exception")(no_args);
       ASSERT_TRUE(false); // raise_exception did not throw?
-    } catch (std::runtime_error& err) {
+    } catch (std::exception& err) {
       ASSERT_TRUE(std::string(err.what()).find("yet") != std::string::npos);
     }
     in_another_module = 6;

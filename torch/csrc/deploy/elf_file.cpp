@@ -1,6 +1,5 @@
-#include <torch/csrc/deploy/Exception.h>
-#include <torch/csrc/deploy/elf_file.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/deploy/elf_file.h>
 
 namespace torch {
 namespace deploy {
@@ -14,7 +13,7 @@ ElfFile::ElfFile(const char* filename) : memFile_(filename) {
   shdrList_ = (Elf64_Shdr*)(fileData + ehdr_->e_shoff);
 
   auto strtabSecNo = ehdr_->e_shstrndx;
-  MULTIPY_CHECK(
+  TORCH_CHECK(
       strtabSecNo >= 0 && strtabSecNo < numSections_,
       "e_shstrndx out of range");
 
@@ -27,7 +26,7 @@ ElfFile::ElfFile(const char* filename) : memFile_(filename) {
 }
 
 at::optional<Section> ElfFile::findSection(const char* name) const {
-  MULTIPY_CHECK(name != nullptr, "Null name");
+  TORCH_CHECK(name != nullptr, "Null name");
   at::optional<Section> found = at::nullopt;
   for (const auto& section : sections_) {
     if (strcmp(name, section.name) == 0) {
@@ -41,13 +40,13 @@ at::optional<Section> ElfFile::findSection(const char* name) const {
 
 void ElfFile::checkFormat() const {
   // check the magic numbers
-  MULTIPY_CHECK(
+  TORCH_CHECK(
       (ehdr_->e_ident[EI_MAG0] == ELFMAG0) &&
           (ehdr_->e_ident[EI_MAG1] == ELFMAG1) &&
           (ehdr_->e_ident[EI_MAG2] == ELFMAG2) &&
           (ehdr_->e_ident[EI_MAG3] == ELFMAG3),
       "Unexpected magic numbers");
-  MULTIPY_CHECK(
+  TORCH_CHECK(
       ehdr_->e_ident[EI_CLASS] == ELFCLASS64, "Only support 64bit ELF file");
 }
 

@@ -98,8 +98,8 @@ on:
           WORKFLOW_ID: '${{ github.run_id }}'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 {%- if needs_credentials %}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 {%- endif %}
         shell: bash
         run: |
