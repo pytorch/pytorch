@@ -1055,6 +1055,16 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     return inputs
 
 
+def sample_inputs_amax_amin_reduction(op_info, device, dtype, requires_grad, **kwargs):
+    inputs = []
+    inputs.append(SampleInput(make_tensor([], dtype=dtype, device=device, requires_grad=requires_grad),))
+    inputs.append(SampleInput(make_tensor([S], dtype=dtype, device=device, requires_grad=requires_grad),))
+    inputs.append(SampleInput(make_tensor([S, M], dtype=dtype, device=device, requires_grad=requires_grad),))
+    inputs.append(SampleInput(make_tensor([S, M, L, S], dtype=dtype, device=device, requires_grad=requires_grad),))
+    inputs.append(SampleInput(make_tensor((S, 0, S), dtype=dtype, device=device, requires_grad=requires_grad), kwargs={'dim': -1}))
+    return inputs
+
+
 def sample_inputs_sparse_coo_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked reduction operators that support inputs
     with sparse coo layouts.
@@ -14981,6 +14991,7 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amax),
+        sample_inputs_func=sample_inputs_amax_amin_reduction,
         skips=(
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
@@ -14993,6 +15004,7 @@ op_db: List[OpInfo] = [
         nan_policy='propagate',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         ref=reference_reduction_numpy(np.amin),
+        sample_inputs_func=sample_inputs_amax_amin_reduction,
         skips=(
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
