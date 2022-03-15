@@ -1,7 +1,6 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
-from collections import namedtuple
 import itertools
 
 import torch
@@ -477,9 +476,7 @@ else:
             bin_edges = bins
             hist = _VF._histogramdd_from_bin_tensors(input, bin_edges, weight=weight, density=density)
 
-        # TODO: figure out how to return torch.return_types.histogramdd
-        histogramdd_return_type = namedtuple('histogramdd_return_type', 'hist bin_edges')
-        return histogramdd_return_type(hist, bin_edges)
+        return torch.return_type.histogramdd(hist, bin_edges)
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:

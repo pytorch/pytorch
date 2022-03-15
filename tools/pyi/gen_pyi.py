@@ -78,6 +78,7 @@ blocklist = [
     'range',
     # defined in functional
     'einsum',
+    'histogramdd',
     # reduction argument; these bindings don't make sense
     'binary_cross_entropy_with_logits',
     'ctc_loss',
