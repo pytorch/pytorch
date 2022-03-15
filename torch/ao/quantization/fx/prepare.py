@@ -90,7 +90,7 @@ from .backend_config.utils import (
     get_pattern_to_input_type_to_index,
     get_module_to_qat_module,
 )
-from .backend_config.pytorch_native import (
+from .backend_config import (
     get_native_backend_config_dict,
 )
 
@@ -340,6 +340,7 @@ def get_target_activation_dtype_for_node(
                     else torch.float
                 return {
                     "input_activation_dtype": act_dtype,
+                    "input_activation_compute_dtype": act_compute_dtype,
                     "weight_dtype": weight_dtype,
                     "bias_dtype": bias_dtype,
                     "output_activation_dtype": act_dtype,
@@ -413,6 +414,24 @@ def get_arg_target_dtype_as_input_to_node(
     else:
         return node_name_to_target_dtype[node.name]["bias_dtype"]
 
+def get_arg_target_compute_dtype_as_input_to_node(
+    arg: Node,
+    node: Node,
+    modules: Dict[str, torch.nn.Module],
+    node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
+) -> Optional[torch.dtype]:
+    """ Get the target argument dtype for the argument `arg`, as input
+    to node `node`
+    """
+    assert isinstance(arg, Node)
+    is_weight = node_arg_is_weight(node, arg)
+    is_bias = node_arg_is_bias(node, arg)
+    is_activation = not is_weight and not is_bias
+    if is_activation and \
+       "input_activation_compute_dtype" in node_name_to_target_dtype[node.name]:
+        return node_name_to_target_dtype[node.name]["input_activation_compute_dtype"]
+    else:
+        return None
 
 def maybe_insert_input_observer_for_arg_or_kwarg(
     node: Union[Node, Any],
@@ -464,6 +483,9 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
 
         arg_as_output_target_dtype = get_arg_target_dtype_as_output(arg, modules, node_name_to_target_dtype)
         arg_as_input_target_dtype = get_arg_target_dtype_as_input_to_node(arg, node, modules, node_name_to_target_dtype)
+        arg_as_input_target_compute_dtype = \
+            get_arg_target_compute_dtype_as_input_to_node(
+                arg, node, modules, node_name_to_target_dtype)
         needs_obs = (
             # if the dtypes are different, we need an observer
             (arg_as_output_target_dtype != arg_as_input_target_dtype) and
@@ -475,7 +497,13 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # if arg is a bool tensor or not a tensor, do not insert observer
             (arg_as_output_target_dtype not in (torch.bool, None)) and
             # if qconfig is reuse_input qconfig, we won't insert extra observer for input
-            not is_reuse_input_qconfig_
+            not is_reuse_input_qconfig_ or
+            # need to add input observer for dynamic quantization
+            # only add observer for first input for now, we may need to extend
+            # qconfig_dict and backend_config_dict to support more general configurations
+            # of dynamic quantization, e.g. dynamically quantizing second input, third
+            # input etc.
+            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8, torch.float16]) and arg is node.args[0]
         )
 
     else:
@@ -1131,18 +1159,23 @@ def insert_observers_for_model(
                             if user != node and is_user_quantized:
                                 is_quantized_branch = True
 
-                    # this modifies node inplace
-                    maybe_insert_input_observers_for_node(
-                        node, qconfig, model, modules, graph,
-                        node_name_to_target_dtype,
-                        qhandler,
-                        prepare_custom_config_dict,
-                        backend_config_dict)
+                    # TODO: this only works for sequential fusion right now, extend it
+                    # it to automatically detect all input nodes based on the pattern
+                    # need to change find_matches function to return this information
+                    is_input_node_of_the_pattern = matched_nodes[-1] is node
+                    if is_input_node_of_the_pattern:
+                        # this modifies node inplace
+                        maybe_insert_input_observers_for_node(
+                            node, qconfig, model, modules, graph,
+                            node_name_to_target_dtype,
+                            qhandler,
+                            prepare_custom_config_dict,
+                            backend_config_dict)
 
-                    # Insert equalization input observers if needed
-                    maybe_insert_input_equalization_observers_for_node(
-                        node, equalization_qconfig, model, modules, graph,
-                        node_name_to_target_dtype, is_quantized_branch)
+                        # Insert equalization input observers if needed
+                        maybe_insert_input_equalization_observers_for_node(
+                            node, equalization_qconfig, model, modules, graph,
+                            node_name_to_target_dtype, is_quantized_branch)
 
                     is_last_node_of_pattern = root_node is node
                     is_general_tensor_value_op = \
@@ -1327,6 +1360,7 @@ def prepare(
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
     #     <class 'torch.ao.quantization.fx.quantize.Add'>),
     # }
+    # TODO: rename to pattern_to_quantize_handler
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
         quant_patterns = get_default_quant_patterns()
@@ -1335,7 +1369,8 @@ def prepare(
         # TODO: currently we just extend the quantize handlers generated from
         # `get_native_backend_config_dict`
         # in the future we can just assign backend_config_dict when everything is defined
-        patterns.extend(get_pattern_to_quantize_handlers(get_native_backend_config_dict()))
+        for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
+            patterns[pattern] = quantize_handler
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
 
