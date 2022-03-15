@@ -1,7 +1,7 @@
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, deprecation_warning
 
 
