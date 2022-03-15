@@ -267,7 +267,7 @@ Tensor dense_to_sparse_csr(const Tensor& self) {
 }
 
 Tensor csr_to_sparse_csr(const Tensor& self) {
-  return self;
+  return self.clone();
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self) {

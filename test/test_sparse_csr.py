@@ -1588,6 +1588,49 @@ class TestSparseCSR(TestCase):
             self.assertEqual(inp.crow_indices(), detached_inp.crow_indices())
             self.assertEqual(inp.col_indices(), detached_inp.col_indices())
 
+    @skipMeta
+    def test_exercise_to_sparse_csr(self):
+        t = torch.randn(4, 5).relu_()
+        t_dense = t.to_dense()
+
+        t_coo = t.to_sparse_coo()
+        t_csr = t.to_sparse_csr()
+
+        t_coo_csr = t_coo.to_sparse_csr()
+        t_csr_coo = t_csr.to_sparse()
+
+        t_csr_csr = t_csr.to_sparse_csr()
+        t_coo_coo = t_coo.to_sparse()
+
+        t_coo_dense = t_coo.to_dense()
+        t_csr_dense = t_csr.to_dense()
+
+        # Idempotent to_sparse_coo
+        self.assertEqual(t_coo_coo.values(), t_coo.values())
+        self.assertEqual(t_coo_coo.indices(), t_coo.indices())
+
+        # csr -> coo
+        self.assertEqual(t_csr_coo.values(), t_coo.values())
+        self.assertEqual(t_csr_coo.indices(), t_coo.indices())
+
+        # coo -> csr
+        self.assertEqual(t_coo_csr.values(), t_csr.values())
+        self.assertEqual(t_coo_csr.col_indices(), t_csr.col_indices())
+        self.assertEqual(t_coo_csr.crow_indices(), t_csr.crow_indices())
+
+        # Idempotent to_sparse_csr
+        self.assertEqual(t_csr_csr.values(), t_csr.values())
+        self.assertEqual(t_csr_csr.col_indices(), t_csr.col_indices())
+        self.assertEqual(t_csr_csr.crow_indices(), t_csr.crow_indices())
+
+        # Idempotent to_dense
+        self.assertEqual(t, t_dense)
+
+        # coo to dense
+        self.assertEqual(t, t_coo_dense)
+
+        # csr to dense
+        self.assertEqual(t, t_csr_dense)
 
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA

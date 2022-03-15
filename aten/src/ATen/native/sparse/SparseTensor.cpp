@@ -495,6 +495,10 @@ SparseTensor dense_to_sparse(const Tensor& self) {
   return dense_to_sparse(self, self.dim());
 }
 
+SparseTensor sparse_to_sparse(const Tensor& self) {
+  return self.clone();
+}
+
 SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
   int64_t dims = self.dim();
   // TODO: it seems like sparse_dim == 0 could be supported even if self.dim() >
@@ -542,6 +546,10 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
   return sparse._coalesced_(true);
+}
+
+SparseTensor sparse_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  return self.clone();
 }
 
 SparseTensor sparse_csr_to_sparse(const Tensor& self, int64_t sparse_dim) {
