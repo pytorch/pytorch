@@ -5486,7 +5486,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.sigmoid(x)
                 x = torch.sigmoid(x)
                 x = x.sigmoid()
-                x.sigmoid_()
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
                 x = F.hardsigmoid(x, inplace=True)
@@ -5494,7 +5493,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # F.tanh is deprecated
                 x = torch.tanh(x)
                 x = x.tanh()
-                x.tanh_()
                 return x
 
         for eval_mode in [True, False]:
@@ -5505,12 +5503,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m.eval()
                 qconfig = default_qconfig
                 prepare = prepare_fx
-                fq_count = 11
+                fq_count = 9
             else:
                 m.train()
                 qconfig = default_qat_qconfig
                 prepare = prepare_qat_fx
-                fq_count = 11
+                fq_count = 9
 
             # nothing to fuse so skipping the fuse step
             m_copy = copy.deepcopy(m)
@@ -5553,8 +5551,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_list=order_check)
 
             reference_count_check = {
-                ns.call_function(torch.quantize_per_tensor) : 13,
-                ns.call_method('dequantize') : 13
+                ns.call_function(torch.quantize_per_tensor) : 11,
+                ns.call_method('dequantize') : 11
             }
             reference_order_check = [
                 ns.call_function(torch.quantize_per_tensor),
