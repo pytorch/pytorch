@@ -1747,8 +1747,6 @@ class FullyShardedDataParallel(nn.Module):
         """
         Gather all shards of params.
         """
-        self._lazy_init()
-
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
                 if self.cpu_offload.offload_params:
