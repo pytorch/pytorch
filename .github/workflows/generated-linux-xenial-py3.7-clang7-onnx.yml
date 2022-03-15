@@ -44,6 +44,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -261,6 +262,7 @@ jobs:
           docker system prune -af
 
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
@@ -529,6 +531,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge

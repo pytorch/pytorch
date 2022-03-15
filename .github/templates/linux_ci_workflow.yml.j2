@@ -40,6 +40,7 @@ env:
 jobs:
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -150,6 +151,7 @@ jobs:
 {% block test +%}
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
@@ -323,6 +325,7 @@ jobs:
 {%- endif -%}
 {%- if enable_doc_jobs %}
   build-docs:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:

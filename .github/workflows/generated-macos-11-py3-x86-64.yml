@@ -32,6 +32,7 @@ env:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-11
     env:
       JOB_BASE_NAME: macos-11-py3-x86-64
@@ -87,6 +88,7 @@ jobs:
 
 
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, macos-11)
     needs: build
     runs-on: macos-11
@@ -204,6 +206,7 @@ jobs:
           export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, macos-11)
     needs: build
     runs-on: macos-11
