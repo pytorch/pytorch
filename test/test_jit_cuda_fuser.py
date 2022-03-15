@@ -4145,6 +4145,22 @@ class TestCudaFuser(JitTestCase):
             self.assertGraphContains(t_jit.graph_for(grad_output, input, weight, r_m.clone(), r_v.clone, save_mean,
                                                      save_invstd, True, 1e-5, [True, True, True]), FUSION_GUARD)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_contiguous_on_broadcasted(self):
+        x = torch.randn(4, 1, device="cuda")
+        y = torch.randn(4, 128, device="cuda")
+
+        with nvfuser_singleton_fusion(True):
+            def t(x, y):
+                t1 = x.expand([4, 128])
+                t2 = t1 * y
+                return t2
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x, y)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

@@ -75,6 +75,27 @@ TensorView::TensorView(
           passkey.ir_container_->zeroVal(), IrBuilder::create<Int>()));
     }
   }
+  // [ Note -- stride_properties in tensor type ]
+  //
+  // `stride_properties()` returns a vector<optional<Stride>>, while
+  //     Stride {
+  //       optional<size_t> stride_index_;
+  //       optional<bool> contiguous_;
+  //       optional<size_t> stride_;
+  //     };
+  // To keep things simple, we ignore all the optional wrapper, as in reality,
+  // they would always be available unless we start doing multiple profiling
+  // runs.
+  //
+  //   `stride_properties()` returns the vector of Stride, where it is ordered
+  //   from the fastest to slowest dimensions. i.e. stride_properties()[i] would
+  //   give us the i-th fastest dimension. where:
+  //     1. `Stride::stride_index_` gives the index to the dimension;
+  //     2. `Stride::contiguous_` indicates whether this dimension is
+  //     memory-dense*;
+  //     3. `Stride::stride_` is the actual stride for the given dimension.
+  // * note that memory-dense means different things depending on the order of
+  // the dimension. checkout `TensorType::computeStrideProps` for details
 
   // default to non_contiguous;
   std::vector<bool> contig_info(tensor_type->dim().value(), false);
@@ -96,12 +117,19 @@ TensorView::TensorView(
         // dim;
         contig_info[index] = (index == tensor_type->dim().value() - 1);
       } else {
-        // check the neighboring faster dimension;
-        if (auto left_index_opt =
-                tensor_type->stride_properties()[static_cast<int>(i) - 1]
-                    ->stride_index_) {
-          // collapse if two axes are neighboring in both sizes & stride_index;
-          contig_info[index] = (left_index_opt.value() == (index + 1));
+        // check the neighboring faster dimension, collapse if it is considered
+        // as inner dimension per stride_index
+        auto inner_index_opt =
+            tensor_type->stride_properties()[static_cast<int>(i) - 1]
+                ->stride_index_;
+        if (inner_index_opt.has_value() &&
+            inner_index_opt.value() == (index + 1)) {
+          // collapse if inner dimension has non-broadcasted strides
+          auto inner_stride_opt =
+              tensor_type->stride_properties()[static_cast<int>(i) - 1]
+                  ->stride_;
+          contig_info[index] =
+              inner_stride_opt.has_value() && inner_stride_opt.value() != 0;
         }
       }
     }
