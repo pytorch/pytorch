@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -17,6 +18,7 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
+#include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 using c10::QualifiedName;
 
@@ -1661,6 +1663,99 @@ uint64_t PythonPrint::minVersion() const {
 }
 
 PythonPrint::~PythonPrint() = default;
+
+std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
+  std::vector<IValue> result;
+  std::vector<IValue> stack;
+  stack.emplace_back(ivalue);
+  while (!stack.empty()) {
+    IValue head = stack.back();
+    stack.pop_back();
+    if (head.isObject()) {
+      result.push_back(head);
+      auto obj = head.toObject();
+      ClassTypePtr type = obj->type();
+      if (type->hasMethod("__getstate__")) {
+        Function& getstate = type->getMethod("__getstate__");
+        stack.emplace_back(getstate({obj}));
+      } else {
+        for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
+          stack.emplace_back(obj->getSlot(i));
+        }
+      }
+    } else if (ivalue.isGenericDict()) {
+      for (const auto& kv : ivalue.toGenericDict()) {
+        // skip key because key cannot be an object
+        stack.emplace_back(kv.value());
+      }
+    } else if (ivalue.isList()) {
+      for (const auto& v : ivalue.toList()) {
+        stack.emplace_back(v);
+      }
+    } else if (ivalue.isTuple()) {
+      for (const auto& v : ivalue.toTuple()->elements()) {
+        stack.emplace_back(v);
+      }
+    }
+  }
+  return result;
+}
+
+c10::optional<std::string> printType(
+    const c10::Type& type,
+    torch::jit::TypeNameUniquer& type_name_uniquer) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(
+        [&](auto&& t) { return printType(t, type_name_uniquer); });
+  }
+  auto namedType = type.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+  }
+  return c10::nullopt;
+}
+
+void jitModuleToPythonCodeAndConstants(
+    const Module& module,
+    ExtraFilesMap* jit_sources, // output
+    std::vector<IValue>* constants // output
+) {
+  std::vector<IValue> objects = traverseIValueAndGetObjects(module._ivalue());
+  std::unordered_set<c10::QualifiedName> visited;
+  PrintDepsTable class_deps;
+  TypeNameUniquer uniquer;
+  auto type_printer = [&](const c10::Type& t) { return printType(t, uniquer); };
+
+  // Group by prefix; because every prefix is a file.
+  std::unordered_map<std::string, PythonPrint> grouped_by_prefix;
+  for (const IValue& obj : objects) {
+    ObjectPtr obj_ptr = obj.toObject();
+    ClassTypePtr class_type = obj_ptr->type();
+    class_deps.add(class_type);
+  }
+
+  for (int i = 0; i < class_deps.size(); ++i) {
+    auto type = class_deps[i];
+    auto qualname = uniquer.getUniqueName(type);
+    std::string qualifier = qualname.prefix();
+    auto pp_iter = grouped_by_prefix.find(qualifier);
+    if (pp_iter == grouped_by_prefix.end()) {
+      pp_iter = grouped_by_prefix
+                    .emplace(
+                        qualifier,
+                        PythonPrint(
+                            *constants,
+                            class_deps,
+                            type_printer,
+                            /*enforce_importable=*/true))
+                    .first;
+    }
+    pp_iter->second.printNamedType(type);
+  }
+  for (const auto& kv : grouped_by_prefix) {
+    (*jit_sources)[kv.first] = kv.second.str();
+  }
+}
 
 } // namespace jit
 } // namespace torch
