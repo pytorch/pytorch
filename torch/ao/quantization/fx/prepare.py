@@ -419,7 +419,7 @@ def get_arg_target_compute_dtype_as_input_to_node(
     node: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Union[torch.dtype, type, None]]],
-) -> Union[dtype, type, None]:
+) -> Union[torch.dtype, type, None]:
     """ Get the target argument dtype for the argument `arg`, as input
     to node `node`
     """
