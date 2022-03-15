@@ -914,7 +914,6 @@ class FullyShardedDataParallel(nn.Module):
         >>>     local_dict = sharded_module.state_dict()
         >>> local_dict.keys()
         >>> odict_keys(['flat_param', 'inner.flat_param'])
-        >>> {hi}
 
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
