@@ -317,7 +317,7 @@ class CommonDistributedDataParallelTest(object):
         return dist.FileStore(self.file_name, self.world_size)
 
     def _get_process_group(self):
-        raise ValueError("To be implemented by child class")
+        raise NotImplementedError("To be implemented by child class")
 
     def _train_model(self, model, input_var, target, loss, run_checkpoint=False, use_reentrant=True):
         model.train()
