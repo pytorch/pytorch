@@ -2,7 +2,6 @@
 
 #include <ATen/InferSize.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/cast.h>
 #include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/core/ir_util.h>
@@ -36,7 +35,7 @@ using namespace torch::lazy;
 
 torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
                                const torch::lazy::Shape& target_shape) {
-  if (torch::lazy::GetShapeFromTsValue(input).sizes() == target_shape.sizes()) {
+  if (input.shape().sizes() == target_shape.sizes()) {
     return input;
   }
   return torch::lazy::MakeNode<torch::lazy::Expand>(

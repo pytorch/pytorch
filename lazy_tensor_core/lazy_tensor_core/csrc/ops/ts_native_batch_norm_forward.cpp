@@ -13,9 +13,9 @@ TSNativeBatchNormForward::TSNativeBatchNormForward(
     double eps)
     : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::native_batch_norm),
                           {input, weight, bias, running_mean, running_var},
-                          {torch::lazy::GetShapeFromTsValue(input),
-                           torch::lazy::GetShapeFromTsValue(running_mean),
-                           torch::lazy::GetShapeFromTsValue(running_var)},
+                          {input.shape(),
+                           running_mean.shape(),
+                           running_var.shape()},
                           /*num_outputs=*/3,
                           torch::lazy::MHash(training, momentum, eps)),
       training_(training),

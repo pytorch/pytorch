@@ -20,8 +20,6 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
-
-
 torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
   LOG(FATAL) << "InferShape no longer implemented.";
 }
