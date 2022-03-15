@@ -2329,6 +2329,40 @@ static bool hasTensorWithOptions(
   return false;
 }
 
+static bool hasTensorWithOptions(
+    const IValue& ivalue,
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout,
+    c10::optional<c10::MemoryFormat> memory_format) {
+  return hasTensorWithOptions(ivalue, dtype, layout) &&
+      (memory_format == ivalue.toTensor().options().memory_format_opt());
+}
+
+REGISTER_OPERATOR_FUNCTOR(aten::ones_like, aten_ones_like, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::ones_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& self = p_node->Input(0).toTensor();
+    const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+    const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+    const auto device = p_node->Input(3).toOptional<c10::Device>();
+    const auto pin_memory = p_node->Input(4).toOptional<bool>();
+    const auto memory_format = p_node->Input(5).toOptional<c10::MemoryFormat>();
+    if (!hasTensorWithOptions(
+            p_node->Output(0), dtype, layout, memory_format)) {
+      p_node->Output(0) = at::native::ones_like(
+          self, dtype, layout, device, pin_memory, memory_format);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::ones_out(self.sizes(), out_t);
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
