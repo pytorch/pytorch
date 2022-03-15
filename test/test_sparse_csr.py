@@ -427,6 +427,11 @@ class TestSparseCSR(TestCase):
             torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(2, 1), values.repeat(2, 1), size,
                                     device=device)
 
+        with self.assertRaisesRegex(RuntimeError,
+                                    r"All batch dimensions of the provided size, indices, and values must be the same"):
+            torch.sparse_csr_tensor(crow_indices.repeat(2, 1), col_indices.repeat(3, 1), values.repeat(4, 1), (2, 2, 10),
+                                    device=device)
+
     def test_factory_indices_invariants_check(self, device):
         crow_indices = [0, 2, 4]
         col_indices = [0, 1, 0, 1]

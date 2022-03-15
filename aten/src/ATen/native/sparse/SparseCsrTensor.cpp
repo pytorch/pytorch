@@ -84,6 +84,17 @@ void _validate_sparse_csr_tensor_args(const Tensor& crow_indices, const Tensor& 
       crow_indices.dim() == size.size() - 1,
       "Number of dimensions of indices must be one less than the number of dimensions of the provided size.");
 
+  // All batch sizes must be the same
+  auto batch_size = size.slice(0, size.size() - 2);
+  auto crow_indices_batch_size = crow_indices.sizes().slice(0, crow_indices.dim() - 1);
+  auto col_indices_batch_size = col_indices.sizes().slice(0, col_indices.dim() - 1);
+  auto values_batch_size = values.sizes().slice(0, values.dim() - 1);
+  TORCH_CHECK(
+      batch_size == crow_indices_batch_size &&
+      batch_size == col_indices_batch_size &&
+      batch_size == values_batch_size,
+      "All batch dimensions of the provided size, indices, and values must be the same.");
+
   // Note, this check also enforces `crow_indices.size(-1) >= 1`
   TORCH_CHECK(
       crow_indices.size(-1) == (size[size.size() - 2] + 1),
