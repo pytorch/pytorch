@@ -7,11 +7,7 @@ from tools.codegen.model import (BackendIndex, NativeFunction,
 from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
-<<<<<<< HEAD
-from tools.codegen.api.lazy import LazyIrSchema, isValueType, tensorListValueT
-=======
-from tools.codegen.api.lazy import LazyIrSchema, LazyArgument, isValueType
->>>>>>> 7dca2393c8 (continue shifting to args)
+from tools.codegen.api.lazy import LazyIrSchema, LazyArgument, isValueType, tensorListValueT
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
 def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
@@ -25,7 +21,7 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
         if isinstance(arg.lazy_type, BaseCType):
             if arg.is_wrapped_scalar:
                 return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
-            elif arg.type.type is tensorListValueT:
+            elif arg.lazy_type.type is tensorListValueT:
                 return f"lazy_{arg.name}_tensorlist"
             return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.lazy_type, OptionalCType):
@@ -113,7 +109,7 @@ class LazyIR(ABC):
         node_ctor_args = ", ".join([f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args])
         scalar_initializers = ",\n        ".join([f"{a.name}({a.name})" for a in scalar_args])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
-        scalar_decls = "\n  ".join(["std::string {a.name};" if a.lazy_type.cpp_type() == "c10::string_view" 
+        scalar_decls = "\n  ".join([f"std::string {a.name};" if a.lazy_type.cpp_type() == "c10::string_view" 
                                     else f"{a.lazy_type.cpp_type()} {a.name};"
                                     for a in scalar_args])
         scalar_hashes = ", ".join([f"{a.name}" for a in scalar_args])
