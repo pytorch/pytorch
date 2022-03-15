@@ -75,8 +75,7 @@ void rsqrt_kernel_cuda(TensorIteratorBase& iter) {
           template <typename T>
           T rsqrt_kernel(T x) {
             const T one = T{1};
-            // std::sqrt for c10::complex is overloaded in c10/util/complex_math.h
-            return one / sqrt(x);
+            return one / std::sqrt(x);
       }); // rsqrt_string
       AT_DISPATCH_COMPLEX_TYPES(common_dtype, "rsqrt_cuda", [&]() {
           jitted_gpu_kernel<
@@ -114,7 +113,7 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
       static const auto sqrt_string = jiterator_stringify(
           template <typename T>
           T sqrt_kernel(T x) {
-            return sqrt(x);
+            return std::sqrt(x);
       }); // sqrt_string
       AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sqrt_cuda", [&]() {
           jitted_gpu_kernel<
@@ -126,14 +125,14 @@ void sqrt_kernel_cuda(TensorIteratorBase& iter) {
     #else
       AT_DISPATCH_COMPLEX_TYPES(common_dtype, "sqrt_cuda", [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return ::sqrt(a);
+          return std::sqrt(a);
         });
       });
     #endif
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, common_dtype, "sqrt_cuda", [&]() {
       gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::sqrt(a);
+        return std::sqrt(a);
       });
     });
   }
