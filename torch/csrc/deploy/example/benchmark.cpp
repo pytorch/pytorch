@@ -2,6 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/TypeDefault.h>
+#include <c10/util/irange.h>
+
 #include <torch/script.h>
 
 #include <pthread.h>
