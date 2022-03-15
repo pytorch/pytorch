@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/SparseTensorUtils.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -259,6 +261,35 @@ Tensor dense_to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype
   }
   return tensor.clone();
 }
+
+at::sparse_csr::SparseCsrTensor dense_to_sparse_csr(const Tensor& self) {
+  return self.to_sparse().to_sparse_csr();
+}
+
+at::sparse_csr::SparseCsrTensor csr_to_sparse_csr(const at::sparse_csr::SparseCsrTensor& self) {
+  return self;
+}
+
+at::sparse_csr::SparseCsrTensor coo_to_sparse_csr(const at::sparse::SparseTensor& self) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.coalesce();
+  auto row_indices = coalesced_self.indices()[0];
+  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, self.size(0), out_int32);
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      coalesced_self.indices()[1].contiguous(),
+      coalesced_self.values(),
+      coalesced_self.sizes(),
+      coalesced_self.scalar_type(),
+      c10::kSparseCsr,
+      coalesced_self.device());
+}
+
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
