@@ -286,6 +286,12 @@ def set_rng_seed(seed):
     np.random.seed(seed)
 
 class _TestONNXRuntime:
+    """Abstract base class for test cases.
+
+    Intentionally not a sub-class of unittest.TestCase so that unittest / pytest
+    don't run it directly. unitest.TestCase is mixed in as another base class when
+    creating concrete sub-types. See MakeTestCase().
+    """
     opset_version = -1  # Sub-classes must override
     keep_initializers_as_inputs = True  # For IR version 3 type export.
 
