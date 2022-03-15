@@ -203,11 +203,6 @@ def doAutodiffCheck(testname):
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
-# even though FULL_PROFILER should be our default
-# we haven't tested every single test in this file
-# but we enable FULL_PROFILER for a large subset
-# of the tests with "with enable_profiling_mode_for_profiling_tests"
-torch._C._jit_set_profiling_mode(False)
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     hx, cx = hidden

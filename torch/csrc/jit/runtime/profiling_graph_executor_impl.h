@@ -15,8 +15,9 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       const std::shared_ptr<Graph>& graph,
       std::string function_name);
 
-  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
-      override;
+  const ExecutionPlan& getPlanFor(
+      Stack& stack,
+      c10::optional<size_t> remaining_bailout_depth) override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
@@ -29,6 +30,8 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
     // prevent memory leaks
     fallback_functions_.clear();
     remaining_bailout_depth_.reset();
+    // TODO - would be nice to have it initialized in subsequent use
+    fusion_strategy_ = getFusionStrategy();
   }
 
   bool isOptimized() const override {
@@ -38,13 +41,14 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
  private:
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
-      size_t remaining_bailout_depth);
+      c10::optional<size_t> remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(
       std::shared_ptr<Graph>& graph,
       size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
   FusionBehavior getCurrentBehavior(size_t remaining_depth);
+  size_t getInstantiatedBailoutDepth();
   void runNoGradOptimizations(
       std::shared_ptr<Graph>& graph,
       size_t remaining_bailout_depth);
