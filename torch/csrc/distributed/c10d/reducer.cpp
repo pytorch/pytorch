@@ -2126,10 +2126,9 @@ void verify_params_across_processes(
   i = 0;
   for (const auto p : c10::irange(params.size())) {
     const auto& t = params[p];
-    // I'd like to include which process we are in the message,
-    // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      auto msg = c10::str("params[", p, "] in this process",
+      auto msg = c10::str("[", process_group->getRank(),
+                        "]: params[", p, "] in this process",
                         " with sizes ",
                         t.sizes(),
                         " appears not to match sizes of the same param in process 0.");
