@@ -60,7 +60,7 @@ def var(input: Tensor,
 )";
 
 const std::string& GetSerializedDecompositions() {
-    return decomp_funcs;
+  return decomp_funcs;
 }
 
 const OperatorMap<std::string>& GetDecompositionMapping() {
@@ -74,5 +74,5 @@ const OperatorMap<std::string>& GetDecompositionMapping() {
   return decomposition_mapping;
 }
 
-}
-}
+} // namespace jit
+} // namespace torch
