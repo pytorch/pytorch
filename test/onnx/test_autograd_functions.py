@@ -20,3 +20,5 @@ def fn(input):
 input = torch.ones(1)
 traced_exp = torch.jit.trace(fn, input)
 print(traced_exp.graph)
+
+torch.onnx.export(traced_exp, input, 'model.onnx')

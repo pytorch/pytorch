@@ -5,6 +5,7 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/passes/onnx.h>
+#include <torch/csrc/jit/passes/onnx/autograd_function_process.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/deduplicate_initializers.h>
@@ -52,6 +53,9 @@ void initONNXBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_function_substitution",
           wrap_pybind_function(ONNXFunctionCallSubstitution))
+      .def(
+          "_jit_pass_onnx_autograd_function_process",
+          wrap_pybind_function(ONNXAutogradFunctionProcess))
       .def(
           "_jit_pass_onnx_peephole",
           ::torch::wrap_pybind_function([](std::shared_ptr<Graph>& graph,

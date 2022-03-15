@@ -568,6 +568,7 @@ def _optimize_graph(
     _C._jit_pass_fuse_addmm(graph)
     _C._jit_pass_lint(graph)
 
+    _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_peephole(graph, True)
     _C._jit_pass_lower_all_tuples(graph)
     # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
