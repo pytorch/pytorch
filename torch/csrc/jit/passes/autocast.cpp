@@ -229,6 +229,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
   c10::optional<bool> incompatible_amp = c10::nullopt;
+  bool has_seen_amp_section = false;
 
   // The current autocast enabled/disabled state
   auto current_state = [&] {
@@ -297,6 +298,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
               "Unsupported case by AMP & JIT");
           incompatible_amp = false;
           autocast_stack.push(*autocast_scope);
+          has_seen_amp_section = true;
         }
         break;
 
@@ -435,7 +437,9 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 
       // Banned in autocast, see binary_cross_entropy_banned()
       case aten::binary_cross_entropy:
-        AT_ERROR("Unsafe to autocast");
+        if (has_seen_amp_section) {
+          AT_ERROR("Unsafe to autocast");
+        }
     }
 
     // process sub-blocks, if any
