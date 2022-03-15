@@ -332,6 +332,10 @@ class CachingAllocatorConfig {
     return instance().m_max_split_size;
   }
 
+  // This is used to round-up allocation size to nearest power of 2 divisions.
+  // More description below in function roundup_power2_next_division
+  // As ane example, if we want 4 divisions between 2's power, this can be done
+  // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
   static size_t roundup_power2_divisions() {
     return instance().m_roundup_power2_divisions;
   }
