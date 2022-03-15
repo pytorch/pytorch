@@ -778,7 +778,7 @@ def maybe_insert_observers_before_graph_output(
                         qconfig_map, model, modules, graph))
         elif isinstance(old_arg, dict) and len(output_quantized_idxs) == 1:
             assert 0 in output_quantized_idxs, \
-                    'For Dict outputs, output_quantized_idxs only support 0 index'
+                'For Dict outputs, output_quantized_idxs only support 0 index'
             target_dtype = output_quantized_idxs[0]
             results_dict = {}
             for k, inner_v in old_arg.items():
