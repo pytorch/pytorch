@@ -45,6 +45,7 @@ jobs:
 
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     env:
       JOB_BASE_NAME: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test-build-and-test
