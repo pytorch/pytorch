@@ -40,7 +40,7 @@ from torch.testing._internal.common_methods_invocations import mask_not_all_zero
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta)
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import floating_types_and
 from torch.testing._internal.logging_tensor import no_dispatch
 
 import pickle
@@ -2820,7 +2820,7 @@ class TestAutograd(TestCase):
         for evt in p.function_events:
             if evt.name in names:
                 found_indices.add(names.index(evt.name))
-        self.assertEquals(len(found_indices), len(names))
+        self.assertEqual(len(found_indices), len(names))
 
     def test_profiler_seq_nr(self):
         with profile(use_kineto=kineto_available()) as p:
@@ -6669,13 +6669,16 @@ class TestAutogradForwardMode(TestCase):
             def __new__(cls, data=None):
                 return torch.Tensor._make_subclass(cls, data)
 
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
-                    with no_dispatch():
-                        return MySubclass(torch.ops.aten.alias(*args))
+                    # Make sure autograd is not disabled here
+                    foo = torch.rand(1, requires_grad=True)
+                    self.assertIsNotNone(foo.exp().grad_fn)
 
                 with no_dispatch():
                     return func(*args, **kwargs)
@@ -6684,10 +6687,11 @@ class TestAutogradForwardMode(TestCase):
         s = MySubclass(a)
 
         with fwAD.dual_level():
+            # Only the primal has "alias" called on it
             fwAD.make_dual(s, torch.rand_like(s))
             self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
-            self.assertEqual(counter[0], 2)
+            self.assertEqual(counter[0], 1)
 
     def test_print(self):
         with fwAD.dual_level() as level:
@@ -7490,7 +7494,7 @@ class TestAutogradDeviceType(TestCase):
         # At the time of writing this test, copy_ is not generated from native_functions.yaml
         # there was a bug that bfloat16 was not recognized as floating.
         x = torch.randn(10, device=device, requires_grad=True)
-        floating_dt = [dt for dt in get_all_dtypes() if dt.is_floating_point]
+        floating_dt = floating_types_and(torch.half, torch.bfloat16)
         for dt in floating_dt:
             y = torch.empty(10, device=device, dtype=dt)
             y.copy_(x)
