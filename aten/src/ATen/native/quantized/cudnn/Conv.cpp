@@ -13,7 +13,7 @@
 #include <ATen/cudnn/Handle.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cudnn/ConvShared.h>
-#include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
+#include <ATen/native/quantized/cudnn/cudnn_utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
