@@ -1340,6 +1340,59 @@ TEST(StaticRuntime, Ones) {
   testStaticRuntime(script, args, args2);
 }
 
+TEST(StaticRuntime, OnesLike) {
+  const auto script = R"JIT(
+    def forward(self,
+                input: Tensor,
+                dtype: Optional[int],
+                layout: Optional[int],
+                device: Optional[Device],
+                pin_memory: Optional[bool],
+                memory_format: Optional[int]):
+        a = torch.ones_like(input,
+                            dtype=dtype,
+                            layout=layout,
+                            device=device,
+                            pin_memory=pin_memory,
+                            memory_format=memory_format)
+        return (a.clone())
+  )JIT";
+
+  auto cpu = at::Device(DeviceType::CPU);
+  auto input0 = at::randn({2, 5});
+  std::vector<IValue> args{
+      input0,
+      at::ScalarType::Int,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  std::vector<IValue> args1{
+      input0,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  auto input1 = at::randn({5, 6});
+  std::vector<IValue> args2{
+      input1,
+      at::ScalarType::Float,
+      at::kStrided,
+      cpu,
+      false,
+      c10::MemoryFormat::Contiguous};
+  testStaticRuntime(script, args);
+  testStaticRuntime(
+      script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, Zeros) {
   const auto script = R"JIT(
     def forward(self,
