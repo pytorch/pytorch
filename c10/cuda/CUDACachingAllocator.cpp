@@ -7,6 +7,7 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <c10/util/llvmMathExtras.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -331,6 +332,10 @@ class CachingAllocatorConfig {
     return instance().m_max_split_size;
   }
 
+  static size_t roundup_power2_divisions() {
+    return instance().m_roundup_power2_divisions;
+  }
+
  private:
   static CachingAllocatorConfig& instance() {
     static CachingAllocatorConfig* s_instance = ([]() {
@@ -342,8 +347,10 @@ class CachingAllocatorConfig {
   }
 
   CachingAllocatorConfig()
-      : m_max_split_size(std::numeric_limits<size_t>::max()) {}
+      : m_max_split_size(std::numeric_limits<size_t>::max()),
+        m_roundup_power2_divisions(0) {}
   size_t m_max_split_size;
+  size_t m_roundup_power2_divisions;
 
   void parseArgs() {
     const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
@@ -373,6 +380,13 @@ class CachingAllocatorConfig {
             val2 = std::min(
                 val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
             m_max_split_size = val2 * 1024 * 1024;
+          } else if (kv[0].compare("roundup_power2_divisions") == 0) {
+            size_t val2 = stoi(kv[1]);
+            TORCH_CHECK(
+                llvm::isPowerOf2_64(val2),
+                "For roundups, the divisons has to be power of 2 ",
+                "");
+            m_roundup_power2_divisions = val2;
           } else {
             TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
           }
@@ -808,11 +822,41 @@ class DeviceCachingAllocator {
     return result;
   }
 
+  // This function takes the size and number of divisions argument and rounds
+  // up the size argument for the nearest power-of-2 division.
+  // For example, if we need to round-up 1200 and number of divisions is 4,
+  // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  // them, the values are 1024, 1280, 1536, and 1792. So the function will
+  // return 1280 as the nearest ceiling of power-2 divison.
+  static size_t roundup_power2_next_division(size_t size, size_t divisions) {
+    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
+      return size;
+    }
+    if (llvm::isPowerOf2_64(size)) {
+      return size;
+    }
+
+    // divide the space between these 2's power into equal divisions
+    // If division is zero, return the power-of-2 ceiling.
+    auto power2_floor = llvm::PowerOf2Floor(size);
+    auto power2_divison = power2_floor / divisions;
+    if (C10_UNLIKELY(power2_divison == 0)) {
+      return (power2_floor << 1);
+    }
+
+    return llvm::alignTo(size, power2_divison);
+  }
+
   static size_t round_size(size_t size) {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      auto divisions = CachingAllocatorConfig::roundup_power2_divisions();
+      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+        return roundup_power2_next_division(size, divisions);
+      } else {
+        return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      }
     }
   }
 
