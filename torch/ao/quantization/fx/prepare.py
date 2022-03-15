@@ -776,16 +776,14 @@ def maybe_insert_observers_before_graph_output(
                     _recursive_maybe_replace_node_with_obs(
                         inner_node, output_target_dtype, node_name_to_target_dtype,
                         qconfig_map, model, modules, graph))
-        elif isinstance(old_arg, dict):
+        elif isinstance(old_arg, dict) and len(output_quantized_idxs) == 1:
+            assert 0 in output_quantized_idxs, \
+                    'For Dict outputs, output_quantized_idxs only support 0 index'
+            target_dtype = output_quantized_idxs[0]
             results_dict = {}
-            for arg_idx, inner_v in enumerate(old_arg.items()):
-                if arg_idx in output_quantized_idxs:
-                    output_target_dtype = output_quantized_idxs[arg_idx]
-                else:
-                    output_target_dtype = torch.float
-                k, inner_node = inner_v
+            for k, inner_v in old_arg.items():
                 results_dict[k] = _recursive_maybe_replace_node_with_obs(
-                    inner_node, output_target_dtype, node_name_to_target_dtype,
+                    inner_v, target_dtype, node_name_to_target_dtype,
                     qconfig_map, model, modules, graph)
             new_args.append(results_dict)
         else:
