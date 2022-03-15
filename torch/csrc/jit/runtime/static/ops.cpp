@@ -2240,6 +2240,32 @@ REGISTER_OPERATOR_FUNCTOR(
       return quantized_linear_dynamic_fp16_impl<true>(n);
     });
 
+// device & pin_memory matter only when CUDA is enabled.
+static bool hasTensorWithOptions(
+    const IValue& ivalue,
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout) {
+  if (!ivalue.isTensor()) {
+    return false;
+  }
+  const auto& tensor = ivalue.toTensor();
+  if (dtype == tensor.dtype().toScalarType() &&
+      layout == tensor.options().layout_opt()) {
+    return true;
+  }
+  VLOG(1) << "tensor exists, but tensor options were different";
+  return false;
+}
+
+static bool hasTensorWithOptions(
+    const IValue& ivalue,
+    c10::optional<c10::ScalarType> dtype,
+    c10::optional<c10::Layout> layout,
+    c10::optional<c10::MemoryFormat> memory_format) {
+  return hasTensorWithOptions(ivalue, dtype, layout) &&
+      (memory_format == ivalue.toTensor().options().memory_format_opt());
+}
+
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
@@ -2249,9 +2275,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& size = p_node->Input(0).toDimVector();
     const auto fill_value = p_node->Input(1).toScalar();
-    if (p_node->Output(0).isNone()) {
-      const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
-      const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+    const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+    const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+    if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
       const auto device = p_node->Input(4).toOptional<c10::Device>();
       const auto pin_memory = p_node->Input(5).toOptional<bool>();
       p_node->Output(0) =
@@ -2311,32 +2337,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
     at::native::ones_out(size, out_t);
   };
 });
-
-// device & pin_memory matter only when CUDA is enabled.
-static bool hasTensorWithOptions(
-    const IValue& ivalue,
-    c10::optional<c10::ScalarType> dtype,
-    c10::optional<c10::Layout> layout) {
-  if (!ivalue.isTensor()) {
-    return false;
-  }
-  const auto& tensor = ivalue.toTensor();
-  if (dtype == tensor.dtype().toScalarType() &&
-      layout == tensor.options().layout_opt()) {
-    return true;
-  }
-  VLOG(1) << "tensor exists, but tensor options were different";
-  return false;
-}
-
-static bool hasTensorWithOptions(
-    const IValue& ivalue,
-    c10::optional<c10::ScalarType> dtype,
-    c10::optional<c10::Layout> layout,
-    c10::optional<c10::MemoryFormat> memory_format) {
-  return hasTensorWithOptions(ivalue, dtype, layout) &&
-      (memory_format == ivalue.toTensor().options().memory_format_opt());
-}
 
 REGISTER_OPERATOR_FUNCTOR(aten::ones_like, aten_ones_like, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(

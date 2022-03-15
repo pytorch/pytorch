@@ -1272,13 +1272,23 @@ TEST(StaticRuntime, Full) {
         return (a.clone())
   )JIT";
 
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   c10::List<int64_t> size0{2, 5};
-  std::vector<IValue> args{size0, 4, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args{
+      size0, 4, at::ScalarType::Int, at::kStrided, cpu, false};
+  std::vector<IValue> args1{
+      size0, 4, at::ScalarType::Float, at::kStrided, cpu, false};
   c10::List<int64_t> size1{5, 6};
-  std::vector<IValue> args2{size1, 5, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args2{
+      size1, 5, at::ScalarType::Float, at::kStrided, cpu, false};
   testStaticRuntime(full_script, args);
+  testStaticRuntime(
+      full_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_script, args, args2);
 }
 
