@@ -411,7 +411,8 @@ std::tuple<Tensor, std::vector<Tensor>> histogramdd(
     const Tensor &self, TensorList bins, c10::optional<ArrayRef<double>> /*range*/,
     const c10::optional<Tensor> &weight, bool density) {
   auto hist = at::_histogramdd_from_bin_tensors(self, bins, weight, density);
-  return {std::move(hist), bins.vec()};
+  return std::tuple<Tensor, std::vector<Tensor>>{
+      std::move(hist), bins.vec()};
 }
 
 std::tuple<Tensor, std::vector<Tensor>> histogramdd(
@@ -419,7 +420,8 @@ std::tuple<Tensor, std::vector<Tensor>> histogramdd(
     const c10::optional<Tensor> &weight, bool density) {
   auto bin_edges = at::_histogramdd_bin_edges(self, bins, range, weight, density);
   auto hist = at::_histogramdd_from_bin_cts(self, bins, range, weight, density);
-  return {std::move(hist), std::move(bin_edges)};
+  return std::tuple<Tensor, std::vector<Tensor>>{
+      std::move(hist), std::move(bin_edges)};
 }
 
 std::tuple<Tensor, std::vector<Tensor>> histogramdd(
