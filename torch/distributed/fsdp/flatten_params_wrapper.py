@@ -95,8 +95,8 @@ class FlatParameter(nn.Parameter):
     Args:
         params (Sequence[nn.Parameter])
             The parameters to be flattend and concatened.
-        requres_grad (bool):
-            Set to Ture if gradients need to be computed for this parameter,
+        requires_grad (bool):
+            Set to True if gradients need to be computed for this parameter,
             False otherwise.
     """
 
