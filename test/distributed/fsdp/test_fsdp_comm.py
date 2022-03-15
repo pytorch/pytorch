@@ -129,9 +129,11 @@ class TestCommunication(FSDPTest):
                         # full parameters are not freed after first iteration in the no_sync mode
                         if sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
                             expected_num_all_gather_no_sync_updated = 0
-                    assert num_all_gather == expected_num_all_gather_no_sync_updated, \
-                        f"Expected {expected_num_all_gather_no_sync_updated} " \
-                        f"all-gathers but saw {num_all_gather} all-gathers " \
+                    self.assertEqual(
+                        num_all_gather,
+                        expected_num_all_gather_no_sync_updated,
+                        f"Expected {expected_num_all_gather_no_sync_updated} "
+                        f"all-gathers but saw {num_all_gather} all-gathers "
                         f"when using `no_sync()`"
                     )
                     self.assertEqual(
@@ -163,9 +165,11 @@ class TestCommunication(FSDPTest):
                     # SHARD_GRAD_OP mode
                     if sharding_strategy == ShardingStrategy.SHARD_GRAD_OP:
                         expected_num_all_gather_sync_updated = num_fsdp
-                assert num_all_gather == expected_num_all_gather_sync_updated, \
-                    f"Expected {expected_num_all_gather_sync_updated} all-gathers " \
-                    f"but saw {num_all_gather} all-gathers when not using " \
+                self.assertEqual(
+                    num_all_gather,
+                    expected_num_all_gather_sync_updated,
+                    f"Expected {expected_num_all_gather_sync_updated} all-gathers "
+                    f"but saw {num_all_gather} all-gathers when not using "
                     "`no_sync()`"
                 )
                 self.assertEqual(
