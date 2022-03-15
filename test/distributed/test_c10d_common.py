@@ -412,6 +412,8 @@ class CommonDistributedDataParallelTest(object):
         """
         def __init__(self, use_reentrant=True):
             super().__init__(use_reentrant=use_reentrant)
+            # Share weights
+            self.l1.weight = self.l2.weight
 
         def forward(self, inp):
             x = self.l1(inp)
@@ -437,6 +439,7 @@ class CommonDistributedDataParallelTest(object):
     class DynamicCheckpointTwiceModuleWeightSharing(DynamicCheckpointTwiceModule):
         def __init__(self, use_reentrant=True):
             super().__init__(use_reentrant=use_reentrant)
+            # Share weights
             self.l1.weight = self.l2.weight
 
 
