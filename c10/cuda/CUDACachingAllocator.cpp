@@ -843,12 +843,13 @@ class DeviceCachingAllocator {
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
     auto power2_floor = llvm::PowerOf2Floor(size);
-    auto power2_divison = power2_floor / divisions;
+    auto power2_divison =
+        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
     if (C10_UNLIKELY(power2_divison == 0)) {
       return (power2_floor << 1);
     }
-
-    return llvm::alignTo(size, power2_divison);
+    auto bitmask = ~(power2_divison - 1);
+    return (size & bitmask) + power2_divison;
   }
 
   static size_t round_size(size_t size) {
