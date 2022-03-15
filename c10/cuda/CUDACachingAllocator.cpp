@@ -848,8 +848,9 @@ class DeviceCachingAllocator {
     if (C10_UNLIKELY(power2_divison == 0)) {
       return (power2_floor << 1);
     }
-    size_t bitmask = ~(power2_divison - 1);
-    return (size & bitmask) + power2_divison;
+    size_t round_size_floor = size & (~(power2_divison - 1));
+    return (round_size_floor == size) ? size
+                                      : round_size_floor + power2_divison;
   }
 
   static size_t round_size(size_t size) {
