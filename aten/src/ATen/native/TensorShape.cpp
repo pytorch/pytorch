@@ -1544,43 +1544,63 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     {
       auto dim_indices_counts = at::zeros({size}, index.options());
       {
-        auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
         auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
+        auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
         for (const auto i : c10::irange(nnz)) {
           ++ptr_dim_indices_counts[*ptr_dim_indices++];
         }
       }
-      const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index);
-      const auto perm = at::arange(index_len, index.options());
+
+      auto index_counts = at::zeros({size}, index.options());
+      {
+        auto* ptr_index = index.data_ptr<int64_t>();
+        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
+        for (const auto i : c10::irange(index_len)) {
+          ++ptr_index_counts[*ptr_index++];
+        }
+      }
+
+      auto index_sorted = at::empty_like(index);
+      {
+        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
+        auto* ptr_index_sorted = index_sorted.data_ptr<int64_t>();
+        for (const auto i : c10::irange(size)) {
+          const auto i_count = *ptr_index_counts++;
+          if (i_count) {
+            std::fill(ptr_index_sorted, ptr_index_sorted + i_count, i);
+            ptr_index_sorted += i_count;
+          }
+        }
+      }
+
+      const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
+      const auto perm = at::arange(index_len, index_sorted.options());
       res_dim_indices = at::repeat_interleave(perm, selected_dim_indices_counts);
 
       auto res_nnz = res_dim_indices.numel();
 
-      auto index_mask = at::zeros({size}, index.options().dtype(at::kBool));
-      index_mask.scatter_(0, index, true);
-
       // find intersection
       {
         auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
-        auto* ptr_index_mask = index_mask.data_ptr<bool>();
+        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
         for (const auto i : c10::irange(size)) {
-          if (!(*ptr_dim_indices_counts && *ptr_index_mask)) {
+          if (!(*ptr_dim_indices_counts && *ptr_index_counts)) {
             *ptr_dim_indices_counts = 0;
-            *ptr_index_mask = false;
+            *ptr_index_counts = 0;
           }
           ++ptr_dim_indices_counts;
-          ++ptr_index_mask;
+          ++ptr_index_counts;
         }
       }
 
       std::vector<std::vector<int64_t>> dim_indices_idxs(size);
       {
         auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
-        auto* ptr_index_mask = index_mask.data_ptr<bool>();
+        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
 
         for (const auto i : c10::irange(nnz)) {
           const auto idx = *ptr_dim_indices++;
-          const auto is_idx_selected = ptr_index_mask[idx];
+          const auto is_idx_selected = ptr_index_counts[idx];
           if (is_idx_selected) {
             dim_indices_idxs[idx].push_back(i);
           }
@@ -1588,7 +1608,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       }
 
       {
-        auto* ptr_index = index.data_ptr<int64_t>();
+        auto* ptr_index = index_sorted.data_ptr<int64_t>();
         auto* ptr_selected_dim_indices = selected_dim_indices.data_ptr<int64_t>();
         for (const auto i : c10::irange(index_len)) {
           const auto idx = *ptr_index++;
