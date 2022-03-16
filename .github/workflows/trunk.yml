@@ -8,7 +8,7 @@ on:
       - release/*
     tags:
       - ciflow/trunk/*
-      - ciflow/everything/*
+      - ciflow/all/*
   workflow_dispatch:
 
 concurrency:
