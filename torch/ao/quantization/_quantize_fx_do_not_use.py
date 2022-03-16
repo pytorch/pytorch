@@ -16,7 +16,6 @@ def _convert_fx_do_not_use(
     Please do not use, this is a temporary function to migrate convert_fx
     to a new implementation
     """
-    assert is_reference
     if convert_custom_config_dict is None:
         convert_custom_config_dict = {}
 
