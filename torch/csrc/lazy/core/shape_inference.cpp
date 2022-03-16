@@ -141,6 +141,14 @@ std::vector<Shape> compute_shape_abs(const at::Tensor & self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optional<at::Generator> generator) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_bernoulli_(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
+  return compute_shape_bernoulli(self, generator);
+}
+
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {
   if(reduction == at::Reduction::None) {
     return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -351,6 +359,18 @@ std::vector<Shape> compute_shape_native_dropout(const at::Tensor & input, double
 
 std::vector<Shape> compute_shape_native_dropout_backward(const at::Tensor & grad_output, const at::Tensor & mask, double scale) {
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_random_(at::Tensor & self, c10::optional<at::Generator> generator) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_(self, generator);
+}
+
+std::vector<Shape> compute_shape_random_(at::Tensor & self, int64_t from, c10::optional<int64_t> to, c10::optional<at::Generator> generator) {
+  return compute_shape_random_(self, generator);
 }
 
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
