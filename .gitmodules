@@ -148,4 +148,3 @@
 [submodule "third_party/hipify_torch"]
 	path = third_party/hipify_torch
 	url = https://github.com/ROCmSoftwarePlatform/hipify_torch.git
-	branch = syncup_pytorch_hipify
