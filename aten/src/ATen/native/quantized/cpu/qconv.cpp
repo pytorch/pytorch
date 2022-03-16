@@ -671,7 +671,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
     xnn_operator_t xnnp_op = nullptr;
 
     // Update the input scale so we may cache the op
-    this->input_scale = input_scale;
+    input_scale = act_input_scale;
 
     // create an empty tensor for packing the weights
     const at::Tensor weight_contig =
