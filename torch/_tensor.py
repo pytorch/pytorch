@@ -1082,19 +1082,6 @@ class Tensor(torch._C._TensorBase):
         else:
             return self.to_sparse()
 
-    def to_sparse_csr(self):
-        """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
-
-        Examples::
-
-            >>> dense = torch.randn(5, 5)
-            >>> sparse = dense.to_sparse_csr()
-            >>> sparse._nnz()
-            25
-
-        """
-        return self.to_sparse_csr()
-
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor._update_names, (self,), self, names, inplace)
