@@ -11,6 +11,7 @@ void createCusolverDnHandle(cusolverDnHandle_t *handle) {
 }
 
 void destroyCusolverDnHandle(cusolverDnHandle_t handle) {
+  (void)handle; // Suppress unused variable warning
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
 // would already be destroyed by the time this gets destroyed. It
