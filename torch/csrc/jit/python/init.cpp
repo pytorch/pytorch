@@ -77,6 +77,7 @@
 #include <torch/csrc/jit/python/script_init.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/decomposition_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/jit_trace.h>
@@ -160,6 +161,15 @@ void initJITBindings(PyObject* module) {
             }
             return shapeComputeGraphForSchema(n->schema());
           })
+      .def(
+          "_jit_decomposition_graph_for_node",
+          [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
+            if (!n->maybeSchema()) {
+              return c10::nullopt;
+            }
+            return DecompositionGraphForSchema(n->schema());
+          })
+      .def("_jit_pass_run_decompositions", RunDecompositions)
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def(
           "_jit_pass_propagate_shapes_on_graph_and_build_compute",
@@ -402,7 +412,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
       .def(
           "_jit_pass_canonicalize",
-          [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
+          [](const std::shared_ptr<Graph>& g, bool keep_unique_names = true) {
+            return Canonicalize(g, keep_unique_names);
+          },
+          py::arg("graph"),
+          py::arg("keep_unique_names") = true)
       .def("_jit_pass_lint", LintGraph)
       .def(
           "_jit_pass_complete_shape_analysis",
@@ -620,8 +634,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
-            bool oldState = getProfilingMode();
-            getProfilingMode() = profiling_flag;
+            TORCH_WARN(
+                "Set profiling mode is deprecated and will invoke getGraphExecutorOptimize now. Please use `_get_graph_executor_optimize`");
+            auto oldState = getGraphExecutorOptimize();
+            setGraphExecutorOptimize(profiling_flag);
             return oldState;
           })
       .def(
@@ -668,6 +684,7 @@ void initJITBindings(PyObject* module) {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
                 TORCH_INTERNAL_ASSERT(
+                    false,
                     "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
