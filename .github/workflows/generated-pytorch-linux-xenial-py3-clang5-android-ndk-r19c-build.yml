@@ -14,6 +14,7 @@ on:
     branches:
       - master
       - main
+      - nightly
       - release/*
   workflow_dispatch:
 
@@ -447,6 +448,7 @@ jobs:
           ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
         run: |
           set -eux
+          # shellcheck disable=SC2154
           (echo "cd workspace && ./.circleci/scripts/publish_android_snapshot.sh" | docker exec \
             -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot" \
             -e SONATYPE_NEXUS_USERNAME \
