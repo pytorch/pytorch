@@ -133,6 +133,50 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
+GH_GET_PR_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 100, after: $cursor) {
+              nodes {
+                app {
+                  name
+                  databaseId
+                }
+                workflowRun {
+                  workflow {
+                    name
+                  }
+                }
+                checkRuns(first: 10) {
+                  nodes {
+                    name
+                    conclusion
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+                conclusion
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -215,6 +259,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
+        self.conclusions: Optional[Dict[str, str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -296,22 +341,38 @@ class GitHubPR:
 
     def get_checkrun_conclusions(self) -> Dict[str, str]:
         """ Returns list of checkrun / conclusions """
-        last_commit = self.info["commits"]["nodes"][-1]["commit"]
-        checksuites = last_commit["checkSuites"]
-        # TODO: Implement pagination
-        if bool(checksuites["pageInfo"]["hasNextPage"]):
-            raise RuntimeError("Too many checksuites for commit")
-        rc = {}
-        for node in checksuites["nodes"]:
-            workflow_run = node["workflowRun"]
-            checkruns = node["checkRuns"]
-            if workflow_run is not None:
-                rc[workflow_run["workflow"]["name"]] = node["conclusion"]
-                continue
-            if checkruns is not None:
-                for checkrun_node in checkruns["nodes"]:
-                    rc[checkrun_node["name"]] = checkrun_node["conclusion"]
-        return rc
+        if self.conclusions is not None:
+            return self.conclusions
+        orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
+        checksuites = orig_last_commit["checkSuites"]
+        conclusions = {}
+
+        def add_conclusions(nodes: List[Dict[str, Any]]) -> None:
+            for node in nodes:
+                workflow_run = node["workflowRun"]
+                checkruns = node["checkRuns"]
+                if workflow_run is not None:
+                    conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
+                    continue
+                if checkruns is not None:
+                    for checkrun_node in checkruns["nodes"]:
+                        conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
+
+        add_conclusions(checksuites["nodes"])
+        while bool(checksuites["pageInfo"]["hasNextPage"]):
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=checksuites["pageInfo"]["endCursor"])
+            info = rc["data"]["repository"]["pullRequest"]
+            last_commit = info["commits"]["nodes"][-1]["commit"]
+            if last_commit["oid"] != orig_last_commit["oid"]:
+                raise RuntimeError("Last commit changed on PR")
+            checksuites = last_commit["checkSuites"]
+            add_conclusions(checksuites["nodes"])
+        self.conclusions = conclusions
+        return conclusions
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
