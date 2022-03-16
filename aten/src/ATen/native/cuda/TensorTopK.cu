@@ -610,8 +610,8 @@ class BlockIdxToKey {
   uint32_t blocks_per_slice;
 public:
   BlockIdxToKey(uint32_t blocks_per_slice): blocks_per_slice(blocks_per_slice) {}
-  __device__ __forceinline__ bool operator()(uint32_t blk) const {
-    return 1 == ((blk / blocks_per_slice) % 2);
+  __device__ __forceinline__ uint32_t operator()(uint32_t blk) const {
+    return blk / blocks_per_slice;
   }
 };
 
@@ -711,7 +711,7 @@ void launch(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
   using counting_iter_t = cub::CountingInputIterator<uint32_t, uint32_t>;
-  using slice_idx_iter_t = cub::TransformInputIterator<bool, BlockIdxToKey, counting_iter_t>;
+  using slice_idx_iter_t = cub::TransformInputIterator<uint32_t, BlockIdxToKey, counting_iter_t>;
   slice_idx_iter_t slice_idx_iter(counting_iter_t(0), BlockIdxToKey(blocks_per_slice));
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks);
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks);
