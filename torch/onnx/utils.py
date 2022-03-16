@@ -649,6 +649,29 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         torch.jit._trace._trace_module_map = trace_module_map
         return trace_module_map
 
+    def __register_attribute_hook():
+        attr_name = "_onnx_attrs"
+
+        def _track_module_attributes_forward_pre_hook(module, input):
+            setattr(module, attr_name, _get_module_attributes(module))
+
+        def _track_module_attributes_forward_hook(module, input, output):
+            tracing_state = torch._C._get_tracing_state()
+            if not tracing_state:
+                return
+
+            graph = tracing_state.graph()
+            onnx_attrs = {}
+            if hasattr(module, attr_name):
+                onnx_attrs = getattr(module, attr_name)
+                delattr(module, attr_name)
+
+            torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+
+        for m in model.modules():
+            m.register_forward_hook(_track_module_attributes_forward_hook)
+            m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
+
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
         trace_module_map = __setup_trace_module_map()
         export_modules_as_functions = {v for k, v in trace_module_map.items()}
@@ -665,10 +688,22 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
+
+    if export_modules_as_functions:
+        __register_attribute_hook()
+
     return export_modules_as_functions
 
 def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
+    torch._C._jit_pass_onnx_clear_scope_records()
+
+def _get_module_attributes(module):
+    from typing import get_type_hints
+    annotations = get_type_hints(type(module))
+    base_m_annotations = get_type_hints(torch.nn.Module)
+    [annotations.pop(k, None) for k in base_m_annotations]
+    return {k : getattr(module, k) for k in annotations}
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
@@ -745,7 +780,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
             torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
             node_attr_to_name = {}  # type: ignore[var-annotated]
-            if export_modules_as_functions is not None:
+            if export_modules_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
@@ -1094,7 +1129,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return _graph_at(g, op_name, *inputs, aten=True, **attrs)
+            return g.at(op_name, *inputs, aten=True, **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
@@ -1109,8 +1144,8 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 
 # Generate an ONNX ATen op node.
-def _graph_at(g, opname, *args, **kwargs):
-    return g.op("ATen", *args, operator_s=opname, **kwargs)
+def _aten_op(g, operator, *args, overload_name="", **kwargs):
+    return g.op("ATen", *args, operator_s=operator, overload_name_s=overload_name, **kwargs)
 
 
 # This helper function can create either constant tensor or constant scalar.
@@ -1244,7 +1279,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
 
 
 torch._C.Graph.op = _graph_op  # type: ignore[attr-defined]
-torch._C.Graph.at = _graph_at  # type: ignore[attr-defined]
+torch._C.Graph.at = _aten_op  # type: ignore[attr-defined]
 torch._C.Block.op = _block_op  # type: ignore[attr-defined]
 torch._C.Graph.constant = _graph_constant  # type: ignore[attr-defined]
 torch._C.Node.__getitem__ = _node_getitem  # type: ignore[attr-defined, misc, assignment]

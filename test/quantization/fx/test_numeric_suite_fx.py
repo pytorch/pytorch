@@ -1905,6 +1905,13 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         extend_logger_results_with_comparison(
             act_compare_dict, 'a', 'b', compute_sqnr, 'sqnr')
 
+    def test_fp16_shadows_fp32(self):
+        m = LinearReluFunctional().eval()
+        qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
+        mp = prepare_fx(copy.deepcopy(m), qconfig_dict)
+        mq = convert_fx(mp, is_reference=True)
+        mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
+
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
     """

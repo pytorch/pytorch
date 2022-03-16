@@ -146,6 +146,16 @@ void FlatbufferLoader::internal_registerTypeResolver(
   type_resolver_ = type_resolver;
 }
 
+void parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files) {
+  auto extra_files_offsets = module->extra_files();
+  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
+    const auto* extra_file = extra_files_offsets->Get(i);
+    extra_files[extra_file->name()->str()] = extra_file->content()->str();
+  }
+}
+
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
   module_ = module;
@@ -215,7 +225,10 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
   }
 
-  AT_ASSERT(unsupported_op_names.empty());
+  TORCH_CHECK(
+      unsupported_op_names.empty(),
+      "Unsupported ops: ",
+      c10::Join(", ", unsupported_op_names));
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
