@@ -293,10 +293,22 @@ std::string CUDAHooks::showConfig() const {
   cudaRuntimeGetVersion(&runtimeVersion);
 
   auto printCudaStyleVersion = [&](int v) {
+#ifdef USE_ROCM
+    // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
+    if(v < 500) {
+      // If major=xx, minor=yy then format -> xxyy
+      oss << (v / 100) << "." << (v % 10);
+    }
+    else {
+      // If major=xx, minor=yy & patch=zzzzz then format -> xxyyzzzzz
+      oss << (v / 10000000) << "." << (v / 100000 % 100) << "." << (v % 100000);
+    }
+#else
     oss << (v / 1000) << "." << (v / 10 % 100);
     if (v % 10 != 0) {
       oss << "." << (v % 10);
     }
+#endif
   };
 
 #if !defined(USE_ROCM)
