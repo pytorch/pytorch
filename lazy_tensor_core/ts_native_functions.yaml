@@ -18,6 +18,8 @@ full_codegen:
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm
+  - bernoulli
+  - bernoulli_.float
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
@@ -97,6 +99,9 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
+  - random_
+  - random_.from
+  - random_.to
   - reciprocal
   - relu
   - relu_
@@ -138,8 +143,6 @@ full_codegen:
 supported:
   - as_strided
   - as_strided_
-  - bernoulli
-  - bernoulli_.float
   - clone
   - _copy_from
   - _copy_from_and_resize
@@ -153,9 +156,6 @@ supported:
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
-  - random_
-  - random_.from
-  - random_.to
   - select.int
   - slice.Tensor
   - squeeze

@@ -19,11 +19,6 @@ void as_strided_(torch::lazy::LazyTensorPtr& input, std::vector<int64_t> size,
                  std::vector<int64_t> stride,
                  c10::optional<int64_t> storage_offset);
 
-torch::lazy::LazyTensorPtr bernoulli(const torch::lazy::LazyTensorPtr& input, double probability);
-torch::lazy::LazyTensorPtr bernoulli(const torch::lazy::LazyTensorPtr& input);
-void bernoulli_(torch::lazy::LazyTensorPtr& input, double probability);
-void bernoulli_(torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& probability);
-
 torch::lazy::LazyTensorPtr expand(const torch::lazy::LazyTensorPtr& input,
                   std::vector<int64_t> size);
 
