@@ -57,7 +57,6 @@ name: !{{ build_environment }}
           # x86_32
           export id_x86_32
           id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}-x86_32")
-          echo "id_x86_32=${id_x86_32}" >> "${GITHUB_ENV}"
 
           # Putting everything together
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
@@ -88,6 +87,7 @@ name: !{{ build_environment }}
 
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
+          echo "id_x86_32=${id_x86_32}" >> "${GITHUB_ENV}"
 
       !{{ common_android.upload_android_binary_size("prebuilt", "${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz") }}
       - uses: !{{ common.upload_artifact_s3_action }}
@@ -98,6 +98,7 @@ name: !{{ build_environment }}
           if-no-files-found: error
           path:
             build_android_artifacts/artifacts.tgz
+
       - name: Publish android snapshot
         if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
         env:
