@@ -1225,8 +1225,8 @@ class FullyShardedDataParallel(nn.Module):
         for param_name, param in torch.nn.Module.named_parameters(
             self, prefix=prefix, recurse=recurse,
         ):
-            # Remove any instances of "_fsdp_wrapped_module._fpw_module"; there
-            # can be multiple occurrences in the case of nested FSDP modules
+            # Remove any instances of "_fsdp_wrapped_module._fpw_module.";
+            # there can be multiple in the case of nested FSDP modules
             fsdp_prefix = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
             param_name = param_name.replace(fsdp_prefix, "")
             yield (param_name, param)
