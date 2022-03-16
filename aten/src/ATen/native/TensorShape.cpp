@@ -1541,6 +1541,54 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       }
     }
 
+    {
+      auto dim_indices_counts = at::zeros({size}, index.options());
+      auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
+      auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
+      for (const auto i : c10::irange(nnz)) {
+        ++ptr_dim_indices_counts[*ptr_dim_indices++];
+      }
+      const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index);
+      const auto perm = at::arange(index_len, index.options());
+      res_dim_indices = at::repeat_interleave(perm, selected_dim_indices_counts);
+
+      int64_t res_nnz = 0;
+      {
+        auto selected_dim_indices_offsets = selected_dim_indices_counts.cumsum(0);
+        res_nnz = *(selected_dim_indices_offsets.data_ptr<int64_t>() + index_len - 1);
+      }
+
+      auto index_mask = at::zeros({size}, index.options().dtype(at::kBool));
+      index_mask.scatter_(0, index, true);
+      std::vector<std::vector<int64_t>> dim_indices_idxs(size);
+      {
+        auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
+        auto* ptr_index_mask = index_mask.data_ptr<bool>();
+
+        for (const auto i : c10::irange(nnz)) {
+          const auto idx = *ptr_dim_indices++;
+          const auto is_idx_selected = ptr_index_mask[idx];
+          if (is_idx_selected) {
+            dim_indices_idxs[idx].push_back(i);
+          }
+        }
+      }
+
+      {
+        auto* ptr_index = index.data_ptr<int64_t>();
+        auto* ptr_selected_dim_indices = selected_dim_indices.data_ptr<int64_t>();
+        for (const auto i : c10::irange(index_len)) {
+          const auto idx = *ptr_index++;
+          const auto dim_indices_idx = dim_indices_idxs[idx];
+          if (!dim_indices_idx.empty()) {
+            std::copy(dim_indices_idx.begin(), dim_indices_idx.end(), ptr_selected_dim_indices);
+            ptr_selected_dim_indices += dim_indices_idx.size();
+          }
+        }
+      }
+
+    }
+
     auto res_indices = indices.index_select(1, selected_dim_indices);
     res_indices[dim] = res_dim_indices;
     const auto res_values = values.index_select(0, selected_dim_indices);
