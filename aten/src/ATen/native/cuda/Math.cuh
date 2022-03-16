@@ -628,14 +628,14 @@ const auto igammac_string = gamma_helpers_string + jiterator_stringify(
   // at most 1 of them can be 0), where igammac(0, x) = 0.0 iff x > 0.
   if ((x < 0) || (a < 0)) {
     // out of defined-region of the function
-    return std::numeric_limits<scalar_t>::quiet_NaN();
+    return NAN;
   }
   else if (a == 0) {
     if (x > 0) {
       return 0.0;
     }
     else {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return NAN;
     }
   }
   else if (x == 0) {
@@ -643,7 +643,7 @@ const auto igammac_string = gamma_helpers_string + jiterator_stringify(
   }
   else if (std::isinf(a)) {
     if (std::isinf(x)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return NAN;
     }
     return 1.0;
   }
@@ -710,14 +710,14 @@ const auto igamma_string = igammac_string + jiterator_stringify(
     // at most 1 of them can be 0), where igamma(0, x) = 1.0 iff x > 0.
     if ((x < 0) || (a < 0)) {
       // out of defined-region of the function
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return NAN;
     }
     else if (a == 0) {
       if (x > 0) {
         return 1.0;
       }
       else {
-        return std::numeric_limits<scalar_t>::quiet_NaN();
+        return NAN;
       }
     }
     else if (x == 0) {
@@ -725,7 +725,7 @@ const auto igamma_string = igammac_string + jiterator_stringify(
     }
     else if (std::isinf(a)) {
       if (std::isinf(x)) {
-        return std::numeric_limits<scalar_t>::quiet_NaN();
+        return NAN;
       }
       return 0.0;
     }
@@ -993,16 +993,16 @@ const auto gammaincinv_string = igamma_string + inverse_gamma_helpers_string + j
     scalar_t x, fac, f_fp, fpp_fp;
 
     if (std::isnan(a) || std::isnan(y)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return NAN;
     }
     else if ((a < 0) || (y < 0) || (y > 1)) {
-      return std::numeric_limits<scalar_t>::quiet_NaN();
+      return NAN;
     }
     else if (y == 0.0) {
       return 0.0;
     }
     else if (y == 1.0) {
-      return std::numeric_limits<T>::infinity();
+      return POS_INFINITY;
     }
     else if (y > 0.9) {
       return calc_gammainccinv(a, 1 - y);
@@ -1040,13 +1040,13 @@ const auto gammainccinv_string = igammac_string + inverse_gamma_helpers_string +
       scalar_t x, fac, f_fp, fpp_fp;
 
       if (std::isnan(a) || std::isnan(y)) {
-        return std::numeric_limits<scalar_t>::quiet_NaN();
+        return NAN;
       }
       else if ((a < 0.0) || (y < 0.0) || (y > 1.0)) {
-        return std::numeric_limits<scalar_t>::quiet_NaN();
+        return NAN;
       }
       else if (y == 0.0) {
-        return std::numeric_limits<scalar_t>::infinity();
+        return POS_INFINITY;
       }
       else if (y == 1.0) {
         return 0.0;

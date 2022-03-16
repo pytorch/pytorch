@@ -3734,10 +3734,8 @@ class TestBinaryUfuncs(TestCase):
             actual_output = torch_fn(input0, input1)
             self.assertEqual(torch.from_numpy(expected_output).to(device=device, dtype=dtype), actual_output)
 
-    @skipCUDAIfRocm  # see issue https://github.com/pytorch/pytorch/issues/46531
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_gammaincinv_common(self, device, dtype=torch.float64):
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
@@ -3747,7 +3745,6 @@ class TestBinaryUfuncs(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_gammainccinv_common(self, device, dtype=torch.float64):
         # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
@@ -3757,7 +3754,6 @@ class TestBinaryUfuncs(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_gammaincinv_edge_cases(self, device, dtype=torch.float64):
         # write comment
         inputs = [
@@ -3775,7 +3771,6 @@ class TestBinaryUfuncs(TestCase):
 
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64)
-    @onlyNativeDeviceTypes
     def test_gammainccinv_edge_cases(self, device, dtype=torch.float64):
         inputs = [
             (10, 2.5715803516000736e-20),
