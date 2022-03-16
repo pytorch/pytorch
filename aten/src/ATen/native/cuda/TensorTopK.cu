@@ -13,6 +13,7 @@
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/cuda/cub.cuh>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 
 #include <c10/macros/Macros.h>
 
@@ -250,7 +251,7 @@ __global__ void radixFindKthValues(
     // outputs
     uint32_t* semaphores,  // size: num_slices
     Bitwise* desires,      // size: num_slices
-    short* counts,         // size: num_slices * blocks_per_slice * radix_digits
+    short* counts,     // size: num_slices * blocks_per_slice * radix_digits
     T* kthValues           // size: num_slices, only write when current_bit reaches 0
   ) {
 
@@ -448,6 +449,23 @@ __global__ void computeBlockwiseWithinKCounts(
   }
 }
 
+template <typename Bitwise, typename IndexType>
+__global__ void computeBlockwiseKthCounts(
+  Bitwise* desires,            // size: num_slices
+  short* counts,               // size: num_slices * blocks_per_slice * radix_digits
+  IndexType num_blocks,        // the number of blocks used by `radixFindKthValues` kernel
+  IndexType blocks_per_slice,
+  // outputs:
+  IndexType* kthCounts         // size: num_slices * blocks_per_slice == num_blocks
+) {
+  CUDA_KERNEL_LOOP_TYPE(idx, num_blocks, IndexType) {
+    IndexType slice_idx = idx / blocks_per_slice;
+    Bitwise desired = doLdg(desires + slice_idx);
+    Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, 0, RADIX_BITS);
+    kthCounts[idx] = doLdg(counts + idx * RADIX_DIGITS + desired_digit);
+  }
+}
+
 template <typename T, typename IndexType, int Dim>
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
@@ -630,8 +648,8 @@ void launch(
   IndexType* withinKCounts = reinterpret_cast<IndexType*>(withinKCounts_buffer.get());
   AT_CUDA_CHECK(cudaMemsetAsync(withinKCounts, 0, num_blocks * sizeof(IndexType), stream));
 
-  auto kthOffsets_buffer = allocator.allocate(num_blocks * sizeof(IndexType));
-  IndexType* kthOffsets = reinterpret_cast<IndexType*>(kthOffsets_buffer.get());
+  auto kthCounts_buffer = allocator.allocate(num_blocks * sizeof(IndexType));
+  IndexType* kthCounts = reinterpret_cast<IndexType*>(kthCounts_buffer.get());
 #endif
 
   Bitwise desiredMask = 0;
@@ -665,27 +683,22 @@ void launch(
   }
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
-  // Do a prefix scan of withinKCounts and kth counts using slice_idx as keys to get the starting index of each block
+  computeBlockwiseKthCounts<Bitwise, IndexType><<<std::min((numInputSlices + 255) / 256, (IndexType)65535), 256, 0, stream>>>(
+    desired, counts, num_blocks, blocks_per_slice, kthCounts);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
   using counting_iter_t = cub::CountingInputIterator<IndexType, IndexType>;
   counting_iter_t blk_idx_iter(0);
   auto get_slice_idx = [=]__device__(IndexType blk)->IndexType { return blk / blocks_per_slice; };
-  auto get_kth_count = [=]__device__(IndexType blk)->IndexType {
-    IndexType slice_idx = blk / blocks_per_slice;
-    Bitwise desired_ = doLdg(desired + slice_idx);
-    Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired_, 0, RADIX_BITS);
-    return doLdg(counts + blk * RADIX_DIGITS + desired_digit);
-  };
   using slice_idx_iter_t = cub::TransformInputIterator<IndexType, decltype(get_slice_idx), counting_iter_t>;
   slice_idx_iter_t slice_idx_iter(blk_idx_iter, get_slice_idx);
-  using kth_count_iter_t = cub::TransformInputIterator<IndexType, decltype(get_kth_count), counting_iter_t>;
-  kth_count_iter_t kth_count_iter(blk_idx_iter, get_kth_count);
   at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks);
-  at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kth_count_iter, kthOffsets, num_blocks);
+  at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks);
   // copy topk values to output tensor
   gatherTopK<T, IndexType, Dim><<<grid, block, 0, stream>>>(
     input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
     topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
-    blocks_per_slice, kthValues, withinKCounts, kthOffsets);
+    blocks_per_slice, kthValues, withinKCounts, kthCounts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // Find topk values based on kth values
