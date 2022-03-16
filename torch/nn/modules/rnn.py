@@ -608,9 +608,8 @@ class LSTM(RNNBase):
           `h_n` will contain a concatenation of the last forward and backward hidden states, respectively.
         * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-          final cell state for each element in the sequence. (If the model is bidirectional, c_n
-          will contain a concatenation of the last forward and the last backward cell states, similar to
-          h_n.)
+          final cell state for each element in the sequence. When ``bidirectional=True``,
+          `c_n` will contain a concatenation of the last forward and backward cell states, respectively.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
