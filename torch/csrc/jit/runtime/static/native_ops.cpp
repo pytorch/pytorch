@@ -39,7 +39,7 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name) {
   return SRNativeOperatorRegistry()->Has(name);
 }
 
-std::function<void(ProcessedNode*)> getNativeOperation(Node* n) {
+SROperator getNativeOperation(Node* n) {
   auto op_name = n->kind().toQualString();
   if (SRNativeOperatorRegistry()->Has(op_name)) {
     return SRNativeOperatorRegistry()->Create(op_name)->Generate(n);
@@ -956,6 +956,52 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         pnode->Output(0) = condition ? createBorrowedIValue(pnode->Input(1))
                                      : createBorrowedIValue(pnode->Input(2));
       };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::len,
+    aten_len,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema("aten::len.t(t[] a) -> int")) ||
+          n->matches(torch::schema("aten::len.any(Any[] a) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto list = pnode->Input(0).toListRef();
+          const int64_t size = list.size();
+          pnode->Output(0) = size;
+        };
+      }
+      if (n->matches(torch::schema("aten::len.Tensor(Tensor t) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& t = pnode->Input(0).toTensor();
+          TORCH_CHECK(t.dim() > 0);
+          pnode->Output(0) = t.sizes()[0];
+        };
+      }
+      if (n->matches(torch::schema("aten::len.str(str s) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& string = pnode->Input(0).toStringRef();
+          pnode->Output(0) = static_cast<int64_t>(string.size());
+        };
+      }
+      if (n->matches(
+              torch::schema("aten::len.Dict_str(Dict(str, t) self) -> int")) ||
+          n->matches(
+              torch::schema("aten::len.Dict_int(Dict(int, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_bool(Dict(bool, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_float(Dict(float, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_complex(Dict(complex, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_Tensor(Dict(Tensor, t) self) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& dict = pnode->Input(0).toGenericDict();
+          pnode->Output(0) = static_cast<int64_t>(dict.size());
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 } // namespace jit
