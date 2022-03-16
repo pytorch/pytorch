@@ -1,10 +1,7 @@
 name: Lint
 
 on:
-  push:
-    branches:
-      - master
-  pull_request:
+  workflow_call:
 
 jobs:
   quick-checks:
@@ -347,14 +344,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          check_name: 'flake8-py3'
+          check_name: "flake8-py3"
           linter_output_path: flake8-output/annotations.json
           commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
 
   clang-tidy:
     name: clang-tidy
-    runs-on: linux.2xlarge
+    runs-on: [self-hosted, linux.2xlarge]
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
@@ -441,7 +438,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          check_name: 'clang-tidy'
+          check_name: "clang-tidy"
           linter_output_path: clang-tidy/annotations.json
           commit_sha: ${{ github.event.pull_request.head.sha }}
           mode: json
@@ -510,7 +507,3 @@ jobs:
             echo 'Please fix the above mypy warnings.'
             false
           fi
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true

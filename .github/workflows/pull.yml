@@ -14,6 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint
+    uses: ./.github/workflows/_lint.yml
+
+  test-tools:
+    name: Test tools
+    uses: ./.github/workflows/_test-tools.yml
+
   linux-xenial-py3_7-gcc5_4-build:
     name: linux-xenial-py3.7-gcc5.4
     uses: ./.github/workflows/_linux-build.yml

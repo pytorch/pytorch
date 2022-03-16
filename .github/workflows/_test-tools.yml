@@ -1,11 +1,7 @@
 name: Test tools
 
 on:
-  push:
-    branches:
-      - master
-      - main
-  pull_request:
+  workflow_call
 
 jobs:
   test:
@@ -33,7 +29,3 @@ jobs:
         run: |
           python3 -m unittest discover -vs tools/test -p 'test_*.py'
           python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true
