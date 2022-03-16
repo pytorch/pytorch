@@ -866,7 +866,11 @@ struct TORCH_API DictType : public SharedType {
   static const TypeKind Kind = TypeKind::DictType;
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
-    switch (key->kind()) {
+    auto kind = key->kind();
+    if (auto dyn = key->castRaw<DynamicType>()) {
+      kind = dyn->dynamicKind();
+    }
+    switch (kind) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::BoolType:

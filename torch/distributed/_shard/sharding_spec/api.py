@@ -194,29 +194,30 @@ class ChunkShardingSpec(ShardingSpec):
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned()
         )
+        current_rank = dist.get_rank(process_group)
         tensor_meta = self.build_metadata(tensor.size(), tensor_properties)
         local_shards = []
         local_tensor = None
         local_metadata = None
-        tensors_to_scatter = []
+        tensors_to_scatter = [] if current_rank == src_rank else None
 
-        current_rank = dist.get_rank(process_group)
         for shard_meta in tensor_meta.shards_metadata:
             rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
             shard_offsets = shard_meta.shard_offsets
             shard_sizes = shard_meta.shard_sizes
-            narrowed_tensor = tensor
-            for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
-                if size < tensor.size(idx):
-                    # Reshape to get shard for this rank and we don't want autograd
-                    # recording here for the narrow op and 'local_shard' should be a
-                    # leaf variable in the autograd graph.
-                    narrowed_tensor = narrowed_tensor.narrow(
-                        idx,
-                        shard_offsets[idx],
-                        shard_sizes[idx]
-                    ).clone().detach().contiguous()
-            tensors_to_scatter.append(narrowed_tensor)
+            if current_rank == src_rank:
+                narrowed_tensor = tensor
+                for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
+                    if size < tensor.size(idx):
+                        # Reshape to get shard for this rank and we don't want autograd
+                        # recording here for the narrow op and 'local_shard' should be a
+                        # leaf variable in the autograd graph.
+                        narrowed_tensor = narrowed_tensor.narrow(
+                            idx,
+                            shard_offsets[idx],
+                            shard_sizes[idx]
+                        ).clone().detach().contiguous()
+                tensors_to_scatter.append(narrowed_tensor)
 
             if current_rank == rank:
                 local_tensor = torch.empty(
