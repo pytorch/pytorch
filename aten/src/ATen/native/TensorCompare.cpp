@@ -345,7 +345,7 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = at::empty({0}, self.options());
-  at::where_out(ret, condition, self, other);
+  at::native::where_self_out(condition, self, other, ret);
   return ret;
 }
 
