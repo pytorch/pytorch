@@ -80,6 +80,8 @@ from torch.ao.quantization.fx.pattern_utils import (
     get_default_output_activation_post_process_map
 )
 
+from torch.ao.quantization.fx.utils import NodeInfo
+
 from torch.ao.quantization.fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
     default_symmetric_fixed_qparams_fake_quant,
@@ -133,7 +135,9 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from typing import Callable, Optional, List
+
+
 
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
@@ -2590,6 +2594,234 @@ class TestQuantizeFx(QuantizationTestCase):
             mp(torch.rand(4, 4, 4, 4))
             mc = convert_fx(mp)
 
+    class _NonReferenceTestModel(nn.Module):
+        def __init__(self, func, lin_in, lin_out):
+            super().__init__()
+            self.conv1 = nn.Conv2d(3, 6, 5)
+            self.pool = nn.MaxPool2d(2, 2)
+            self.lin = nn.Linear(lin_in, lin_out)
+            self.func = func
+
+        def forward(self, x, y, z):
+            x = self.pool(F.relu(self.conv1(x)))
+            x = torch.flatten(x, 1)
+            x = self.func(x, y, z)
+            x = self.lin(x)
+            return x
+
+    # This function looks at the node specified by the NodeInfo in the key of
+    # node_info_to_non_tensor_args and checks that the args at specified indices
+    # are not observed (since they are non tensors). If the args at those indices
+    # are a tuple/list (which do not show up as nodes) the function checks the
+    # individual elements of the tuple/list recursively.
+    def _check_not_observed(self, model, node_info_to_non_tensor_args):
+
+        # this is a helper function (for easier recursion) that checks whether
+        # arg_node is observed
+        def _check_node_not_observed(model, arg_node, node):
+            if isinstance(arg_node, tuple) or isinstance(arg_node, list):
+                for new_node in arg_node:
+                    _check_node_not_observed(model, new_node, node)
+            elif arg_node.op == "call_module":
+                self.assertTrue(
+                    not is_activation_post_process(getattr(model, arg_node.target)),
+                    "Arg: {0} of node: {1} is observed but is not a float tensor".format(
+                        arg_node, node
+                    ),
+                )
+
+        for node in model.graph.nodes:
+            indices = node_info_to_non_tensor_args.get(
+                NodeInfo(node.op, node.target), []
+            )
+            for index in indices:
+                if index < len(node.args):
+                    arg_node = node.args[index]
+                    _check_node_not_observed(model, arg_node, node)
+
+    # This test checks that the model gets prepared correct, doesn't have observers
+    # on specific ops (see _check_not_observed) and that the prepared model runs
+    def _test_dtype_propagation(self, model, node_info_to_non_tensor_args, *args):
+        model.eval()
+        qconfig_dict = {"": torch.ao.quantization.get_default_qconfig("fbgemm")}
+        prepared_model = prepare_fx(model, qconfig_dict)
+        self._check_not_observed(prepared_model, node_info_to_non_tensor_args)
+        prepared_model(*args)
+
+    def test_masked_fill_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.masked_fill(y, z)
+
+        model = self._NonReferenceTestModel(func, 1176, 1)
+        args = [torch.randn(5, 3, 32, 32), torch.randn(1176) > 0, 0.1]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "masked_fill"): [1, 2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_permute_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.permute(y, z)
+
+        model = self._NonReferenceTestModel(func, 1176, 1)
+        args = [torch.randn(5, 3, 32, 32), 0, 1]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "permute"): [1, 2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_repeat_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.repeat(y, z)
+
+        model = self._NonReferenceTestModel(func, 1176, 1)
+        args = [torch.randn(5, 3, 32, 32), 2, 1]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "repeat"): [1, 2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_reshape_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.reshape(-1, y)
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), 5, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "reshape"): [2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_size_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.reshape((-1, x.size(y)))
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), 0, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "size"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_transpose_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.transpose(y, z)
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), 0, 1]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "transpose"): [1, 2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_torch_transpose_nontensor_args_not_observed(self):
+        # TODO: make torch.transpose traceable by fx when using
+        # variable nontensor arguments
+        # func = lambda x, y, z: torch.transpose(x, y, z) # error
+        def func(x, y, z):
+            return torch.transpose(x, 0, 1)
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        node_info_to_non_tensor_args = {
+            NodeInfo("call_method", torch.transpose): [1, 2]
+        }
+        args = [torch.randn(5, 3, 32, 32), 0, 1]
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_unsqueeze_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.unsqueeze(y)
+
+        model = self._NonReferenceTestModel(func, 1176, 1)
+        args = [torch.randn(5, 3, 32, 32), 1, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "unsqueeze"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_unsqueeze__nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.unsqueeze_(y)
+
+        model = self._NonReferenceTestModel(func, 1176, 1)
+        args = [torch.randn(5, 3, 32, 32), 1, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "unsqueeze_"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_torch_unsqueeze_nontensor_args_not_observed(self):
+        # TODO: make torch.unsqueeze scriptable by fx when using
+        # variable nontensor arguments
+        # func = lambda x, y, z: torch.unsqueeze(x, y) # error
+        def func(x, y, z):
+            return torch.unsqueeze(x, 1)
+
+        model = self._NonReferenceTestModel(func, 1176, 1)
+        args = [torch.randn(5, 3, 32, 32), 1, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", torch.unsqueeze): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_view_nontensor_args_not_observed(self):
+        def func(x, y, z):
+            return x.view(-1, y)
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), 5, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "view"): [2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_list_args(self):
+        def func(x, y, z):
+            return x.reshape(y)
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), [-1, 5], None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "reshape"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_split_list_args(self):
+        def func(x, y, z):
+            return x.reshape([y, z])
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), -1, 5]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "reshape"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_tuple_args(self):
+        def func(x, y, z):
+            return x.reshape(y)
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), (-1, 5), None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "reshape"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_split_tuple_args(self):
+        def func(x, y, z):
+            return x.reshape((y, z))
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), -1, 5]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "reshape"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_dict_args(self):
+        def func(x, y, z):
+            return x.transpose(y["first"], y["second"])
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), {"first": 0, "second": 1}, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "transpose"): [1, 2]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_dict_tuple_args(self):
+        class reshape_module(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y, z):
+                return x.reshape(y["shape"])
+
+        model = self._NonReferenceTestModel(reshape_module(), 5, 1)
+        args = [torch.randn(5, 3, 32, 32), {"shape": (-1, 5)}, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "reshape"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
+    def test_propagate_dtypes_for_known_nodes_dict_split_tuple_args(self):
+        def func(x, y, z):
+            return x.reshape((y["first"], y["second"]))
+
+        model = self._NonReferenceTestModel(func, 5, 1)
+        args = [torch.randn(5, 3, 32, 32), {"first": -1, "second": 5}, None]
+        node_info_to_non_tensor_args = {NodeInfo("call_method", "transpose"): [1]}
+        self._test_dtype_propagation(model, node_info_to_non_tensor_args, *args)
+
     def test_assert_on_size_after_quant_layer(self):
         """
         Verifies that calculating a size of a quantized tensor works
@@ -3201,7 +3433,6 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_preserve_tuple(self):
         """ Test tuple input type is preserved
         """
-        from typing import List
 
         class LSTM(nn.Module):
             def __init__(self):
