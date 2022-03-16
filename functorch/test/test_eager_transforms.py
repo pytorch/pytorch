@@ -1632,6 +1632,26 @@ class TestHessian(TestCase):
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
 
+    def test_jacfwd_different_levels(self, device):
+        # Test case from:
+        # https://github.com/pytorch/functorch/issues/597
+        b = 8
+        n = 100
+        d = 2
+        x1 = torch.randn(b, n, d, device=device)
+        x2 = x1
+        A = 0.1 * torch.randn(b, d, d, device=device)
+
+        def loss(A, x1, x2):
+            x2_hat = (A@(x1.T)).T
+            res = x2-x2_hat
+            res_sqr = res**2
+            return res_sqr.sum()
+
+        hess1 = vmap(jacrev(jacrev(loss)))(A, x1, x2)
+        hess2 = vmap(hessian(loss))(A, x1, x2)
+        self.assertEqual(hess2, hess1)
+
 
 class TestJvp(TestCase):
     def test_inplace_on_captures(self, device):
@@ -2238,9 +2258,12 @@ class TestExamplesCorrectness(TestCase):
 
         self.assertEqual(result_grads, expected_grads)
 
-    def test_lennard_jones_batched_jacrev(self, device):
+    @parametrize('jac', ['jacfwd', 'jacrev'])
+    def test_lennard_jones_batched_jac(self, device, jac):
         sigma = 0.5
         epsilon = 4.
+
+        jac = getattr(functorch, jac)
 
         def lennard_jones(r):
             return epsilon * ((sigma / r)**12 - (sigma / r)**6)
@@ -2276,7 +2299,7 @@ class TestExamplesCorrectness(TestCase):
             energies = model(norms)
 
             if use_functorch:
-                network_derivs = vmap(jacrev(model))(norms).squeeze(-1)
+                network_derivs = vmap(jac(model))(norms).squeeze(-1)
                 forces = -network_derivs * drs / norms
             else:
                 forces = []
