@@ -33,6 +33,8 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          no-sudo: true
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
