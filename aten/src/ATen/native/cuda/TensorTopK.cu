@@ -23,21 +23,6 @@ namespace at {
 namespace native {
 
 // TODO: remove this when CUDA <11.6 is no longer supported
-void topk_out_with_sort(
-  const Tensor& self,
-  int64_t k, int64_t dim, bool largest,
-  const Tensor& values,
-  const Tensor& indices
-) {
-#if !CUB_SUPPORTS_SCAN_BY_KEY()
-  Tensor sorted_values, sorted_indices;
-  std::tie(sorted_values, sorted_indices) = at::native::sort_cuda(self, dim, largest);
-  values.copy_(sorted_values.narrow(dim, 0, k));
-  indices.copy_(sorted_indices.narrow(dim, 0, k));
-#endif
-}
-
-// TODO: remove this when CUDA <11.6 is no longer supported
 bool should_use_sort(const Tensor& self, int64_t dim) {
 #if CUB_SUPPORTS_SCAN_BY_KEY()
   return false;
