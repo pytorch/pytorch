@@ -1575,53 +1575,43 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       }();
 
-      const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
-      const auto perm = at::arange(index_len, index_sorted.options());
-      res_dim_indices = at::repeat_interleave(perm, selected_dim_indices_counts);
-
-      auto res_nnz = res_dim_indices.numel();
-
-      // find intersection
+      // find res_dim_indices
       {
-        auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
-        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
-        for (const auto i : c10::irange(size)) {
-          if (!(*ptr_dim_indices_counts && *ptr_index_counts)) {
-            *ptr_dim_indices_counts = 0;
-            *ptr_index_counts = 0;
-          }
-          ++ptr_dim_indices_counts;
-          ++ptr_index_counts;
-        }
+        const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
+        const auto perm = at::arange(index_len, index_sorted.options());
+        res_dim_indices = at::repeat_interleave(perm, selected_dim_indices_counts);
       }
 
-      std::vector<std::vector<int64_t>> dim_indices_idxs(size);
+      // find selected_dim_indices
       {
-        auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
-        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
+        const auto res_nnz = res_dim_indices.numel();
+        // define selected_dim_indices
+
+        const auto intersection_counts = (dim_indices_counts * index_counts);
+        const auto intersection_cumsum = intersection_counts.cumsum(/*dim=*/0);
+        auto idx_curr_offset = at::zeros({size}, index_sorted.options());
+
+        auto* ptr_selected_dim_indices = selected_dim_indices.data_ptr<int64_t>();
+        const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
+        const auto* ptr_intersection_cumsum = intersection_cumsum.data_ptr<int64_t>();
+        auto* ptr_idx_curr_offset = idx_curr_offset.data_ptr<int64_t>();
+        const auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
+        const auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
 
         for (const auto i : c10::irange(nnz)) {
           const auto idx = *ptr_dim_indices++;
-          const auto is_idx_selected = ptr_index_counts[idx];
-          if (is_idx_selected) {
-            dim_indices_idxs[idx].push_back(i);
-          }
+
+          const auto idx_intersection_count = ptr_intersection_counts[idx];
+          const auto idx_intersection_cumsum = ptr_intersection_cumsum[idx];
+          auto& idx_curr_offset = ptr_idx_curr_offset[idx];
+
+          const auto offset = idx_curr_offset + idx_intersection_cumsum - idx_intersection_count;
+          auto* start = ptr_selected_dim_indices + offset;
+          const auto idx_index_count = ptr_index_counts[idx];
+          std::fill(start, start + idx_index_count, i);
+          idx_curr_offset += idx_index_count;
         }
       }
-
-      {
-        auto* ptr_index = index_sorted.data_ptr<int64_t>();
-        auto* ptr_selected_dim_indices = selected_dim_indices.data_ptr<int64_t>();
-        for (const auto i : c10::irange(index_len)) {
-          const auto idx = *ptr_index++;
-          const auto dim_indices_idx = dim_indices_idxs[idx];
-          if (!dim_indices_idx.empty()) {
-            std::copy(dim_indices_idx.begin(), dim_indices_idx.end(), ptr_selected_dim_indices);
-            ptr_selected_dim_indices += dim_indices_idx.size();
-          }
-        }
-      }
-
     }
 
     auto res_indices = indices.index_select(1, selected_dim_indices);
