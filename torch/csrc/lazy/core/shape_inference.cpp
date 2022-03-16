@@ -145,7 +145,7 @@ std::vector<Shape> compute_shape_bernoulli(const at::Tensor & self, c10::optiona
 }
 
 std::vector<Shape> compute_shape_bernoulli_(at::Tensor & self, double p, c10::optional<at::Generator> generator) {
-  return compute_shape_bernoulli(self, generator);  
+  return compute_shape_bernoulli(self, generator);
 }
 
 std::vector<Shape> compute_shape_binary_cross_entropy(const at::Tensor & self, const at::Tensor & target, const c10::optional<at::Tensor> & weight, int64_t reduction) {

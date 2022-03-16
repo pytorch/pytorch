@@ -105,7 +105,7 @@ def isGeneratorType(typ: Type) -> bool:
 class LazyArgument:
     name: str
     orig_type: Type
-    lazy_type: CType
+    lazy_type: Optional[CType]
     is_wrapped_scalar: bool
     is_generator: bool
 
@@ -214,7 +214,7 @@ class LazyIrSchema:
         if values and scalars and generator:
             return args
         elif values and scalars:
-            return [a for a in args if not a.is_generator ]
+            return [a for a in args if not a.is_generator]
         elif values:
             return [a for a in args if a.is_lazy_value]
         elif scalars:

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
-from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
+from tools.codegen.api.types import (BaseCType, OptionalCType,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, LazyArgument, isValueType, tensorListValueT
@@ -33,7 +33,7 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
                    f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : " \
                    "c10::nullopt"
         else:
-            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.type})")
+            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
     else:
         if isinstance(arg.lazy_type, VectorCType) and isinstance(arg.lazy_type.elem, BaseCType):
             return f"std::vector<{arg.lazy_type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
@@ -109,7 +109,7 @@ class LazyIR(ABC):
         node_ctor_args = ", ".join([f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args])
         scalar_initializers = ",\n        ".join([f"{a.name}({a.name})" for a in scalar_args])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
-        scalar_decls = "\n  ".join([f"std::string {a.name};" if a.lazy_type.cpp_type() == "c10::string_view" 
+        scalar_decls = "\n  ".join([f"std::string {a.name};" if a.lazy_type.cpp_type() == "c10::string_view"
                                     else f"{a.lazy_type.cpp_type()} {a.name};"
                                     for a in scalar_args])
         scalar_hashes = ", ".join([f"{a.name}" for a in scalar_args])
@@ -122,7 +122,7 @@ class LazyIR(ABC):
                 base_ctor_value_args_list.append(f"{arg.name}.value_or(kNullValue)")
                 optional_values.append(arg.name)
             else:
-                raise AssertionError(f"TODO not sure if there are other valid types to handle here ({t.type})")
+                raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
         base_ctor_value_args = ", ".join(base_ctor_value_args_list)
         has_optional_decls = "\n  ".join([f"bool has_{value}: 1;" for value in optional_values])
         has_optional_defs = "\n    ".join([f"has_{value} = !!{value};" for value in optional_values])
@@ -202,7 +202,7 @@ def lazy_tensor_decls(value_args: List[LazyArgument], tensor_class: str) -> str:
             lazy_tensor_decls.append(
                 f"    {tensor_class}Ptr lazy_{arg.name} = torch::lazy::TryGetLtcTensor({arg.name}.value_or(at::Tensor()));")
         else:
-            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({t.type})")
+            raise AssertionError(f"TODO not sure if there are other valid types to handle here ({arg.lazy_type})")
     return ("\n        ").join(lazy_tensor_decls)
 
 @dataclass(frozen=True)
@@ -222,7 +222,7 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
 
         fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
-        
+
         value_types_names = [f"{a.name}" for a in value_args if not a.is_wrapped_scalar]
         assert len(value_types_names) > 0, "Code below assumes there is at least one tensor arg"
         get_device_str = f"""auto common_device = torch::lazy::GetBackendDevice({', '.join(value_types_names)});

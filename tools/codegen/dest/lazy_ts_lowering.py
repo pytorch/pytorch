@@ -1,6 +1,6 @@
 from typing import Union
 from tools.codegen.model import (NativeFunction, NativeFunctionsGroup)
-from tools.codegen.api.lazy import LazyIrSchema, isValueType
+from tools.codegen.api.lazy import LazyIrSchema
 from tools.codegen.api.types import OptionalCType
 
 
