@@ -30,6 +30,7 @@ NestedTensorImpl::NestedTensorImpl(
   key_set_ =
       key_set_ - c10::DispatchKeySet({c10::DispatchKey::ADInplaceOrView});
   refresh_dim();
+  set_sizes_customization_policy(CustomizableMethodPolicy::NotSupported);
 }
 
 void NestedTensorImpl::refresh_dim() {
@@ -38,5 +39,8 @@ void NestedTensorImpl::refresh_dim() {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
 
+const char* NestedTensorImpl::tensorimpl_type_name() const {
+  return "NestedTensorImpl";
+}
 } // namespace native
 } // namespace at
