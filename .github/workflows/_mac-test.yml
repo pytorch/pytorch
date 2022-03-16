@@ -49,7 +49,8 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
     steps:
-      - uses: ./.github/actions/checkout-pytorch
+      # [see note: pytorch repo ref]
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - uses: ./.github/actions/download-build-artifacts
         with:
