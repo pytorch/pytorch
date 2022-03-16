@@ -1159,6 +1159,30 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     at::native::index_out(out_t, in0_t, in1_l);
   };
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::index_select,
+    aten_index_select,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::index_select(Tensor self, int dim, Tensor index) -> Tensor"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto dim = p_node->Input(1).toInt();
+        const auto& index = p_node->Input(2).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::native::index_select_cpu_(self, dim, index);
+          return;
+        }
+        auto& out = p_node->Output(0).toTensor();
+        fastResizeToZero(out);
+        at::native::index_select_out_cpu_(self, dim, index, out);
+      };
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor"))) {
