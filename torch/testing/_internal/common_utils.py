@@ -1023,6 +1023,21 @@ def skipIfNoLapack(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfCaffe2AtenFallback(fn):
+    reason = 'Certain operations are not compatible with Caffe2.'
+    if isinstance(fn, type):
+        if torch.onnx._CAFFE2_ATEN_FALLBACK:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch.onnx._CAFFE2_ATEN_FALLBACK:
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
