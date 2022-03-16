@@ -134,7 +134,7 @@ $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
                 return "arf"
 
         # Wobbles depending on NDEBUG mode of pybind11
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
         self.assertRaisesRegexp(
