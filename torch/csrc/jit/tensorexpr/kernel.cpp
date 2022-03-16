@@ -537,29 +537,17 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
   throw malformed_input(msg);
 }
 
-// Return the (lower, upper) loop bounds if they are constants, else nullopt.
-c10::optional<std::pair<int64_t, int64_t>> loopBounds(ForPtr loop) {
-  auto start = IRSimplifier::simplify(loop->start());
-  auto stop = IRSimplifier::simplify(loop->stop());
-  if (!start->isConstant() || !stop->isConstant()) {
-    return c10::nullopt;
-  }
-  return c10::make_optional(
-      std::make_pair(immediateAs<int64_t>(start), immediateAs<int64_t>(stop)));
-}
-
 // True if all the loops in this vector have equal bounds.
 bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
-  auto bounds = loopBounds(loops[0]);
-  if (!bounds) {
-    return false;
+  if (loops.size() <= 1) {
+    return true;
   }
-  for (auto const& loop : loops) {
-    auto next = loopBounds(loop);
-    if (!next) {
-      return false;
-    }
-    if (bounds->first != next->first || bounds->second != next->second) {
+  const auto& start = loops.front()->start();
+  const auto& stop = loops.front()->stop();
+  for (size_t i = 1; i < loops.size(); ++i) {
+    const auto& curr_start = loops[i]->start();
+    const auto& curr_stop = loops[i]->stop();
+    if (!exprEquals(start, curr_start) || !exprEquals(stop, curr_stop)) {
       return false;
     }
   }
@@ -585,6 +573,8 @@ void fuseAllLoops(StmtPtr st) {
     if (loopsToFuse.empty()) {
       return;
     }
+    // TODO: Support fusing some of the loops in a block.
+    // Currently, we only fuse all the loops in a block, which is restrictive.
     if (!loopBoundsAllEqual(loopsToFuse)) {
       return;
     }

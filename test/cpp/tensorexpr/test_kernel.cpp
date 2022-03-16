@@ -1836,5 +1836,78 @@ graph(%x : int,
   ASSERT_TRUE(at::equal(stack[3].toTensor(), xt * yt));
 }
 
+TEST_F(Kernel, FuseLoopsWithVariableBounds) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_template = R"IR(
+      graph(%a : Float(SS(-2), 3, SS(-3), requires_grad=0, device=${device}),
+            %b : Float(SS(-2), 7, SS(-3), requires_grad=0, device=${device}),
+            %c : Float(SS(-2), 9, SS(-3), requires_grad=0, device=${device}),
+            %SS_2 : int,
+            %SS_3 : int):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Float(SS(-2), 19, SS(-3), requires_grad=0, device=${device}) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        return (%r))IR";
+  for (bool use_cuda : {false, true}) {
+    if (!torch::cuda::is_available() && use_cuda) {
+      continue;
+    }
+    auto device = use_cuda ? at::kCUDA : at::kCPU;
+    at::jit::TemplateEnv env;
+    env.s("device", use_cuda ? "cuda:0" : "cpu");
+    const auto graph_string = format(graph_template, env);
+    std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, graph.get());
+
+    std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
+
+    std::vector<torch::jit::StrideInput> input_desc = {
+        torch::jit::StrideInput::TENSOR_CONT};
+    std::unordered_map<
+        const torch::jit::Value*,
+        std::vector<torch::jit::StrideInput>>
+        symbolic_strides;
+    symbolic_strides[graph->inputs().at(0)] = input_desc;
+    symbolic_strides[graph->inputs().at(1)] = input_desc;
+    symbolic_strides[graph->inputs().at(2)] = input_desc;
+    symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+    TensorExprKernel kernel(
+        graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+
+    std::ostringstream oss;
+    oss << *kernel.getCodeGenStmt();
+    const std::string& verification_pattern =
+        R"IR(
+  # CHECK: for (int64_t i
+  # CHECK-NEXT: for (int64_t j
+  # CHECK-NOT: for (int64_t i
+        )IR";
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    auto run_kernel = [&](int dim1, int dim2) {
+      auto a =
+          at::rand({dim1, 3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+      auto b =
+          at::rand({dim1, 7, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+      auto c =
+          at::rand({dim1, 9, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+
+      auto ref = at::cat({a, b, c}, 1);
+
+      std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
+      stack.emplace_back(dim1);
+      stack.emplace_back(dim2);
+      kernel.run(stack);
+
+      auto o = stack[0].toTensor();
+      ASSERT_TRUE(at::allclose(o, ref));
+    };
+
+    run_kernel(10, 20);
+  }
+#endif
+}
+
 } // namespace jit
 } // namespace torch
