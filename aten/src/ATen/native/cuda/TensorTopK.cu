@@ -251,7 +251,7 @@ __global__ void radixFindKthValues(
     // outputs
     uint32_t* semaphores,  // size: num_slices
     Bitwise* desires,      // size: num_slices
-    IndexType* counts,     // size: num_slices * blocks_per_slice * radix_digits
+    short* counts,     // size: num_slices * blocks_per_slice * radix_digits
     T* kthValues           // size: num_slices, only write when current_bit reaches 0
   ) {
 
@@ -385,7 +385,7 @@ template <typename Bitwise, typename IndexType>
 C10_LAUNCH_BOUNDS_1(RADIX_DIGITS)  // one thread per digit
 __global__ void computeBlockwiseWithinKCounts(
   Bitwise* desires,          // size: num_slices
-  IndexType* counts,         // size: num_slices * blocks_per_slice * radix_digits
+  short* counts,             // size: num_slices * blocks_per_slice * radix_digits
   IndexType blocks_per_slice,
   int current_bit,
   bool largest,
@@ -452,7 +452,7 @@ __global__ void computeBlockwiseWithinKCounts(
 template <typename Bitwise, typename IndexType>
 __global__ void computeBlockwiseKthCounts(
   Bitwise* desires,            // size: num_slices
-  IndexType* counts,           // size: num_slices * blocks_per_slice * radix_digits
+  short* counts,               // size: num_slices * blocks_per_slice * radix_digits
   IndexType num_blocks,        // the number of blocks used by `radixFindKthValues` kernel
   IndexType blocks_per_slice,
   // outputs:
@@ -568,6 +568,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 }
 #endif
 
+constexpr int MIN_ITEMS_PER_THREAD = 4;
+constexpr int MAX_ITEMS_PER_THREAD = 64;
 int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   // occupancy of this kernel is limited by registers per threads
   constexpr int REGS_PER_THREAD = 40; // from nsight launch statistics
@@ -587,7 +589,7 @@ int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
 #endif
   int blocks_per_mp = std::min(regs_per_mp / REGS_PER_BLOCK, max_blocks_per_mp);
   int64_t items_per_thread = at::ceil_div((int64_t)(slice_size * num_slices), (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
-  items_per_thread = std::max(4, std::min((int)items_per_thread, 64)); // clamp to (4, 64)
+  items_per_thread = std::max(MIN_ITEMS_PER_THREAD, std::min((int)items_per_thread, MAX_ITEMS_PER_THREAD)); // clamp to (4, 64)
   return items_per_thread;
 }
 
@@ -637,8 +639,9 @@ void launch(
   auto desired_buffer = allocator.allocate(numInputSlices * sizeof(Bitwise));
   Bitwise* desired = reinterpret_cast<Bitwise*>(desired_buffer.get());
 
-  auto counts_buffer = allocator.allocate(num_blocks * RADIX_DIGITS * sizeof(IndexType));
-  IndexType* counts = reinterpret_cast<IndexType*>(counts_buffer.get());
+  auto counts_buffer = allocator.allocate(num_blocks * RADIX_DIGITS * sizeof(short));
+  short* counts = reinterpret_cast<short*>(counts_buffer.get());
+  static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max());
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
   auto withinKCounts_buffer = allocator.allocate(num_blocks * sizeof(IndexType));
