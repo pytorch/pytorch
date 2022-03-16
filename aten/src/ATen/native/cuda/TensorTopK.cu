@@ -284,7 +284,7 @@ __global__ void radixFindKthValues(
   static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
     "blockwise counter too large");
   union __align__(16) TempStorage {
-    short digit_counters[RADIX_DIGITS];
+    uint32_t digit_counters[RADIX_DIGITS];
     uint32_t digit_count_cumsum[RADIX_DIGITS]; // only used if this it the last block for this slice
     typename BlockScan::TempStorage scan_storage;
   };
