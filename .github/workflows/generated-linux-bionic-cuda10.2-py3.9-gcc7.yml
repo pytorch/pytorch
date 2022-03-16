@@ -267,6 +267,7 @@ jobs:
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: jit_legacy
@@ -506,6 +507,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -545,6 +547,7 @@ jobs:
     runs-on: linux.16xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: multigpu
@@ -784,6 +787,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -823,6 +827,7 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: nogpu_NO_AVX
@@ -1053,6 +1058,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1092,6 +1098,7 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: nogpu_NO_AVX2
@@ -1322,6 +1329,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1361,6 +1369,7 @@ jobs:
     runs-on: linux.8xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: distributed
@@ -1600,6 +1609,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1639,6 +1649,7 @@ jobs:
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: slow
@@ -1878,6 +1889,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1917,6 +1929,7 @@ jobs:
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: default
@@ -2156,6 +2169,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2195,6 +2209,7 @@ jobs:
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: default
@@ -2434,6 +2449,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
