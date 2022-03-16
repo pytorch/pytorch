@@ -412,7 +412,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
       .def(
           "_jit_pass_canonicalize",
-          [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
+          [](const std::shared_ptr<Graph>& g, bool keep_unique_names = true) {
+            return Canonicalize(g, keep_unique_names);
+          },
+          py::arg("graph"),
+          py::arg("keep_unique_names") = true)
       .def("_jit_pass_lint", LintGraph)
       .def(
           "_jit_pass_complete_shape_analysis",
@@ -630,7 +634,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
-            TORCH_WARN("Set profiling mode is deprecated and will invoke getGraphExecutorOptimize now. Please use `_get_graph_executor_optimize`");
+            TORCH_WARN(
+                "Set profiling mode is deprecated and will invoke getGraphExecutorOptimize now. Please use `_get_graph_executor_optimize`");
             auto oldState = getGraphExecutorOptimize();
             setGraphExecutorOptimize(profiling_flag);
             return oldState;
@@ -679,6 +684,7 @@ void initJITBindings(PyObject* module) {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
                 TORCH_INTERNAL_ASSERT(
+                    false,
                     "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
