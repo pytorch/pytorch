@@ -2820,7 +2820,7 @@ class TestAutograd(TestCase):
         for evt in p.function_events:
             if evt.name in names:
                 found_indices.add(names.index(evt.name))
-        self.assertEquals(len(found_indices), len(names))
+        self.assertEqual(len(found_indices), len(names))
 
     def test_profiler_seq_nr(self):
         with profile(use_kineto=kineto_available()) as p:

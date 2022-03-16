@@ -4,6 +4,8 @@
 
   - [General Overview](#general-overview)
   - [Cutting release branches](#cutting-release-branches)
+    - [`pytorch/pytorch`](#pytorchpytorch)
+    - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes](#making-release-branch-specific-changes)
     - [Getting CI signal on release branches:](#getting-ci-signal-on-release-branches)
   - [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
@@ -31,26 +33,35 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 ## Cutting release branches
 
+### `pytorch/pytorch`
+
 Release branches are typically cut from the branch [`viable/strict`](https://github.com/pytorch/pytorch/tree/viable/strict) as to ensure that tests are passing on the release branch.
 
-Release branches *should* be prefixed like so:
-```
-release/{MAJOR}.{MINOR}
+There's a convenience script to create release branches from current `viable/strict` (from root `pytorch/pytorch`):
+
+```bash
+DRY_RUN=disabled scripts/release/cut-release-branch.sh
 ```
 
-An example of this would look like:
-```
-release/1.8
+This script should create 2 branches:
+* `release/{MAJOR}.{MINOR}`
+* `orig/release/{MAJOR}.{MINOR}`
+
+### `pytorch/builder` / PyTorch domain libraries
+
+Convenience script can also be used domains as well as `pytorch/builder`
+
+> NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
+
+```bash
+DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
 ```
 
-Please make sure to create branch that pins divergent point of release branch from the main branch, i.e. `orig/release/{MAJOR}.{MINOR}`
 ### Making release branch specific changes
 
 These are examples of changes that should be made to release branches so that CI / tooling can function normally on
 them:
 
-* Update target determinator to use release branch:
-  * Example: https://github.com/pytorch/pytorch/pull/40712
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/40706
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
@@ -63,6 +74,7 @@ These are examples of changes that should be made to the *default* branch after 
   * Example: https://github.com/pytorch/pytorch/pull/65435
 
 ### Getting CI signal on release branches:
+
 Create a PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in order to start CI testing for cherry-picks into release branch.
 
 Example:
