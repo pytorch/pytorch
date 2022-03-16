@@ -105,7 +105,7 @@ def isGeneratorType(typ: Type) -> bool:
 class LazyArgument:
     name: str
     orig_type: Type
-    lazy_type: Optional[CType]
+    lazy_type_: Optional[CType]
     is_wrapped_scalar: bool
     is_generator: bool
 
@@ -121,12 +121,17 @@ class LazyArgument:
             # there is no handling for generators in TorchScript IR (or XLA)
             # so we fall back to eager if the (optional)generator has value, and otherwise
             # its null and safe to exclude from lazy IR
-            self.lazy_type = None
+            self.lazy_type_ = None
         else:
-            self.lazy_type = process_ir_type(arg.type)
+            self.lazy_type_ = process_ir_type(arg.type)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
 
-        self.is_lazy_value = isValueType(self.lazy_type)
+        self.is_lazy_value = not self.is_generator and isValueType(self.lazy_type)
+
+    @property
+    def lazy_type(self) -> CType:
+        assert self.lazy_type_ is not None, f"Attempted to access lazy_type for invalid argument {self.name}"
+        return self.lazy_type_
 
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
