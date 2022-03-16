@@ -897,8 +897,8 @@ TEST_F(NVFuserTest, FusionTopoSort_CUDA) {
   // e1: v4     =   add(v3, v2)
   // e2: v5     =   add(v2, v4)
   // e3: v6     =   add(v5, v5)
-  Double* v0 = IrBuilder::create<Double>(1.f);
-  Double* v1 = IrBuilder::create<Double>(2.f);
+  Double* v0 = IrBuilder::create<Double>();
+  Double* v1 = IrBuilder::create<Double>();
   Double* v2 = IrBuilder::create<Double>();
   Double* v3 = IrBuilder::create<Double>();
   Double* v4 = IrBuilder::create<Double>();
@@ -21646,6 +21646,30 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
   auto ref = (at::native::view(t0, {6}) + 1).unsqueeze(0) + t1;
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of #1521
+TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto immediate_scalr = IrBuilder::create<Double>(0.1);
+  // Adding an immediate scalar value as an input is not allowed
+  ASSERT_ANY_THROW(fusion.addInput(immediate_scalr));
+
+  // Instead, use a symbolic value
+  auto symbolic_scalar = IrBuilder::create<Double>();
+  fusion.addInput(symbolic_scalar);
+
+  auto tv1 = add(tv0, symbolic_scalar);
+  fusion.addOutput(tv1);
+
+  // Make sure the kernel is compiled.
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
 }
 
 } // namespace jit

@@ -183,6 +183,10 @@ void Fusion::addInput(Val* input) {
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
     tv->setMemoryType(MemoryType::Global);
+  } else if (input->getValType().value() == ValType::Scalar) {
+    TORCH_CHECK(
+        !input->isConst(),
+        "Immediate scalar value cannot be added as an input. It is not necessary to pass it as an input.");
   }
 
   inputs_.push_back(input);
