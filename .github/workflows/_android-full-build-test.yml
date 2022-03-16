@@ -27,7 +27,10 @@ jobs:
       fail-fast: true
     runs-on: [self-hosted, linux.2xlarge]
     steps:
-      - uses: ./.github/actions/checkout-pytorch
+      # Use a pytorch/pytorch reference instead of a reference to the local
+      # checkout because when we run this action we don't *have* a local
+      # checkout. In other cases you should prefer a local checkout.
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -156,7 +159,9 @@ jobs:
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
-          (echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec \            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
+          # shellcheck disable=SC1105
+          ((echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec \
+            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
