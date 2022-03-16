@@ -7,7 +7,6 @@ from tools.codegen.api.types import kernel_signature
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 
-
 @with_native_function_and_index
 def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional[str]:
     sig = kernel_signature(f, backend_index)
