@@ -51,11 +51,24 @@ std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rul
   //          Case 1  Case 2  Case 3
   // base        [6]  [B, 6]  [B, 6]
   // tangent  [B, 5]     [5]  [B, 5]
+  // result   [B, 6]  [B, 6]  [B, 6]
 
-  // Case 2 & 3: it doesn't matter at all what `tangent` is.
+  // Case 2 & 3
   if (base_bdim) {
-    const auto result = at::_new_zeros_with_same_feature_meta(tangent, base, self_num_batch_dims);
-    return std::make_tuple(result, base_bdim);
+    auto base_ = moveBatchDimToFront(base, base_bdim);
+    Tensor tangent_ = tangent;
+    if (tangent_bdim.has_value()) {
+      // tangent  [B, K0, K1, 5]
+      // base_            [B, 6]
+      // We want to move B to after the Ks, so that self_num_batch_dims
+      // (which really means tangent_num_batch_dims) isn't interfered with.
+      // [B, K0, K1, 6] -> [K0, K1, B, 6]
+      //
+      // [K0, K1, B, 6], [B, 5], 2 -> [K0, K1, B, 5]
+      tangent_ = tangent.movedim(*tangent_bdim, self_num_batch_dims);
+    }
+    const auto result = at::_new_zeros_with_same_feature_meta(tangent_, base_, self_num_batch_dims);
+    return std::make_tuple(result, self_num_batch_dims);
   }
 
   // Case 1:
