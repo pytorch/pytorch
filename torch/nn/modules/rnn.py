@@ -602,9 +602,7 @@ class LSTM(RNNBase):
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
           will also be a packed sequence. When ``bidirectional=True``, `output` will contain
-          a concatenation of the forward hidden states in order and backward hidden states in
-          reverse order: `forward[0]` aligned with `backward[L]`, `forward[1]` with `backward[L-1]`,
-          etc.
+          a concatenation of the forward and reverse hidden states at each time step in the sequence.
         * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
           final hidden state for each element in the sequence. When ``bidirectional=True``,
