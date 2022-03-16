@@ -3,20 +3,23 @@
 import torch
 from torch import Tensor
 aten = torch.ops.aten
-from typing import Optional, List
+from typing import Optional, List, Dict, Set
 import inspect
 from torch.fx.operator_schemas import get_signature_for_torch_op
 import warnings
 
-decomposition_table = {}
-function_name_set = set()
+decomposition_table: Dict[str, torch.jit.ScriptFunction] = {}
+function_name_set: Set[str] = set()
 
 def check_decomposition_has_type_annotations(f):
+
+    inspect_empty = inspect._empty  # type: ignore[attr-defined]
     sig = inspect.signature(f)
     for param in sig.parameters.values():
-        assert param.annotation != inspect._empty, "No signature on param {name} for function {func}".format(name=param.name, func=f.name)
+        assert param.annotation != inspect_empty, \
+            "No signature on param {name} for function {func}".format(name=param.name, func=f.name)
 
-    assert sig.return_annotation != inspect._empty, "No return annotation for function {func}".format(func=f.name)
+    assert sig.return_annotation != inspect_empty, "No return annotation for function {func}".format(func=f.name)
 
 def signatures_match(decomposition_sig, torch_op_sig):
     decomp_params = decomposition_sig.parameters
@@ -31,6 +34,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
         # in the torch_op_sig - like default value
         # can't check 'kind' bc
         # kwarg-only values with defaults not yet supported in TS
+        inspect_empty = inspect._empty  # type: ignore[attr-defined]
         for field in ['name', 'annotation']:
             if field == 'name' and decomp_param.name == "self":
                 warnings.warn("PyTorch uses 'input' instead of 'self' on public api")
@@ -42,7 +46,7 @@ def signatures_match(decomposition_sig, torch_op_sig):
         op_default = op_param.default
         # default value not always correctly inferred as being present on torch schema,
         # but if specified on both they should be equal
-        if decomp_default != inspect._empty and op_default != inspect._empty:
+        if decomp_default != inspect_empty and op_default != inspect_empty:
             if decomp_default != op_default:
                 return False
 
@@ -86,7 +90,8 @@ def register_decomposition(aten_op, registry=None):
 # TODO: replace torch.sigmoid -> aten.sigmoid
 
 @register_decomposition(aten.var)
-def var_decomposition(input: Tensor, dim: Optional[List[int]] = None, correction: Optional[int] = None, keepdim: bool = False) -> Tensor:
+def var_decomposition(input: Tensor, dim: Optional[List[int]] = None, correction: Optional[int] = None,
+                      keepdim: bool = False) -> Tensor:
     if dim is None:
         dim_i: List[int] = []
         dim = dim_i
@@ -95,8 +100,8 @@ def var_decomposition(input: Tensor, dim: Optional[List[int]] = None, correction
         n = input.numel()
     else:
         n = 1
-        for dim_i in dim:
-            n *= input.shape[dim_i]
+        for dim_i in dim:  # type: ignore[assignment]
+            n *= input.shape[dim_i]  # type: ignore[call-overload]
 
     mean = aten.mean(input, dim, True)
     sub = input - mean
