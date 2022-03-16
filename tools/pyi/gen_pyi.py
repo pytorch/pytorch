@@ -214,6 +214,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         'pixel_shuffle',
         'pixel_unshuffle',
         'channel_shuffle',
+        'native_channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
@@ -467,6 +468,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         '_is_view': ['def _is_view(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
+        'is_nested': ['is_nested: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],

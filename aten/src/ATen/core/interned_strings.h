@@ -96,6 +96,7 @@ namespace c10 {
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
+  _(prim, IfThenElse)                \
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
@@ -301,6 +302,7 @@ namespace c10 {
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \
+  _(attr, module)                    \
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \

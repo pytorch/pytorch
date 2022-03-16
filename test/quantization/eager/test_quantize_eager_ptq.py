@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
 from torch.nn.utils.rnn import PackedSequence
 from torch.ao.quantization import (
     quantize,
@@ -75,6 +74,7 @@ import unittest
 import numpy as np
 
 class TestQuantizeEagerOps(QuantizationTestCase):
+    @override_qengines
     def _test_reference_module_impl(self,
                                     float_module_class,
                                     quantized_module_class,
@@ -110,21 +110,22 @@ class TestQuantizeEagerOps(QuantizationTestCase):
                 x = self.dequant2(x)
                 return x
 
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines or qengine == 'qnnpack':
+            return   # qnnpack does not support nnq.ConvTranspose3d
 
         data = torch.randn(*input_size, dtype=torch.float)
         original_m = M()
         original_ref_m = RefM()
-        torch.quantization.engine = 'qnnpack'
 
         original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
 
-        original_m.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        original_m.qconfig = torch.quantization.default_qconfig
 
         m = prepare(original_m)
         # calibration
         m(data)
-
         m = convert(m)
         # check if the module is properly quantized
         self.assertEqual(type(m.quant), nnq.Quantize)
@@ -134,21 +135,11 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         # quantize the reference model
         original_ref_m.eval()
-        original_ref_m.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        original_ref_m.qconfig = torch.quantization.default_qconfig
 
         ref_m = prepare(original_ref_m)
         ref_m(data)
-        reference_module_mapping = {
-            QuantStub: nnq.Quantize,
-            DeQuantStub: nnq.DeQuantize,
-            nn.Conv1d: nnqr.Conv1d,
-            nn.Conv2d: nnqr.Conv2d,
-            nn.Conv3d: nnqr.Conv3d,
-            nn.ConvTranspose1d: nnqr.ConvTranspose1d,
-            nn.ConvTranspose2d: nnqr.ConvTranspose2d,
-            nn.ConvTranspose3d: nnqr.ConvTranspose3d,
-        }
-        ref_m = convert(ref_m, mapping=reference_module_mapping)
+        ref_m = convert(ref_m, is_reference=True)
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
 
@@ -198,6 +189,14 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             nnq.ConvTranspose3d,
             {'in_channels': 1, 'out_channels': 1, 'kernel_size': 1},
             (16, 1, 10, 10, 10)
+        )
+
+    def test_linear(self):
+        self._test_reference_module_impl(
+            nn.Linear,
+            nnq.Linear,
+            {'in_features': 5, 'out_features': 10},
+            (16, 5)
         )
 
     def _test_activation_op_impl(
@@ -940,6 +939,19 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         m.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         m[0].qconfig = None
         mp = torch.ao.quantization.prepare(m)
+
+    @skipIfNoFBGEMM
+    def test_quantwrapper_attaches_qconfig_to_dequant(self):
+        qconfig = torch.ao.quantization.default_qconfig
+
+        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
+        for i in range(len(m)):
+            m[i].qconfig = qconfig
+            m[i] = torch.ao.quantization.QuantWrapper(m[i])
+
+        mp = torch.ao.quantization.prepare(m)
+        mq = torch.ao.quantization.convert(mp)
+        self.assertTrue(isinstance(mq[0].dequant, nnq.DeQuantize))
 
 
 @skipIfNoFBGEMM
