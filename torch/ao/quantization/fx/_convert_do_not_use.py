@@ -736,7 +736,7 @@ def _convert_do_not_use(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
                 # extra check for fused module classes to make sure they are fused module classes
                 # of target modules
-                if type(modules[node.target]) in FUSED_MODULE_CLASSES and
+                if type(modules[node.target]) in FUSED_MODULE_CLASSES and \
                     type(modules[node.target][0]) not in FLOAT_WEIGHTED_MODULE_CLASSES:
                         continue
                 convert_weighted_module(
