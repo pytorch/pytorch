@@ -23,7 +23,10 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.2xlarge]
     steps:
-      - uses: ./.github/actions/checkout-pytorch
+      # Use a pytorch/pytorch reference instead of a reference to the local
+      # checkout because when we run this action we don't *have* a local
+      # checkout.
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
