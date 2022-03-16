@@ -2049,7 +2049,7 @@ class TestBinaryUfuncs(TestCase):
     @onlyCPU
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_sub(self, device, dtype):
-        if dtype in get_all_int_dtypes():
+        if dtype in integral_types():
             # Before Python 3.10, floats were implicitly converted to ints, but with
             #   DeprecationWarning: an integer is required (got type float).
             #   Implicit conversion to integers using __int__ is deprecated,
