@@ -35,7 +35,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - uses: ./.github/actions/setup-rocm
 
