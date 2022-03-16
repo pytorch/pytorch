@@ -21,14 +21,11 @@ jobs:
   build:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    strategy:
-      matrix:
-        arch: [arm_v7a, arm_v8a, x86_32, x86_64]
-      fail-fast: true
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -40,17 +37,19 @@ jobs:
         uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Output disk space left
+        shell: bash
         run: |
           sudo df -H
 
       - name: Preserve github env variables for use in docker
+        shell: bash
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
 
@@ -58,80 +57,41 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Build-${{ matrix.arch }}
-        env:
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
-          BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-${{ matrix.arch }}-build"
-          AWS_DEFAULT_REGION: us-east-1
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
-          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-          MATRIX_ARCH: ${{ matrix.arch }}
-        run: |
-          # detached container should get cleaned up by teardown_ec2_linux
-          #!/bin/bash -eo pipefail
-          export container_name
-          container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e AWS_DEFAULT_REGION \
-            -e IS_GHA \
-            -e PR_NUMBER \
-            -e SHA1 \
-            -e BRANCH \
-            -e GITHUB_RUN_ID \
-            -e SCCACHE_BUCKET \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e SKIP_SCCACHE_INITIALIZATION=1 \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --tty \
-            --detach \
-            --user jenkins \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
-          )
-          git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
-          docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-          (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
-
-          # Copy install binaries back
-          mkdir -p "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
-          docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
-
-      - uses: ./.github/actions/chown-workspace
-        if: always()
-
-      - uses: ./.github/actions/teardown-linux
-        if: always()
-
-  build-prebuilt:
-    runs-on: [self-hosted, linux.2xlarge]
-    needs: build
-    steps:
-      # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+      - name: Build arm_v7a
+        uses: ./.github/actions/build-android
         with:
+          arch: arm_v7a
           github-secret: ${{ secrets.GITHUB_TOKEN }}
+          build-environment: ${{ inputs.build-environment }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          branch: ${{ steps.parse-ref.outputs.branch }}
 
-      - name: Calculate docker image
-        id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+      - name: Build arm_v8a
+        uses: ./.github/actions/build-android
         with:
-          docker-image-name: ${{ inputs.docker-image-name }}
-          xla: ${{ contains(inputs.build-environment, 'xla') }}
+          arch: arm_v8a
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          build-environment: ${{ inputs.build-environment }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          branch: ${{ steps.parse-ref.outputs.branch }}
 
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
+      - name: Build x86_32
+        uses: ./.github/actions/build-android
+        with:
+          arch: x86_32
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          build-environment: ${{ inputs.build-environment }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          branch: ${{ steps.parse-ref.outputs.branch }}
+
+      - name: Build x86_64
+        uses: ./.github/actions/build-android
+        with:
+          arch: x86_64
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          build-environment: ${{ inputs.build-environment }}
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          branch: ${{ steps.parse-ref.outputs.branch }}
 
       # TODO: pretty sure this is wrong, since DOCKER_IMAGE is no longer built on every commit
       # https://github.com/pytorch/pytorch/issues/74073
@@ -211,11 +171,12 @@ jobs:
           name: ${{ inputs.build-environment }}
           retention-days: 14
           if-no-files-found: error
-          path:
-            build_android_artifacts/artifacts.tgz
+          path: build_android_artifacts/artifacts.tgz
 
-      - uses: ./.github/actions/chown-workspace
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
         if: always()
 
-      - uses: ./.github/actions/teardown-linux
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
         if: always()

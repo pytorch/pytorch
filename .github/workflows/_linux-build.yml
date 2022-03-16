@@ -44,7 +44,8 @@ jobs:
       # Use a pytorch/pytorch reference instead of a reference to the local
       # checkout because when we run this action we don't *have* a local
       # checkout. In other cases you should prefer a local checkout.
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - uses: ./.github/actions/setup-linux
         with:
@@ -57,7 +58,8 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -126,7 +128,8 @@ jobs:
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
-      - uses: ./.github/actions/chown-workspace
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Archive artifacts into zip
@@ -143,5 +146,6 @@ jobs:
           if-no-files-found: error
           path: artifacts.zip
 
-      - uses: ./.github/actions/teardown-linux
+      - name: Teardown Linux
+        uses: ./.github/actions/teardown-linux
         if: always()

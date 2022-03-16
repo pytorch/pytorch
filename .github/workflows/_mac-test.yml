@@ -50,11 +50,14 @@ jobs:
       PYTORCH_RETRY_TEST_CASES: 1
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-      - uses: ./.github/actions/download-build-artifacts
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
+          use-gha: true
 
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
@@ -77,7 +80,8 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
 
-      - uses: ./.github/actions/upload-test-artifacts
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           use-gha: true
@@ -90,6 +94,7 @@ jobs:
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}

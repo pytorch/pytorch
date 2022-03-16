@@ -32,7 +32,8 @@ jobs:
       JOB_BASE_NAME: ${{ inputs.build-environment }}-build
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
 
@@ -81,7 +82,8 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
 
-      - uses: ./.github/actions/teardown-win
+      - name: Teardown Windows
+        uses: ./.github/actions/teardown-win
         if: always()
         timeout-minutes: 120
         with:

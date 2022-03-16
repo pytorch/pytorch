@@ -6,12 +6,22 @@ inputs:
   name:
     description: Name of what artifact to download
     required: true
+  use-gha:
+    description: If set to any value, use GHA to download the artifact. Otherwise use s3.
+    required: false
 
 runs:
   using: composite
   steps:
-    - name: Download PyTorch Build Artifacts
+    - name: Download PyTorch Build Artifacts from S3
+      if: ${{ !inputs.use-gha }}
       uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      with:
+        name: ${{ inputs.name }}
+
+    - name: Download PyTorch Build Artifacts from GHA
+      if: inputs.use-gha
+      uses: actions/download-artifact@v2
       with:
         name: ${{ inputs.name }}
 
