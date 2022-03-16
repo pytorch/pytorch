@@ -31,7 +31,9 @@ def fuser(name):
     old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
     old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
     old_nvfuser_state = torch._C._jit_nvfuser_enabled()
+    old_optimize = torch._C._get_graph_executor_optimize()
     if name == 'fuser0':  # legacy fuser
+        torch._C._get_graph_executor_optimize(True)
         torch._C._jit_override_can_fuse_on_cpu(True)
         torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(False)
@@ -44,6 +46,7 @@ def fuser(name):
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_set_nvfuser_enabled(False)
     elif name == 'fuser2':  # nvFuser
+        torch._C._get_graph_executor_optimize(True)
         torch._C._jit_override_can_fuse_on_cpu(False)
         torch._C._jit_override_can_fuse_on_gpu(False)
         torch._C._jit_set_texpr_fuser_enabled(False)
@@ -57,6 +60,7 @@ def fuser(name):
             torch._C._jit_set_profiling_executor(old_profiling_executor)
             torch._C._get_graph_executor_optimize(old_profiling_mode)
         # recover the previous values
+        torch._C._get_graph_executor_optimize(old_optimize)
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
         torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
         torch._C._jit_set_texpr_fuser_enabled(old_texpr_fuser_state)

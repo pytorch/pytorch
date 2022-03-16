@@ -1,11 +1,12 @@
 from contextlib import contextmanager
 from torch.testing import make_tensor
-from typing import Any, List, Tuple, Callable
+from typing import Any, List, Tuple, Callable, Optional
 import argparse
 import random
 import torch
 import traceback
 import time
+import functools
 
 '''
 Usage:
@@ -41,16 +42,14 @@ def extract_ir(filename: str) -> List[str]:
 
 
 def make_tensor_from_type(inp_type: torch._C.TensorType):
-    if inp_type.requires_grad() is not False:
-        raise NotImplementedError("Tensors with requires_grad are not implemented")
-    return make_tensor(
-        inp_type.sizes(),
-        dtype=inp_type.dtype(),
-        device=inp_type.device())
-
+    return torch._C._representative_tensor(inp_type).requires_grad_(False)
 
 def load_graph_and_inputs(ir: str) -> Tuple[Any, List[Any]]:
-    graph = torch._C.parse_ir(ir)
+    try:
+        graph = torch._C.parse_ir(ir)
+    except Exception as e:
+        print(ir)
+        assert False
     graph.makeMultiOutputIntoTuple()
     inputs = []
     for inp in graph.inputs():
@@ -106,44 +105,39 @@ def run_test(ir, inputs, *, warmup_runs=10, test_runs=20) -> float:
 
 @contextmanager
 def no_fuser(*args, **kwargs):
-    old_cpu_fuse = torch._C._jit_can_fuse_on_cpu()
-    old_gpu_fuse = torch._C._jit_can_fuse_on_gpu()
-    old_texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-    old_nvfuser_state = torch._C._jit_nvfuser_enabled()
-
-    torch._C._jit_override_can_fuse_on_cpu(False)
-    torch._C._jit_override_can_fuse_on_gpu(False)
-    torch._C._jit_set_texpr_fuser_enabled(False)
-    torch._C._jit_set_nvfuser_enabled(False)
-
+    old_optimize = torch._C._get_graph_executor_optimize(False)
     try:
         yield
     finally:
-        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuse)
-        torch._C._jit_override_can_fuse_on_gpu(old_gpu_fuse)
-        torch._C._jit_set_texpr_fuser_enabled(old_texpr_fuser_state)
-        torch._C._jit_set_nvfuser_enabled(old_nvfuser_state)
-
+        torch._C._get_graph_executor_optimize(old_optimize)
 
 def run_baseline_no_fusion(ir, inputs) -> float:
     with no_fuser():
         return run_test(ir, inputs)
 
 
-def run_nnc(ir, inputs) -> float:
-    with torch.jit.fuser("fuser1"):
-        return run_test(ir, inputs)
-
+def run_nnc(ir, inputs, dynamic) -> float:
+    try:
+        if dynamic:
+            old_dynamics = torch.jit.set_fusion_strategy([("DYNAMIC", 10)])
+        with torch.jit.fuser("fuser1"):
+            return run_test(ir, inputs)
+    finally:
+            if dynamic:
+                torch.jit.set_fusion_strategy(old_dynamics)
 
 def run_nvfuser(ir, inputs) -> float:
     with torch.jit.fuser("fuser2"):
         return run_test(ir, inputs)
 
 
-def test_runners(graphs: List[str], runners: List[Tuple[str, Callable]]):
+def test_runners(graphs: List[str], runners: List[Tuple[str, Callable]], graph_set: Optional[List[int]]):
     for i, ir in enumerate(graphs):
         _, inputs = load_graph_and_inputs(ir)
-        print(f"Running Graph {ir}")
+        if graph_set and i not in graph_set:
+            continue
+
+        print(f"Running Graph {i}")
         prev_result = None
         prev_runner_name = None
         for runner in runners:
@@ -173,6 +167,10 @@ def run():
     parser.add_argument("--no-nnc", dest="nnc", action="store_false", help="DON'T benchmark nnc")
     parser.set_defaults(nnc=False)
 
+    parser.add_argument("--nnc-dynamic", dest="nnc_dynamic", action="store_true", help="nnc with dynamic shapes")
+    parser.set_defaults(nnc_dynamic=False)
+
+
     parser.add_argument("--baseline", dest="baseline", action="store_true", help="benchmark baseline")
     parser.add_argument("--no-baseline", dest="baseline", action="store_false", help="DON'T benchmark baseline")
     parser.set_defaults(baseline=False)
@@ -181,22 +179,30 @@ def run():
     parser.add_argument("--no-output", dest="output", action="store_false", help="DON'T output graph IR")
     parser.set_defaults(output=False)
 
+    parser.add_argument('--graphs', nargs="+", type=int)
+
+
     args = parser.parse_args()
     graphs = extract_ir(args.filename)
+
+    graph_set = args.graphs
+    graph_set = graph_set if graph_set else None
 
     options = []
     if args.baseline:
         options.append(("Baseline no fusion", run_baseline_no_fusion))
     if args.nnc:
-        options.append(("NNC", run_nnc))
+        options.append(("NNC", functools.partial(run_nnc, dynamic=args.nnc_dynamic)))
     if args.nvfuser:
         options.append(("NVFuser", run_nvfuser))
 
-    test_runners(graphs, options)
+    test_runners(graphs, options, graph_set)
 
     if args.output:
         quoted = []
-        for ir in graphs:
+        for i, ir in enumerate(graphs):
+            if graph_set and i not in graph_set:
+                continue
             quoted.append("\"\"\"" + ir + "\"\"\"")
         print("[" + ", ".join(quoted) + "]")
 

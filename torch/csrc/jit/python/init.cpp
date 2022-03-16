@@ -832,6 +832,16 @@ void initJITBindings(PyObject* module) {
           [](Graph& g, const std::vector<at::Tensor>& inps) {
             return debugGetFusedKernelCode(g, inps);
           })
+      .def("_representative_tensor", [](TensorType& type) {
+        auto tt = type.expect<TensorType>();
+        at::DeviceGuard device_guard(*type.device());
+        return at::empty_strided(
+                   *type.sizes().concrete_sizes(),
+                   *type.strides().concrete_sizes(),
+                   at::TensorOptions(*type.device())
+                       .dtype(*type.scalarType()))
+            .zero_().requires_grad_(*tt->requiresGrad());
+      })
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
