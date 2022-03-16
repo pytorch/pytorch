@@ -7,20 +7,6 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default %}
-  pull_request:
-{%- endif -%}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-  push:
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
