@@ -601,7 +601,10 @@ class LSTM(RNNBase):
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
-          will also be a packed sequence.
+          will also be a packed sequence. When ``bidirectional=True``, `output` will contain
+          a concatenation of the forward hidden states in order and backward hidden states in
+          reverse order: `forward[0]` aligned with `backward[L]`, `forward[1]` with `backward[L-1]`,
+          etc.
         * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
           final hidden state for each element in the sequence. When ``bidirectional=True``,
@@ -646,6 +649,11 @@ class LSTM(RNNBase):
         For bidirectional LSTMs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        For bidirectional LSTMs, `h_n` is not equivalent to `output[-1]`, as the former contains
+        the last forward and last backward states, and the latter the last forward and first 
+        backward state.
 
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
