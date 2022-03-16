@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/decomposition_registry_util.h>
-// clang-format off
 
 namespace torch {
 namespace jit {
@@ -67,15 +66,13 @@ const std::string& GetSerializedDecompositions() {
 const OperatorMap<std::string>& GetDecompositionMapping() {
   // clang-format off
  static const OperatorMap<std::string> decomposition_mapping {
-	{"aten::var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor)", "var_decomposition"},
-	{"aten::var(Tensor self, bool unbiased=True) -> (Tensor)", "var"},
+\    {"aten::var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor)", "var_decomposition"},
+\    {"aten::var(Tensor self, bool unbiased=True) -> (Tensor)", "var"},
   };
   // clang-format on
 
   return decomposition_mapping;
 }
-
-// clang-format on
 
 } // namespace jit
 } // namespace torch
