@@ -113,7 +113,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32, compute_dtype=torch.float16),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
@@ -184,8 +184,8 @@ def get_default_qconfig(backend='fbgemm', version=0):
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports `fbgemm`
-        and `qnnpack`.
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
+        `qnnpack` and `onednn`.
 
     Return:
         qconfig
@@ -197,6 +197,9 @@ def get_default_qconfig(backend='fbgemm', version=0):
         elif backend == 'qnnpack':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
+                              weight=default_per_channel_weight_observer)
         else:
             qconfig = default_qconfig
     else:
@@ -216,8 +219,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
     Returns the default QAT qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports `fbgemm`
-        and `qnnpack`.
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
+        `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
@@ -237,6 +240,11 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_max=255,
                                                                 reduce_range=False),
                               weight=default_weight_fake_quant)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255),
+                              weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
     # Use the fused observe + fake_quant modules for doing QAT.
@@ -253,6 +261,11 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                                  quant_max=255,
                                                                                  reduce_range=False),
                               weight=default_fused_wt_fake_quant)
+        elif backend == 'onednn':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255),
+                              weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2
     else:
@@ -404,9 +417,10 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
 def activation_is_memoryless(qconfig: QConfig):
     """
     Return whether the observer for activations defined in the given QConfig is memoryless.
+    This means a MovingAverage observer with averaging constant equal to 1.
     """
     def _is_memoryless(observer):
-        return hasattr(observer, "memoryless") and observer.memoryless
+        return hasattr(observer, "averaging_constant") and observer.averaging_constant == 1
     act = qconfig.activation()
     if isinstance(act, FakeQuantizeBase) and hasattr(act, "activation_post_process"):
         return _is_memoryless(act.activation_post_process)
