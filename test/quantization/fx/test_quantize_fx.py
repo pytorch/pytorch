@@ -3718,6 +3718,41 @@ class TestQuantizeFx(QuantizationTestCase):
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
 
+    def test_qat_skip_untraced(self):
+        class UnTraceableModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.untraceable_module = UnTraceableModule()
+
+            def forward(self, x):
+                x = self.untraceable_module(x)
+                return x
+
+        mod = M()
+
+        qconfig_dict = {"": torch.quantization.get_default_qat_qconfig()}
+        prepare_custom_config_dict = {"non_traceable_module_class": [UnTraceableModule]}
+        mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
+            mod.train(), qconfig_dict, prepare_custom_config_dict
+        )
+        mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
+            mod.train(), qconfig_dict, prepare_custom_config_dict
+        )
+        self.assertTrue(isinstance(mod_prep.untraceable_module.linear, torch.nn.Linear))
+        self.assertTrue(
+            type(mod_prep.untraceable_module.linear)
+            is not torch.nn.qat.modules.linear.Linear,
+            "prepare_qat_fx shold not convert anything inside untraced modules",
+        )
+
     def test_qconfig_dict_setup(self):
         class M(torch.nn.Module):
             def __init__(self):
