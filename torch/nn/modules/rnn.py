@@ -652,7 +652,7 @@ class LSTM(RNNBase):
 
     .. note::
         For bidirectional LSTMs, `h_n` is not equivalent to `output[-1]`, as the former contains
-        the last forward and last backward states, and the latter the last forward and first 
+        the last forward and last backward states, and the latter the last forward and first
         backward state.
 
     .. note::
