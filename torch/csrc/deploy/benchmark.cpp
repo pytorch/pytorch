@@ -95,7 +95,7 @@ struct RunPython {
 static torch::IValue to_device(const torch::IValue& v, torch::Device to);
 
 static std::vector<torch::IValue> to_device_vec(
-    at::ArrayRef<torch::IValue> vs,
+    multipy::ArrayRef<torch::IValue> vs,
     torch::Device to) {
   std::vector<torch::IValue> results;
   for (const torch::IValue& v : vs) {
