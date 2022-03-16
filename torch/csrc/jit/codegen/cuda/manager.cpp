@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -223,11 +224,19 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   };
 
   c10::optional<Stack> stack_copy;
-  if (shouldVerifyResult()) {
+  auto compare_callback = getCudaFuserComparisonCallback();
+  if (compare_callback != nullptr) {
+    size_t inputs_size = fusion_node->g(attr::Subgraph)->inputs().size();
+    TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
     stack_copy = Stack();
-    for (const auto& v : stack) {
-      stack_copy->emplace_back(v.deepcopy());
-    }
+    stack_copy->insert(
+        stack_copy->end(), stack.begin(), stack.end() - inputs_size);
+    // deepcopy the last (inputs_size) stack items
+    std::transform(
+        stack.end() - inputs_size,
+        stack.end(),
+        std::back_inserter(*stack_copy),
+        [](const c10::IValue& ivalue) { return ivalue.deepcopy(); });
   }
 
   auto run_fusion = [&]() {
@@ -273,26 +282,9 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   }
 
   if (stack_copy) {
+    size_t output_count = fusion_node->g(attr::Subgraph)->outputs().size();
     take_fallback(*stack_copy);
-    TORCH_CHECK(
-        stack_copy->size() == stack.size(),
-        "Fallback & fused graph produce different size stacks");
-    for (auto i : c10::irange(stack.size())) {
-      TORCH_CHECK(
-          (*stack_copy)[i].isTensor() == stack[i].isTensor(),
-          i,
-          "-th stack element differs in type between fused & fallback output");
-      if (stack[i].isTensor()) {
-        if (!at::allclose((*stack_copy)[i].toTensor(), stack[i].toTensor())) {
-          TORCH_WARN(
-              i,
-              "-th element on the stack differs in value. Expected: ",
-              stack[i].toTensor(),
-              "; Actual: ",
-              (*stack_copy)[i].toTensor());
-        }
-      }
-    }
+    compare_callback(output_count, *stack_copy, stack);
   }
 }
 

@@ -3660,6 +3660,38 @@ class TestCudaFuser(JitTestCase):
         for t in [t_unsqueeze, t_squeeze, t_squeeze_dim, t_squeeze_dim_no_op]:
             run(t)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_nvfuser_comparison_callbacks(self):
+        try:
+            fused_result = None
+            unfused_result = None
+
+            def callback(cnt, stack_unfused, stack_fused):
+                nonlocal unfused_result
+                nonlocal fused_result
+                unfused_result = stack_unfused[-1]
+                fused_result = stack_fused[-1]
+            torch._C._jit_nvfuser_set_comparison_callback(callback)
+
+            def fn(x, y):
+                z = torch.add(x, y)
+                return torch.relu(z)
+
+            x = torch.rand((4, 4)).cuda() - 0.5
+            y = torch.rand((4, 4)).cuda() - 0.5
+
+            fn_s = torch.jit.script(fn)
+            fn_s(x, y)
+            fn_s(x, y)
+            fn_s(x, y)
+
+            expected = fn(x, y)
+
+            self.assertEqual(expected, fused_result)
+            self.assertEqual(expected, unfused_result)
+        finally:
+            torch._C._jit_nvfuser_clear_comparison_callback()
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -3706,7 +3738,6 @@ class TestPassManagerCudaFuser(JitTestCase):
         self.assertTrue(torch._C._jit_nvfuser_enabled())
         self.assertTrue(torch._C._jit_set_nvfuser_enabled(False))
         self.assertFalse(torch._C._jit_nvfuser_enabled())
-
 
 if __name__ == '__main__':
     run_tests()
