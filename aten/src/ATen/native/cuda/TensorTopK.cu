@@ -23,18 +23,8 @@ namespace at {
 namespace native {
 
 // TODO: remove this when CUDA <11.6 is no longer supported
-bool should_use_sort(const Tensor& self, int64_t dim) {
-#if CUB_SUPPORTS_SCAN_BY_KEY()
-  return false;
-#else
-  // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
-  if (self.dim() == 0) return false;
-  if (self.dtype() == kBool) return false; // Bool is not support by topk
-  int64_t slice_size = self.size(dim);
-  if (slice_size == 0) return false;
-  int64_t num_slices = self.numel() / slice_size;
-  return num_slices <= 10 && slice_size >= 100000;
-#endif
+bool disable_sort_for_topk() {
+  return CUB_SUPPORTS_SCAN_BY_KEY();
 }
 
 namespace sbtopk { // single_block_topk
@@ -735,16 +725,17 @@ void launch(
 bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
 #if CUB_SUPPORTS_SCAN_BY_KEY()
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/74267
-  return (num_slices <= 60 && slice_size >= 10000) ||
-      (num_slices >= 60 && num_slices <= 100 && slice_size >= 8000) ||
-      (num_slices >= 100 && num_slices <= 200 && slice_size >= 5000) ||
-      (num_slices >= 200 && num_slices <= 400 && slice_size >= 3000) ||
-      (num_slices >= 400 && num_slices <= 4000 && slice_size >= 800) ||
-      (num_slices >= 4000 && slice_size >= 400);
+  return (num_slices <= 20 && slice_size >= 20000) ||
+      (num_slices > 20 && num_slices <= 40 && slice_size >= 10000) ||
+      (num_slices > 40 && num_slices <= 80 && slice_size >= 8000) ||
+      (num_slices > 80 && num_slices < 200 && slice_size >= 5000) ||
+      (num_slices >= 200 && num_slices < 800 && slice_size >= 3000) ||
+      (num_slices >= 800 && num_slices <= 4000 && slice_size >= 800) ||
+      (num_slices > 4000 && slice_size >= 400);
 #else
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
   return (num_slices <= 400 && slice_size >= 5000) ||
-      (num_slices >= 400 && num_slices < 4000 && slice_size >= 1000) ||
+      (num_slices > 400 && num_slices < 4000 && slice_size >= 1000) ||
       (num_slices >= 4000 && slice_size >= 300);
 #endif
 }

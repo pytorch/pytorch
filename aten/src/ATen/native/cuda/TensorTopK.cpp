@@ -19,8 +19,19 @@ void topk_out_with_sort(
   values.copy_(sorted_values.narrow(dim, 0, k));
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
+
 // TODO: remove this when CUDA <11.6 is no longer supported
-bool should_use_sort(const Tensor& self, int64_t dim);
+bool disable_sort_for_topk();
+bool should_use_sort(const Tensor& self, int64_t dim) {
+  if (disable_sort_for_topk()) return false;
+  // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
+  if (self.dim() == 0) return false;
+  if (self.dtype() == kBool) return false; // Bool is not support by topk
+  int64_t slice_size = self.size(dim);
+  if (slice_size == 0) return false;
+  int64_t num_slices = self.numel() / slice_size;
+  return num_slices <= 10 && slice_size >= 100000;
+}
 
 TORCH_IMPL_FUNC(topk_out_cuda)
   (const Tensor& self,
