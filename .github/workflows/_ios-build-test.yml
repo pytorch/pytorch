@@ -53,7 +53,8 @@ jobs:
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
       PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
-      - uses: ./.github/actions/checkout-pytorch
+      # [see note: pytorch repo ref]
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Populate CI build options
         run: |
