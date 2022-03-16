@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/variant.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <unordered_map>
@@ -46,6 +47,26 @@ PropagateShapesAndBuildLargeShapeComputeGraph(
 // information.
 TORCH_API bool setSymbolicShapeAnalysisTestMode(bool value);
 TORCH_API bool symbolicShapeAnalysisTestModeEnabled();
+
+// Temporary placeholder for shape analysis API.
+// This is so that I can stuff a shape argument into an IValue, and
+// use the fact that an IValue is a tagged union to be able to
+// pass the arguments variadically
+
+// FOR NOW, Build something that takes this in
+/*
+TORCH_API c10::IValue newSymbolicTensor(
+    std::vector<bool>& is_symbolic,
+    std::vector<int64_t>& sizes);
+TORCH_API c10::IValue newSymbolicShape();
+TORCH_API bool isSymbolicDim(const c10::IValue& v);
+        input_shapes->push_back(c10::SymbolicShape());
+*/
+using SSAInput = c10::variant<IValue, c10::SymbolicShape>;
+
+TORCH_API std::shared_ptr<std::vector<IValue>> calculateSymbolicShapesOnOp(
+    FunctionSchema schema,
+    const std::vector<SSAInput>& inputs);
 
 } // namespace jit
 } // namespace torch
