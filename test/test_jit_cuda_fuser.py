@@ -4112,6 +4112,29 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_pointwise_reference_tensor(self):
+        def t(input1, input2, scalar):
+            _unsafe_view = torch.ops.aten._unsafe_view(input1, [2, 4, 16])
+            add_ = torch.ops.aten.add_(_unsafe_view, input2)
+            gelu_ = torch.ops.aten.gelu(add_)
+            view_ = torch.ops.aten.view(gelu_, [8, 16])
+            mul_ = torch.ops.aten.mul(add_, scalar)
+            return [view_, mul_]
+
+        x = torch.randn(8, 16, device="cuda")
+        bias = torch.randn(16, device="cuda")
+        scalar = torch.ones(torch.Size([]), device="cuda")
+
+        t_jit = torch.jit.script(t)
+        for i in range(3):
+            jit_o = t_jit(x, bias, scalar)
+        o = t(x, bias, scalar)
+        self.assertEqual(jit_o, o)
+        self.assertGraphContains(t_jit.graph_for(x, bias, scalar), FUSION_GUARD)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_native_batch_norm_backward(self):
         grad_output = torch.randn(4, 2, 3, device="cuda")
         input = torch.randn(4, 2, 3, device="cuda")
