@@ -1552,11 +1552,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       const auto perm = at::arange(index_len, index.options());
       res_dim_indices = at::repeat_interleave(perm, selected_dim_indices_counts);
 
-      int64_t res_nnz = 0;
-      {
-        auto selected_dim_indices_offsets = selected_dim_indices_counts.cumsum(0);
-        res_nnz = *(selected_dim_indices_offsets.data_ptr<int64_t>() + index_len - 1);
-      }
+      auto res_nnz = res_dim_indices.numel();
 
       auto index_mask = at::zeros({size}, index.options().dtype(at::kBool));
       index_mask.scatter_(0, index, true);
