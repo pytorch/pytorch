@@ -227,8 +227,7 @@ jobs:
           )
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+          (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
           # Copy install binaries back
           mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v7a"
@@ -271,8 +270,7 @@ jobs:
           )
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+          (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
           # Copy install binaries back
           mkdir -p "${GITHUB_WORKSPACE}/build_android_install_arm_v8a"
@@ -315,8 +313,7 @@ jobs:
           )
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+          (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
           # Copy install binaries back
           mkdir -p "${GITHUB_WORKSPACE}/build_android_install_x86_32"
@@ -359,8 +356,7 @@ jobs:
           )
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+          (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
           # Copy install binaries back
           mkdir -p "${GITHUB_WORKSPACE}/build_android_install_x86_64"
@@ -379,11 +375,10 @@ jobs:
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
-          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_x86_32"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec \
+          (echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec \
             -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
