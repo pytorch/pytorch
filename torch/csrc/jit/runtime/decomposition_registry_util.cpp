@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/decomposition_registry_util.h>
+// clang-format off
 
 namespace torch {
 namespace jit {
@@ -73,6 +74,8 @@ const OperatorMap<std::string>& GetDecompositionMapping() {
 
   return decomposition_mapping;
 }
+
+// clang-format on
 
 } // namespace jit
 } // namespace torch
