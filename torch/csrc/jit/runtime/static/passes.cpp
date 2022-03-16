@@ -832,37 +832,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 } // namespace jit
 
-void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
-  const c10::Symbol static_runtime_layer_norm_symbol =
-      fromQualString("static_runtime::layer_norm");
-  auto nodes = graph->nodes();
-  std::vector<std::pair<Node*, Node*>> replacement;
-  DepthFirstGraphNodeIterator graph_it(graph);
-  for (auto old_node = graph_it.next(); old_node != nullptr;
-       old_node = graph_it.next()) {
-    if (!old_node->matches(torch::schema(
-            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"))) {
-      continue;
-    }
-    TORCH_CHECK(old_node->outputs().size() == 1);
-    auto* new_node = graph->create(
-        static_runtime_layer_norm_symbol,
-        /*layer_norm*/ 1 + /*mean*/ 1 + /*rst=*/1);
-    for (auto* input : old_node->inputs()) {
-      new_node->addInput(input);
-    }
-    replacement.emplace_back(old_node, new_node);
-  }
-  for (const auto& p : replacement) {
-    auto* old_node = p.first;
-    auto* new_node = p.second;
-    new_node->insertBefore(old_node);
-    new_node->output(0)->copyMetadata(old_node->output(0));
-    old_node->output(0)->replaceAllUsesWith(new_node->output(0));
-    old_node->destroy();
-  }
-}
-
 void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
