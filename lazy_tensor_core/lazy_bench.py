@@ -94,7 +94,8 @@ class HardSwishBenchmark:
         self.name = "HardSwishBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])'
         self.dims = dims
 
-    def __call__(self, device, jit):
+    # test and extra_args are placeholders to match TorchBench API
+    def __call__(self, device, jit, test, extra_args):
         return HardSwish(self.dims, device, jit)
 
 class HardSwish(nn.Module):
@@ -121,7 +122,8 @@ class DivAddMulBenchmark:
         self.name = "DivAddMulBenchmark(dims=[" + ','.join([str(d) for d in dims]) + '])'
         self.dims = dims
 
-    def __call__(self, device, jit):
+    # test and extra_args are placeholders to match TorchBench API
+    def __call__(self, device, jit, test, extra_args):
         return DivAddMul(self.dims, device, jit)
 
 class DivAddMul(nn.Module):
@@ -602,6 +604,7 @@ if __name__ == "__main__" :
                         help="which model run in subprocess. This will ignore filter and exclude")
     parser.add_argument("--allclose_atol", type=float, default=1e-4,
                         help="Absolute tolerance to check lazy result again the correct result")
+    parser.add_argument("--fp16", choices=["no", "half", "amp"], default="no", help="enable fp16 modes from: no fp16, half, or amp")
     args = parser.parse_args()
     results = []
 
@@ -637,9 +640,9 @@ if __name__ == "__main__" :
 
                     # no try since we should've already filtered out models we can't create
                     set_seeds()
-                    benchmark = benchmark_cls(device=args.device, jit=False)
+                    benchmark = benchmark_cls(test=args.test, device=args.device, jit=False, extra_args=["--fp16", args.fp16])
                     set_seeds()
-                    lazy_benchmark = benchmark_cls(device='lazy', jit=False)
+                    lazy_benchmark = benchmark_cls(test=args.test, device='lazy', jit=False, extra_args=["--fp16", args.fp16])
                     # TODO: might be redundant
                     gc.collect()
 
