@@ -1093,27 +1093,7 @@ class Tensor(torch._C._TensorBase):
             25
 
         """
-        shape = self.size()
-        fill_value = 0
-        if len(shape) != 2:
-            raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
-
-        if self.is_sparse:
-            coalesced_self = self.coalesce()
-            row_indices = coalesced_self.indices()[0]
-            device = coalesced_self.values().device
-            crow_indices = torch._convert_indices_from_coo_to_csr(
-                row_indices, self.shape[0], out_int32=row_indices.dtype == torch.int32)
-            return torch.sparse_csr_tensor(crow_indices,
-                                           coalesced_self.indices()[1].contiguous(),
-                                           coalesced_self.values(),
-                                           size=coalesced_self.shape,
-                                           dtype=coalesced_self.dtype,
-                                           device=device)
-        elif self.is_sparse_csr:
-            return self
-        else:
-            return self.to_sparse().to_sparse_csr()
+        return self.to_sparse_csr()
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
