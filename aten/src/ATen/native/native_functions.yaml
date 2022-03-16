@@ -4162,7 +4162,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: squeeze
+    CPU, CUDA, Meta: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
@@ -4170,7 +4170,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: squeeze
+    CPU, CUDA, Meta: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
@@ -4694,7 +4694,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA: unsqueeze
+    CPU, CUDA, Meta: unsqueeze
     SparseCPU, SparseCUDA: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
 
