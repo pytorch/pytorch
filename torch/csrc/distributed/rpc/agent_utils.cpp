@@ -80,7 +80,7 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
         (char*)allWorkerInfosKeyVector.data(), allWorkerInfosKeyVector.size());
     // workerInfos are comma separated, (e.g.
     // "Name1-Rank1,Name2-Rank2,Name3-Rank2") parse list of workers
-    for (std::string workerInfo : splitString(allWorkerInfos, ",")) {
+    for (const std::string& workerInfo : splitString(allWorkerInfos, ",")) {
       auto workerInfoVec = splitString(workerInfo, "-");
       std::string workerName = workerInfoVec.at(0);
       int workerId = std::stoi(workerInfoVec.at(1));
