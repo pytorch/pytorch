@@ -604,10 +604,8 @@ class LSTM(RNNBase):
           will also be a packed sequence.
         * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-          final hidden state for each element in the sequence. (If the model is bidirectional, h_n
-          will contain a concatenation of the last forward and the last backward hidden states, contrary
-          to output, which contains a concatenation of the forward states in order and backward states
-          in reverse order: first forward and last backward, second forward and second to last backward, etc.)
+          final hidden state for each element in the sequence. When ``bidirectional=True``,
+          `h_n` will contain a concatenation of the last forward and backward hidden states, respectively.
         * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
           final cell state for each element in the sequence. (If the model is bidirectional, c_n
