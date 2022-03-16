@@ -641,7 +641,8 @@ void launch(
 
   auto counts_buffer = allocator.allocate(num_blocks * RADIX_DIGITS * sizeof(short));
   short* counts = reinterpret_cast<short*>(counts_buffer.get());
-  static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max());
+  static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
+    "blockwise counter too large");
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
   auto withinKCounts_buffer = allocator.allocate(num_blocks * sizeof(IndexType));
