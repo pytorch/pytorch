@@ -424,11 +424,6 @@ __global__ void computeBlockwiseWithinKCounts(
 
   Bitwise desired = doLdg(desires + slice_idx);
   Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
-  // if (block_idx % blocks_per_slice == 0 && tidx == 0) {
-  //   printf(
-  //     "current_bit: %ld, slice: %ld, desired_digit: %ld, desired: %ld\n",
-  //     (long)current_bit, (long)slice_idx, (long)desired_digit, (long)desired);
-  // }
 
   // if largest, then only threads that has tidx > desired_digit are active
   // if !largest, then only threads that has tidx < desired_digit are active
@@ -705,16 +700,13 @@ void launch(
     computeBlockwiseWithinKCounts<Bitwise, IndexType><<<grid, RADIX_DIGITS, 0, stream>>>(
       desired, counts, blocks_per_slice, current_bit, largest, withinKCounts);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    // print<IndexType><<<1, 1, 0, stream>>>(withinKCounts, num_blocks);
 #endif
     desiredMask = at::cuda::Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS);
   }
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
-  // std::cout << "blocks_per_slice = " << blocks_per_slice << std::endl;
   computeBlockwiseKthCounts<Bitwise, IndexType><<<std::min((numInputSlices + 255) / 256, (IndexType)65535), 256, 0, stream>>>(
     desired, counts, num_blocks, blocks_per_slice, kthCounts);
-  // print<IndexType><<<1, 1, 0, stream>>>(kthCounts, num_blocks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
   using counting_iter_t = cub::CountingInputIterator<IndexType, IndexType>;
