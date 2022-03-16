@@ -47,6 +47,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     timeout-minutes: 240
     env:
@@ -141,6 +142,7 @@ jobs:
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
           rm -rf ./*
   test_force_on_cpu_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (force_on_cpu, 1, 1, windows.4xlarge)
     timeout-minutes: 270
     env:
@@ -295,6 +297,7 @@ jobs:
         run: |
           rm -rf ./*
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, windows.8xlarge.nvidia.gpu)
     timeout-minutes: 270
     env:
@@ -457,6 +460,7 @@ jobs:
         run: |
           rm -rf ./*
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, windows.8xlarge.nvidia.gpu)
     timeout-minutes: 270
     env:
