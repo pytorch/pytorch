@@ -705,12 +705,7 @@ class TestOperators(TestCase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op, bdims=(0,)):
                 self.assertEqual(loop_out, batched_out)
 
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
-    @opsToleranceOverride('TestOperators', 'test_vjp', (
-        tol1('nn.functional.conv_transpose3d',
-             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
-    ))
-    @skipOps('TestOperators', 'test_vmapjvpall', {
+    vmapjvpall_fail = {
         skip('nn.functional.dropout'),  # randomness
         skip('nn.functional.rrelu'),  # randomness
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
@@ -760,7 +755,14 @@ class TestOperators(TestCase):
         # Some kind of issue with unsymmetric tangent type
         # Runtime Error: The tangent part of the matrix A should also be symmetric.
         xfail('linalg.eigh'),
-    })
+    }
+
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
+        tol1('nn.functional.conv_transpose3d',
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
+    ))
+    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
@@ -784,6 +786,61 @@ class TestOperators(TestCase):
             fn, args = get_jvp_variant_primals_tangents(op, sample)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, opinfo=op):
                 self.assertEqual(loop_out, batched_out)
+
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
+        xfail('linalg.solve_triangular'),
+        xfail('nn.functional.huber_loss'),
+        xfail('nn.functional.poisson_nll_loss'),
+        xfail('lu'),
+        xfail('cumprod'),
+        xfail('lu_solve'),
+        xfail('linalg.lstsq', 'grad_oriented'),
+        xfail('cross'),
+        xfail('qr'),
+        xfail('linalg.pinv'),
+        xfail('masked_fill'),
+        xfail('copysign'),
+        xfail('linalg.solve'),
+        xfail('linalg.eig'),
+        xfail('complex'),
+        xfail('linalg.pinv', 'hermitian'),
+        xfail('pinverse'),
+        skip('_masked.mean'),  # ???
+        xfail('linalg.cholesky_ex'),
+        xfail('masked_scatter'),
+        xfail('index_fill'),
+        xfail('take'),
+        xfail('linalg.eigvals'),
+        xfail('linalg.qr'),
+        xfail('linalg.tensorsolve'),
+        xfail('nn.functional.max_pool3d'),
+        xfail('vdot'),
+        xfail('linalg.cross'),
+    }))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
+    def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
+        if is_inplace(op, op.get_op()):
+            # TODO: test in-place
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        if not op.supports_forward_ad:
+            self.skipTest("Skipped! Forward AD not supported.")
+            return
+
+        def test():
+            for sample in samples:
+                arg_values = [sample.input] + list(sample.args)
+                kwarg_values = sample.kwargs
+                args = tuple([*arg_values, *kwarg_values])
+                fn, args = get_jvp_variant_primals_tangents(op, sample)
+                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
+                        fn, args, {}, opinfo=op, compute_loop_out=False):
+                    pass
+        check_vmap_fallback(self, test, op, dry_run=False)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})

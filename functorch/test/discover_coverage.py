@@ -4,6 +4,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from enum import Enum
 import functorch._src.top_operators_github_usage as top_ops
 import pprint
+import unittest
 
 # Importing these files make modifications to the op_db that we need
 import test_ops  # noqa: F401
@@ -276,6 +277,46 @@ tests = {
 }
 
 
+def is_decorateinfo_skip_or_xfail(decorateinfo):
+    assert len(decorateinfo.decorators) == 1
+    actual_decorator = decorateinfo.decorators[0]
+    if actual_decorator == unittest.skip("Skipped!"):
+        return True
+    if actual_decorator == unittest.expectedFailure:
+        return True
+    return False
+
+
+def get_all_tested_ops():
+    overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
+    op_to_opinfo = get_ops_covered_by_opinfos()
+    result = set({})
+    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
+        opinfos = op_to_opinfo[op]
+        for opinfo in opinfos:
+            result.add(opinfo.name)
+    return result
+
+
+def get_skipped_or_xfailed_ops_for(test_name):
+    overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
+    op_to_opinfo = get_ops_covered_by_opinfos()
+    result = set({})
+    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
+        opinfos = op_to_opinfo[op]
+        for opinfo in opinfos:
+            for decorator in opinfo.decorators:
+                if not hasattr(decorator, 'test_name'):
+                    continue
+                if decorator.test_name != test_name:
+                    continue
+                if is_decorateinfo_skip_or_xfail(decorator):
+                    result.add(opinfo.name)
+    return result
+
+
+# import pdb; pdb.set_trace()
+
 def get_statuses(for_subset=None, invert=False):
     overridable_outplace_we_care_about = get_public_overridable_outplace_we_care_about()
     if for_subset is not None:
@@ -349,6 +390,74 @@ print(f'Overridable public outplace ops: {len(overridable_outplace_ops)}')
 print(f'Overridable public outplace ops we care about: {len(overridable_outplace_we_care_about)}')
 print(f'OpInfo-tested overridable public outplace ops: {len(tested_overridable_outplace_ops)}')
 
+
+def remove_torch(name):
+    assert name[:6] == 'torch.'
+    return name[6:]
+
+
+def get_list_of_all_tests():
+    all_tests = list(tested_overridable_outplace_ops.keys())
+    return set([remove_torch(test) for test in all_tests])
+
+
+mytest = {
+    'test_vmap_exhaustive',
+    'test_op_has_batch_rule',
+    'test_vjp',
+    'test_vmapvjp',
+    'test_vmapvjp_has_batch_rule',
+}
+
+print('*' * 80)
+all_tests = get_list_of_all_tests()
+for test in mytest:
+    result = get_skipped_or_xfailed_ops_for(test)
+    diff = len(all_tests - result)
+    print(f'{test}: {diff}')
+
+
+def get_jvp_coverage(subset=None):
+    # - number that support autograd
+    # - number that support forward_ad (in pytorch core)
+    # - number that support functorch.jvp
+    op_to_opinfo = get_ops_covered_by_opinfos()
+    ops_dct = tested_overridable_outplace_ops
+    if subset is not None:
+        ops_dct = {name: op for name, op in ops_dct.items()
+                   if remove_torch(name) in subset}
+    supports_autograd_ops_dct = {name: op_to_opinfo[fn] for name, fn in ops_dct.items()
+                                 if op_to_opinfo[fn][0].supports_autograd}
+    supports_forwardad_ops_dct = {name: op_to_opinfo[fn] for name, fn in ops_dct.items()
+                                  if op_to_opinfo[fn][0].supports_forward_ad}
+
+    ops = set([remove_torch(test) for test in list(ops_dct.keys())])
+    supports_autograd = set([remove_torch(test)
+                             for test in list(supports_autograd_ops_dct.keys())])
+    supports_forward_ad = set([remove_torch(test)
+                               for test in list(supports_forwardad_ops_dct.keys())])
+    assert supports_forward_ad.issubset(supports_autograd)
+    assert supports_autograd.issubset(ops)
+
+    failed_ops = get_skipped_or_xfailed_ops_for('test_jvp')
+
+    coverage = len(supports_forward_ad - failed_ops)
+    no_forward_ad = len(supports_autograd) - len(supports_forward_ad)
+    print(f'test_jvp, {coverage}, {no_forward_ad}, {len(ops)}')
+
+
+get_jvp_coverage()
+get_jvp_coverage(get_top_ops(100, 25))
+for op in get_top_ops(100, 25):
+    print(op)
+print('*' * 80)
+
+# result = get_skipped_or_xfailed_ops_for('test_vmap_exhaustive')
+# result = get_skipped_or_xfailed_ops_for('test_op_has_batch_rule')
+# result = get_skipped_or_xfailed_ops_for('test_vjp')
+# result = get_skipped_or_xfailed_ops_for('test_vmapvjp')
+# result = get_skipped_or_xfailed_ops_for('test_vmapvjp_has_batch_rule')
+# import pdb; pdb.set_trace()
 
 statuses = transpose_statuses()
 for test in tests:
@@ -435,3 +544,41 @@ def print_coverage_info(th=100, nn=25):
 # print_coverage_info(200, 50)
 
 # pprint.pprint(get_top_ops(100, 25))
+
+dct = {}
+for op in op_db:
+    def add(name, op):
+        if name not in dct:
+            dct[name] = []
+        dct[name].append(op)
+    add(op.name, op)
+    for alias in op.aliases:
+        add(alias.name, op)
+
+top_ops_125 = set(get_top_ops(100, 25))
+dct_keys = set(dct.keys())
+
+# only has 110, but that's OK
+dct_125 = {k: v for k, v in dct.items() if k in top_ops_125}
+failed_ops = get_skipped_or_xfailed_ops_for('test_vmapjvpall_has_batch_rule')
+failed_ops = set([k for k in failed_ops if k in dct_125])
+supports_bwd = {k: v for k, v in dct_125.items()
+                if any(opinfo.supports_autograd for opinfo in v)}
+supports_fwd = {k: v for k, v in dct_125.items()
+                if all(opinfo.supports_forward_ad for opinfo in v)}
+supports_fwd = set(supports_fwd.keys())
+supports_bwd = set(supports_bwd.keys())
+assert set(supports_fwd).issubset(set(supports_bwd))
+supports_bwd_but_not_fwd = set(supports_bwd) - set(supports_fwd)
+unsupported = failed_ops.union(supports_bwd_but_not_fwd)
+supported = set(dct_125.keys()) - unsupported
+
+print(len(supported) + len(unsupported))
+
+print("&" * 80)
+for x in supported:
+    print(x)
+
+print("&" * 80)
+for x in unsupported:
+    print(x)
