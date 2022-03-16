@@ -322,7 +322,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.scalar_type())) {
+    if (at::isFloatingType(output.scalar_type())
+        || at::isComplexType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
