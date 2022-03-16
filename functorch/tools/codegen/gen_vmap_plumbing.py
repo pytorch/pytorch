@@ -5,6 +5,7 @@ from tools.codegen.model import (
     BaseTy, Variant, OptionalType, BaseType, ListType, NativeFunction, Type,
     Argument, Return, SchemaKind, Tag
 )
+from tools.codegen.api.translate import translate
 from tools.codegen.context import method_with_native_function
 from tools.codegen.utils import mapMaybe
 from dataclasses import dataclass
@@ -20,29 +21,29 @@ def is_optional_tensor(typ: Type) -> bool:
     return isinstance(typ, OptionalType) and is_tensor(typ.elem)
 
 
-def is_vector_tensor(typ: Type) -> bool:
+def is_tensor_list(typ: Type) -> bool:
     return isinstance(typ, ListType) and is_tensor(typ.elem)
 
 
-def unwrap_tensor(name: str) -> List[str]:
+def unwrap_tensor(name: str, cur_level_var: str) -> List[str]:
     result = f"""\
     Tensor {name}_value;
     optional<int64_t> {name}_bdim;
-    std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, cur_level);"""
+    std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, {cur_level_var});"""
     return textwrap.dedent(result).split('\n')
 
 
-def unwrap_optional_tensor(name: str) -> List[str]:
+def unwrap_optional_tensor(name: str, cur_level_var: str) -> List[str]:
     result = f"""\
     optional<Tensor> {name}_value;
     optional<int64_t> {name}_bdim;
     if ({name}) {{
-        std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}.value(), cur_level);
+        std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}.value(), {cur_level_var});
     }}"""
     return textwrap.dedent(result).split('\n')
 
 
-def gen_unwraps(flat_arguments: List[Argument]) -> Tuple[List[str], List[str]]:
+def gen_unwraps(flat_arguments: List[Argument], cur_level_var: str) -> Tuple[List[str], List[str]]:
     arg_names = [a.name for a in flat_arguments]
     arg_types = [a.type for a in flat_arguments]
 
@@ -51,10 +52,10 @@ def gen_unwraps(flat_arguments: List[Argument]) -> Tuple[List[str], List[str]]:
 
     unwraps = []
     for tensor in tensors:
-        unwraps += unwrap_tensor(tensor)
+        unwraps += unwrap_tensor(tensor, cur_level_var)
 
     for opt_tensor in optional_tensors:
-        unwraps += unwrap_optional_tensor(opt_tensor)
+        unwraps += unwrap_optional_tensor(opt_tensor, cur_level_var)
     unwraps = '\n'.join(unwraps)
 
     unwrapped_arg_list = []
@@ -72,35 +73,37 @@ def get_aten_op_call(schema) -> str:
     return f'ATEN_FN({schema.name.name})'
 
 
-def gen_case_where_all_bdims_are_none(flat_args: List[Argument], schema) -> str:
+def gen_case_where_all_bdims_are_none(schema, cur_level_var) -> str:
     conditions = []
+    flat_args = schema.arguments.flat_all
     for arg in flat_args:
         if not arg.type.is_tensor_like():
             continue
-        conditions.append(f'!isBatchedAtLevel({arg.name}, cur_level)')
-    aten_op = get_aten_op_call(schema)
-    arg_names = [a.name for a in flat_args]
+        conditions.append(f'!isBatchedAtLevel({arg.name}, {cur_level_var})')
 
+    sig = DispatcherSignature.from_schema(schema)
+    translated_args = ', '.join(e.expr for e in translate(sig.arguments(), sig.arguments()))
     return f"""\
 if ({' && '.join(conditions)}) {{
-  return {aten_op}({', '.join(arg_names)});
+  return at::_ops::{sig.func.name.unambiguous_name()}::call({translated_args});
 }}"""
 
 
-def gen_returns(returns: List[Return]) -> str:
+def gen_returns(returns: List[Return], cur_level_var: str, results_var: str) -> str:
     idx = 0
     wrapped_returns = []
     for ret in returns:
         if is_tensor(ret.type):
-            wrapped_returns.append(f'makeBatched(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)')
-            idx += 2
-        elif is_vector_tensor(ret.type):
             wrapped_returns.append(
-                f'makeBatchedVector(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)'
+                f'makeBatched(std::get<{idx}>({results_var}), std::get<{idx + 1}>({results_var}), {cur_level_var})')
+            idx += 2
+        elif is_tensor_list(ret.type):
+            wrapped_returns.append(
+                f'makeBatchedVector(std::get<{idx}>({results_var}), std::get<{idx+1}>({results_var}), {cur_level_var})'
             )
             idx += 2
         else:
-            wrapped_returns.append(f'std::get<{idx}>(results)')
+            wrapped_returns.append(f'std::get<{idx}>({results_var})')
             idx += 1
     if len(wrapped_returns) == 1:
         wrapped_returns = f'return {wrapped_returns[0]};'
@@ -110,29 +113,42 @@ def gen_returns(returns: List[Return]) -> str:
 
 
 def accepts_at_least_one_tensor_input(schema):
-    for arg in schema.arguments.flat_all:
-        if arg.type.is_tensor_like():
-            return True
-    return False
+    return any(a.type.is_tensor_like() for a in schema.arguments.flat_all)
+
+
+def is_mutated_arg(argument):
+    return argument.annotation is not None and argument.annotation.is_write
 
 
 def gen_vmap_inplace_plumbing(native_function):
+    # Assumptions:
+    # - only one argument is being modified in-place
+    # - the argument that is being modified in-place is the first argument
+    # - all returns are either Tensor, tuple of Tensor, or TensorList
     schema = native_function.func
     sig = DispatcherSignature.from_schema(schema)
     returns = schema.returns
 
+    # Check assumptions. If these are invalid we return None
+    # and punt the work to handle them to the future.
     assert schema.kind() == SchemaKind.inplace
+    if not is_mutated_arg(schema.arguments.flat_all[0]):
+        return None
+    if not len([arg for arg in schema.arguments.flat_all if is_mutated_arg(arg)]) == 1:
+        return None
 
     # Only support cases where all returns are Tensors or vector<Tensor>
     if len(returns) == 0:
         return None
-    if not all(is_tensor(ret.type) or is_vector_tensor(ret.type) for ret in returns):
+    if not all(is_tensor(ret.type) or is_tensor_list(ret.type) for ret in returns):
         return None
     if not accepts_at_least_one_tensor_input(schema):
         return None
 
-    unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
+    cur_level_var = 'cur_level'
+
+    unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
 
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
@@ -140,7 +156,7 @@ template <typename batch_rule_t, batch_rule_t batch_rule>
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
+  int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
   batch_rule({', '.join(unwrapped_arg_list)});
@@ -156,7 +172,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str:
     # Only support cases where all returns are Tensors or vector<Tensor>
     if len(returns) == 0:
         return None
-    if not all(is_tensor(ret.type) or is_vector_tensor(ret.type) for ret in returns):
+    if not all(ret.type.is_tensor_like() for ret in returns):
         return None
     if not accepts_at_least_one_tensor_input(schema):
         return None
@@ -171,20 +187,26 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str:
     if schema.kind() == SchemaKind.out:
         return None
 
-    unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all)
-    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema.arguments.flat_all, schema)
+    # From now on, assume we're dealing with a functional (out-of-place) operation
+    assert schema.kind() == SchemaKind.functional
 
-    wrapped_returns = gen_returns(returns)
+    results_var = 'results'
+    cur_level_var = 'cur_level'
+
+    unwraps, unwrapped_arg_list = gen_unwraps(schema.arguments.flat_all, cur_level_var)
+    bdims_all_none_case = gen_case_where_all_bdims_are_none(schema, cur_level_var)
+
+    wrapped_returns = gen_returns(returns, cur_level_var, results_var)
     return f"""\
 template <typename batch_rule_t, batch_rule_t batch_rule>
 {sig.decl(name=schema.name.unambiguous_name() + '_generated_plumbing')} {{
   c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
   auto maybe_layer = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
+  int64_t {cur_level_var} = maybe_layer->layerId();
 {textwrap.indent(bdims_all_none_case, "  ")}
 {textwrap.indent(unwraps, "  ")}
-  auto results = batch_rule({', '.join(unwrapped_arg_list)});
+  auto {results_var} = batch_rule({', '.join(unwrapped_arg_list)});
   {wrapped_returns}
 }}"""
 
