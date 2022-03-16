@@ -1560,18 +1560,20 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       }
 
-      auto index_sorted = at::empty_like(index);
-      {
-        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
-        auto* ptr_index_sorted = index_sorted.data_ptr<int64_t>();
-        for (const auto i : c10::irange(size)) {
-          const auto i_count = *ptr_index_counts++;
-          if (i_count) {
-            std::fill(ptr_index_sorted, ptr_index_sorted + i_count, i);
-            ptr_index_sorted += i_count;
-          }
+      const auto index_sorted = [&](void) -> Tensor {
+        // TODO: find a better threshold based on actual runtime benchmarking.
+        // Here we switch between radix sort and merge/quick sort based on
+        // algorithmic complexity.
+        if (size < std::log2(index_len) * index_len) {
+          // do radix sort in O(size)
+          const auto perm = at::arange(size, index.options());
+          return at::repeat_interleave(perm, index_counts);
         }
-      }
+        else {
+          // do merge/quick sort in O(index_len * log(index_len))
+          return std::get<0>(index.sort());
+        }
+      }();
 
       const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
       const auto perm = at::arange(index_len, index_sorted.options());
