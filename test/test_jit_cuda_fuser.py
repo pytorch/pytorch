@@ -2496,7 +2496,9 @@ class TestCudaFuser(JitTestCase):
     def test_linear(self):
         in_feature = 2
         out_feature = 8
-        x = torch.randn(4, in_feature, dtype=torch.float32, device='cuda')
+        # Changing the input dims to be 3-D to avoid eager mode bias fusion
+        # The bias fusion causes some precision issues with TF-32
+        x = torch.randn(2, 4, in_feature, dtype=torch.float32, device='cuda')
         weight = torch.randn(out_feature, in_feature, dtype=torch.float32, device='cuda')
         bias = torch.randn(out_feature, dtype=torch.float32, device='cuda')
 
