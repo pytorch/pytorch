@@ -510,7 +510,7 @@ Tensor cross_entropy_loss_prob_target(
         if (input.numel()==0){
           return -(input * target).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-	         return -(input * target).sum() / (input.numel()/ input.size(1));
+          return -(input * target).sum() / (input.numel()/ input.size(1));
         }
       case Reduction::Sum:
         return -(input * target).sum();
