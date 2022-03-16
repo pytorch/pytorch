@@ -43,6 +43,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -260,6 +261,7 @@ jobs:
           docker system prune -af
 
   test_jit_legacy_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -537,6 +539,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_multigpu_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (multigpu, 1, 1, linux.16xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.16xlarge.nvidia.gpu
@@ -814,6 +817,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_nogpu_NO_AVX_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (nogpu_NO_AVX, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
@@ -1082,6 +1086,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_nogpu_NO_AVX2_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
@@ -1350,6 +1355,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_distributed_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.8xlarge.nvidia.gpu
@@ -1627,6 +1633,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_slow_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (slow, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -1904,6 +1911,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
@@ -2181,6 +2189,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
