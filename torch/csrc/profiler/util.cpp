@@ -169,7 +169,7 @@ std::string inputOpIdsToStr(const std::list<std::pair<at::RecordFunctionHandle, 
   std::string str("[");
   int idx = 0;
 
-  for (const auto op_id_info_pair : input_op_ids) {
+  for (const auto& op_id_info_pair : input_op_ids) {
     if (idx++ > 0) {
       str = fmt::format("{}, ", str);
     }
