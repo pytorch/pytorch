@@ -121,8 +121,8 @@ class QuantizationTracer(Tracer):
     def __init__(
         self, skipped_module_names: List[str],
         skipped_module_classes: List[Callable],
-        non_traceable_module_names: List[str]=[],
-        non_traceable_module_classes: List[Callable]=[]
+        non_traceable_module_names: List[str] = list(),
+        non_traceable_module_classes: List[Callable] = list()
     ):
         super().__init__()
         self.skipped_module_names = skipped_module_names
@@ -147,14 +147,14 @@ class QuantizationTracer(Tracer):
         ):
             for name, child in m.named_children():
                 if not hasattr(child, "qconfig"):
-                    child.qconfig = None # type: ignore[assignment]
+                    child.qconfig = None  # type: ignore[assignment]
         return (
             (
                 m.__module__.startswith("torch.nn")
                 and not isinstance(m, torch.nn.Sequential)
             )
-            or module_qualified_name in self.skipped_module_names+self.non_traceable_module_names
-            or type(m) in self.skipped_module_classes+self.non_traceable_module_classes
+            or module_qualified_name in self.skipped_module_names + self.non_traceable_module_names
+            or type(m) in self.skipped_module_classes + self.non_traceable_module_classes
             or isinstance(m, _FusedModule)
         )
 
