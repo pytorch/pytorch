@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 300
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
