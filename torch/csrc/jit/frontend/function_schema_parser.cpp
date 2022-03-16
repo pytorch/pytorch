@@ -2,7 +2,6 @@
 
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/Optional.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -28,13 +27,8 @@ namespace jit {
 
 namespace {
 struct SchemaParser {
-  explicit SchemaParser(const std::string& str)
-      : L(std::make_shared<Source>(
-            c10::string_view(str),
-            c10::nullopt,
-            0,
-            nullptr,
-            Source::DONT_COPY)),
+  SchemaParser(const std::string& str)
+      : L(std::make_shared<SourceView>(c10::string_view(str))),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
   either<OperatorName, FunctionSchema> parseDeclaration() {
@@ -356,12 +350,12 @@ struct SchemaParser {
 };
 } // namespace
 
-C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
+either<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
   return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
 
-C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
+FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
   TORCH_CHECK(
       parsed.is_right(),
@@ -369,7 +363,7 @@ C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   return std::move(parsed.right());
 }
 
-C10_EXPORT OperatorName parseName(const std::string& name) {
+OperatorName parseName(const std::string& name) {
   auto parsed = parseSchemaOrName(name);
   TORCH_CHECK(
       parsed.is_left(),
