@@ -644,16 +644,45 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif TEST_SAVE_XML is not None:
-        # import here so that non-CI doesn't need xmlrunner installed
-        import xmlrunner  # type: ignore[import]
-        test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
-        test_report_path = TEST_SAVE_XML + LOG_SUFFIX
-        test_report_path = os.path.join(test_report_path, test_filename)
-        os.makedirs(test_report_path, exist_ok=True)
-        verbose = '--verbose' in argv or '-v' in argv
-        if verbose:
-            print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+
+        def make_xml_runner(argv):
+            test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
+            test_report_path = TEST_SAVE_XML + LOG_SUFFIX
+            test_report_path = os.path.join(test_report_path, test_filename)
+            os.makedirs(test_report_path, exist_ok=True)
+            verbose = '--verbose' in argv or '-v' in argv
+            if verbose:
+                print('Test results will be stored in {}'.format(test_report_path))
+
+            # patching library code to add verbosity to test outputs
+            # https://github.com/pytorch/pytorch/issues/69014
+            # import here so that non-CI doesn't need xmlrunner installed
+            # this works with unittest_xml_reporting<=3.2.0,>=2.0.0
+            # (3.2.0 is latest at the moment)
+            from xmlrunner.result import _XMLTestResult  # type: ignore[import]
+
+            class XMLTestResultVerbose(_XMLTestResult):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+
+                def addSkip(self, test, reason):
+                    """
+                    Called when a test method was skipped; includes skipping reason
+                    """
+                    self._save_output_data()
+                    testinfo = self.infoclass(
+                        self, test, self.infoclass.SKIP, reason)
+                    testinfo.test_exception_name = 'skip'
+                    testinfo.test_exception_message = reason
+                    self.skipped.append((testinfo, reason))
+                    self._prepare_callback(testinfo, [], f"skip: {reason}", 's')
+
+            from xmlrunner import XMLTestRunner  # type: ignore[import]
+            testRunner = XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1, resultclass=XMLTestResultVerbose)
+            return testRunner
+
+        testRunner = make_xml_runner(argv)
+        unittest.main(argv=argv, testRunner=testRunner)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
