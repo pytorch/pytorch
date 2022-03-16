@@ -1,11 +1,11 @@
 torch.hub
 ===================================
-Pytorch Hub is a pre-trained model repository designed to facilitate research reproducibility.
+PyTorch Hub is a pre-trained model repository designed to facilitate research reproducibility.
 
 Publishing models
 -----------------
 
-Pytorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
+PyTorch Hub supports publishing pre-trained models(model definitions and pre-trained weights)
 to a github repository by adding a simple ``hubconf.py`` file;
 
 ``hubconf.py`` can have multiple entrypoints. Each entrypoint is defined as a python function
@@ -77,7 +77,7 @@ Important Notice
 Loading models from Hub
 -----------------------
 
-Pytorch Hub provides convenient APIs to explore all available models in hub
+PyTorch Hub provides convenient APIs to explore all available models in hub
 through :func:`torch.hub.list()`, show docstring and examples through
 :func:`torch.hub.help()` and load the pre-trained models using
 :func:`torch.hub.load()`.

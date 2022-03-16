@@ -1613,100 +1613,136 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 
 } // namespace Native
 
-// Define config stuff here, rather than its own .cpp file,
+
+// General caching allocator utilities
+
+// Environment config parser
+// Defined here, rather than its own .cpp file,
 // because parseArgs needs to know kLargeBuffer.
-bool parsed = false;
+class CachingAllocatorConfig {
+  public:
+    static AllocatorBackend allocator_backend() {
+      return instance().m_allocator_backend;
+    }
 
-size_t m_max_split_size = std::numeric_limits<size_t>::max();
-std::string m_allocator_backend = "native";
+    static size_t max_split_size() {
+      return instance().m_max_split_size;
+    }
 
-void parseArgs() {
-  const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-  if (val != NULL) {
-    const std::string config(val);
+  private:
+    static CachingAllocatorConfig& instance() {
+      static CachingAllocatorConfig* s_instance = ([]() {
+	  auto inst = new CachingAllocatorConfig();
+	  inst->parseArgs();
+	  return inst;
+	  })();
+      return *s_instance;
+    }
 
-    std::regex exp("[\\s,]+");
-    std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-    std::sregex_token_iterator end;
-    std::vector<std::string> options(it, end);
+    CachingAllocatorConfig()
+      : m_allocator_backend{AllocatorBackend::NATIVE},
+        m_max_split_size{std::numeric_limits<size_t>::max()} {}
+    AllocatorBackend m_allocator_backend;
+    size_t m_max_split_size;
 
-    bool used_max_split_size_mb(false);
-    bool used_cudaMallocAsync(false);
+    void parseArgs() {
+      const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+      if (val != NULL) {
+	const std::string config(val);
 
-    for (auto option : options) {
-      std::regex exp2("[:]+");
-      std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-      std::sregex_token_iterator end2;
-      std::vector<std::string> kv(it2, end2);
-      if (kv.size() >= 2) {
-        /* Maximum split size in MB.  Limited to large size blocks */
-        if (kv[0].compare("max_split_size_mb") == 0) {
-          size_t val2 = stoi(kv[1]);
-          TORCH_CHECK(
-              val2 > Native::kLargeBuffer / (1024 * 1024),
-              "CachingAllocator option max_split_size_mb too small, must be > ",
-              Native::kLargeBuffer / (1024 * 1024),
-              "");
-          val2 = std::max(val2, Native::kLargeBuffer / (1024 * 1024));
-          val2 = std::min(
-              val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
-          m_max_split_size = val2 * 1024 * 1024;
-          used_max_split_size_mb = true;
-        } else if (kv[0].compare("backend") == 0) {
-          TORCH_CHECK(((kv[1].compare("native") == 0) ||
-                       (kv[1].compare("cudaMallocAsync") == 0)),
-                      "Unknown allocator backend, "
-                      "options are native and cudaMallocAsync");
-          m_allocator_backend = kv[1];
-          used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
-          if (used_cudaMallocAsync) {
+	std::regex exp("[\\s,]+");
+	std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+	std::sregex_token_iterator end;
+	std::vector<std::string> options(it, end);
+
+	bool used_max_split_size_mb(false);
+	bool used_cudaMallocAsync(false);
+
+	for (auto option : options) {
+	  std::regex exp2("[:]+");
+	  std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+	  std::sregex_token_iterator end2;
+	  std::vector<std::string> kv(it2, end2);
+	  if (kv.size() >= 2) {
+	    /* Maximum split size in MB.  Limited to large size blocks */
+	    if (kv[0].compare("max_split_size_mb") == 0) {
+	      size_t val2 = stoi(kv[1]);
+	      TORCH_CHECK(
+		  val2 > Native::kLargeBuffer / (1024 * 1024),
+		  "CachingAllocator option max_split_size_mb too small, must be > ",
+		  Native::kLargeBuffer / (1024 * 1024),
+		  "");
+	      val2 = std::max(val2, Native::kLargeBuffer / (1024 * 1024));
+	      val2 = std::min(
+		  val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
+	      m_max_split_size = val2 * 1024 * 1024;
+	      used_max_split_size_mb = true;
+	    } else if (kv[0].compare("backend") == 0) {
+	      TORCH_CHECK(((kv[1].compare("native") == 0) ||
+		    (kv[1].compare("cudaMallocAsync") == 0)),
+		  "Unknown allocator backend, "
+		  "options are native and cudaMallocAsync");
+	      used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
+	      if (used_cudaMallocAsync) {
 #if CUDA_VERSION >= 11040
-            int version;
-            C10_CUDA_CHECK(cudaDriverGetVersion(&version));
-            TORCH_CHECK(version >= 11040,
-                        "backend:cudaMallocAsync requires CUDA runtime "
-                        "11.4 or newer, but cudaDriverGetVersion returned ",
-                        version);
+		int version;
+		C10_CUDA_CHECK(cudaDriverGetVersion(&version));
+		TORCH_CHECK(version >= 11040,
+		    "backend:cudaMallocAsync requires CUDA runtime "
+		    "11.4 or newer, but cudaDriverGetVersion returned ",
+		    version);
+		m_allocator_backend = AllocatorBackend::CUDAMALLOCASYNC;
 #else
-            TORCH_CHECK(false,
-                        "backend:cudaMallocAsync requires Pytorch to be built with "
-                        "CUDA 11.4 or newer, but CUDA_VERSION is ",
-                        CUDA_VERSION);
+		TORCH_CHECK(false,
+		    "backend:cudaMallocAsync requires PyTorch to be built with "
+		    "CUDA 11.4 or newer, but CUDA_VERSION is ",
+		    CUDA_VERSION);
 #endif
-          }
-        } else {
-          TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
-        }
+	      }
+	    } else {
+	      TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
+	    }
+	  }
+	}
+
+	if (used_max_split_size_mb && used_cudaMallocAsync) {
+	  TORCH_WARN("backend:cudaMallocAsync ignores max_split_size_mb");
+	}
       }
     }
+};
 
-    if (used_max_split_size_mb && used_cudaMallocAsync) {
-      TORCH_WARN("backend:cudaMallocAsync ignores max_split_size_mb");
-    }
-  }
-}
-
-// Public interface
-const char* allocatorBackend() {
-  // Static initializer is thread-safe
-  static const std::string backend = []() {
-                                       if (!parsed) {
-                                         parseArgs();
-                                       }
-                                       return m_allocator_backend;
-                                     }();
-  return backend.c_str();
+// External config interface (declared in CUDACachingAllocator.h)
+// Should we bother having these two functions?
+// They are basically useless layers of indirection, but a minor
+// code-cleanliness benefit is they alleviate the need to define
+// CachingAllocatorConfig itself in CUDACachingAllocator.h.
+AllocatorBackend allocatorBackend() {
+  return CachingAllocatorConfig::allocator_backend();
 }
 
 size_t maxSplitSize() {
-  // Static initializer is thread-safe
-  static const size_t size = []() {
-                               if (!parsed) {
-                                 parseArgs();
-                               }
-                               return m_max_split_size;
-                             }();
-  return size;
+  return CachingAllocatorConfig::max_split_size();
+}
+
+// Size pretty-printer
+inline std::string format_size(uint64_t size) {
+  std::ostringstream os;
+  os.precision(2);
+  os << std::fixed;
+  if (size <= 1024) {
+    os << size << " bytes";
+  } else if (size <= 1048576) {
+    os << (size / 1024.0);
+    os << " KiB";
+  } else if (size <= 1073741824ULL) {
+    os << size / 1048576.0;
+    os << " MiB";
+  } else {
+    os << size / 1073741824.0;
+    os << " GiB";
+  }
+  return os.str();
 }
 
 } // namespace CUDACachingAllocator

@@ -361,7 +361,7 @@ The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``backend`` allows selecting the underlying allocator implementation.
-  Currently, valid options are ``native``, which uses Pytorch's native
+  Currently, valid options are ``native``, which uses PyTorch's native
   implementation, and ``cudaMallocAsync``, which uses
   `CUDA's built-in asynchronous allocator`_.
   ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.

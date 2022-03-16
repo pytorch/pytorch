@@ -2,11 +2,11 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <c10/util/UniqueVoidPtr.h>
 
 #include <mutex>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -81,12 +81,12 @@ std::mutex general_mutex;
  *     the end of capture (specifically, to notifyCaptureEnded).
  */
 
-using PtrInfo = std::unordered_map<void*, PtrUsage>;
+using PtrInfo = ska::flat_hash_map<void*, PtrUsage>;
 PtrInfo ptr_info;
 std::vector<void*> ungraphed_ptrs_defer_free_until_no_capture;
 
 // These two help setMemoryFraction limit the amount of memory
-// used by Pytorch in particular (as opposed to other libraries
+// used by PyTorch in particular (as opposed to other libraries
 // in the same process that might be sharing the same cudaMemPool_t).
 std::vector<size_t> pytorch_used_bytes;
 std::vector<size_t> pytorch_memory_limits;
@@ -148,6 +148,8 @@ inline void lazy_init_device(int device) {
   if (!devs_initialized_flags[device]) {
     CUDAGuard g(device);
 
+    // See "Retaining memory in the pool" here:
+    // https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/
     cudaMemPool_t mempool;
     C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, device));
     uint64_t threshold = UINT64_MAX;
@@ -266,8 +268,9 @@ void free(void* ptr) {
 
   if (C10_UNLIKELY(capture_underway)) {
     if (!it->second.captured) {
-      TORCH_WARN_ONCE("free() was called on an uncaptured allocation during graph capture. "
-                      "This may be benign, for example, a Python tensor in the capture "
+      TORCH_WARN_ONCE("free() was called on an uncaptured allocation during graph capture "
+                      "(address = ", ptr,
+                      "). This may be benign, for example, a Python tensor in the capture "
                       "might happen to shadow (use the same name as) an unrelated temporary "
                       "tensor from somewhere before capture, pushing the earlier tensor "
                       "out of scope. "
@@ -340,7 +343,7 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
                      "\nRequested               : ", format_size(size),
                      "\nDevice limit            : ", format_size(device_total),
                      "\nFree (according to CUDA): ", format_size(device_free),
-                     "\nPytorch limit (set by user-supplied memory fraction)"
+                     "\nPyTorch limit (set by user-supplied memory fraction)"
                      "\n                        : ", format_size(pytorch_memory_limits[device]));
   } else {
     C10_CUDA_CHECK(err);
@@ -359,9 +362,7 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
 } // anonymous namespace
 
 // Same pattern as CUDACachingAllocator.cpp.
-// Again, I don't think we absolutely need the symmetry,
-// but it's the simplest way to imitate the interface.
-struct CudaCachingAllocator : public Allocator {
+struct CudaMallocAsyncAllocator : public Allocator {
   DataPtr allocate(size_t size) const override {
     constexpr size_t one_exa_bytes = 1152921504606846976ULL;
     TORCH_CHECK_WITH(
@@ -381,7 +382,7 @@ struct CudaCachingAllocator : public Allocator {
   }
 };
 
-CudaCachingAllocator device_allocator;
+CudaMallocAsyncAllocator device_allocator;
 
 // Interface functions declared in CUDACachingAllocator.h
 
@@ -393,14 +394,17 @@ Allocator* get(void) {
 // just set up for later calls to init per-device pools based
 // on the current device each later call sees.
 void init(int dev_count) {
-  static bool called = false;
-  TORCH_INTERNAL_ASSERT(!called, "init called twice");
-  std::lock_guard<std::mutex> lk(general_mutex);
-  device_count = dev_count;
-  devs_initialized_flags.resize(dev_count, false);
-  dummy_unifying_free_streams.resize(dev_count);
-  pytorch_used_bytes.resize(dev_count);
-  pytorch_memory_limits.resize(dev_count);
+  static bool called = [] {;
+    // Are there external guarantees init will be called before
+    // any of the allocator's other functions?
+    // std::lock_guard<std::mutex> lk(general_mutex);
+    device_count = dev_count;
+    devs_initialized_flags.resize(dev_count, false);
+    dummy_unifying_free_streams.resize(dev_count);
+    pytorch_used_bytes.resize(dev_count);
+    pytorch_memory_limits.resize(dev_count);
+    return true;
+  }();
 }
 
 static inline void assertValidDevice(int device) {
@@ -752,7 +756,7 @@ void raw_delete(void* ptr) {
 TORCH_CHECK(false, \
             "Called CudaMallocAsync::" \
             name \
-            " but Pytorch was built with cuda < 11.4."); \
+            " but PyTorch was built with cuda < 11.4."); \
 
 void* raw_alloc(size_t nbytes) {
   NOT_AVAILABLE("raw_alloc")
