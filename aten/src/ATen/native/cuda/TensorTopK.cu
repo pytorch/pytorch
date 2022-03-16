@@ -448,14 +448,6 @@ __global__ void computeBlockwiseWithinKCounts(
   }
 }
 
-template<typename T>
-__global__ void print(T *buffer, int n) {
-  for (int i = 0; i < n; i++) {
-    printf("%ld ", (long)buffer[i]);
-  }
-  printf("\n");
-}
-
 template <typename Bitwise, typename IndexType>
 __global__ void computeBlockwiseKthCounts(
   Bitwise* desires,            // size: num_slices
@@ -520,6 +512,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
   // Find the k-th highest element in our input
   T kthValue = kthValues[slice_idx];
+  const auto kthValueConverted = at::native::TopKTypeConfig<T>::convert(kthValue);
 
   // Find the start index in output tensor of this block
   IndexType startWithinK = 0;
@@ -542,8 +535,9 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
     int kth = 0;
     if (idx < inputSliceSize) {
       val = doLdg(inputSliceStart + idx * inputWithinSliceStride);
-      withinK = (largest ? val > kthValue : val < kthValue);
-      kth = (val == kthValue);
+      const auto valConverted = at::native::TopKTypeConfig<T>::convert(val);
+      withinK = (largest ? valConverted > kthValueConverted : valConverted < kthValueConverted);
+      kth = (valConverted == kthValueConverted);
     }
 
     IndexType withinKIndex;
