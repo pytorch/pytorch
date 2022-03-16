@@ -1762,8 +1762,6 @@ workflows:
               only:
                 - postnightly
     when: << pipeline.parameters.run_build >>
-  master_build:
-    when: << pipeline.parameters.run_master_build >>
   # Promotion workflow
   promote:
     jobs:

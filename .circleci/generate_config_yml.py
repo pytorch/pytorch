@@ -146,18 +146,20 @@ def gen_build_workflows_tree():
     )
     master_build_jobs = filter_master_only_jobs(build_jobs)
 
-    return {
+    rc = {
         "workflows": {
             "build": {
                 "when": r"<< pipeline.parameters.run_build >>",
                 "jobs": build_jobs,
             },
-            "master_build": {
-                "when": r"<< pipeline.parameters.run_master_build >>",
-                "jobs": master_build_jobs,
-            },
         }
     }
+    if len(master_build_jobs) > 0:
+        rc["workflows"]["master_build"] = {
+            "when": r"<< pipeline.parameters.run_master_build >>",
+            "jobs": master_build_jobs,
+        }
+    return rc
 
 
 # Order of this list matters to the generated config.yml.
