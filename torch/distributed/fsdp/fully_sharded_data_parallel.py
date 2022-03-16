@@ -10,10 +10,11 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
-    Optional,
     Generator,
+    Iterator,
+    List,
     NamedTuple,
+    Optional,
     Set,
     Tuple,
     Union,
@@ -27,18 +28,20 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
 from torch.distributed._sharded_tensor import (
-    init_from_local_shards,
     Shard,
     ShardedTensor,
+    init_from_local_shards,
 )
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
-from .flatten_params_wrapper import FlatParameter, FlattenParamsWrapper, FLAT_PARAM
-from .utils import (
-    _apply_to_tensors,
-    _replace_by_prefix,
+from .flatten_params_wrapper import (
+    FLAT_PARAM,
+    FPW_MODULE,
+    FlatParameter,
+    FlattenParamsWrapper,
 )
+from .utils import _apply_to_tensors, _replace_by_prefix
 from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
@@ -1166,6 +1169,8 @@ class FullyShardedDataParallel(nn.Module):
                 discarded after the context manager exists;
                 disabling this can be slightly more efficient (default: True)
         """
+        torch_named_parameters = getattr(torch.nn.Module, "named_parameters")
+        setattr(self, "named_parameters", self._fsdp_named_parameters)
         if recurse:
             with contextlib.ExitStack() as stack:
                 # Summon all params for any nested FSDP instances.
@@ -1199,12 +1204,34 @@ class FullyShardedDataParallel(nn.Module):
                 try:
                     yield
                 finally:
+                    setattr(
+                        self, "named_parameters",
+                        torch_named_parameters,
+                    )
                     if writeback:
                         self._write_back_current_shard()
                     stack.close()
                     self._free_full_params(currently_local_params)
                     self._use_param_local_shard()
                     self.training_state = TrainingState_.IDLE
+
+    def _fsdp_named_parameters(
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Intercepts parameter names from :meth:`named_parameters` and removes
+        all occurrences of the FSDP-specific flattened parameter prefix.
+        """
+        for param_name, param in torch.nn.Module.named_parameters(
+            self, prefix=prefix, recurse=recurse
+        ):
+            # Remove any instances of "_fsdp_wrapped_module._fpw_module"; there
+            # can be multiple occurrences in the case of nested FSDP modules
+            fsdp_prefix = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
+            param_name = param_name.replace(fsdp_prefix, "")
+            yield (param_name, param)
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's
