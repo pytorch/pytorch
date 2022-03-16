@@ -19,6 +19,7 @@ from typing import (
     Union,
     cast,
 )
+import warnings
 
 import torch
 import torch.distributed as dist
@@ -191,18 +192,18 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        fsdp_auto_wrap_policy: (Optional [callable]):
+        auto_wrap_policy: (Optional [callable]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
             the returned FSDP root instance.
             ``default_auto_wrap_policy`` written in ``torch.distributed.fsdp.wrap`` is
-            an example of ``fsdp_auto_wrap_policy`` callable, this policy wraps layers
+            an example of ``auto_wrap_policy`` callable, this policy wraps layers
             with parameter sizes larger than 100M. Users can supply the customized
-            ``fsdp_auto_wrap_policy`` callable that should accept following arguments:
+            ``auto_wrap_policy`` callable that should accept following arguments:
             ``module: nn.Module``, ``recurse: bool``, ``unwrapped_params: int``,
             extra customized arguments could be added to the customized
-            ``fsdp_auto_wrap_policy`` callable as well.
+            ``auto_wrap_policy`` callable as well.
 
             Example::
 
@@ -227,15 +228,15 @@ class FullyShardedDataParallel(nn.Module):
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        fsdp_auto_wrap_policy: Optional[Callable] = None,
+        auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        # if fsdp_auto_wrap_policy is specified, submodules should not be
+        # if auto_wrap_policy is specified, submodules should not be
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
-        if fsdp_auto_wrap_policy is not None:
+        if auto_wrap_policy is not None:
             self._check_wrapped(
                 module,
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
@@ -243,7 +244,7 @@ class FullyShardedDataParallel(nn.Module):
             )
             _recursive_wrap(
                 module,
-                auto_wrap_policy=fsdp_auto_wrap_policy,
+                auto_wrap_policy=auto_wrap_policy,
                 wrapper_cls=FullyShardedDataParallel,
                 # Note that we have the recursive_wrap skip wrapping for
                 # the outermost (this) module otherwise it will result in a
@@ -253,10 +254,6 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=process_group,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
-                # Note that recursive_wap should not call FSDP with wrapping
-                # enabled, as this recursive call handles all wrapping,
-                # including for nested children.
-                fsdp_auto_wrap_policy=None,
             )
 
         self.process_group = process_group or _get_default_group()
@@ -917,7 +914,6 @@ class FullyShardedDataParallel(nn.Module):
         >>>     local_dict = sharded_module.state_dict()
         >>> local_dict.keys()
         >>> odict_keys(['flat_param', 'inner.flat_param'])
-        >>> {hi}
 
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives may be used.
@@ -1114,7 +1110,10 @@ class FullyShardedDataParallel(nn.Module):
         # the code, i.e., ``p.data == p._local_shard`` after each function. This
         # also ensures that after the first forward, the optimizer state will be
         # initialized with the correct dtype and (sharded) size, since optimizer
-        # state is typically initialized lazily in ``optim.step()``.
+        # state is typically initialized lazily in ``optim.step()``. Note that
+        # when CPU offload is enabled, _use_param_local_shard implicitly
+        # offloads the local shard to CPU by making p.data point to
+        # p._local_shard, which would reside on CPU.
         self._use_param_local_shard()
 
         # Register pre-backward hooks to all-gather the params for the backward
@@ -1145,7 +1144,11 @@ class FullyShardedDataParallel(nn.Module):
 
     @contextlib.contextmanager
     def summon_full_params(
-        self, recurse: bool = True, writeback: bool = True
+        self,
+        recurse: bool = True,
+        writeback: bool = True,
+        rank0_only: bool = False,
+        offload_to_cpu: bool = False,
     ) -> Generator:
         r""" A context manager to expose full params for the current FSDP
         instance. Can be useful *after* forward/backward for a model to get
@@ -1163,20 +1166,74 @@ class FullyShardedDataParallel(nn.Module):
             the parameters, currently only when world_size == 1, the
             modification is persisted regardless of ``writeback``.
 
+        .. warning:: Note that ``rank0_only=True`` in conjunction with
+            ``writeback=True`` is not currently supported and will raise an
+            error. This is because model parameter shapes would be different
+            across ranks within the context, and writing to them can lead to
+            inconsistency across ranks when the context is exited.
+
+        ..warning:: Note that ``offload_to_cpu`` and ``rank0_only=False`` will
+            result in full parameters being redundantly copied to CPU memory for
+            GPUs that reside on the same machine, which may incur the risk of
+            CPU OOM. It is recommended to use ``offload_to_cpu`` with
+            ``rank0_only=True``.
+
         Args:
             recurse (bool, Optional): recursively summon all params for nested
                 FSDP instances (default: True)
             writeback (bool, Optional): if ``False``, modifications to params are
                 discarded after the context manager exists;
                 disabling this can be slightly more efficient (default: True)
+            rank0_only (bool, Optional): if ``True``, full parameters are
+                materialized on only global rank 0. This means that within the
+                context, only rank 0 will have full parameters and the other
+                ranks will have sharded parameters. Note that setting
+                ``rank0_only=True`` with ``writeback=True`` is not supported,
+                as model parameter shapes will be different across ranks
+                within the context, and writing to them can lead to
+                inconsistency across ranks when the context is exited.
+            offload_to_cpu (bool, optional): If ``True``, full parameters are
+                offloaded to CPU. Note that this offloading currently only
+                occurs if the parameter is sharded (which is only not the case
+                for world_size = 1). It is recommended to use ``offload_to_cpu``
+                with ``rank0_only=True`` to avoid redundant copies of model
+                parameters being offloaded to the same CPU memory.
         """
+
+        if writeback and rank0_only:
+            raise ValueError(
+                "writeback=True and rank0_only=True is not supported, as model "
+                "parameter shapes will be different across ranks, and writing "
+                "to them can lead to inconsistencies across ranks when the "
+                "context is exited."
+            )
+
+        if offload_to_cpu and not rank0_only:
+            warnings.warn(
+                "offload_to_cpu and rank0_only=False will result in "
+                "full parameters being redundantly copied to CPU memory for "
+                "GPUs that reside on the same machine, which may incur the risk of "
+                "CPU OOM. It is recommended to use ``offload_to_cpu`` with "
+                "rank0_only=True."
+            )
+
+        def _free_full_params_and_use_local_shard(params_to_free):
+            self._free_full_params(params_to_free)
+            # when CPU offload is enabled, _use_param_local_shard implicitly
+            # offloads the local shard to CPU by making p.data point to
+            # p._local_shard, which would reside on CPU.
+            self._use_param_local_shard()
+
         if recurse:
             with contextlib.ExitStack() as stack:
                 # Summon all params for any nested FSDP instances.
                 for module in self.fsdp_modules(self):
                     stack.enter_context(
                         module.summon_full_params(
-                            recurse=False, writeback=writeback
+                            recurse=False,
+                            writeback=writeback,
+                            rank0_only=rank0_only,
+                            offload_to_cpu=offload_to_cpu,
                         )
                     )
                 # Yield to the caller, with full params in all nested instances.
@@ -1191,24 +1248,59 @@ class FullyShardedDataParallel(nn.Module):
             # forward/backward.
             self.training_state = TrainingState_.SUMMON_FULL_PARAMS
 
+            # Even if rank0_only = True, we need to materialize all params here
+            # and free them right after as full param materialization requires
+            # collective comm.
             currently_local_params = self._collect_local_params()
             self._rebuild_full_params()
             # Wait for all_gather to finish before computation
             torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
-            # FSDP now has the full flattened parameter. Unflatten it to get the
-            # full parameters.
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(self.module.unflatten_params())
+            my_rank = dist.get_rank(self.process_group)
+            if offload_to_cpu and (not rank0_only or my_rank == 0):
+                for p in self.params:
+                    if p._is_sharded:
+                        with torch.no_grad():
+                            # Note that we offload the full param padded because
+                            # we have rebuilt full params.
+                            p._full_param_padded = (  # type: ignore[attr-defined]
+                                p._full_param_padded.to(torch.device("cpu"))  # type: ignore[attr-defined]
+                            )
+                            self._update_p_data(
+                                p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
+                            )
+
+            if rank0_only and my_rank != 0:
+                _free_full_params_and_use_local_shard(currently_local_params)
                 try:
                     yield
                 finally:
-                    if writeback:
-                        self._write_back_current_shard()
-                    stack.close()
-                    self._free_full_params(currently_local_params)
-                    self._use_param_local_shard()
                     self.training_state = TrainingState_.IDLE
+            else:
+                # FSDP now has the full flattened parameter. Unflatten it to get the
+                # full parameters.
+                with contextlib.ExitStack() as stack:
+                    # Invariant: rank == 0 or !rank0_only
+                    stack.enter_context(self.module.unflatten_params())
+                    try:
+                        yield
+                    finally:
+                        if offload_to_cpu:
+                            for p in self.params:
+                                if p._is_sharded:
+                                    with torch.no_grad():
+                                        p._full_param_padded = (  # type: ignore[attr-defined]
+                                            p._full_param_padded.to(self.compute_device)  # type: ignore[attr-defined]
+                                        )
+                                        self._update_p_data(
+                                            p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
+                                        )
+
+                        if writeback:
+                            self._write_back_current_shard()
+                        stack.close()
+                        _free_full_params_and_use_local_shard(currently_local_params)
+                        self.training_state = TrainingState_.IDLE
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's
@@ -1360,7 +1452,10 @@ class FullyShardedDataParallel(nn.Module):
 
         self._free_full_params(cast(List[FlatParameter], [param]))
 
-        # Switch to local shard after backward.
+        # Switch to local shard after backward. Note that
+        # when CPU offload is enabled, _use_param_local_shard implicitly
+        # offloads the local shard to CPU by making p.data point to
+        # p._local_shard, which would reside on CPU.
         self._use_param_local_shard(cast(List[FlatParameter], [param]))
 
         # Prefetch previous layer's full params in backward pass post backward hook,
@@ -1575,22 +1670,22 @@ class FullyShardedDataParallel(nn.Module):
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
 
+    def _update_p_data(self, p, output_tensor: torch.Tensor) -> None:
+        """
+        Helper function to update p.data pointer.
+        Args:
+            output_tensor (torch.Tensor): this tensor contains the data we just gathered.
+        """
+        p.data = output_tensor
+        # Trim any padding and reshape to match original size.
+        p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
+
     @torch.no_grad()
     def _rebuild_full_params(self) -> None:
         """
         Gather all shards of params.
         """
         self._lazy_init()
-
-        def update_p_data(output_tensor: torch.Tensor) -> None:
-            """
-            Helper function to update p.data pointer.
-            Args:
-                output_tensor (torch.Tensor): this tensor contains the data we just gathered.
-            """
-            p.data = output_tensor
-            # Trim any padding and reshape to match original size.
-            p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
 
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
@@ -1609,7 +1704,7 @@ class FullyShardedDataParallel(nn.Module):
                     p._full_param_padded.storage().size()  # type: ignore[attr-defined]
                     == p._full_param_padded.size().numel()  # type: ignore[attr-defined]
                 ):
-                    update_p_data(p._full_param_padded)  # type: ignore[attr-defined]
+                    self._update_p_data(p, output_tensor=p._full_param_padded)  # type: ignore[attr-defined]
                     continue
                 else:
                     # If full param has not been rebuilt or has been freed, call all gather
@@ -1631,7 +1726,7 @@ class FullyShardedDataParallel(nn.Module):
                     )
 
                     # Set p.data = output_tensor (with padding trimmed)
-                    update_p_data(output_tensor)
+                    self._update_p_data(p, output_tensor=output_tensor)
 
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
