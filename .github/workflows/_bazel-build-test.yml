@@ -138,7 +138,8 @@ jobs:
       - uses: ./.github/actions/chown-workspace
         if: always()
 
-      - uses: ./.github/actions/upload-test-artifacts
+      - name: Upload test artifacts
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           file-suffix: $bazel-${{ github.job }}
@@ -149,6 +150,7 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
