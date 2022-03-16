@@ -6260,28 +6260,6 @@ TEST_F(AtenLtcTsTensorTest, TestWhereBroadcast) {
   });
 }
 
-TEST_F(AtenLtcTsTensorTest, TestWhereAutograd) {
-  torch::Tensor a = torch::rand(
-      {3, 3}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor b = torch::rand(
-      {3, 3}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  torch::Tensor c = torch::empty(
-      {3, 3}, torch::TensorOptions(torch::kByte).device(DefaultDevice()));
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      c[i][j] = i == j;
-    }
-  }
-  torch::Tensor d = torch::_s_where(c, a, b);
-  ForEachDevice([&](const torch::Device& device) {
-    torch::Tensor xla_a = CopyToDevice(a, device);
-    torch::Tensor xla_b = CopyToDevice(b, device);
-    torch::Tensor xla_c = CopyToDevice(c, device);
-    torch::Tensor xla_d = torch::_s_where(xla_c, xla_a, xla_b);
-    AllClose(d, xla_d);
-  });
-}
-
 TEST_F(AtenLtcTsTensorTest, TestThreshold) {
   torch::Tensor input =
       torch::rand({2, 1, 4, 6},
