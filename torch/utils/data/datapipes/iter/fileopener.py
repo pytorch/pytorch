@@ -1,7 +1,7 @@
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import get_file_binaries_from_pathnames, deprecation_warning
 
 
@@ -22,6 +22,14 @@ class FileOpenerIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
     Note:
         The opened file handles will be closed by Python's GC periodically. Users can choose
         to close them explicitly.
+
+    Example:
+        >>> from torchdata.datapipes.iter import FileLister, FileOpener, StreamReader
+        >>> dp = FileLister(root=".").filter(lambda fname: fname.endswith('.txt'))
+        >>> dp = FileOpener(dp)
+        >>> dp = StreamReader(dp)
+        >>> list(dp)
+        [('./abc.txt', 'abc')]
     """
 
     def __init__(

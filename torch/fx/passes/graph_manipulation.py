@@ -451,9 +451,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 get_output_arg_info,
             )
 
-            # If there're multiple outputs then node_rep["args"][0] will be a tuple.
-            # In this case we want to unpack the tuple.
-            if isinstance(node_rep["args"][0], tuple):
+            # If there're multiple outputs then node_rep["args"][0] will be a tuple or
+            # list. In this case we want to unpack the tuple or list.
+            if isinstance(node_rep["args"][0], (tuple, list)):
                 node_rep["args"] = node_rep["args"][0]
         else:
             node_rep["args"] = map_aggregate(node.args, get_arg_info)

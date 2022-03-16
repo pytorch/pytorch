@@ -23,13 +23,12 @@ env:
 jobs:
 
   docker-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     strategy:
       matrix:
         include:
-            - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9'
-              docker_image_short_name: 'pytorch-linux-bionic-cuda10.2-cudnn7-py3.7-clang9'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7'
               docker_image_short_name: 'pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7'
@@ -42,8 +41,6 @@ jobs:
               docker_image_short_name: 'pytorch-linux-bionic-rocm4.5-py3.7'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7'
               docker_image_short_name: 'pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7'
-            - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7'
-              docker_image_short_name: 'pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7'
               docker_image_short_name: 'pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c'
@@ -75,6 +72,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -108,6 +113,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
@@ -145,8 +151,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()

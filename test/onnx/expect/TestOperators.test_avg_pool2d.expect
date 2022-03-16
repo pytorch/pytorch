@@ -56,7 +56,7 @@ graph {
       type: INTS
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Pad_0"
     type {

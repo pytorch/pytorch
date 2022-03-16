@@ -233,7 +233,7 @@ bool InterpreterState::run(Stack& stack) {
           }
           return false;
         case LIST_CONSTRUCT: {
-          listConstruct(stack, *code.types_[inst.X], inst.N);
+          listConstruct(stack, *code.types_.at(inst.X), inst.N);
           frame.step();
         } break;
         case LIST_UNPACK: {
@@ -305,21 +305,20 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         case DICT_CONSTRUCT: {
-          dictConstruct(stack, *code.types_[inst.X], inst.N);
+          dictConstruct(stack, *code.types_.at(inst.X), inst.N);
           frame.step();
         } break;
         case NAMED_TUPLE_CONSTRUCT: {
-          namedTupleConstruct(stack, code.types_[inst.X], inst.N);
+          namedTupleConstruct(stack, code.types_.at(inst.X), inst.N);
           frame.step();
         } break;
         case CREATE_OBJECT: {
-          auto type = code.types_[inst.X]->expect<c10::ClassType>();
+          auto type = code.types_.at(inst.X)->expect<c10::ClassType>();
           createObject(stack, type);
           frame.step();
         } break;
         case ISINSTANCE: {
-          at::ArrayRef<TypePtr> types(
-              &(code.types_[inst.X]), &(code.types_[inst.X + inst.N]));
+          at::ArrayRef<TypePtr> types(&code.types_.at(inst.X), inst.N);
           isinstance(stack, types);
           frame.step();
         } break;
