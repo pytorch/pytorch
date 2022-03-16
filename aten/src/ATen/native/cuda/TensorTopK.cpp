@@ -3,7 +3,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cuda/Sort.h>
-#include <aten/src/ATen/cuda/cub_definitions.cuh>
 
 namespace at {
 namespace native {
