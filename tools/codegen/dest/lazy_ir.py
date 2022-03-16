@@ -21,14 +21,14 @@ def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
         if isinstance(arg.type, BaseCType):
             if arg.name in schema.wrapped_scalar_names:
                 return f"torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
-            return f"lazy_{arg.name}.GetIrValue()"
+            return f"lazy_{arg.name}->GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             if arg.name in schema.wrapped_scalar_names:
                 return f"{arg.name} ? " \
                     f"c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})) : " \
                     "c10::nullopt"
             return f"lazy_{arg.name} ? " \
-                   f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \
+                   f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : " \
                    "c10::nullopt"
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
@@ -182,13 +182,13 @@ def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: 
             continue
         if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(
-                f"{tensor_class} lazy_{t.name} = "
+                f"{tensor_class}Ptr lazy_{t.name} = "
                 f"torch::lazy::GetLtcTensorOrCreateForWrappedNumber({t.name}, *common_device);")
         elif isinstance(t.type, OptionalCType):
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
             lazy_tensor_decls.append(
-                f"    {tensor_class} lazy_{t.name} = torch::lazy::TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
+                f"    {tensor_class}Ptr lazy_{t.name} = torch::lazy::TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return ("\n        ").join(lazy_tensor_decls)
@@ -229,7 +229,6 @@ class GenLazyNativeFuncDefinition:
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
 
-            # TODO: INTEGRATION POINT HERE:
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
         {meta_out}"""
         else:
@@ -247,7 +246,7 @@ class GenLazyNativeFuncDefinition:
                 torch::lazy::LazyTensor::Create(std::move(node), *common_device));"""
 
         if returns_length > 1:
-            bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
+            bridge_str = f"""std::vector<{self.tensor_class}Ptr> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back(torch::lazy::LazyTensor::Create(torch::lazy::Value(node, i), *common_device));
         }}
@@ -256,7 +255,7 @@ class GenLazyNativeFuncDefinition:
         if schema.name.name.inplace or func.func.is_out_fn():
             assert returns_length == 1, "We assumed there was no such case where an op is an in-place variant " \
                                         "and has tuple outputs."
-            bridge_str = f"""lazy_{first_tensor_name}.SetInPlaceIrValue(node);
+            bridge_str = f"""lazy_{first_tensor_name}->SetInPlaceIrValue(node);
         auto& result = {first_tensor_name};"""
 
 
@@ -291,11 +290,11 @@ class ComputeShapeSignature:
 
     @property
     def shape_decl(self) -> str:
-        return f"std::vector<Shape> compute_shape_{self.__decl_suffix()}"
+        return f"TORCH_API std::vector<Shape> compute_shape_{self.__decl_suffix()}"
 
     @property
     def shape_call(self) -> str:
-        return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
+        return f"torch::lazy::compute_shape_{self.__call_suffix()}"
 
 
 @dataclass(frozen=True)
