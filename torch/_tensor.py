@@ -1067,7 +1067,7 @@ class Tensor(torch._C._TensorBase):
             25
 
        """
-        return torch.to_sparse(self)
+        return self.to_sparse()
 
     def to_sparse_csr(self):
         """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
