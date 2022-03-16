@@ -1918,6 +1918,8 @@ cc_test(
     ], exclude=[
         # skip these since they depend on generated LazyIr.h which isn't available in bazel yet
         "test/cpp/lazy/test_ir.cpp",
+        "test/cpp/lazy/test_lazy_ops.cpp",
+        "test/cpp/lazy/test_lazy_ops_util.cpp",
     ]),
     linkstatic = True,
     tags = [
