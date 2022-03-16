@@ -220,8 +220,8 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
   }
 
   void setFindModule(
-      std::function<at::optional<std::string>(const std::string&)> find_module)
-      override {
+      std::function<multipy::optional<std::string>(const std::string&)>
+          find_module) override {
     std::function<py::object(const std::string&)> wrapped_find_module =
         [=](const std::string& name) -> py::object {
       auto r = find_module(name);
