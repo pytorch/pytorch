@@ -649,9 +649,9 @@ class LSTM(RNNBase):
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
 
     .. note::
-        For bidirectional LSTMs, `h_n` is not equivalent to `output[-1]`, as the former contains
-        the last forward and last backward states, and the latter the last forward and first
-        backward state.
+        For bidirectional LSTMs, `h_n` is not equivalent to the last element of `output`; the
+        former contains the final forward and reverse hidden states, while the latter contains the
+        final forward hidden state and the initial reverse hidden state.
 
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
