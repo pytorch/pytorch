@@ -224,9 +224,6 @@ void initGoogleLogging(char const* name) {
 } // namespace
 
 void initLogging() {
-  // Unlike caffe2 torch always writes to stderr.
-  FLAGS_logtostderr = 1;
-
   detail::setLogLevelFlagFromEnv();
 
   UpdateLoggingLevelsFromFlags();
@@ -401,10 +398,10 @@ void setLogLevelFlagFromEnv() {
     return;
   }
 
-  std::transform(level.begin(), level.end(), level.begin(),
-    [](unsigned char c) {
-      return toupper(c);
-    });
+  std::transform(
+      level.begin(), level.end(), level.begin(), [](unsigned char c) {
+        return toupper(c);
+      });
 
   if (level == "0" || level == "INFO") {
     FLAGS_caffe2_log_level = 0;
@@ -427,9 +424,11 @@ void setLogLevelFlagFromEnv() {
     return;
   }
 
-  std::cerr << "`TORCH_CPP_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
-               "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
-               "`2`, and `3`." << std::endl;
+  std::cerr
+      << "`TORCH_CPP_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
+         "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
+         "`2`, and `3`."
+      << std::endl;
 }
 
 } // namespace
