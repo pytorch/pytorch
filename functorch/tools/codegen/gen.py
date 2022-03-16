@@ -185,7 +185,7 @@ def main() -> None:
         '-s',
         '--source-path',
         help='path to source directory for ATen',
-        default='/scratch/rzou/pt/workbench/aten/src/ATen')
+        default='/scratch/rzou/pt/debug-cpu/aten/src/ATen')
     parser.add_argument(
         '-o',
         '--output-dependencies',
