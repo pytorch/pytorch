@@ -31,6 +31,12 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
+from quantization_ops import (
+    GeneralQuantModule,
+    DynamicQuantModule,
+    StaticQuantModule,
+    FusedQuantModule,
+)
 
 output_path = "ios/TestApp/models/"
 production_ops_path = "test/mobile/model_test/model_ops.yaml"
@@ -38,11 +44,17 @@ coverage_out_path = "test/mobile/model_test/coverage.yaml"
 
 
 def scriptAndSave(module, name):
-    script_module = torch.jit.script(module)
-    script_module._save_for_lite_interpreter(output_path + name)
-    script_module()
+    return save(torch.jit.script(module), name)
+
+def traceAndSave(module, name, input=[]):
+    return save(torch.jit.trace(module, input), name)
+
+def save(module, name):
+    module._save_for_lite_interpreter(output_path + name)
     print("model saved to " + output_path + name)
-    ops = torch.jit.export_opnames(script_module)
+    ops = torch.jit.export_opnames(module)
+    print(ops)
+    module()
     return ops
 
 
@@ -76,6 +88,11 @@ ops = [
     scriptAndSave(NNLossFunctionModule(), "loss_function_ops.ptl"),
     scriptAndSave(NNVisionModule(), "vision_function_ops.ptl"),
     scriptAndSave(NNShuffleModule(), "shuffle_ops.ptl"),
+    # quantization ops
+    scriptAndSave(GeneralQuantModule(), "general_quant_ops.ptl"),
+    scriptAndSave(DynamicQuantModule().getModule(), "dynamic_quant_ops.ptl"),
+    traceAndSave(StaticQuantModule().getModule(), "static_quant_ops.ptl"),
+    scriptAndSave(FusedQuantModule().getModule(), "fused_quant_ops.ptl"),
 ]
 
 
