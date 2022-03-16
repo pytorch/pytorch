@@ -688,7 +688,7 @@ static void _trace_post_record(
         }
 
         // print subgraph
-        subgraph->print(std::cout, 0);
+        //subgraph->print(std::cout, 0);
       }
     }
   }

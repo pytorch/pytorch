@@ -6,11 +6,15 @@
 namespace torch {
 namespace jit {
 
-void autogradFunctionProcess(Block* block) {
-  /*for (auto it = block->nodes().begin(), end = block->nodes().end();
+void inlineAutogradFunction(Block* block) {
+  for (auto it = block->nodes().begin(), end = block->nodes().end();
        it != end;) {
-    Node* cur = *it++;
-    switch (cur->kind()) {
+    Node* node = *it++;
+    if (node->kind() == prim::PythonOp) {
+      auto subgraph = node->g(torch::jit::attr::Subgraph);
+      subgraph->print(std::cout, 0);
+    }
+    /*switch (cur->kind()) {
       case prim::CallFunction: {
         AT_ASSERT(cur->input(0)->node()->kind() == prim::Constant);
         auto function_constant = cur->input(0)->node();
@@ -71,13 +75,13 @@ void autogradFunctionProcess(Block* block) {
           functionCallSubstitution(b);
         }
       } break;
-    }
-  }*/
+    }*/
+  }
 }
 
 // This pass is to be used for ONNX conversion only.
 void ONNXAutogradFunctionProcess(std::shared_ptr<Graph>& graph) {
-  autogradFunctionProcess(graph->block());
+  inlineAutogradFunction(graph->block());
 }
 
 } // namespace jit
