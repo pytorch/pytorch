@@ -68,7 +68,8 @@ void XarEnvironment::setupPythonApp() {
   constexpr const char* SECTION_NAME = ".torch_deploy_payload.unity";
   ElfFile elfFile(exePath_.c_str());
   auto payloadSection = elfFile.findSection(SECTION_NAME);
-  MULTIPY_CHECK(payloadSection != at::nullopt, "Missing the payload section");
+  MULTIPY_CHECK(
+      payloadSection != multipy::nullopt, "Missing the payload section");
   const char* pythonAppPkgStart = payloadSection->start;
   auto pythonAppPkgSize = payloadSection->len;
   LOG(INFO) << "Embedded binary size " << pythonAppPkgSize;
