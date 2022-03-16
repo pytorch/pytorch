@@ -52,5 +52,6 @@ popd
 
 assert_git_not_dirty
 
+export LD_PRELOAD=/opt/conda/lib/libasan.so
 # export test times so that potential sharded tests that'll branch off this build will use consistent data
 python test/run_test.py --export-past-test-times
