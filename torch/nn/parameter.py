@@ -2,17 +2,12 @@ import torch
 from torch._C import _disabled_torch_function_impl
 
 
-# Class used to tag a tensor (subclass) as a parameter.
-class _ParameterTag(object):
-    pass
-
-
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
     def __instancecheck__(self, instance):
         return super().__instancecheck__(instance) or (
-            hasattr(instance, '_is_param') and isinstance(instance._is_param, _ParameterTag))
+            isinstance(instance, torch.Tensor) and getattr(instance, '_is_param', False))
 
 
 class Parameter(torch.Tensor, metaclass=_ParameterMeta):
@@ -38,7 +33,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
 
         # Set a flag on the instance to indicate parameter-ness.
         t = data.detach().requires_grad_(requires_grad)
-        t._is_param = _ParameterTag()
+        t._is_param = True
         return t
 
     __torch_function__ = _disabled_torch_function_impl

@@ -7,16 +7,36 @@ from torch import nn
 from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
-from torch.testing._internal.common_subclass import subclass_db
+    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests, expectedFailureParametrized)
+from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
+from torch.testing._internal.logging_tensor import LoggingTensor
 from unittest import expectedFailure
+
+
+# Decorator for parametrizing tests across the various tensor classes.
+parametrize_tensor_cls = parametrize("tensor_cls", [
+    subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
 
 
 class TestSubclass(TestCase):
     def _create_tensor(self, tensor_cls):
         return subclass_db[tensor_cls].create_fn(3)
 
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize_tensor_cls
+    @parametrize("tensor_requires_grad", [False, True])
+    def test_param_invariants(self, tensor_cls, tensor_requires_grad):
+        x = self._create_tensor(tensor_cls).requires_grad_(tensor_requires_grad)
+        param = nn.Parameter(x, requires_grad=(not tensor_requires_grad))
+
+        self.assertTrue(isinstance(param, nn.Parameter))
+        # Ensure requires_grad passed to Parameter's constructor takes precedence.
+        self.assertEqual(param.requires_grad, not tensor_requires_grad)
+
+        # Ensure original tensor is not mutated by Parameter construction.
+        self.assertFalse(isinstance(x, nn.Parameter))
+        self.assertEqual(x.requires_grad, tensor_requires_grad)
+
+    @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_deepcopy(self, tensor_cls, as_param):
         x = self._create_tensor(tensor_cls)
@@ -33,7 +53,7 @@ class TestSubclass(TestCase):
         else:
             self.assertTrue(type(x_copy) is tensor_cls)
 
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_serialization(self, tensor_cls, as_param):
         with tempfile.TemporaryFile() as f:
@@ -53,7 +73,7 @@ class TestSubclass(TestCase):
             else:
                 self.assertTrue(type(x_loaded) is tensor_cls)
 
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_repr(self, tensor_cls, as_param):
         x = self._create_tensor(tensor_cls)
@@ -66,7 +86,7 @@ class TestSubclass(TestCase):
             self.assertEqual(str_repr.count(f"{tensor_cls.__name__}("), 1)
             self.assertEqual(str_repr.count("Parameter"), 1 if as_param else 0)
 
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize_tensor_cls
     @parametrize("as_param", [False, True])
     def test_type_propagation(self, tensor_cls, as_param):
         x = self._create_tensor(tensor_cls)
@@ -79,7 +99,7 @@ class TestSubclass(TestCase):
         # Custom type should be propagated across operations, but "parameter-ness" should not be.
         self.assertTrue(output.__class__ is (tensor_cls if as_param else x.__class__))
 
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize_tensor_cls
     def test_module_optimization(self, tensor_cls):
         def create_fn():
             return self._create_tensor(tensor_cls)
@@ -122,7 +142,11 @@ class TestSubclass(TestCase):
         m(create_fn()).sum().backward(torch.tensor(1))
         optimizer.step()
 
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize("tensor_cls", [
+        subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()
+        # TODO: Either implement set_() properly for these tensor subclasses or apply a
+        # more general fix to avoid the need for special set_() handling.
+        if tensor_cls not in [LoggingTensor, DiagTensorBelow]])
     @parametrize("leave_parametrized", [False, True])
     def test_parametrization(self, tensor_cls, leave_parametrized):
         def create_fn():
@@ -150,7 +174,7 @@ class TestSubclass(TestCase):
 
     # Lazy modules with custom tensors are not supported yet.
     @expectedFailure
-    @parametrize("tensor_cls", [subtest(tensor_cls, name=info.name) for tensor_cls, info in subclass_db.items()])
+    @parametrize_tensor_cls
     def test_lazy_module(self, tensor_cls):
 
         class MyLazyModule(LazyModuleMixin, nn.Module):
