@@ -393,3 +393,39 @@ additional_op_db.append(
         supports_out=False,
         sample_inputs_func=sample_inputs_index_put,
     ))
+
+
+def sample_inputs_new_zeros_with_same_feature_meta(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    matrix = [
+        # tangent, base, num_tangent_bdims
+        ([5], [2, 3], 0),
+        ([2, 3], [2, 3], 0),
+        ([5], [2], 0),
+        ([1, 0, 2], [1, 2], 0),
+        ([], [1, 2], 0),
+        ([8, 7, 5], [2, 3, 11], 1),
+        ([6, 7, 5], [2, 3, 4], 2),
+        ([6, 4], [3], 2),
+    ]
+    results = []
+    for tangent_shape, base_shape, num_tangent_bdims in matrix:
+        tangent = make_arg(tangent_shape)
+        base = make_arg(base_shape)
+        results.append(SampleInput(
+            tangent,
+            args=(base,),
+            kwargs=dict(self_num_batch_dims=num_tangent_bdims)))
+    return results
+
+
+additional_op_db.append(
+    OpInfo(
+        "ops.aten._new_zeros_with_same_feature_meta",
+        variant_test_name='functorchonly',
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_autograd=False,
+        supports_forward_ad=False,
+        sample_inputs_func=sample_inputs_new_zeros_with_same_feature_meta,
+    ))
