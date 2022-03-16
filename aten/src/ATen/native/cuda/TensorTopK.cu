@@ -463,6 +463,7 @@ __global__ void computeBlockwiseWithinKCounts(
   }
 }
 
+// Assumption: slice_size can not be larger than UINT32_MAX
 template <typename Bitwise>
 __global__ void computeBlockwiseKthCounts(
   Bitwise* desires,            // size: num_slices
