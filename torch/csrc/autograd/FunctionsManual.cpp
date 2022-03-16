@@ -5200,6 +5200,25 @@ Tensor lu_factor_ex_jvp(
   }
 }
 
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  // NB: for simplicitly, we recompute some values that can be reused from forward
+  auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  // NB: it's OK for logsumexp_jvp to be reused for formulas like softmax/log_softmax
+  //     that only have one differentiable input, because that means self_t are never zerotensors
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).sum(dim, keepdim);
+    result /= sumexp_p;
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
+  }
+}
+
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
@@ -5224,43 +5243,41 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
-std::tuple<Tensor, Tensor> scatter_reduce_backward(
-  const Tensor& grad,
-  const Tensor& input,
-  int dim,
-  const Tensor& index,
-  const Tensor& src,
-  c10::string_view reduce,
-  const Tensor & result) {
-  Tensor grad_input, grad_src;
+Tensor scatter_reduce_backward(const Tensor & grad,
+                               const Tensor& input,
+                               int dim,
+                               const Tensor & index,
+                               c10::string_view reduce,
+                               const Tensor & result){
+  Tensor grad_input;
 
-  if (!grad.defined()) {
-    return std::make_tuple(grad_input, grad_src);
-  }
+
+  // TODO: gather doesn't support broadcasting of input and index
+  // currently this works because scatter_reduce doesn't support broadcasting yet but
+  // this needs to be fixed when scatter_reduce is upgraded to support broadcasting
+  // by broadcasting index here too.
 
   if (reduce == "sum") {
-    grad_input = grad;
-    grad_src = grad.gather(dim, index);
+    grad_input = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_input = (grad * result) / input;
+    grad_input = (grad * result).gather(dim, index) / input;
+    // handle nans in above computation when input = 0, we know result = 0 (0 / 0 -> nan)
+    // so just replace with 0
     grad_input.masked_fill_(input == 0, 0);
-    grad_src = (grad * result).gather(dim, index) / src;
-    grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = ones_like(grad);
-    N.scatter_add_(dim, index, ones_like(src));
-    grad_input = grad / N;
-    Tensor N_src = N.gather(dim, index);
-    grad_src = grad.gather(dim, index) / N_src;
+    Tensor N = zeros_like(grad);
+    N.scatter_add_(dim, index, ones_like(input));
+    Tensor N_input = N.gather(dim, index);
+    grad_input = grad.gather(dim, index) / N_input;
+    grad_input.masked_fill_(N_input == 0, 0);
   } else if (reduce == "amax" || reduce == "amin") {
-    grad_input = (input == result) * grad;
     Tensor value = result.gather(dim, index);
-    grad_src = (src == value) * grad.gather(dim, index);
+    grad_input = (input == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
 
-  return std::make_tuple(grad_input, grad_src);
+  return grad_input;
 
 }
 
