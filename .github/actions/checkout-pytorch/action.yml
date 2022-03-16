@@ -2,7 +2,6 @@ name: Checkout PyTorch
 
 description: Clean workspace and check out PyTorch
 
-
 runs:
   using: composite
   steps:

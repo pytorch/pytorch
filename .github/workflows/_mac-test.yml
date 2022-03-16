@@ -50,7 +50,7 @@ jobs:
       PYTORCH_RETRY_TEST_CASES: 1
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - uses: ./.github/actions/download-build-artifacts
         with:
