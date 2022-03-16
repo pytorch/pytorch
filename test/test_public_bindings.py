@@ -6,7 +6,6 @@ import torch
 import sys
 from typing import Callable
 import inspect
-import expecttest
 
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
@@ -281,12 +280,14 @@ class TestPublicBindings(TestCase):
         An API is considered public, if  its  `__module__` starts with `torch.`
         and there is no name in `__module__` or the object itself that starts with “_”.
         Each public package should either:
-        - (preferred) Define `__all__` and all callables and classes in there must have their `__module__` start with the current submodule's path.
-          Things not in `__all__` should NOT have their `__module__` start with the current submodule.
+        - (preferred) Define `__all__` and all callables and classes in there must have their
+         `__module__` start with the current submodule's path. Things not in `__all__` should
+          NOT have their `__module__` start with the current submodule.
         - (for simple python-only modules) Not define `__all__` and all the elements in `dir(submod)` must have their
           `__module__` that start with the current submodule.
         '''
         allow_list = []
+
         def test_module(modname):
             is_a_private_module = False
             split_strs = modname.split('.')
@@ -317,7 +318,7 @@ class TestPublicBindings(TestCase):
                 return True
 
             if hasattr(modname, '__all__'):
-                public_api = getattr(mod, '__all__')
+                public_api = mod.__all__
                 all_api = dir(modname)
                 for elem in all_api:
                     module_starts_with_modname(elem, modname, elem not in public_api)
@@ -329,8 +330,8 @@ class TestPublicBindings(TestCase):
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 
-        # test_module('torch')
-        self.assertExpected(str(allow_list), 'api_checks')
+        test_module('torch')
+        self.assertExpected("\n".join(map(str, allow_list)), 'api_checks')
 
 if __name__ == '__main__':
     run_tests()
