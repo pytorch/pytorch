@@ -234,7 +234,7 @@ then the output has the same batch dimensions.
     Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
     the inverse, as::
 
-        torch.linalg.solve(A, B) == A.inv() @ B
+        linalg.solve(A, B) == linalg.inv(A) @ B  # When B is a matrix
 
     It is always prefered to use :func:`~solve` when possible, as it is faster and more
     numerically stable than computing the inverse explicitly.
@@ -2174,7 +2174,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
     Consider using :func:`torch.linalg.tensorsolve` if possible for multiplying a tensor on the left
     by the tensor inverse, as::
 
-        tensorsolve(A, B) == torch.tensordot(tensorinv(A), B)
+        linalg.tensorsolve(A, B) == torch.tensordot(linalg.tensorinv(A), B)  # When B is a tensor with shape A.shape[:B.ndim]
 
     It is always prefered to use :func:`~tensorsolve` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
@@ -2243,7 +2243,7 @@ Args:
     A (Tensor): tensor to solve for. Its shape must satisfy
                     `prod(\ `:attr:`A`\ `.shape[:\ `:attr:`B`\ `.ndim]) ==
                     prod(\ `:attr:`A`\ `.shape[\ `:attr:`B`\ `.ndim:])`.
-    B (Tensor): tensor of shape :attr:`A`\ `.shape[\ `:attr:`B`\ `.ndim]`.
+    B (Tensor): tensor of shape :attr:`A`\ `.shape[:\ `:attr:`B`\ `.ndim]`.
     dims (Tuple[int], optional): dimensions of :attr:`A` to be moved.
         If `None`, no dimensions are moved. Default: `None`.
 
