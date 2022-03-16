@@ -302,7 +302,7 @@ if((NOT BLAS_LIBRARIES)
   BLAS
   sgemm
   ""
-  ${GENERIC_BLAS})
+  "${GENERIC_BLAS}")
   if (BLAS_LIBRARIES)
     set(BLAS_INFO "generic")
   endif(BLAS_LIBRARIES)
