@@ -2012,7 +2012,10 @@ def sample_inputs_binary_pwise(
         rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
     )
 
-    scalar = make_arg((), **rhs_make_tensor_kwargs)
+    scalar_kwargs = copy.copy(rhs_make_tensor_kwargs)
+    if python_scalars:
+        scalar_kwargs["device"] = "cpu"
+    scalar = make_arg((), **scalar_kwargs)
     if python_scalars:
         scalar = scalar.item()  # type: ignore[assignment]
 
@@ -3284,10 +3287,11 @@ def sample_inputs_bincount(op_info, device, dtype, requires_grad, **kwargs):
     sample_inputs = []
 
     for size, weighted in product((S, M), [False, True]):
-        input_tensor = torch.randint(0, size, (size,), dtype=dtype, device=device)
+        cpu_input_tensor = torch.randint(0, size, (size,), dtype=dtype, device='cpu')
+        input_tensor = cpu_input_tensor.to(device=device)
         weight_tensor = make_arg((size,)) if weighted else None
 
-        max_val = int(input_tensor.max().item())
+        max_val = int(cpu_input_tensor.max().item())
 
         for minlength in [0, max_val // 2, max_val, 2 * max_val]:
             sample_inputs.append(SampleInput(input_tensor,
@@ -3457,11 +3461,12 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    make_scalar_arg = partial(make_tensor, dtype=dtype, device='cpu', requires_grad=requires_grad)
     sizes = ((), (S,), (S, S), (S, S, S))
     samples = []
     for x_size in sizes:
         # threshold and values args must be numbers
-        samples.append(SampleInput(make_arg(x_size), args=(make_arg(()).item(), make_arg(()).item())))
+        samples.append(SampleInput(make_arg(x_size), args=(make_scalar_arg(()).item(), make_scalar_arg(()).item())))
     return samples
 
 def sample_inputs_argsort(*args, **kwargs):
@@ -4446,6 +4451,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     fill = op_info.name == "index_fill"
 
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_scalar_arg = partial(make_tensor, device='cpu', dtype=dtype, requires_grad=requires_grad)
     make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
 
     def make_idx(n):
@@ -4473,7 +4479,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
             args.append(make_arg(shape))
         elif fill:
             # A weird number to catch errors
-            args.append(make_arg((1,)).item())
+            args.append(make_scalar_arg((1,)).item())
 
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
@@ -4808,8 +4814,8 @@ def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
         u, s, vh = torch.linalg.svd(A, full_matrices=False)
         s.clamp_(min=min_singular_value)
         A = (u * s.unsqueeze(-2)) @ vh
-        det = A.det()
-        if sign is not None:
+        if sign is not None and not A.is_meta:
+            det = A.det()
             if A.dim() == 2:
                 if (det < 0) ^ (sign < 0):
                     A[0, :].neg_()
@@ -6130,7 +6136,11 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 dtype=torch.long,
             )
 
-            if "ignore_index" in kwargs and torch.all(target == kwargs["ignore_index"]):
+            if (
+                not target.is_meta and
+                "ignore_index" in kwargs and
+                torch.all(target == kwargs["ignore_index"])
+            ):
                 # make sure at least one item in target is not ignored
                 target[0] = random.sample(set(range(num_classes)) - {kwargs["ignore_index"]}, 1)[0]
 
@@ -6522,10 +6532,11 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, other_scalar, **kw
                            (dtype_y.is_floating_point or dtype_y.is_complex))
 
         x = make_arg(shape_x, dtype=dtype, requires_grad=requires_grad)
-        y = make_arg(shape_y, dtype=dtype_y, requires_grad=requires_grad_y)
         if other_scalar:
-            y = y.item()
-        a = make_arg((), dtype=dtype_a).item()
+            y = make_tensor(shape_y, device='cpu', dtype=dtype_y, requires_grad=requires_grad_y).item()
+        else:
+            y = make_arg(shape_y, dtype=dtype_y, requires_grad=requires_grad_y)
+        a = make_tensor((), device='cpu', dtype=dtype_a).item()
         yield SampleInput(x, args=(y,), kwargs={"alpha": a})
 
 def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
@@ -7109,7 +7120,7 @@ def sample_inputs_where(op_info, device, dtype, requires_grad, **kwargs):
             mask_t.fill_(True)
             return mask_t
 
-        if mask_t.sum() == 0:
+        if not mask_t.is_meta and mask_t.sum() == 0:
             def random_index(shape):
                 return tuple(map(lambda max_idx: random.randint(0, max_idx), shape))
 
@@ -7152,8 +7163,9 @@ def sample_inputs_nonzero(op_info, device, dtype, requires_grad, **kwargs):
 
         # construct input with mixed zero and non-zero elements
         mixed = make_arg(shape).requires_grad_(False)
-        mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
-        mixed[mask_t] = 0
+        if not mixed.is_meta:
+            mask_t = make_tensor(shape, dtype=torch.bool, device=device, requires_grad=False)
+            mixed[mask_t] = 0
         inputs.append(mixed)
 
     for input_t, as_tuple in product(inputs, [False, True]):
@@ -7602,7 +7614,7 @@ def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
             t = make_target(s)
             ignore = num_classes // 2
             # If "mean", nll returns NaN, so it's not differentiable at those points
-            if t.eq(ignore).all() and reduction == "mean":
+            if not t.is_meta and t.eq(ignore).all() and reduction == "mean":
                 t.fill_(0)
             yield make_input(s), t, dict(ignore_index=num_classes // 2, reduction=reduction)
             # Test ignoring all the targets
