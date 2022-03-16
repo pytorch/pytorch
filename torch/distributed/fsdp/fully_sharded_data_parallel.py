@@ -1169,8 +1169,9 @@ class FullyShardedDataParallel(nn.Module):
                 discarded after the context manager exists;
                 disabling this can be slightly more efficient (default: True)
         """
-        torch_named_parameters = getattr(torch.nn.Module, "named_parameters")
-        setattr(self, "named_parameters", self._fsdp_named_parameters)
+        # Monkey patch `named_parameters()`
+        torch_named_parameters = torch.nn.Module.named_parameters
+        self.named_parameters = self._fsdp_named_parameters  # type: ignore[assignment]
         if recurse:
             with contextlib.ExitStack() as stack:
                 # Summon all params for any nested FSDP instances.
@@ -1204,10 +1205,7 @@ class FullyShardedDataParallel(nn.Module):
                 try:
                     yield
                 finally:
-                    setattr(
-                        self, "named_parameters",
-                        torch_named_parameters,
-                    )
+                    self.named_parameters = torch_named_parameters  # type: ignore[assignment]
                     if writeback:
                         self._write_back_current_shard()
                     stack.close()
@@ -1225,7 +1223,7 @@ class FullyShardedDataParallel(nn.Module):
         all occurrences of the FSDP-specific flattened parameter prefix.
         """
         for param_name, param in torch.nn.Module.named_parameters(
-            self, prefix=prefix, recurse=recurse
+            self, prefix=prefix, recurse=recurse,
         ):
             # Remove any instances of "_fsdp_wrapped_module._fpw_module"; there
             # can be multiple occurrences in the case of nested FSDP modules
