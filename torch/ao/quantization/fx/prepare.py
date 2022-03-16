@@ -90,6 +90,9 @@ from .backend_config.utils import (
     get_pattern_to_input_type_to_index,
     get_module_to_qat_module,
 )
+from .backend_config import (
+    get_native_backend_config_dict,
+)
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Set
 from collections import defaultdict
@@ -1357,11 +1360,17 @@ def prepare(
     #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
     #     <class 'torch.ao.quantization.fx.quantize.Add'>),
     # }
+    # TODO: rename to pattern_to_quantize_handler
     patterns: Dict[Pattern, QuantizeHandler] = {}
     if backend_config_dict is None:
         quant_patterns = get_default_quant_patterns()
         patterns = get_combined_dict(
             quant_patterns, additional_quant_patterns)
+        # TODO: currently we just extend the quantize handlers generated from
+        # `get_native_backend_config_dict`
+        # in the future we can just assign backend_config_dict when everything is defined
+        for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
+            patterns[pattern] = quantize_handler
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
 
