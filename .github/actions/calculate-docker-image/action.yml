@@ -14,6 +14,9 @@ inputs:
   always-rebuild:
     description: If set to any value, always build a fresh docker image.
     required: false
+  pull:
+    description: If set to any value, run `docker pull`` on the calculated image.
+    required: false
 
 outputs:
   docker-image:

@@ -34,42 +34,17 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
+      - uses: ./.github/actions/checkout-pytorch
 
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - uses: ./.github/actions/setup-rocm
+
+      - uses: ./.github/actions/pull-docker-image
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
+          docker-image: ${{ inputs.docker-image }}
 
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
-
-      - name: Pull Docker image
-        env:
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
-        run: |
-          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-          retry docker pull "${DOCKER_IMAGE}"
-
-      - name: Download PyTorch Build Artifacts
-        uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+      - uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
-
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
-
-      - name: Output disk space left
-        run: |
-          df -H
 
       - name: Parse ref
         id: parse-ref
@@ -147,42 +122,11 @@ jobs:
           # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
           docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
 
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-        run: |
-          # Remove any previous test jsons if they exist
-          rm -f test-jsons-*.zip
-          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-
-      - name: Store Test Downloaded JSONs on Github
-        uses: actions/upload-artifact@v2
+      - uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          retention-days: 14
-          if-no-files-found: warn
-          path:
-            test-jsons-*.zip
-
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-
-      - name: Store Test Reports on Github
-        uses: actions/upload-artifact@v2
-        if: always()
-        with:
-          name: test-reports
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
 
       - name: Upload test statistics
         if: always()
@@ -205,11 +149,7 @@ jobs:
           export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
-      - name: Kill containers, clean up images
+      - uses: ./.github/actions/teardown-linux
         if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+        with:
+          wait-ssh: false

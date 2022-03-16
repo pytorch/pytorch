@@ -8,6 +8,7 @@ runs:
     - name: Set DOCKER_HOST
       shell: bash
       run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+
     - name: Runner health check system info
       if: always()
       shell: bash
@@ -16,16 +17,19 @@ runs:
         cat /etc/apt/sources.list.d/rocm.list || true
         cat /opt/rocm/.info/version || true
         whoami
+
     - name: Runner health check rocm-smi
       if: always()
       shell: bash
       run: |
         rocm-smi
+
     - name: Runner health check rocminfo
       if: always()
       shell: bash
       run: |
         rocminfo
+
     - name: Runner health check GPU count
       if: always()
       shell: bash
@@ -35,15 +39,18 @@ runs:
             echo "Failed to detect GPUs on the runner"
             exit 1
         fi
+
     - name: Runner health check disconnect on failure
       if: ${{ failure() }}
       shell: bash
       run: |
         killall runsvc.sh
+
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
         env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+
     - name: ROCm set GPU_FLAG
       shell: bash
       run: |

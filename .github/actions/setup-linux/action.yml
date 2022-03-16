@@ -1,4 +1,4 @@
-name: Setup EC2 Linux
+name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
@@ -13,6 +13,7 @@ runs:
     - name: Display EC2 information
       shell: bash
       run: .github/scripts/display_ec2_info.sh
+
     - name: Start docker if docker deamon is not running
       shell: bash
       run: |
@@ -21,6 +22,7 @@ runs:
         else
             echo "Starting docker deamon..." && sudo systemctl start docker;
         fi
+
     - name: Log in to ECR
       shell: bash
       env:
