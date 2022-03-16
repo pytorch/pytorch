@@ -148,7 +148,13 @@ void initONNXBindings(PyObject* module) {
             DeduplicateInitializers(graph, params_dict, is_train);
             return params_dict;
           },
-          pybind11::return_value_policy::move);
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_clear_scope_records",
+          &torch::jit::onnx::ONNXClearScopeRecords)
+      .def(
+          "_jit_pass_onnx_track_scope_attributes",
+          &torch::jit::onnx::ONNXTrackScopeAttributes);
 
   m.def(
       "_check_onnx_proto",

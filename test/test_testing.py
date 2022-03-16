@@ -40,7 +40,7 @@ class TestTesting(TestCase):
             (0, S),
             (S, 0)]
         for test_size in test_sizes:
-            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
             a_n = a.cpu().numpy()
             msg = f'size: {test_size}'
             self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
@@ -255,7 +255,7 @@ class TestTesting(TestCase):
         def check(size, low, high, requires_grad, noncontiguous):
             if dtype not in [torch.float, torch.cfloat]:
                 requires_grad = False
-            t = make_tensor(size, device, dtype, low=low, high=high,
+            t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
