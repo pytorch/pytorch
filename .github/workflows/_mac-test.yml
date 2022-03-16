@@ -49,30 +49,11 @@ jobs:
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          echo "${GITHUB_WORKSPACE}"
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
+      - uses: ./.github/actions/checkout-pytorch
 
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - uses: ./.github/actions/download-build-artifacts
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Download PyTorch Build Artifacts from GHA
-        uses: actions/download-artifact@v2
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-          path: .
-
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
+          name: ${{ inputs.build-environment }}
 
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
@@ -95,40 +76,11 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
 
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-        run: |
-          # Remove any previous test jsons if they exist
-          rm -f test-jsons-*.zip
-          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-
-      - name: Store Test Downloaded JSONs on Github
-        uses: actions/upload-artifact@v2
+      - uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          retention-days: 14
-          if-no-files-found: warn
-          path: test-jsons-*.zip
-
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-
-      - name: Store Test Reports on Github
-        uses: actions/upload-artifact@v2
-        if: always()
-        with:
-          name: test-reports
-          retention-days: 14
-          if-no-files-found: error
-          path: test-reports-*.zip
+          use-gha: true
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
 
       - name: Upload test statistics
         if: always()

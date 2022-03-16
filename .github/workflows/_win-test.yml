@@ -31,52 +31,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          echo "${GITHUB_WORKSPACE}"
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
+      - uses: ./.github/actions/checkout-pytorch
 
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Display EC2 information
-        shell: bash
-        run: .github/scripts/display_ec2_info.sh
-
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
-      - name: Enable long paths on Windows
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
-
-      - name: Install Visual Studio 2019 toolchain
-        shell: powershell
-        env:
-          VS_VERSION: "16.8.6"
-          INSTALL_WINDOWS_SDK: 1
-        run: |
-          .\.circleci\scripts\vs_install.ps1
-
-      - name: Install CUDA and CuDNN
-        if: inputs.cuda-version != 'cpu' && matrix.config != 'force_on_cpu'
-        shell: bash
-        env:
-          CUDA_VERSION: ${{ inputs.cuda-version }}
-        run: |
-          .circleci/scripts/windows_cuda_install.sh
-          .circleci/scripts/windows_cudnn_install.sh
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          cuda-version: ${{ inputs.cuda-version }}
 
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
@@ -88,12 +49,6 @@ jobs:
         shell: powershell
         run: |
           tree /F C:\$Env:GITHUB_RUN_ID\build-results
-
-      # Needed for coverage in win-test.sh
-      - uses: actions/setup-python@v2
-        name: Setup Python3
-        with:
-          python-version: "3.x"
 
       - name: Test
         shell: bash
@@ -123,54 +78,10 @@ jobs:
         run: |
           .jenkins/pytorch/win-test.sh
 
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-        shell: powershell
-        run: |
-          # -ir => recursive include all files in pattern
-          7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
-
-      - name: Store Test Downloaded JSONs on S3
-        uses: seemethere/upload-artifact-s3@v3
+      - uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          retention-days: 14
-          if-no-files-found: warn
-          path:
-            test-jsons-*.zip
-
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
-        shell: powershell
-        run: |
-          # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
-
-      - name: Store Test Reports on S3
-        uses: seemethere/upload-artifact-s3@v3
-        if: always()
-        with:
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
-
-      - name: Wait until all sessions have drained
-        shell: powershell
-        if: always()
-        timeout-minutes: 120
-        run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
-
-      - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
-        shell: powershell
-        if: always()
-        run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
 
       - name: Parse ref
         id: parse-ref
@@ -197,9 +108,6 @@ jobs:
           export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
-      - name: Cleanup workspace
+      - uses: ./.github/actions/teardown-win
         if: always()
-        shell: bash
-        # Should remove the entirety of pytorch-${{ github.run_id }}
-        run: |
-          rm -rf ./*
+        timeout-minutes: 120
