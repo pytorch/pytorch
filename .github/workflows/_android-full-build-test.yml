@@ -27,20 +27,7 @@ jobs:
       fail-fast: true
     runs-on: [self-hosted, linux.2xlarge]
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          echo "${GITHUB_WORKSPACE}"
-          sudo rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
+      - uses: ./.github/actions/checkout-pytorch
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -54,12 +41,9 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
-      - name: Pull Docker image
-        env:
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-        run: |
-          retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-          retry docker pull "${DOCKER_IMAGE}"
+      - uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Output disk space left
         run: |
@@ -88,9 +72,6 @@ jobs:
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           #!/bin/bash -eo pipefail
-          # Pull Docker image and run build
-          time docker pull "${DOCKER_IMAGE}" >/dev/null
-          echo "${DOCKER_IMAGE}"
           export container_name
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
@@ -116,55 +97,23 @@ jobs:
           )
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+          (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
 
           # Copy install binaries back
           mkdir -p "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
           docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
 
-      - name: Chown workspace
+      - uses: ./.github/actions/chown-workspace
         if: always()
-        env:
-          # TODO duplicated
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # TODO working-directory: !{{ pytorch_directory }}
-        # Always hold for active ssh sessions
+      - uses: ./.github/actions/teardown-linux
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
 
   build-prebuilt:
     runs-on: [self-hosted, linux.2xlarge]
     needs: build
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          echo "${GITHUB_WORKSPACE}"
-          sudo rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
+      - uses: ./.github/actions/checkout-pytorch
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -207,9 +156,7 @@ jobs:
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec \
-            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
+          (echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec \            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
@@ -263,26 +210,8 @@ jobs:
           path:
             build_android_artifacts/artifacts.tgz
 
-      - name: Chown workspace
+      - uses: ./.github/actions/chown-workspace
         if: always()
-        env:
-          # TODO duplicated
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # TODO working-directory: !{{ pytorch_directory }}
-        # Always hold for active ssh sessions
+      - uses: ./.github/actions/teardown-linux
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
