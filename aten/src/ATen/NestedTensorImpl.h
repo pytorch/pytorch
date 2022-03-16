@@ -62,5 +62,34 @@ struct NestedTensorImpl : public c10::TensorImpl {
   const at::Tensor nested_size_tensor_;
 };
 
+inline bool is_nested_tensor_impl(const at::Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(
+      c10::DispatchKey::NestedTensor);
+}
+
+inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {
+  if (is_nested_tensor_impl(tensor)) {
+    return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
+  }
+  return nullptr;
+}
+
+inline NestedTensorImpl* get_nested_tensor_impl(
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      is_nested_tensor_impl(tensor),
+      "get_nested_tensor_impl requires a NestedTensor.");
+  return static_cast<NestedTensorImpl*>(
+      tensor.unsafeGetTensorImpl());
+}
+
+
+// TODO: real implementation once we support strides.
+inline bool nested_tensor_impl_is_contiguous(
+    const NestedTensorImpl* nt,
+    at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
+  return memory_format == MemoryFormat::Contiguous;
+}
+
 } // namespace native
 } // namespace at
