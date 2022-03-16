@@ -27,9 +27,7 @@ jobs:
       fail-fast: true
     runs-on: [self-hosted, linux.2xlarge]
     steps:
-      # Use a pytorch/pytorch reference instead of a reference to the local
-      # checkout because when we run this action we don't *have* a local
-      # checkout. In other cases you should prefer a local checkout.
+      # [see note: pytorch repo ref]
       - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
@@ -116,7 +114,8 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     needs: build
     steps:
-      - uses: ./.github/actions/checkout-pytorch
+      # [see note: pytorch repo ref]
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

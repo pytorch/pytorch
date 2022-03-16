@@ -31,7 +31,8 @@ jobs:
     env:
       JOB_BASE_NAME: ${{ inputs.build-environment }}-build
     steps:
-      - uses: ./.github/actions/checkout-pytorch
+      # [see note: pytorch repo ref]
+      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
