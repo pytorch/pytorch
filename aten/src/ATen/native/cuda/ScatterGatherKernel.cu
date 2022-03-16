@@ -304,7 +304,7 @@ struct cuda_scatter_reduce_two_base_kernel {
     auto index_stride = self_dim_stride;
 
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
+    AT_DISPATCH_ALL_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_reduce_two_base_kernel_func", [&] {

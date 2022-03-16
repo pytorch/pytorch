@@ -24,6 +24,7 @@ on:
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
@@ -106,6 +107,6 @@ on:
           # Skip docker push as this job is purely for size analysis purpose.
           # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
       !{{ common.parse_ref() }}
-      !{{ common_android.upload_androind_binary_size("custom-build-single", "") }}
+      !{{ common_android.upload_android_binary_size("custom-build-single", "") }}
       !{{ common.teardown_ec2_linux() }}
 {%- endblock %}

@@ -26,6 +26,8 @@ from torch.ao.quantization.utils import get_combined_dict
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
     nn.Linear: nnqr.Linear,
     nn.Conv1d: nnqr.Conv1d,
     nn.Conv2d: nnqr.Conv2d,
@@ -33,6 +35,12 @@ DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.ConvTranspose1d: nnqr.ConvTranspose1d,
     nn.ConvTranspose2d: nnqr.ConvTranspose2d,
     nn.ConvTranspose3d: nnqr.ConvTranspose3d,
+    nn.Embedding: nnqr.Embedding,
+    nn.EmbeddingBag: nnqr.EmbeddingBag,
+    nn.GRUCell: nnqr.GRUCell,
+    nn.LSTMCell: nnqr.LSTMCell,
+    nn.RNNCell: nnqr.RNNCell,
+    nn.LSTM: nnqr.LSTM,
 }
 
 # Default map for swapping float module to quantized ones
@@ -174,6 +182,11 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
     return copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+
+def get_default_static_quant_reference_module_mappings() -> Dict[Callable, Any]:
+    ''' Get reference module mapping for post training static quantization
+    '''
+    return copy.deepcopy(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS)
 
 def get_embedding_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping, including mapping for embedding QAT

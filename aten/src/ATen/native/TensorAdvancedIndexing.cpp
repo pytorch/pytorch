@@ -185,7 +185,10 @@ TORCH_META_FUNC2(scatter_reduce, two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce) {
+ const c10::string_view reduce,
+ bool include_input
+ ) {
+  (void) include_input;
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -896,9 +899,6 @@ Tensor & index_select_out_cpu_dim1_(
 
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
             dst_floats[i] = src_floats[idx];
           }
         }
@@ -908,10 +908,6 @@ Tensor & index_select_out_cpu_dim1_(
         for (const auto batch : c10::irange(outer_dims_product)) {
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
-
             auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
             auto dst = out + batch * gathered_batch_bytesize + i * block_bytesize;
             memcpy(dst, src, block_bytesize);
@@ -1192,6 +1188,36 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
 }
 
+static void scatter_reduce_exclude_input_helper(
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  SCATTER_GATHER_OP op) {
+  AT_DISPATCH_ALL_TYPES_AND3(
+    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+    self.scalar_type(), "cuda_scatter_exclude_input_init", [&] {
+    scalar_t init_val;
+    switch (op) {
+      case SCATTER_GATHER_OP::REDUCE_ADD:
+        init_val = (scalar_t)0;
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
+        init_val = (scalar_t)1;
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
+        init_val = std::numeric_limits<scalar_t>::lowest();
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MINIMUM:
+        init_val = std::numeric_limits<scalar_t>::max();
+        break;
+      case SCATTER_GATHER_OP::REDUCE_MEAN:
+        init_val = (scalar_t)0;
+        break;
+    }
+    self.scatter_(dim, index, init_val);
+  });
+}
+
 template <typename T, typename ReduceStub, typename FillStub>
 void scatter_impl(
     const Tensor& self,
@@ -1201,7 +1227,8 @@ void scatter_impl(
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
-    const c10::optional<c10::string_view> reduce = nullopt) {
+    const c10::optional<c10::string_view> reduce = nullopt,
+    bool reduce_includes_input = true) {
 
   dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
@@ -1214,6 +1241,10 @@ void scatter_impl(
 
   if (reduce.has_value()) {
     auto op = meta::get_operator_enum(reduce.value());
+    if (!reduce_includes_input) {
+      // scatter inits for reduction to appropriate indices
+      scatter_reduce_exclude_input_helper(mut_out, dim, index, op);
+    }
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
     fill_stub(self.device().type(), mut_out, dim, index, src);
@@ -1304,16 +1335,18 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce,
+ bool include_input,
  const Tensor& out) {
-
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_two_stub,
                scatter_stub,
-               reduce);
+               reduce,
+               include_input);
 
   if (meta::get_operator_enum(reduce) == SCATTER_GATHER_OP::REDUCE_MEAN) {
-    auto ones = at::ones(index.sizes(), src.options());
-    auto count = at::scatter_add(at::ones_like(out), dim, index, ones);
+    auto ones = at::ones_like(src);
+    auto count = include_input? at::ones_like(out) : at::scatter(at::ones_like(out), dim, index, 0);
+    count = at::scatter_add(count, dim, index, ones);
     if (out.is_floating_point()) {
       out.div_(count);
     } else {

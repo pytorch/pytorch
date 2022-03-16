@@ -10,8 +10,8 @@ class TestPerOverloadAPI(TestCase):
         add_packet = torch.ops.aten.add
 
         # class attributes
-        self.assertEqual(add_packet.op_name, 'add')
-        self.assertEqual(add_packet.qualified_op_name, 'aten.add')
+        self.assertEqual(add_packet.__name__, 'add')
+        self.assertEqual(str(add_packet), 'aten.add')
 
         # callable
         self.assertEqual(add_packet(torch.tensor(2), torch.tensor(3)), torch.tensor(5))
@@ -27,7 +27,7 @@ class TestPerOverloadAPI(TestCase):
         self.assertEqual(id(add_packet), id(copy.deepcopy(add_packet)))
 
         # pretty print
-        self.assertEqual(str(add_packet), "OpOverloadPacket(op='aten.add')")
+        self.assertEqual(repr(add_packet), "<OpOverloadPacket(op='aten.add')>")
 
         self.assertRaises(AttributeError, lambda: add_packet.foo)
 
@@ -36,9 +36,9 @@ class TestPerOverloadAPI(TestCase):
         add_tensoroverload = add_packet.Tensor
 
         # class attributes
-        self.assertEqual(add_tensoroverload.name, 'aten.add')
-        self.assertEqual(add_tensoroverload.overload_name, 'Tensor')
-        self.assertEqual(add_tensoroverload.overload_packet, add_packet)
+        self.assertEqual(str(add_tensoroverload), 'aten.add.Tensor')
+        self.assertEqual(add_tensoroverload.__name__, 'add.Tensor')
+        self.assertEqual(add_tensoroverload.overloadpacket, add_packet)
 
         # deepcopy is a no-op
         self.assertEqual(id(add_tensoroverload), id(copy.deepcopy(add_tensoroverload)))
@@ -48,7 +48,7 @@ class TestPerOverloadAPI(TestCase):
         self.assertEqual(id(add_tensoroverload), id(another_add_tensoroverload))
 
         # pretty print
-        self.assertEqual(str(add_tensoroverload), "OpOverload(op='aten.add', overload='Tensor')")
+        self.assertEqual(repr(add_tensoroverload), "<OpOverload(op='aten.add', overload='Tensor')>")
 
         # callable
         self.assertEqual(add_tensoroverload(torch.tensor(2), torch.tensor(3)), torch.tensor(5))

@@ -116,19 +116,6 @@ class TestVitalSignsCuda(TestCase):
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
-    # FIXME: Port this to ErrorInputs on where
-    @onlyCUDA
-    @dtypes(torch.float32)
-    def test_where_invalid_device(self, device, dtype):
-        for devices in [('cpu', device, device), (device, 'cpu', 'cpu'),
-                        (device, 'cpu', device), ('cpu', device, 'cpu')]:
-            condition = make_tensor(16, device=devices[0], dtype=torch.float32)
-            x = make_tensor(16, device=devices[1], dtype=torch.float32)
-            y = make_tensor(16, device=devices[2], dtype=torch.float32)
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Expected condition, x and y to be on the same device"):
-                torch.where(condition, x, y)
-
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
@@ -1759,23 +1746,6 @@ else:
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
 
-    # FIXME: port to ErrorInputs
-    def test_cov_error(self, device):
-        def check(msg, *args, **kwargs):
-            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
-                torch.cov(*args, **kwargs)
-
-        a = torch.rand(2)
-        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
-        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
-        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
-        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
-        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
-        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
-        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
-        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
-        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
-
     @skipIfNoSciPy
     @dtypes(*get_all_fp_dtypes())
     def test_uniform_kstest(self, device, dtype):
@@ -3328,11 +3298,10 @@ else:
                                             [True, False, True, False, True]], device=device))
 
     # FIXME: move to test_scatter_gather_ops.py
-    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
     def test_scatter_reduce(self, device, dtype):
-        shapes = [((5, 10, 20), (5, 10, 20), (5, 10, 20)),
-                  ((5, 10, 20), (2, 3, 4), (5, 10, 20)),
-                  ((5, 10, 20), (2, 3, 4), (3, 5, 10))]
+        shapes = [((3, 5, 3), (3, 5, 3), (3, 5, 3)),
+                  ((3, 5, 3), (2, 3, 3), (3, 5, 3))]
         reduces = ["sum", "prod", "mean", "amax", "amin"]
         fns = {"sum": lambda t, v: t.add_(v),
                "prod": lambda t, v: t.mul_(v),
@@ -3341,14 +3310,14 @@ else:
                "amin": lambda t, v: torch.min(t, v, out=t)}
 
         for self_shape, idx_shape, src_shape in shapes:
-            input = torch.randn(self_shape, dtype=dtype, device=device)
-            src = torch.randn(src_shape, dtype=dtype, device=device)
+            input = make_tensor(self_shape, dtype=dtype, device=device)
+            src = make_tensor(src_shape, dtype=dtype, device=device)
             for dim in range(len(self_shape)):
                 index = torch.randint(0, self_shape[dim], idx_shape, dtype=torch.long, device=device)
-                for reduce in reduces:
-                    output = input.scatter_reduce(dim, index, src, reduce)
+                for reduce, include_input in product(reduces, [True, False]):
+                    output = input.scatter_reduce(dim, index, src, reduce, include_input=include_input)
                     expected = input.clone().detach()
-                    counts = torch.ones(self_shape, dtype=dtype, device=device)
+                    counts = torch.zeros(self_shape, dtype=dtype, device=device)
                     op = fns[reduce]
                     for i, j, k in itertools.product(range(idx_shape[0]), range(idx_shape[1]), range(idx_shape[2])):
                         v = src[i, j, k]
@@ -3361,20 +3330,25 @@ else:
                         else:
                             k = m
 
-                        op(expected[i, j, k], v)
-                        counts[i, j, k] += 1
+                        if (counts[i, j, k] == 0):
+                            if (include_input):
+                                op(expected[i, j, k], v)
+                                counts[i, j, k] += 2
+                            else:
+                                expected[i, j, k] = v
+                                counts[i, j, k] += 1
+                        else:
+                            op(expected[i, j, k], v)
+                            counts[i, j, k] += 1
 
                     if (reduce == "mean"):
-                        expected /= counts
+                        counts.masked_fill_(counts == 0, 1)
+                        if expected.is_floating_point():
+                            expected /= counts
+                        else:
+                            expected.div_(counts, rounding_mode="floor")
 
                     self.assertTrue(torch.allclose(output, expected))
-
-        with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            torch.scatter_reduce(input, 4, index, src, "sum")
-
-        with self.assertRaisesRegex(RuntimeError, "Index tensor must have the same number of dimensions as self"):
-            index2 = torch.randint(0, 5, (10, ), dtype=torch.long, device=device)
-            torch.scatter_reduce(input, 0, index2, src, "sum")
 
     # FIXME: find a test suite for the masked scatter operator
     @onlyNativeDeviceTypes
@@ -7094,6 +7068,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             e2[i + 4][i] = v
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
+
+    def test_setting_real_imag_to_a_number(self):
+        x = torch.randn(4, dtype=torch.cfloat)
+        x.real = 0
+        x.imag = 0
+        zeros = torch.zeros(4)
+        self.assertEqual(x.real, zeros)
+        self.assertEqual(x.imag, zeros)
 
     def test_batch_norm_cpu_inference(self):
         # input nchw in (2,1,1,1), (2,2,2,2)
