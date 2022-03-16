@@ -3,32 +3,21 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/cuda/Sort.h>
+#include <aten/src/ATen/cuda/cub_definitions.cuh>
 
 namespace at {
 namespace native {
 
+// TODO: remove this when CUDA <11.6 is no longer supported
 void topk_out_with_sort(
   const Tensor& self,
   int64_t k, int64_t dim, bool largest,
   const Tensor& values,
   const Tensor& indices
-) {
-  Tensor sorted_values, sorted_indices;
-  std::tie(sorted_values, sorted_indices) = at::native::sort_cuda(self, dim, largest);
-  values.copy_(sorted_values.narrow(dim, 0, k));
-  indices.copy_(sorted_indices.narrow(dim, 0, k));
-}
+);
 
-bool should_use_sort(const Tensor& self, int64_t dim) {
-  return false;
-  // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
-  if (self.dim() == 0) return false;
-  if (self.dtype() == kBool) return false; // Bool is not support by topk
-  int64_t slice_size = self.size(dim);
-  if (slice_size == 0) return false;
-  int64_t num_slices = self.numel() / slice_size;
-  return num_slices <= 10 && slice_size >= 100000;
-}
+// TODO: remove this when CUDA <11.6 is no longer supported
+bool should_use_sort(const Tensor& self, int64_t dim);
 
 TORCH_IMPL_FUNC(topk_out_cuda)
   (const Tensor& self,
