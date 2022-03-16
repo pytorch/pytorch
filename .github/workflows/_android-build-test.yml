@@ -98,6 +98,7 @@ jobs:
             -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}")
 
           export COMMAND
+          # shellcheck disable=SC2016
           COMMAND='(echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec -u jenkins -e BUILD_LITE_INTERPRETER -e GRADLE_OFFLINE=1 -i "$id" bash) 2>&1'
           echo "${COMMAND}" > ./command.sh && bash ./command.sh
           # Skip docker push as this job is purely for size analysis purpose.
