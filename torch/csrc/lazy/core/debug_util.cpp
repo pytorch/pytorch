@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/debug_util.h>
 
 #include <torch/csrc/lazy/backend/backend_device.h>
@@ -124,7 +125,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<torch::lazy::LazyTensor
        << location.line << ")\n";
   }
   ss << "\nHashes: (";
-  for (size_t i = 0; i < root_hashes.size(); ++i) {
+  for (const auto i : c10::irange(root_hashes.size())) {
     if (i > 0) {
       ss << ", ";
     }
