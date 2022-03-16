@@ -94,11 +94,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerScalar(torch::lazy::NodeCast<torch::lazy::Scalar>(
           node, torch::lazy::OpKind(at::prim::Constant)));
     }
-    if (node->op().op == at::aten::bernoulli) {
-      std::vector<torch::jit::NamedValue> arguments;
-      arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
-      return LowerBuiltin(node, arguments);
-    }
     if (node->op().op == at::aten::native_batch_norm) {
       return LowerBatchNorm(
           torch::lazy::NodeCast<
