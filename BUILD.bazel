@@ -1915,6 +1915,9 @@ cc_test(
     srcs = glob([
         "test/cpp/lazy/*.cpp",
         "test/cpp/lazy/*.h",
+    ], exclude=[
+        # skip these since they depend on generated LazyIr.h which isn't available in bazel yet
+        "test/cpp/lazy/test_ir.cpp",
     ]),
     linkstatic = True,
     tags = [
