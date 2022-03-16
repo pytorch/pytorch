@@ -68,6 +68,12 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 73969)
         self.assertTrue(pr.has_internal_changes())
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_checksuites_pagination(self, mocked_gql: Any) -> None:
+        "Tests that PR with lots of checksuits can be fetch"
+        pr = GitHubPR("pytorch", "pytorch", 73811)
+        self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+
 
 if __name__ == "__main__":
     main()
