@@ -3,7 +3,6 @@
 from functools import partial, wraps
 import torch
 
-from torch.testing import make_tensor
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, gradcheck, gradgradcheck, first_sample)
 from torch.testing._internal.common_methods_invocations import op_db
