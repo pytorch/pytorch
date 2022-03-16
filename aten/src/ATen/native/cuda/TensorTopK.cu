@@ -305,13 +305,14 @@ __global__ void radixFindKthValues(
     digit_count = temp_storage.digit_counters[tidx];
   }
 
+  // We always write out counts regardless if blocks_per_slice == 1 because
+  // it will be used to compute offsets for `gatherTopK`.
+  if (tidx < RADIX_DIGITS) {
+    counts[block_idx * RADIX_DIGITS + tidx] = digit_count;
+  }
   // if blocks_per_slice == 1, there is no need to do cross-block reduction
-  // in this case counts saved at registers instead of global memory
+  // in this case we use counts saved at registers directly
   if (blocks_per_slice > 1) {
-
-    if (tidx < RADIX_DIGITS) {
-      counts[block_idx * RADIX_DIGITS + tidx] = digit_count;
-    }
     __threadfence(); // make sure writes are globally visible
     __syncthreads(); // make sure all writes are finished before update semaphores
   }
@@ -358,8 +359,8 @@ __global__ void radixFindKthValues(
     // if last pass: write out the kth value
     if (digit_count_cumsum_left < k_to_find && k_to_find <= digit_count_cumsum) {
       desired = at::cuda::Bitfield<Bitwise>::setBitfield(desired, tidx, current_bit, RADIX_BITS);
+      desires[slice_idx] = desired;
       if (current_bit > 0) {
-        desires[slice_idx] = desired;
         ks_to_find[slice_idx] = k_to_find - digit_count_cumsum_left;
       } else {
         kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(desired);
@@ -392,6 +393,11 @@ __global__ void computeBlockwiseWithinKCounts(
 
   Bitwise desired = doLdg(desires + slice_idx);
   Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
+  // if (block_idx % blocks_per_slice == 0 && tidx == 0) {
+  //   printf(
+  //     "current_bit: %ld, slice: %ld, desired_digit: %ld, desired: %ld\n",
+  //     (long)current_bit, (long)slice_idx, (long)desired_digit, (long)desired);
+  // }
 
   // if largest, then only threads that has tidx > desired_digit are active
   // if !largest, then only threads that has tidx < desired_digit are active
@@ -440,6 +446,14 @@ __global__ void computeBlockwiseWithinKCounts(
   if (tidx == 0) {
     withinKCounts[block_idx] += count;
   }
+}
+
+template<typename T>
+__global__ void print(T *buffer, int n) {
+  for (int i = 0; i < n; i++) {
+    printf("%ld ", (long)buffer[i]);
+  }
+  printf("\n");
 }
 
 template <typename Bitwise, typename IndexType>
@@ -666,13 +680,16 @@ void launch(
     computeBlockwiseWithinKCounts<Bitwise, IndexType><<<grid, RADIX_DIGITS, 0, stream>>>(
       desired, counts, blocks_per_slice, current_bit, largest, withinKCounts);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+    // print<IndexType><<<1, 1, 0, stream>>>(withinKCounts, num_blocks);
 #endif
     desiredMask = at::cuda::Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS);
   }
 
 #if CUB_SUPPORTS_SCAN_BY_KEY()
+  // std::cout << "blocks_per_slice = " << blocks_per_slice << std::endl;
   computeBlockwiseKthCounts<Bitwise, IndexType><<<std::min((numInputSlices + 255) / 256, (IndexType)65535), 256, 0, stream>>>(
     desired, counts, num_blocks, blocks_per_slice, kthCounts);
+  // print<IndexType><<<1, 1, 0, stream>>>(kthCounts, num_blocks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   // Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
   using counting_iter_t = cub::CountingInputIterator<IndexType, IndexType>;
@@ -714,6 +731,7 @@ void launch(
 } // namespace mbtopk
 
 bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
+  return true;
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
   return (num_slices <= 400 && slice_size >= 5000) ||
       (num_slices >= 400 && num_slices < 4000 && slice_size >= 1000) ||

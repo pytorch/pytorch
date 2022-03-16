@@ -20,6 +20,7 @@ void topk_out_with_sort(
 }
 
 bool should_use_sort(const Tensor& self, int64_t dim) {
+  return false;
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
   if (self.dim() == 0) return false;
   if (self.dtype() == kBool) return false; // Bool is not support by topk
