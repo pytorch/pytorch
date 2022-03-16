@@ -362,7 +362,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       tensor_data_.size(),
       storage_data_offset,
       fbb.CreateVector(obj_types_offset_));
-  fbb.Finish(mod);
+  FinishModuleBuffer(fbb, mod);
   return fbb.Release();
 }
 
