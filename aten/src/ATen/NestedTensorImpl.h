@@ -29,7 +29,7 @@ struct NestedTensorImpl : public c10::TensorImpl {
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
-  const Tensor& get_nested_size_tensor() {
+  const Tensor& get_nested_size_tensor() const {
     return nested_size_tensor_;
   }
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
