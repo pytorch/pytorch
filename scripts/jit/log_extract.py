@@ -119,7 +119,7 @@ def run_baseline_no_fusion(ir, inputs) -> float:
 def run_nnc(ir, inputs, dynamic) -> float:
     try:
         strat = [("DYNAMIC", 10)] if dynamic else [("STATIC", 10)]
-        old_strat = torch.jit.set_fusion_strategy([("DYNAMIC", 10)])
+        old_strat = torch.jit.set_fusion_strategy(strat)
         with torch.jit.fuser("fuser1"):
             return run_test(ir, inputs)
     finally:
@@ -191,10 +191,10 @@ def run():
     options = []
     if args.baseline:
         options.append(("Baseline no fusion", run_baseline_no_fusion))
-    if args.nnc_static:
-        options.append(("NNC Static", functools.partial(run_nnc, dynamic=False)))
     if args.nnc_dynamic:
         options.append(("NNC Dynamic", functools.partial(run_nnc, dynamic=True)))
+    if args.nnc_static:
+        options.append(("NNC Static", functools.partial(run_nnc, dynamic=False)))
     if args.nvfuser:
         options.append(("NVFuser", run_nvfuser))
 
