@@ -667,6 +667,7 @@ class PackageExporter:
                     out with the other errors found by package exporter.
                 """
                 if module in mocked_modules:
+                    assert isinstance(module, str)
                     fields = mocked_modules[module]
                     self.dependency_graph.add_node(
                         module_name,
