@@ -3,6 +3,40 @@
 
 namespace c10 {
 
+namespace {
+
+// The idea is to only mark possible overlap across dimensions. We want to
+// return false for expanded tensors and permuted tensors, for which dimensional
+// collapsing is safe.
+bool possible_cross_dimension_overlap(c10::IntArrayRef sizes, c10::IntArrayRef strides) {
+  int n_dim = static_cast<int>(sizes.size());
+  std::vector<size_t> stride_indices(n_dim);
+  std::iota(stride_indices.rbegin(), stride_indices.rend(), 0);
+
+  // sort indices going with ascending strides
+  for (int i = 1; i < n_dim; i++) {
+    auto c = i;
+    for (int j = i - 1; j >= 0; j--) {
+      if (strides[stride_indices[j]] > strides[stride_indices[c]]) {
+        std::swap(stride_indices[j], stride_indices[c]);
+        c = j;
+      }
+    }
+  }
+
+  for (const auto i : c10::irange(1, n_dim)) {
+    if (i != 0) {
+      // we are being conservative on checking for memory overlap
+      if (strides[stride_indices[i]] < sizes[stride_indices[i-1]] * strides[stride_indices[i-1]]) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+}
+
 const TensorTypePtr& TensorType::get() {
   static auto value = TensorType::create(
       {}, {}, SymbolicShape(), VaryingShape<Stride>{}, {});
@@ -175,9 +209,14 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     }
   }
   std::vector<Stride> stride_properties;
+  bool has_overlap = possible_cross_dimension_overlap(sizes, strides);
+  TORCH_INTERNAL_ASSERT(!(tensor_contiguity && has_overlap), "Cannot specify contiguity for storage with overlap");
+
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
-    if (!contiguous_) {
+    if (has_overlap) {
+      contiguous_ = false;
+    } else if (!contiguous_) {
       // innermost stride expected to be 1
       // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
       // BROADCASTED
