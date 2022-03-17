@@ -1,7 +1,6 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
-import itertools
 
 import torch
 from torch._C import _add_docstr
