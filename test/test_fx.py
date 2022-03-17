@@ -143,7 +143,6 @@ class Foo(object):  # noqa: B209
 
 class TestFX(JitTestCase):
     def setUp(self):
-        super().setUp()
         # Checking for mutable operations whil tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
@@ -154,7 +153,6 @@ class TestFX(JitTestCase):
             torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
-        super().tearDown()
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -3466,7 +3464,6 @@ class TestOperatorSignatures(JitTestCase):
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
-        super().setUp()
         self.maxDiff = None
 
         # Checking for mutable operations whil tracing is feature flagged
@@ -3475,7 +3472,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         torch.fx.proxy.TracerBase.check_mutable_operations = True
 
     def tearDown(self):
-        super().tearDown()
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
 
@@ -3714,14 +3710,12 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
-        super().setUp()
         # Checking for mutable operations whil tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
         torch.fx.proxy.TracerBase.check_mutable_operations = True
 
     def tearDown(self):
-        super().tearDown()
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
