@@ -199,7 +199,7 @@ class ChunkShardingSpec(ShardingSpec):
         local_shards = []
         local_tensor = None
         local_metadata = None
-        tensors_to_scatter = [] if current_rank == src_rank else None
+        tensors_to_scatter = []
 
         for shard_meta in tensor_meta.shards_metadata:
             rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
@@ -225,7 +225,12 @@ class ChunkShardingSpec(ShardingSpec):
                 local_metadata = shard_meta
 
         # Scatter the shards to all ranks in the pg
-        dist.scatter(local_tensor, scatter_list=tensors_to_scatter, src=src_rank, group=process_group)
+        dist.scatter(
+            local_tensor,
+            scatter_list=tensors_to_scatter if current_rank == src_rank else None,
+            src=src_rank,
+            group=process_group
+        )
 
         assert local_tensor is not None
         assert local_metadata is not None
