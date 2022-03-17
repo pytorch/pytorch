@@ -1423,7 +1423,7 @@ TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides,
     bool trim_out_of_bounds) {
-  auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_dom = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   const auto ndims = inp_dom.size();
 
   TORCH_CHECK(

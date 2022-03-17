@@ -5339,6 +5339,45 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = shift(tv1, {1});
+  auto tv3 = shift(tv1, {-1});
+  auto tv4 = add(tv1, tv2);
+  auto tv5 = add(tv4, tv3);
+  fusion.addOutput(tv5);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv5->split(-1, 1024);
+  tv5->split(-1, 2);
+  TransformPropagator::from(tv5);
+
+  tv0->computeAt(tv5, 1);
+
+  tv5->axis(1)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv5, ir_utils::allTvs(&fusion));
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({1024 * 32}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto outputs = fe.runFusion(inputs);
+
+  auto ref = t0 + shift(t0, {1}) + shift(t0, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
