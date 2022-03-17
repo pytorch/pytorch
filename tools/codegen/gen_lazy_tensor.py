@@ -254,7 +254,6 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
             codegenInplaceVariant=True
         )),
     })
-
     # Generate IR node classes
     fm.write_with_template('LazyIr.h', 'LazyIr.h', lambda: {
         'lazy_ir_sysinc': [f'#include <{path}>' for path in [
