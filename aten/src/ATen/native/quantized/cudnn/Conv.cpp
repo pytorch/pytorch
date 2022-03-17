@@ -212,7 +212,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
-  c10::optional<at::Tensor> after_relu;
   auto weight = orig_weight_.int_repr();
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
