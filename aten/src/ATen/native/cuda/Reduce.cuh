@@ -17,6 +17,8 @@
 #include <utility>
 #include <thrust/pair.h>
 
+#include <ATen/native/cuda/jit_utils.h>
+
 namespace at { namespace native {
 
 using at::detail::Array;
@@ -903,6 +905,17 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
   AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
+  std::string name = "sum";
+  std::string func = jiterator_stringify(
+  template <typename T>
+  T combine(T a, T b) {
+    return a+b;
+  }
+  );
+  auto code = at::cuda::jit::generate_reduction_code(1, func, name,
+                                               "float", "float", "float",
+                                               true, false, 0);
+  at::cuda::jit::jit_pwise_function(code, "reduction_"+name);
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
   static constexpr bool can_accumulate_in_output =

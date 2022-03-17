@@ -32,6 +32,17 @@ std::string generate_code(
     bool vectorized=false,
     int vec_size=0);
 
+std::string generate_reduction_code(
+    int nOutputs,
+    const std::string& func,
+    const std::string& name,
+    const std::string& f_inputs_type,
+    const std::string& compute_type,
+    const std::string& result_type,
+    bool contiguous,
+    bool vectorized,
+    int vec_size=0);
+
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name);

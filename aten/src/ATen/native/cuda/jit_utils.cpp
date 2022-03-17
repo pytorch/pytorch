@@ -18,6 +18,8 @@
 #include <cstdlib>
 #include <string>
 
+#include <iostream>
+
 // TODO: C++17 has the fileystem header, which may replace these
 #ifdef _WIN32
   // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
@@ -865,6 +867,41 @@ bool r_mkdir_with_base(std::string& base, std::string& dir){
   }
 
   return _r_mkdir(base+dir);
+std::string load_code_template(const std::string& path) {
+  std::ifstream ifs{path};
+  std::string s{
+    std::istreambuf_iterator<char>(ifs),
+    std::istreambuf_iterator<char>()};
+  return s;
+}
+
+std::string generate_reduction_code(
+    int nOutputs,
+    const std::string& func,
+    const std::string& name,
+    const std::string& f_inputs_type,
+    const std::string& compute_type,
+    const std::string& result_type,
+    bool contiguous,
+    bool vectorized,
+    int vec_size) {
+      at::jit::TemplateEnv env;
+      env.s("index_type", "unsigned int");
+      env.s("scalar_type", f_inputs_type);
+      env.s("name", name);
+      env.s("traits_string", "");
+      env.s("complex_body_string", "");
+      env.s("complex_math_string", "");
+      env.s("half_string", "");
+      env.s("bfloat16_string", "");
+      env.s("cmath_string", get_cmath_string());
+      env.s("functor", func);
+      static auto cuda_template = at::jit::CodeTemplate(
+        jit_common_types + load_code_template("/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/reduction_template.cuh"));
+      const auto code = cuda_template.format(env);
+//      std::cout << code << "\n";
+      return code;
+
 }
 
 
