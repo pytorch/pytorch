@@ -7,23 +7,10 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default %}
-  pull_request:
-{%- endif -%}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-  push:
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
@@ -73,7 +60,6 @@ on:
           fi
 
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
-          # shellcheck disable=SC2016
           export id
           id=$(docker run -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
@@ -94,18 +80,15 @@ on:
             -v "$(pwd):/var/lib/jenkins/workspace" \
             --cap-add=SYS_PTRACE \
             --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --security-opt seccomp=unconfined \
             -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}")
 
-          # shellcheck disable=SC2016
           export COMMAND
           # shellcheck disable=SC2016
-          COMMAND='((echo "export GRADLE_OFFLINE=1" && echo "export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          COMMAND='(echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec -u jenkins -e BUILD_LITE_INTERPRETER -e GRADLE_OFFLINE=1 -i "$id" bash) 2>&1'
           echo "${COMMAND}" > ./command.sh && bash ./command.sh
           # Skip docker push as this job is purely for size analysis purpose.
           # Result binaries are already in `/home/circleci/project/` as it's mounted instead of copied.
       !{{ common.parse_ref() }}
-      !{{ common_android.upload_androind_binary_size("custom-build-single", "") }}
+      !{{ common_android.upload_android_binary_size("custom-build-single", "") }}
       !{{ common.teardown_ec2_linux() }}
 {%- endblock %}
