@@ -4,8 +4,6 @@
 #include <c10/cuda/CUDAException.h>
 
 #include <cmath>
-#include <iostream>
-#include <string>
 
 constexpr int blocksize = 256;
 constexpr int factor = 4;
