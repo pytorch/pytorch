@@ -119,6 +119,11 @@ jobs:
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+    secrets:
+      SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+      SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+      ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
+      ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
 
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64

@@ -12,6 +12,20 @@ on:
         type: string
         description: Name of the base docker image to build with.
 
+    secrets:
+      SONATYPE_NEXUS_USERNAME:
+        description: nexus user
+        required: true
+      SONATYPE_NEXUS_PASSWORD:
+        description: nexus pass
+        required: true
+      ANDROID_SIGN_KEY:
+        description: android key
+        required: true
+      ANDROID_SIGN_PASS:
+        description: android pass
+        required: true
+
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
   IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
@@ -81,6 +95,7 @@ jobs:
         uses: ./.github/actions/build-android
         with:
           arch: x86_32
+          arch-for-build-env: x86_32
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -90,6 +105,7 @@ jobs:
         uses: ./.github/actions/build-android
         with:
           arch: x86_64
+          arch-for-build-env: x86_64
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
