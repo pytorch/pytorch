@@ -194,6 +194,8 @@ table Module {
   storage_data_size:int;  // number of storage data;
   storage_data:[StorageData];
   object_types:[ObjectType];
+  jit_sources:[ExtraFile];
+  jit_constants:[uint];  // index to ivalues
 }
 
 root_type Module;
