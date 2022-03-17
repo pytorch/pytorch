@@ -267,7 +267,6 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
-      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: jit_legacy
@@ -498,7 +497,6 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -538,7 +536,6 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
-      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: distributed
@@ -769,7 +766,6 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -809,7 +805,6 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
-      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: docs_test
@@ -1040,7 +1035,6 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1080,7 +1074,6 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
-      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: backwards_compat
@@ -1311,7 +1304,6 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1351,7 +1343,6 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
-      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: default
@@ -1582,7 +1573,6 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1622,7 +1612,6 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
-      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
       TEST_CONFIG: default
@@ -1853,7 +1842,6 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
-          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-gcc5.4-test
           PR_NUMBER: ${{ github.event.pull_request.number }}

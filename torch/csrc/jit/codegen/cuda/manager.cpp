@@ -206,11 +206,6 @@ void compileCudaFusionGroup(Node* fusion_node) {
   }
 }
 
-bool shouldVerifyResult() {
-  static const auto env = std::getenv("TORCH_NVFUSER_VERIFICATION");
-  return env;
-}
-
 void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   FUSER_PERF_SCOPE("nvFuser::Manager::runCudaFusionGroup");
 
@@ -225,7 +220,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
 
   c10::optional<Stack> stack_copy;
   auto compare_callback = getCudaFuserComparisonCallback();
-  if (compare_callback != nullptr) {
+  if (compare_callback.run_fallback) {
+    // make a copy of the stack
     size_t inputs_size = fusion_node->g(attr::Subgraph)->inputs().size();
     TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
     stack_copy = Stack();
@@ -281,10 +277,37 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     run_fusion();
   }
 
-  if (stack_copy) {
+  if (compare_callback.callback != nullptr) {
+    Stack fused_outputs;
+    Stack fallback_outputs;
     size_t output_count = fusion_node->g(attr::Subgraph)->outputs().size();
-    take_fallback(*stack_copy);
-    compare_callback(output_count, *stack_copy, stack);
+    TORCH_CHECK(
+        output_count <= stack.size(),
+        "Expected ",
+        output_count,
+        " outputs but found only ",
+        stack.size(),
+        " items on the stack");
+
+    fused_outputs.insert(
+        fused_outputs.begin(), stack.end() - output_count, stack.end());
+
+    if (stack_copy) {
+      take_fallback(*stack_copy);
+      TORCH_CHECK(
+          stack_copy->size() == stack.size(),
+          "Fused graph returns stack with ",
+          stack.size(),
+          " items, compared to ",
+          stack_copy->size(),
+          " from unfused graph");
+      fallback_outputs.insert(
+          fallback_outputs.begin(),
+          stack_copy->end() - output_count,
+          stack_copy->end());
+    }
+    auto graph_str = fusion_node->g(attr::Subgraph)->toString();
+    compare_callback.callback(fused_outputs, fallback_outputs, graph_str);
   }
 }
 

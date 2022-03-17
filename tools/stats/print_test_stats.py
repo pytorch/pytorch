@@ -107,9 +107,8 @@ def plural(n: int) -> str:
 
 
 def get_base_commit(sha1: str) -> str:
-    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
     return subprocess.check_output(
-        ["git", "merge-base", sha1, default_branch],
+        ["git", "merge-base", sha1, "origin/master"],
         encoding="ascii",
     ).strip()
 
@@ -207,7 +206,7 @@ def analyze(
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
     nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
-    # most recent main ancestor with at least one S3 report,
+    # most recent master ancestor with at least one S3 report,
     # or empty list if there are none (will show all tests as added)
     base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
@@ -526,7 +525,7 @@ def regression_info(
     and its test times. Since Python dicts maintain insertion order
     (guaranteed as part of the language spec since 3.7), the
     base_reports argument must list the head's several most recent
-    main commits, from newest to oldest (so the merge-base is
+    master commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
     simpler_head = simplify(head_report)
@@ -945,7 +944,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         encoding="ascii",
     ))
 
-    # if current commit is already on main, we need to exclude it from
+    # if current commit is already on master, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],

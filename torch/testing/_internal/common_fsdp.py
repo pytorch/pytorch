@@ -242,7 +242,6 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
-        sharding_strategy=None,
         **kwargs
     ):
         super().__init__(
@@ -252,7 +251,6 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
-                sharding_strategy=sharding_strategy,
             ),
             **kwargs
         )
@@ -482,7 +480,6 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
-        sharding_strategy=None,
         save_model=True,
         clip_norm=0.3,
         norm_type=None,
@@ -512,19 +509,13 @@ class FSDPTest(MultiProcessTestCase):
                 wrap_fsdp=True,
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
-                backward_prefetch=backward_prefetch,
-                sharding_strategy=sharding_strategy,
+                backward_prefetch=backward_prefetch
             )
         except Exception as e:
             raise ValueError(f"model_Init_fn {model_init_fn} got error {str(e)}")
 
         cpu_offload = cpu_offload or CPUOffload()  # disabled if not specified.
-        model = FullyShardedDataParallel(
-            model,
-            cpu_offload=cpu_offload,
-            backward_prefetch=backward_prefetch,
-            sharding_strategy=sharding_strategy,
-        )
+        model = FullyShardedDataParallel(model, cpu_offload=cpu_offload, backward_prefetch=backward_prefetch)
         # Call model.cuda() after init FSDP if specified.
         if fsdp_init_mode == FSDPInitMode.CUDA_AFTER:
             model = model.cuda()

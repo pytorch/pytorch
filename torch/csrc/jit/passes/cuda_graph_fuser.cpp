@@ -4,7 +4,7 @@
 namespace torch {
 namespace jit {
 
-static CudaFuserComparisonCallback comparison_callback = nullptr;
+static CudaFuserComparisonCallback comparison_callback = {false, nullptr};
 static std::mutex comparison_callback_lock;
 
 CudaFuserComparisonCallback getCudaFuserComparisonCallback() {
