@@ -12,6 +12,9 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
+  - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
+    - [Modify release matrix](#modify-release-matrix)
+    - [Open Google Colab issue](#open-google-colab-issue)
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
@@ -121,6 +124,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
@@ -133,6 +137,24 @@ Promotion should occur in two steps:
 * Promote S3 wheels to PyPI
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
+
+## Additonal Steps to prepare for release day
+
+The following should be prepared for the release day
+
+### Modify release matrix
+
+Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
+
+After modifying published_versions.json you will need to regenerate regenerate the quick-start-module.js file run following command
+```
+python3 scripts/gen_quick_start_module.py >assets/quick-start-module.js
+```
+Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
+
+### Open Google Colab issue
+
+This is normally done right after the release is completed. We would need to create Google Colab Issue see following [PR](https://github.com/googlecolab/colabtools/issues/2372)
 
 # Patch Releases
 
