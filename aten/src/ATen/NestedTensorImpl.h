@@ -65,13 +65,8 @@ struct NestedTensorImpl : public c10::TensorImpl {
   const at::Tensor nested_size_tensor_;
 };
 
-inline bool is_nested_tensor_impl(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(
-      c10::DispatchKey::NestedTensor);
-}
-
 inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {
-  if (is_nested_tensor_impl(tensor)) {
+  if (tensor.is_nested()) {
     return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
   }
   return nullptr;
@@ -80,7 +75,7 @@ inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor
 inline NestedTensorImpl* get_nested_tensor_impl(
     const at::Tensor& tensor) {
   TORCH_CHECK(
-      is_nested_tensor_impl(tensor),
+      tensor.is_nested(),
       "get_nested_tensor_impl requires a NestedTensor.");
   return static_cast<NestedTensorImpl*>(
       tensor.unsafeGetTensorImpl());
