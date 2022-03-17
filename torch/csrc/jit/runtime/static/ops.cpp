@@ -2645,15 +2645,12 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-/*
-
-TODO(T112769635): Fix broadcasting for this out variant
-
 REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::where.self(Tensor condition, Tensor self, Tensor other) ->
-Tensor"))) { return [](ProcessedNode* p_node) { const auto& cond =
-p_node->Input(0).toTensor(); const auto& self = p_node->Input(1).toTensor();
+          "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& cond = p_node->Input(0).toTensor();
+      const auto& self = p_node->Input(1).toTensor();
       const auto& other = p_node->Input(2).toTensor();
 
       if (p_node->Output(0).isNone()) {
@@ -2661,15 +2658,13 @@ p_node->Input(0).toTensor(); const auto& self = p_node->Input(1).toTensor();
       }
       auto& out = p_node->Output(0).toTensor();
       fastResizeToZero(out);
-      at::native::where_out(cond, self, other, out);
+      at::native::where_self_out(cond, self, other, out);
     };
   }
 
   LogAndDumpSchema(n);
   return nullptr;
 });
-
-*/
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::NumToTensor,
