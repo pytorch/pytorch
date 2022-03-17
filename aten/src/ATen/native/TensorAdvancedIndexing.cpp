@@ -1345,8 +1345,9 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
 
   if (meta::get_operator_enum(reduce) == SCATTER_GATHER_OP::REDUCE_MEAN) {
     auto ones = at::ones_like(src);
-    auto count = include_input? at::ones_like(out) : at::scatter(at::ones_like(out), dim, index, 0);
-    count = at::scatter_add(count, dim, index, ones);
+    auto count = include_input ? at::ones_like(out) : at::zeros_like(out);
+    count.scatter_add_(dim, index, ones);
+    count.masked_fill_(count == 0, 1);
     if (out.is_floating_point()) {
       out.div_(count);
     } else {
