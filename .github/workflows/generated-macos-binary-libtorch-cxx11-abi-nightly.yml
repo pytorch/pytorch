@@ -36,6 +36,7 @@ concurrency:
 
 jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -247,6 +248,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-shared-without-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -458,6 +460,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-static-with-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720
@@ -669,6 +672,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-static-without-deps-cxx11-abi-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     # libtorch builds take a long time on github hosted runners
     timeout-minutes: 720

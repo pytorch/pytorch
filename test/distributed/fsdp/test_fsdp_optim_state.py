@@ -87,12 +87,20 @@ class JaggedModel(torch.nn.Module):
             LinearWithKBiases(5, 5, 1),
         )
         self.linear2 = LinearWithKBiases(5, 4, 0)
-        self.linear3 = LinearWithKBiases(4, 1, 2)
+        self.linear3 = torch.nn.Sequential(
+            Bias(4), Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
+            Bias(4), Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
+            Bias(4), Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
+        )
+        self.linear4 = LinearWithKBiases(4, 1, 2)
         self.relu = torch.nn.ReLU()
 
     def forward(self, x):
         z = x
-        for l in (self.linear0, self.linear1, self.linear2, self.linear3):
+        for l in (
+            self.linear0, self.linear1, self.linear2, self.linear3,
+            self.linear4,
+        ):
             z = l(z)
             z = self.relu(z)
         return z
@@ -124,9 +132,16 @@ class WrappedJaggedModel(JaggedModel):
             FSDP(LinearWithKBiases)
                 FSDP(Bias)
         linear2: LinearWithKBiases
-        linear3: FSDP(LinearWithKBiases)
+        linear3: FSDP(Sequential)
+            Bias
+            Bias
+            Bias
+            Bias
+        linear4: FSDP(LinearWithKBiases)
             Bias
             FSDP(Bias)
+    Note that `linear3` has a single flattened parameter consisting of 4
+    unflattened parameters.
     """
     def __init__(self, group=None) -> None:
         super().__init__()
@@ -134,11 +149,12 @@ class WrappedJaggedModel(JaggedModel):
             self.linear1, process_group=group,
             auto_wrap_policy=always_wrap_policy,
         )
+        self.linear3 = FSDP(self.linear3, process_group=group)
 
-        assert self.linear3.num_biases == 2
+        assert self.linear4.num_biases == 2
         has_seen_first_bias = False
 
-        def linear3_wrap_policy(module, recurse, unwrapped_params):
+        def linear4_wrap_policy(module, recurse, unwrapped_params):
             is_leaf = len(list(module.children())) == 0
             if not is_leaf:
                 return True  # wrap the parent
@@ -149,9 +165,9 @@ class WrappedJaggedModel(JaggedModel):
                 return False
             return True
 
-        self.linear3 = FSDP(
-            self.linear3, process_group=group,
-            auto_wrap_policy=linear3_wrap_policy,
+        self.linear4 = FSDP(
+            self.linear4, process_group=group,
+            auto_wrap_policy=linear4_wrap_policy,
         )
 
 
@@ -173,7 +189,12 @@ class AlternateWrappedJaggedModel(JaggedModel):
             LinearWithKBiases
                 Bias
         linear2: LinearWithKBiases
-        linear3: FSDP(LinearWithKBiases)
+        linear3: Sequential
+            Bias
+            Bias
+            Bias
+            Bias
+        linear4: FSDP(LinearWithKBiases)
             FSDP(Bias)
             Bias
     We use an alternate wrapping to ensure that the optimizer state dict API is
@@ -186,10 +207,10 @@ class AlternateWrappedJaggedModel(JaggedModel):
             auto_wrap_policy=always_wrap_policy,
         )
 
-        assert self.linear3.num_biases == 2
+        assert self.linear4.num_biases == 2
         has_wrapped_first_bias = False
 
-        def linear3_wrap_policy(module, recurse, unwrapped_params):
+        def linear4_wrap_policy(module, recurse, unwrapped_params):
             is_leaf = len(list(module.children())) == 0
             if not is_leaf:
                 return True  # wrap the parent
@@ -200,9 +221,9 @@ class AlternateWrappedJaggedModel(JaggedModel):
                 return True
             return False
 
-        self.linear3 = FSDP(
-            self.linear3, process_group=group,
-            auto_wrap_policy=linear3_wrap_policy,
+        self.linear4 = FSDP(
+            self.linear4, process_group=group,
+            auto_wrap_policy=linear4_wrap_policy,
         )
 
 class TestFSDPOptimState(FSDPTest):
@@ -224,7 +245,7 @@ class TestFSDPOptimState(FSDPTest):
         lr = optim_kwargs.pop("lr", 0.01)
         if not use_multiple_param_groups:
             optim = optim_class(model.parameters(), lr=lr, **optim_kwargs)
-            optim_input = model.parameters()  # refresh generator
+            optim_input = list(model.parameters())  # persist generator
         else:
             if model_class != "jagged" and model_class != "alternate_jagged":
                 assert 0, f"Unsupported model_class: {model_class}"
@@ -232,7 +253,8 @@ class TestFSDPOptimState(FSDPTest):
             # all of the unflattened parameters comprising a flattened
             # parameter must be in the same parameter group
             no_wd_params = list(model.linear0.parameters()) + \
-                list(model.linear1.parameters())
+                list(model.linear1.parameters()) + \
+                list(model.linear4.parameters())
             wd_params = list(model.linear2.parameters()) + \
                 list(model.linear3.parameters())
             optim_input = [
@@ -265,7 +287,8 @@ class TestFSDPOptimState(FSDPTest):
             # all of the unflattened parameters comprising a flattened
             # parameter must be in the same parameter group
             no_wd_params = list(model.linear0.parameters()) + \
-                list(model.linear1.parameters())
+                list(model.linear1.parameters()) + \
+                list(model.linear4.parameters())
             wd_params = list(model.linear2.parameters()) + \
                 list(model.linear3.parameters())
             optim_input = [
@@ -280,14 +303,18 @@ class TestFSDPOptimState(FSDPTest):
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
         device: torch.device = torch.device("cuda"),
+        num_iters: int = 1,
     ):
-        """Performs one forward pass, backward pass, and optimizer step."""
-        module = model.module if hasattr(model, "module") else model
-        inp = module.get_input(device)
-        output = model(*inp)
-        loss = module.get_loss(inp, output).to(device)
-        module.run_backward(loss)
-        optim.step()
+        """Performs a forward pass, backward pass, and optimizer step
+        ``num_iters``-many times."""
+        torch.manual_seed(0)  # set seed for parity checks
+        for _ in range(num_iters):
+            module = model.module if hasattr(model, "module") else model
+            inp = module.get_input(device)
+            output = model(*inp)
+            loss = module.get_loss(inp, output).to(device)
+            module.run_backward(loss)
+            optim.step()
 
     def _check_same_state(
         self,
@@ -342,19 +369,18 @@ class TestFSDPOptimState(FSDPTest):
                 else suppress()
             with context:
                 params.extend(p.detach().clone() for p in module.parameters())
-        for p1, p2 in zip(params, model2.parameters()):
+        for p1, (name, p2) in zip(params, model2.named_parameters()):
+            if self.rank == 0 and not torch.allclose(p1, p2):
+                print(name)
+                print("p2", p1)
+                print("p2", p2)
+            self.assertEqual(p1.shape, p2.shape)
             torch.testing.assert_close(p1, p2)
 
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "model_class",
-        ["jagged"]
-    )
-    @parametrize(
-        "use_multiple_param_groups",
-        [False, True],
-    )
+    @parametrize("model_class", ["jagged"])
+    @parametrize("use_multiple_param_groups", [False, True])
     def test_full_optim_state_dict(
         self,
         model_class: str,
@@ -400,22 +426,27 @@ class TestFSDPOptimState(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "model_class",
-        ["jagged"]
-    )
-    def test_shard_full_optim_state_dict_basic(self, model_class: str):
+    @parametrize("model_class", ["jagged"])
+    @parametrize("use_multiple_param_groups", [False, True])
+    def test_shard_full_optim_state_dict_basic(
+        self,
+        model_class: str,
+        use_multiple_param_groups: bool,
+    ):
         """Save and load the full optimizer state dict using the same model
         wrapping configuration."""
         TARGET_RANK = 0
         # Get the full optimizer state dict
-        wrapped_model, wrapped_optim, _ = \
-            self._init_wrapped(model_class=model_class)
+        wrapped_model, wrapped_optim, optim_input = self._init_wrapped(
+            model_class=model_class,
+            use_multiple_param_groups=use_multiple_param_groups,
+        )
         self._step_model(wrapped_model, wrapped_optim)
         full_osd = FSDP.full_optim_state_dict(
             wrapped_model,
             wrapped_optim,
             target_rank=TARGET_RANK,
+            optim_input=optim_input,
         )
 
         # Broadcast the full optim state dict so that each rank has it (since
@@ -425,7 +456,9 @@ class TestFSDPOptimState(FSDPTest):
         full_osd = obj_list[0]
 
         # Shard the full optimizer state dict
-        sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, wrapped_model)
+        sharded_osd = FSDP.shard_full_optim_state_dict(
+            full_osd, wrapped_model, optim_input,
+        )
         # Since we did not change the model wrapping configuration, this
         # sharded optimizer state dict should be the same as the original
         old_sharded_osd = wrapped_optim.state_dict()
@@ -440,121 +473,31 @@ class TestFSDPOptimState(FSDPTest):
         # sharded optimizer state dict matches the original -- this would just
         # be testing `torch.optim.Optimizer.load_state_dict()`
 
-    @skip_if_lt_x_gpu(4)
-    @parametrize(
-        "model_class",
-        ["jagged"],
-    )
-    @parametrize(
-        "use_multiple_param_groups",
-        [False, True]
-    )
+    @skip_if_lt_x_gpu(2)
+    @parametrize("wrapped_cls1", ["jagged"])
+    @parametrize("wrapped_cls2", ["jagged", "alternate_jagged"])
+    @parametrize("nonwrapped_cls", ["jagged"])
+    @parametrize("use_multiple_param_groups", [False, True])
+    @parametrize("use_new_process_group", [False, True])
     def test_shard_full_optim_state_dict_world_size(
         self,
-        model_class: str,
+        wrapped_cls1: str,
+        wrapped_cls2: str,
+        nonwrapped_cls: str,
         use_multiple_param_groups: bool,
+        use_new_process_group: bool,
     ):
         """Save the full optimizer state dict and load it using a new
-        process group with a differnt world size."""
+        process group with a smaller world size."""
+        torch.backends.cuda.matmul.allow_tf32 = False
         TARGET_RANK = 0
         # Get the full optimizer state dict
         wrapped_model, wrapped_optim, optim_input = self._init_wrapped(
-            model_class=model_class,
+            model_class=wrapped_cls1,
             use_multiple_param_groups=use_multiple_param_groups,
         )
-        self._step_model(wrapped_model, wrapped_optim)  # first step
-        full_osd = FSDP.full_optim_state_dict(
-            wrapped_model,
-            wrapped_optim,
-            target_rank=TARGET_RANK,
-        )
-
-        # Broadcast the full optim state dict so that each rank has it (since
-        # normally it would be saved to and loaded from disk)
-        obj_list = [full_osd]
-        dist.broadcast_object_list(obj_list, src=TARGET_RANK)
-        full_osd = obj_list[0]
-
-        new_group_ranks = [0, 2]
-        new_group = dist.new_group(ranks=new_group_ranks)
-        if self.rank not in new_group_ranks:
-            return
-        wrapped_model, wrapped_optim, optim_input = self._init_wrapped(
-            model_class=model_class, group=new_group,
-            use_multiple_param_groups=use_multiple_param_groups,
-        )
-        self._step_model(wrapped_model, wrapped_optim)  # first step (new model)
-
-        sharded_osd = FSDP.shard_full_optim_state_dict(
-            full_osd, wrapped_model, optim_input,
-        )
-        # Reload the optimizer state dict
-        wrapped_optim.load_state_dict(sharded_osd)
-        self._step_model(wrapped_model, wrapped_optim)  # second step
-
-        # Use a local equivalent for reference
-        nonwrapped_model, nonwrapped_optim = self._init_nonwrapped(
-            model_class=model_class,
-            use_multiple_param_groups=use_multiple_param_groups,
-        )
-        self._step_model(nonwrapped_model, nonwrapped_optim)  # first step
-        self._step_model(nonwrapped_model, nonwrapped_optim)  # second step
-
-        self._check_same_model_params(wrapped_model, nonwrapped_model)
-
-    # TODO: Possibly refactor `shard_full_optim_state_dict()` test variations
-    @skip_if_lt_x_gpu(2)
-    def test_shard_full_optim_state_dict_wrapping(self):
-        TARGET_RANK = 0
-        # Get the full optimizer state dict
-        wrapped_model, wrapped_optim, _ = \
-            self._init_wrapped(model_class="jagged")
-        self._step_model(wrapped_model, wrapped_optim)  # first step
-        full_osd = FSDP.full_optim_state_dict(
-            wrapped_model,
-            wrapped_optim,
-            target_rank=TARGET_RANK,
-        )
-
-        # Broadcast the full optim state dict so that each rank has it (since
-        # normally it would be saved to and loaded from disk)
-        obj_list = [full_osd]
-        dist.broadcast_object_list(obj_list, src=TARGET_RANK)
-        full_osd = obj_list[0]
-
-        wrapped_model, wrapped_optim, _ = \
-            self._init_wrapped(model_class="alternate_jagged")
-        self._step_model(wrapped_model, wrapped_optim)  # first step (new model)
-
-        sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, wrapped_model)
-        wrapped_optim.load_state_dict(sharded_osd)
-        self._step_model(wrapped_model, wrapped_optim)  # second step
-
-        # Use a local equivalent for reference
-        nonwrapped_model, nonwrapped_optim = \
-            self._init_nonwrapped(model_class="jagged")
-        self._step_model(nonwrapped_model, nonwrapped_optim)  # first step
-        self._step_model(nonwrapped_model, nonwrapped_optim)  # second step
-
-        self._check_same_model_params(wrapped_model, nonwrapped_model)
-
-    # TODO: Possibly refactor `shard_full_optim_state_dict()` test variations
-    @skip_if_lt_x_gpu(4)
-    @parametrize(
-        "use_multiple_param_groups",
-        [False, True],
-    )
-    def test_shard_full_optim_state_dict_wrapping_and_world_size(
-        self,
-        use_multiple_param_groups: bool,
-    ):
-        TARGET_RANK = 0
-        # Get the full optimizer state dict
-        wrapped_model, wrapped_optim, optim_input = self._init_wrapped(
-            model_class="jagged",
-            use_multiple_param_groups=use_multiple_param_groups,
-        )
-        self._step_model(wrapped_model, wrapped_optim)  # first step
+        # Run a few steps to generate some optimizer state
+        self._step_model(wrapped_model, wrapped_optim, num_iters=3)
         full_osd = FSDP.full_optim_state_dict(
             wrapped_model,
             wrapped_optim,
@@ -568,30 +511,35 @@ class TestFSDPOptimState(FSDPTest):
         dist.broadcast_object_list(obj_list, src=TARGET_RANK)
         full_osd = obj_list[0]
 
-        new_group_ranks = [0, 2]
-        new_group = dist.new_group(ranks=new_group_ranks)
-        if self.rank not in new_group_ranks:
-            return
+        if use_new_process_group:
+            new_group_ranks = [r for r in range(self.world_size) if r % 2 == 0]
+            new_group = dist.new_group(ranks=new_group_ranks)
+            if self.rank not in new_group_ranks:
+                return
+        else:
+            new_group = None
+
+        # Create a new wrapped model and local-only nonwrapped model both with
+        # the same fresh parameters
         wrapped_model, wrapped_optim, optim_input = self._init_wrapped(
-            model_class="alternate_jagged", group=new_group,
+            model_class=wrapped_cls2, group=new_group,
             use_multiple_param_groups=use_multiple_param_groups,
         )
-        self._step_model(wrapped_model, wrapped_optim)  # first step (new model)
+        nonwrapped_model, nonwrapped_optim = self._init_nonwrapped(
+            model_class=nonwrapped_cls,
+            use_multiple_param_groups=use_multiple_param_groups,
+        )
 
+        # Load the generated optimizer state from the original wrapped model
         sharded_osd = FSDP.shard_full_optim_state_dict(
             full_osd, wrapped_model, optim_input,
         )
         wrapped_optim.load_state_dict(sharded_osd)
-        self._step_model(wrapped_model, wrapped_optim)  # second step
+        nonwrapped_optim.load_state_dict(full_osd)
 
-        # Use a local equivalent for reference
-        nonwrapped_model, nonwrapped_optim = self._init_nonwrapped(
-            model_class="jagged",
-            use_multiple_param_groups=use_multiple_param_groups,
-        )
-        self._step_model(nonwrapped_model, nonwrapped_optim)  # first step
-        self._step_model(nonwrapped_model, nonwrapped_optim)  # second step
-
+        # Take a step with both models and check the parameters are the same
+        self._step_model(wrapped_model, wrapped_optim)
+        self._step_model(nonwrapped_model, nonwrapped_optim)
         self._check_same_model_params(wrapped_model, nonwrapped_model)
 
 
