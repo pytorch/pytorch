@@ -66,8 +66,8 @@ const std::string& GetSerializedDecompositions() {
 const OperatorMap<std::string>& GetDecompositionMapping() {
   // clang-format off
  static const OperatorMap<std::string> decomposition_mapping {
-\    {"aten::var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor)", "var_decomposition"},
-\    {"aten::var(Tensor self, bool unbiased=True) -> (Tensor)", "var"},
+    {"aten::var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor)", "var_decomposition"},
+    {"aten::var(Tensor self, bool unbiased=True) -> (Tensor)", "var"},
   };
   // clang-format on
 
