@@ -776,11 +776,21 @@ class TensorLikePair(Pair):
     ) -> None:
         """Compares sparse CSR tensors by comparing
 
+        - the shape
         - the number of non-zero elements (nnz) for equality,
         - the col_indices for equality,
         - the crow_indices for equality, and
         - the values for closeness.
         """
+        def raise_mismatch_error(attribute_name: str, actual_value: Any, expected_value: Any) -> NoReturn:
+            raise self._make_error_meta(
+                AssertionError,
+                f"The values for attribute '{attribute_name}' do not match: {actual_value} != {expected_value}.",
+            )
+
+        if actual.shape != expected.shape:
+            raise_mismatch_error("shape", actual.shape, expected.shape)
+
         if actual._nnz() != expected._nnz():
             raise self._make_error_meta(
                 AssertionError,
