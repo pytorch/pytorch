@@ -233,7 +233,7 @@ void block_sparse_triangular_solve_vec(
 
 #if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION < 11703)
         // cusparse bsrsv2 and bsrsm2 has a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
-        // See {GITHUB PR PLACEHOLDER}
+        // See https://github.com/pytorch/pytorch/issues/71297
         ::c10::cuda::device_synchronize();
 #endif
       });
@@ -369,7 +369,7 @@ void block_sparse_triangular_solve_mat(
 
 #if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION < 11703)
         // cusparse bsrsv2 and bsrsm2 has a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
-        // See {GITHUB PR PLACEHOLDER}
+        // See https://github.com/pytorch/pytorch/issues/71297
         ::c10::cuda::device_synchronize();
 #endif
       });
