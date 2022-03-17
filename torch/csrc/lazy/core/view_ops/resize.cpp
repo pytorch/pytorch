@@ -6,7 +6,7 @@ namespace lazy {
 namespace {
 
 Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> size) {
-  return Shape(GetShapeFromTsValue(input).scalar_type(), size);
+  return Shape(input.shape().scalar_type(), size);
 }
 
 } // namespace
