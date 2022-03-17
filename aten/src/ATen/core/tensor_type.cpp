@@ -27,7 +27,7 @@ bool possible_cross_dimension_overlap(c10::IntArrayRef sizes, c10::IntArrayRef s
   for (const auto i : c10::irange(1, n_dim)) {
     if (i != 0) {
       // we are being conservative on checking for memory overlap
-      if (strides[stride_indices[i]] < sizes[stride_indices[i-1]] * strides[stride_indices[i-1]]) {
+      if (sizes[stride_indices[i]] != 1 && strides[stride_indices[i]] < sizes[stride_indices[i-1]] * strides[stride_indices[i-1]]) {
         return true;
       }
     }
@@ -209,24 +209,31 @@ VaryingShape<Stride> TensorType::computeStrideProps(
     }
   }
   std::vector<Stride> stride_properties;
-  bool has_overlap = possible_cross_dimension_overlap(sizes, strides);
-  TORCH_INTERNAL_ASSERT(!(tensor_contiguity && has_overlap), "Cannot specify contiguity for storage with overlap");
+  bool has_overlap = false;
+
+  if (!tensor_contiguity) {
+    // only computes overlap when tensor_contiguity is not set
+    has_overlap = possible_cross_dimension_overlap(sizes, strides);
+  }
 
   for (size_t i = 0; i < stride_indices.size(); i++) {
     bool contiguous_ = tensor_contiguity;
-    if (has_overlap) {
-      contiguous_ = false;
-    } else if (!contiguous_) {
-      // innermost stride expected to be 1
-      // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
-      // BROADCASTED
-      if (i == 0) {
-        contiguous_ = strides[stride_indices[i]] == 1;
+    if (!contiguous_) {
+      if (!has_overlap) {
+        // innermost stride expected to be 1
+        // TODO: turn contiguous_ into an enum CONTIGUOUS, NONCONTIGUOUS,
+        // BROADCASTED
+        if (i == 0) {
+          contiguous_ = strides[stride_indices[i]] == 1;
+        } else {
+          contiguous_ = strides[stride_indices[i]] == 1 ||
+              (strides[stride_indices[i]] != 0 &&
+               strides[stride_indices[i]] ==
+                   strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+        }
       } else {
-        contiguous_ = strides[stride_indices[i]] == 1 ||
-            (strides[stride_indices[i]] != 0 &&
-             strides[stride_indices[i]] ==
-                 strides[stride_indices[i - 1]] * sizes[stride_indices[i - 1]]);
+        // leaving this assign statement for readability;
+        contiguous_ = false;
       }
     }
     stride_properties.emplace_back(stride_indices[i], contiguous_, strides[stride_indices[i]]);
