@@ -1,8 +1,6 @@
-#include <torch/csrc/deploy/Exception.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/csrc/deploy/elf_file.h>
-#include <torch/csrc/deploy/interpreter/Optional.hpp>
-
 #include <torch/cuda.h>
 
 #include <dlfcn.h>
@@ -56,13 +54,12 @@ static bool writeDeployInterpreter(FILE* dst) {
   std::ifstream("/proc/self/cmdline") >> exePath;
   ElfFile elfFile(exePath.c_str());
   for (const auto& s : pythonInterpreterSection) {
-    multipy::optional<Section> payloadSection =
-        elfFile.findSection(s.sectionName);
-    if (payloadSection != multipy::nullopt) {
+    at::optional<Section> payloadSection = elfFile.findSection(s.sectionName);
+    if (payloadSection != at::nullopt) {
       payloadStart = payloadSection->start;
       customLoader = s.customLoader;
       size = payloadSection->len;
-      MULTIPY_CHECK(payloadSection.has_value(), "Missing the payload section");
+      TORCH_CHECK(payloadSection.has_value(), "Missing the payload section");
       break;
     }
   }
@@ -77,10 +74,10 @@ static bool writeDeployInterpreter(FILE* dst) {
         break;
       }
     }
-    MULTIPY_CHECK(
+    TORCH_CHECK(
         libStart != nullptr && libEnd != nullptr,
-        "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=" +
-            std::to_string(torch::cuda::is_available()));
+        "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
+        torch::cuda::is_available());
 
     size = libEnd - libStart;
     payloadStart = libStart;
@@ -102,12 +99,12 @@ InterpreterManager::InterpreterManager(
     // can be used for balancing work across GPUs
     I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
     instances_.back().pImpl_->setFindModule(
-        [this](const std::string& name) -> multipy::optional<std::string> {
+        [this](const std::string& name) -> at::optional<std::string> {
           auto it = registeredModuleSource_.find(name);
           if (it != registeredModuleSource_.end()) {
             return it->second;
           } else {
-            return multipy::nullopt;
+            return at::nullopt;
           }
         });
   }
@@ -192,11 +189,11 @@ void ReplicatedObj::unload(const Interpreter* onThisInterpreter) {
 
 ReplicatedObj InterpreterSession::createMovable(Obj obj) {
   TORCH_DEPLOY_TRY
-  MULTIPY_CHECK(
+  TORCH_CHECK(
       manager_,
       "Can only create a movable object when the session was created from an interpreter that is part of a InterpreterManager");
 
-  MULTIPY_CHECK(
+  TORCH_CHECK(
       impl_->isOwner(obj),
       "Cannot create movable from an object that lives in different session");
 
