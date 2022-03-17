@@ -1577,6 +1577,10 @@ class TestFunctionalMapDataPipe(TestCase):
         shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
 
+        #  Functional Test: deactivate shuffling via set_shuffle
+        shuffler_dp = dp.iter.Shuffler(input_dp1).set_shuffle(False)
+        self.assertEqual(list(shuffler_dp), list(range(10)))
+
         # # Reset Test:
         shuffler_dp = input_dp1.shuffle()
         n_elements_before_reset = 5
