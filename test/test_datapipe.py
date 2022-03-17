@@ -1407,6 +1407,10 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
+        # Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_ds.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_ds))
+
     def test_zip_iterdatapipe(self):
 
         # Functional Test: raises TypeError when an input is not of type `IterDataPipe`
@@ -1576,10 +1580,6 @@ class TestFunctionalMapDataPipe(TestCase):
         # Functional Test: Custom indices are working
         shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
-
-        #  Functional Test: deactivate shuffling via set_shuffle
-        shuffler_dp = dp.iter.Shuffler(input_dp1).set_shuffle(False)
-        self.assertEqual(list(shuffler_dp), list(input_dp1))
 
         # # Reset Test:
         shuffler_dp = input_dp1.shuffle()
