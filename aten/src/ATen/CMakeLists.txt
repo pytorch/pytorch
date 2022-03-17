@@ -104,6 +104,7 @@ file(GLOB native_sparse_cpp "native/sparse/*.cpp")
 file(GLOB native_quantized_cpp
             "native/quantized/*.cpp"
             "native/quantized/cpu/*.cpp")
+file(GLOB native_nested_cpp "native/nested/*.cpp")
 
 file(GLOB native_h "native/*.h")
 file(GLOB native_ao_sparse_h
@@ -155,13 +156,16 @@ if(BUILD_LITE_INTERPRETER)
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}
-    ${native_ao_sparse_cpp} ${native_sparse_cpp}
+    ${native_ao_sparse_cpp} ${native_sparse_cpp} ${native_nested_cpp}
     ${native_quantized_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp}
     ${native_utils_cpp} ${native_xnnpack} ${generated_sources} ${core_generated_sources}
     ${ATen_CPU_SRCS} ${ATen_QUANTIZED_SRCS} ${ATen_NNAPI_SRCS} ${cpu_kernel_cpp}
   )
 endif()
 
+if(USE_LIGHTWEIGHT_DISPATCH)
+  set(all_cpu_cpp ${all_cpu_cpp} ${generated_unboxing_sources})
+endif()
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -194,7 +198,6 @@ if(USE_CUDA)
   list(APPEND ATen_CUDA_CU_SRCS
     ${cuda_cu}
     ${native_cuda_cu}
-    ${native_cuda_linalg_cpp}
     ${native_sparse_cuda_cu}
     ${native_quantized_cuda_cu}
     ${cuda_generated_sources}
@@ -208,6 +211,10 @@ if(USE_CUDA)
     ${native_quantized_cudnn_cpp}
     ${native_sparse_cuda_cpp}
   )
+  set(ATen_CUDA_LINALG_SRCS ${native_cuda_linalg_cpp})
+  if(NOT BUILD_LAZY_CUDA_LINALG)
+    list(APPEND ATen_CUDA_CU_SRCS ${native_cuda_linalg_cpp})
+  endif()
   if(CAFFE2_USE_CUDNN)
     list(APPEND ATen_CUDA_CPP_SRCS ${cudnn_cpp})
   endif()
@@ -392,16 +399,24 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
       )
+   if(NOT BUILD_LAZY_CUDA_LINALG)
+     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+       )
+   endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY}
-      ${CUDA_cusolver_LIBRARY}
       )
+   if(NOT BUILD_LAZY_CUDA_LINALG)
+     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+       ${CUDA_cusolver_LIBRARY}
+     )
+   endif()
   endif()
 
   if(CAFFE2_USE_CUDNN)
@@ -415,9 +430,9 @@ endif()
 
 
   if(USE_MAGMA)
-    if(USE_CUDA)
+    if(USE_CUDA AND NOT BUILD_LAZY_CUDA_LINALG)
       list(APPEND ATen_CUDA_DEPENDENCY_LIBS torch::magma)
-    endif(USE_CUDA)
+    endif(USE_CUDA AND NOT BUILD_LAZY_CUDA_LINALG)
     if(USE_ROCM)
       list(APPEND ATen_HIP_DEPENDENCY_LIBS torch::magma)
     endif(USE_ROCM)
@@ -536,6 +551,7 @@ set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_CU_SRCS ${ATen_CUDA_CU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_CPP_SRCS ${ATen_CUDA_CPP_SRCS} PARENT_SCOPE)
+set(ATen_CUDA_LINALG_SRCS ${ATen_CUDA_LINALG_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)

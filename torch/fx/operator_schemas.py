@@ -7,7 +7,7 @@ import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, NamedTuple, cast, TYPE_CHECKING
 from torch._jit_internal import boolean_dispatched
 from ._compatibility import compatibility
-from torch._ops import OpOverloadPacket
+from torch._ops import OpOverloadPacket, OpOverload
 
 if TYPE_CHECKING:
     from .node import Argument
@@ -134,12 +134,11 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
             return_schemas=True, returns a tuple containing the optional Python signatures
             and the optional TorchScript Function signature
     """
+    if isinstance(op, OpOverloadPacket) or isinstance(op, OpOverload):
+        op = op.op
     override = _manual_overrides.get(op)
     if override:
         return (override, None) if return_schemas else None
-
-    if isinstance(op, OpOverloadPacket):
-        op = op._op
 
     aten_fn = torch.jit._builtins._find_builtin(op)
 
