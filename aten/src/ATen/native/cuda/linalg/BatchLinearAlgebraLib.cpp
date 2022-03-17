@@ -529,11 +529,15 @@ inline static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const T
 }
 
 template<typename scalar_t>
-inline static void apply_svd_cusolver_gesvda(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool full_matrices, bool compute_uv) {
+
 }
 
-inline static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
+inline static void svd_cusolver_gesvdaStridedBatched(
+  const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+  const Tensor& infos, bool full_matrices, bool compute_uv) {
+
 }
 
 // call cusolver gesvdj batched function to calculate svd
