@@ -44,6 +44,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -261,11 +262,13 @@ jobs:
           docker system prune -af
 
   test_default_1_3:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 330
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
       TEST_CONFIG: default
@@ -496,6 +499,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -529,11 +533,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_2_3:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 330
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
       TEST_CONFIG: default
@@ -764,6 +770,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -797,11 +804,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_3_3:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 3, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 330
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
       TEST_CONFIG: default
@@ -1032,6 +1041,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
           PR_NUMBER: ${{ github.event.pull_request.number }}

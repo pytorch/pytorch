@@ -3378,6 +3378,34 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         ts_f = torch.jit.script(nf)
         self.assertEqual(nf(vals), ts_f(vals))
 
+    def test_custom_codegen_with_transformer(self):
+        class ListCodeGen(CodeGen):
+            def gen_fn_def(self, free_vars, maybe_return_annotation):
+                lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list"""
+                return lst_unpack
+
+            def additional_globals(self):
+                return [('List', typing.List)]
+
+            def process_inputs(self, *inputs):
+                assert(len(inputs) == 1)
+                return inputs[0]
+
+        def f(a, b):
+            return a + b
+
+        nf = symbolic_trace(f)
+        vals = [torch.randn(3), torch.randn(3)]
+        self.assertEqual(nf(*vals), f(*vals))
+
+        nf.graph.set_codegen(ListCodeGen())
+        nf.recompile()
+        self.assertEqual(nf(vals), f(*vals))
+
+        transformed_gm = Transformer(nf).transform()
+        self.assertEqual(nf(vals), transformed_gm(vals))
 
     def test_imul_code_print(self):
         graph = torch.fx.Graph()
