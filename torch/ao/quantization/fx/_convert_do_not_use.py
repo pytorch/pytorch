@@ -125,6 +125,22 @@ def run_weight_observers(observed: GraphModule) -> None:
             # run the weight observer
             weight_observer_module()
 
+# this method is temporary will be removed soon
+def duplicate_quantize_dynamic_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if (node.op == "call_function" and node.target == torch.quantize_per_tensor_dynamic):
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node("call_function", torch.quantize_per_tensor_dynamic, node.args, node.kwargs)
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
 def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     """
     If a dequantize node has multiple uses, duplicate it and create one dequantize node for each use.
@@ -756,6 +772,7 @@ def _convert_do_not_use(
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = duplicate_dequantize_node(model)
+        model = duplicate_quantize_dynamic_node(model)
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
