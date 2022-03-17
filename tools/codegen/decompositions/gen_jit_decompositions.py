@@ -59,7 +59,7 @@ def gen_decomposition_mappings() -> str:
     decomposition_mappings = []
     for schema, scripted_func in decomposition_table.items():
         decomposition_mappings.append(
-            '\    {"' + schema + '", "' + scripted_func.name + '"},'
+            '    {"' + schema + '", "' + scripted_func.name + '"},'
         )
     return "\n".join(decomposition_mappings)
 
