@@ -33,8 +33,8 @@ class ReplicatedTensor(torch.Tensor):
     def __new__(cls, data=None, process_group=None):
         if data is None:
             data = torch.empty(0)
-        r = torch.Tensor._make_subclass(cls, data)
-        r.process_group = (
+        r = torch.Tensor._make_subclass(cls, data)      # type: ignore[arg-type]
+        r.process_group = (     # type: ignore[attr-defined]
             process_group
             if process_group is not None
             else distributed_c10d._get_default_group()
@@ -98,9 +98,9 @@ class ReplicatedTensor(torch.Tensor):
                 # if all operands are ReplicatedTensors and does not get dispatched to ShardedTensor
                 # __torch_function__, result is a torch.Tensor, then we convert and return a
                 # ReplicatedTensor according to our inter-op rule
-                rs = rs.as_subclass(cls)
+                rs = rs.as_subclass(cls)        # type: ignore[arg-type]
                 # propagate the process_group field to result
-                rs.process_group = replicated_pg
+                rs.process_group = replicated_pg        # type: ignore[attr-defined]
 
             return rs
 

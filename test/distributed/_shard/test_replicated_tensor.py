@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 
 import torch.distributed as dist
