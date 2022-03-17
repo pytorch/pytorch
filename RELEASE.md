@@ -142,7 +142,7 @@ Promotion should occur in two steps:
 
 The following should be prepared for the release day
 
-### Modify release matrix 
+### Modify release matrix
 
 Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
 
