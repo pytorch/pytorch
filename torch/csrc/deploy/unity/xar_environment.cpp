@@ -2,7 +2,6 @@
 #include <dlfcn.h>
 #include <fmt/format.h>
 #include <sys/stat.h>
-#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/elf_file.h>
 #include <torch/csrc/deploy/unity/xar_environment.h>
 
@@ -60,7 +59,7 @@ bool _fileExists(const std::string& filePath) {
 }
 
 void XarEnvironment::setupPythonApp() {
-  MULTIPY_CHECK(
+  TORCH_CHECK(
       !alreadySetupPythonApp_,
       "Already setup the python application. It should only been done once!");
 
@@ -68,8 +67,7 @@ void XarEnvironment::setupPythonApp() {
   constexpr const char* SECTION_NAME = ".torch_deploy_payload.unity";
   ElfFile elfFile(exePath_.c_str());
   auto payloadSection = elfFile.findSection(SECTION_NAME);
-  MULTIPY_CHECK(
-      payloadSection != multipy::nullopt, "Missing the payload section");
+  TORCH_CHECK(payloadSection != at::nullopt, "Missing the payload section");
   const char* pythonAppPkgStart = payloadSection->start;
   auto pythonAppPkgSize = payloadSection->len;
   LOG(INFO) << "Embedded binary size " << pythonAppPkgSize;
@@ -109,26 +107,23 @@ void XarEnvironment::setupPythonApp() {
    * past runs. It should be pretty safe to discard them.
    */
   std::string rmCmd = fmt::format("rm -rf {}", pythonAppDir_);
-  MULTIPY_CHECK(system(rmCmd.c_str()) == 0, "Fail to remove the directory.");
+  TORCH_CHECK(system(rmCmd.c_str()) == 0, "Fail to remove the directory.");
 
   // recreate the directory
   auto r = mkdir(pythonAppDir_.c_str(), 0777);
-  MULTIPY_CHECK(r == 0, "Failed to create directory: " + strerror(errno));
+  TORCH_CHECK(r == 0, "Failed to create directory: ", strerror(errno));
 
   std::string pythonAppArchive = std::string(pythonAppDir_) + "/python_app.xar";
   auto fp = fopen(pythonAppArchive.c_str(), "wb");
-  MULTIPY_CHECK(fp != nullptr, "Fail to create file: " + strerror(errno));
+  TORCH_CHECK(fp != nullptr, "Fail to create file: ", strerror(errno));
   auto written = fwrite(pythonAppPkgStart, 1, pythonAppPkgSize, fp);
-  MULTIPY_CHECK(written == pythonAppPkgSize, "Expected written == size");
+  TORCH_CHECK(written == pythonAppPkgSize, "Expected written == size");
   fclose(fp);
 
   std::string extractCommand = fmt::format(
       "unsquashfs -o 4096 -d {} {}", pythonAppRoot_, pythonAppArchive);
   r = system(extractCommand.c_str());
-  MULTIPY_CHECK(
-      r == 0,
-      "Fail to extract the python package" + std::to_string(r) +
-          extractCommand.c_str());
+  TORCH_CHECK(r == 0, "Fail to extract the python package");
 
   alreadySetupPythonApp_ = true;
 }
@@ -148,9 +143,12 @@ void XarEnvironment::preloadSharedLibraries() {
                 << " does not exist in the python app root, skip loading it";
       continue;
     }
-    MULTIPY_CHECK(
+    TORCH_CHECK(
         dlopen(preloadList[i], RTLD_GLOBAL | RTLD_LAZY) != nullptr,
-        "Fail to open the shared library " + preloadList[i] + ": " + dlerror());
+        "Fail to open the shared library ",
+        preloadList[i],
+        ": ",
+        dlerror());
   }
 }
 
