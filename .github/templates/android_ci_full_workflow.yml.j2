@@ -87,6 +87,7 @@ name: !{{ build_environment }}
 
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
+          echo "id_x86_32=${id_x86_32}" >> "${GITHUB_ENV}"
 
       !{{ common_android.upload_android_binary_size("prebuilt", "${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz") }}
       - uses: !{{ common.upload_artifact_s3_action }}
@@ -97,5 +98,25 @@ name: !{{ build_environment }}
           if-no-files-found: error
           path:
             build_android_artifacts/artifacts.tgz
+
+      - name: Publish android snapshot
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        env:
+          SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+          ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
+          ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
+        run: |
+          set -eux
+          # shellcheck disable=SC2154
+          (echo "cd workspace && ./.circleci/scripts/publish_android_snapshot.sh" | docker exec \
+            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot" \
+            -e SONATYPE_NEXUS_USERNAME \
+            -e SONATYPE_NEXUS_PASSWORD \
+            -e ANDROID_SIGN_KEY \
+            -e ANDROID_SIGN_PASS \
+            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+            -u jenkins -i "$id_x86_32" bash) 2>&1
+
       !{{ common.teardown_ec2_linux() }}
 {%- endblock %}
