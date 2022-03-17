@@ -3566,7 +3566,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 ns.call_module(nniqd.LinearReLU),
                 ns.call_module(nniqd.LinearReLU),
             ]
-            print("m:", m)
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
     def test_ref_linear_module(self):
