@@ -35,6 +35,7 @@ from ..quantization_mappings import DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPIN
 from .backend_config.utils import get_quantized_reference_module_mapping
 from .graph_module import (
     QuantizedGraphModule,
+    is_observed_module,
     is_observed_standalone_module,
 )
 from ._equalize import update_obs_for_equalization, convert_eq_obs
@@ -46,6 +47,10 @@ from .utils import (
     graph_module_from_producer_nodes,
     WEIGHT_INDEX_DICT,
 )
+from .quantization_patterns import (
+    QuantizeHandler,
+)
+from .quantization_types import Pattern
 from ..quant_type import QuantType
 
 from torch.ao.quantization.quantize import (
@@ -53,7 +58,6 @@ from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
 from .lower_to_fbgemm import lower_to_fbgemm
-from .convert import restore_state
 
 # these are tuples so that they can work with isinstance(module, tuple_of_classes)
 FUSED_MODULE_CLASSES = (
@@ -89,6 +93,21 @@ DYNAMIC_MODULE_CLASSES = (
     torch.nn.RNNCell,
     torch.nn.LSTM,
 )
+
+def restore_state(
+        observed: torch.nn.Module
+) -> Tuple[Dict[Pattern, QuantizeHandler],
+           Dict[str, Tuple[str, type]],
+           Dict[str, Any],
+           Set[str]]:
+    assert is_observed_module(observed), \
+        'incoming model must be produced by prepare_fx'
+    prepare_custom_config_dict: Dict[str, Any] = \
+        observed._prepare_custom_config_dict  # type: ignore[assignment]
+    node_name_to_scope: Dict[str, Tuple[str, type]] = observed._node_name_to_scope  # type: ignore[assignment]
+    patterns: Dict[Pattern, QuantizeHandler] = observed._patterns  # type: ignore[assignment]
+    observed_node_names: Set[str] = observed._observed_node_names  # type: ignore[assignment]
+    return patterns, node_name_to_scope, prepare_custom_config_dict, observed_node_names
 
 def has_none_qconfig(node: Argument, qconfig_map: Dict[str, QConfigAny]) -> bool:
     """ Check if a node has a qconfig of None, i.e. user requested to not quantize
