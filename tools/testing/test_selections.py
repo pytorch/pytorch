@@ -78,12 +78,15 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, flo
     sorted_jobs = sorted(filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True)
     sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
 
-    print("Calculating sharing for sharded " + str(sharded_jobs))
     for job in sorted_jobs:
         min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
         curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
         curr_shard_jobs.append(job)
         sharded_jobs[min_shard_index] = (curr_shard_time + filtered_job_times[job], curr_shard_jobs)
+
+    print("Calculating Shard 1 " + str(sharded_jobs[0]))
+    print("Calculating Shard 2 " + str(sharded_jobs[1]))
+    print("Calculating Shard 3 " + str(sharded_jobs[2]))
 
     print("Calculating sharing for unkonw " + str(unknown_jobs))
     # Round robin the unknown jobs starting with the smallest shard
