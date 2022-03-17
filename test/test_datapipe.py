@@ -1579,7 +1579,7 @@ class TestFunctionalMapDataPipe(TestCase):
 
         #  Functional Test: deactivate shuffling via set_shuffle
         shuffler_dp = dp.iter.Shuffler(input_dp1).set_shuffle(False)
-        self.assertEqual(list(shuffler_dp), list(range(10)))
+        self.assertEqual(list(shuffler_dp), list(input_dp1))
 
         # # Reset Test:
         shuffler_dp = input_dp1.shuffle()
