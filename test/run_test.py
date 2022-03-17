@@ -259,8 +259,6 @@ CORE_TEST_LIST = [
     "test_modules",
     "test_nn",
     "test_ops",
-    "test_ops_gradients",
-    "test_ops_jit",
     "test_torch"
 ]
 
