@@ -118,13 +118,12 @@ def run_baseline_no_fusion(ir, inputs) -> float:
 
 def run_nnc(ir, inputs, dynamic) -> float:
     try:
-        if dynamic:
-            old_dynamics = torch.jit.set_fusion_strategy([("DYNAMIC", 10)])
+        strat = [("DYNAMIC", 10)] if dynamic else [("STATIC", 10)]
+        old_strat = torch.jit.set_fusion_strategy([("DYNAMIC", 10)])
         with torch.jit.fuser("fuser1"):
             return run_test(ir, inputs)
     finally:
-            if dynamic:
-                torch.jit.set_fusion_strategy(old_dynamics)
+        torch.jit.set_fusion_strategy(old_strat)
 
 def run_nvfuser(ir, inputs) -> float:
     with torch.jit.fuser("fuser2"):
@@ -163,11 +162,12 @@ def run():
     parser.add_argument("--nvfuser", dest="nvfuser", action="store_true", help="benchmark nvfuser")
     parser.add_argument("--no-nvfuser", dest="nvfuser", action="store_false", help="DON'T benchmark nvfuser")
     parser.set_defaults(nvfuser=False)
-    parser.add_argument("--nnc", dest="nnc", action="store_true", help="benchmark nnc")
-    parser.add_argument("--no-nnc", dest="nnc", action="store_false", help="DON'T benchmark nnc")
-    parser.set_defaults(nnc=False)
+    parser.add_argument("--nnc-static", dest="nnc_static", action="store_true", help="benchmark nnc static")
+    parser.add_argument("--no-nnc-static", dest="nnc_static", action="store_false", help="DON'T benchmark nnc static")
+    parser.set_defaults(nnc_static=False)
 
     parser.add_argument("--nnc-dynamic", dest="nnc_dynamic", action="store_true", help="nnc with dynamic shapes")
+    parser.add_argument("--no-nnc-dynamic", dest="nnc_dynamic", action="store_false", help="DONT't benchmark nnc with dynamic shapes")
     parser.set_defaults(nnc_dynamic=False)
 
 
@@ -191,8 +191,10 @@ def run():
     options = []
     if args.baseline:
         options.append(("Baseline no fusion", run_baseline_no_fusion))
-    if args.nnc:
-        options.append(("NNC", functools.partial(run_nnc, dynamic=args.nnc_dynamic)))
+    if args.nnc_static:
+        options.append(("NNC Static", functools.partial(run_nnc, dynamic=False)))
+    if args.nnc_dynamic:
+        options.append(("NNC Dynamic", functools.partial(run_nnc, dynamic=True)))
     if args.nvfuser:
         options.append(("NVFuser", run_nvfuser))
 
