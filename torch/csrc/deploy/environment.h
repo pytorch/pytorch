@@ -1,6 +1,5 @@
 #pragma once
 #include <fmt/format.h>
-#include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/deploy/elf_file.h>
 #include <fstream>
 #include <string>
@@ -28,7 +27,7 @@ class Environment {
     // load the zipped torch modules
     constexpr const char* ZIPPED_TORCH_NAME = ".torch_python_modules";
     auto zippedTorchSection = elfFile.findSection(ZIPPED_TORCH_NAME);
-    MULTIPY_CHECK(
+    TORCH_CHECK(
         zippedTorchSection.has_value(), "Missing the zipped torch section");
     const char* zippedTorchStart = zippedTorchSection->start;
     auto zippedTorchSize = zippedTorchSection->len;
@@ -36,7 +35,7 @@ class Environment {
     std::string zipArchive =
         std::string(pythonAppDir) + "/torch_python_modules.zip";
     auto zippedFile = fopen(zipArchive.c_str(), "wb");
-    MULTIPY_CHECK(
+    TORCH_CHECK(
         zippedFile != nullptr, "Fail to create file: ", strerror(errno));
     fwrite(zippedTorchStart, 1, zippedTorchSize, zippedFile);
     fclose(zippedFile);
