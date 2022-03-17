@@ -738,7 +738,7 @@ def _convert_do_not_use(
                 # of target modules
                 if type(modules[node.target]) in FUSED_MODULE_CLASSES and \
                     type(modules[node.target][0]) not in FLOAT_WEIGHTED_MODULE_CLASSES:
-                        continue
+                    continue
                 convert_weighted_module(
                     node, modules, observed_node_names, quantized_reference_module_mapping, qconfig_map)
             elif type(modules[node.target]) in custom_module_classes:
