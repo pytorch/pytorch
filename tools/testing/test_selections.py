@@ -73,7 +73,6 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, flo
         else:
             unknown_jobs.append(test)
 
-
     # The following attempts to implement a partition approximation greedy algorithm
     # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
     sorted_jobs = sorted(filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True)
