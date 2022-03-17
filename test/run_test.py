@@ -210,6 +210,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
 ] + FSDP_TEST
 
@@ -228,6 +229,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
     "distributed/_shard/sharded_tensor/ops/test_linear",
+    "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_multiprocessing",
@@ -257,6 +259,8 @@ CORE_TEST_LIST = [
     "test_modules",
     "test_nn",
     "test_ops",
+    "test_ops_gradients",
+    "test_ops_jit",
     "test_torch"
 ]
 

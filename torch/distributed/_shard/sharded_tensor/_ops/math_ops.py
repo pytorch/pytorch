@@ -11,9 +11,9 @@ def register_math_op(op):
     @sharded_op_impl(op)
     def binary_math_op(types, args=(), kwargs=None, pg=None):
         """
-        Handles ``__torch_function__`` dispatch for the elementwise op such
-        as ``torch.nn.functional.gelu`` or ``torch.nn.functional.relu``.
-        This method computes on either a normal tensor or a sharded tensor.
+        Handles ``__torch_function__`` dispatch for the binary math ops
+        such as `torch.add`, `torch.mul`, `torch.div`, etc.
+        This method computes on ShardedTensor, or ShardedTensor op ReplicatedTensor
         """
         if len(args) != 2:
             raise ValueError("Only support binary math op on ShardedTensor for now!")
@@ -27,28 +27,22 @@ def register_math_op(op):
                 raise TypeError("Only ShardedTensor with ChunkShardingSpec supports"
                                 " two ShardedTensor together")
 
-            if lhs.size() == rhs.size() and lhs_spec.sharding_dim == rhs_spec.sharding_dim:
+            if lhs.size() == rhs.size() and lhs_spec.dim == rhs_spec.dim:
                 # perform local element-wise math op
-                res = op(lhs.local_tensor(), rhs.local_tensor)
+                res = op(lhs.local_tensor(), rhs.local_tensor())
                 return ShardedTensor._init_from_local_tensor(res, lhs_spec, lhs.size(), process_group=pg)
             else:
                 raise RuntimeError("Implicit broadcasting not supported yet!")
 
         elif isinstance(lhs, ReplicatedTensor):
             assert isinstance(rhs, ShardedTensor)
-            if lhs.size() == rhs.local_tensor().size():
-                res = op(lhs, rhs.local_tensor())
-                return ShardedTensor._init_from_local_tensor(res, rhs.sharding_spec(), rhs.size(), process_group=pg)
-            else:
-                raise RuntimeError("Implicit broadcasting not supported yet!")
+            res = op(lhs, rhs.local_tensor())
+            return ShardedTensor._init_from_local_tensor(res, rhs.sharding_spec(), rhs.size(), process_group=pg)
 
         elif isinstance(rhs, ReplicatedTensor):
             assert isinstance(lhs, ShardedTensor)
-            if rhs.size() == lhs.local_tensor().size():
-                res = op(lhs.local_tensor(), rhs)
-                return ShardedTensor._init_from_local_tensor(res, lhs.sharding_spec(), lhs.size(), process_group=pg)
-            else:
-                raise RuntimeError("Implicit broadcasting not supported yet!")
+            res = op(lhs.local_tensor(), rhs)
+            return ShardedTensor._init_from_local_tensor(res, lhs.sharding_spec(), lhs.size(), process_group=pg)
         else:
             raise RuntimeError(
                 f"torch function '{op.__name__}', with args: {args} and "
@@ -69,6 +63,7 @@ binary_ops = [
     torch.div,
     Tensor.div,
     Tensor.__rdiv__,
+    # TODO: add magic methods overrides, i.e. ShardedTensor.__add__
 ]
 
 for op in binary_ops:

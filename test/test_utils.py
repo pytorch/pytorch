@@ -411,12 +411,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-class TestFFI(TestCase):
-    def test_deprecated(self):
-        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
-
-
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
