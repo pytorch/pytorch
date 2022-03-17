@@ -235,6 +235,11 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_native_nested_cpp",
+    srcs = glob(["aten/src/ATen/native/nested/*.cpp"]),
+)
+
+filegroup(
     name = "aten_native_quantized_cpp",
     srcs = glob(
         [
@@ -406,6 +411,7 @@ cc_library(
         ":aten_native_mkldnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
+        ":aten_native_nested_cpp",
         ":aten_native_xnnpack",
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
