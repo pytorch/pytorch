@@ -603,7 +603,8 @@ void initJITBindings(PyObject* module) {
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_nvfuser_single_node_mode",
-          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
+          [](bool flag) { return fuser::cuda::setSingletonFusion(flag); },
+          py::call_guard<py::gil_scoped_acquire>())
       .def(
           "_jit_nvfuser_single_node_mode",
           []() { return fuser::cuda::getSingletonFusion(); })
@@ -621,6 +622,19 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
+      .def(
+          "_jit_nvfuser_set_comparison_callback",
+          [](py::function fn) {
+            auto fn_ptr = std::make_shared<py::function>(fn);
+            setCudaFuserComparisonCallback(
+                [fn_ptr](size_t sz, const Stack& x, const Stack& y) {
+                  py::gil_scoped_acquire acquire{};
+                  (*fn_ptr)(sz, x, y);
+                });
+          })
+      .def(
+          "_jit_nvfuser_clear_comparison_callback",
+          []() { setCudaFuserComparisonCallback(nullptr); })
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
