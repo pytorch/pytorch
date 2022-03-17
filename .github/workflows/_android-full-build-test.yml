@@ -55,19 +55,19 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Build arm_v7a
+      - name: Build arm-v7a
         uses: ./.github/actions/build-android
         with:
-          arch: arm_v7a
+          arch: arm-v7a
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
           branch: ${{ steps.parse-ref.outputs.branch }}
 
-      - name: Build arm_v8a
+      - name: Build arm-v8a
         uses: ./.github/actions/build-android
         with:
-          arch: arm_v8a
+          arch: arm-v8a
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -110,9 +110,9 @@ jobs:
           id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}-x86_32")
 
           # Putting everything together
-          docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_arm-v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm-v7a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
-          docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_arm-v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm-v8a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
