@@ -156,7 +156,8 @@ def _query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]
 
 
 def _query_changed_test_files() -> List[str]:
-    cmd = ["git", "diff", "--name-only", "origin/master", "HEAD"]
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
+    cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if proc.returncode != 0:

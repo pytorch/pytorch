@@ -53,6 +53,9 @@ struct NestedTensorImpl : public c10::TensorImpl {
     return buffer_;
   }
 
+ protected:
+  const char* tensorimpl_type_name() const override;
+
  private:
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
@@ -61,6 +64,30 @@ struct NestedTensorImpl : public c10::TensorImpl {
   at::Tensor buffer_;
   const at::Tensor nested_size_tensor_;
 };
+
+inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {
+  if (tensor.is_nested()) {
+    return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
+  }
+  return nullptr;
+}
+
+inline NestedTensorImpl* get_nested_tensor_impl(
+    const at::Tensor& tensor) {
+  TORCH_CHECK(
+      tensor.is_nested(),
+      "get_nested_tensor_impl requires a NestedTensor.");
+  return static_cast<NestedTensorImpl*>(
+      tensor.unsafeGetTensorImpl());
+}
+
+
+// TODO: real implementation once we support strides.
+inline bool nested_tensor_impl_is_contiguous(
+    const NestedTensorImpl* nt,
+    at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
+  return memory_format == MemoryFormat::Contiguous;
+}
 
 } // namespace native
 } // namespace at

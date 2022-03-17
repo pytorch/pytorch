@@ -781,7 +781,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # conv2d_dyanmic branch
                     raise Exception("Only static quant is supported for conv")
 
-@register_quant_pattern(torch.nn.Linear)
 @register_quant_pattern(torch.nn.functional.linear)
 @register_quant_pattern(torch.nn.qat.Linear)
 @register_quant_pattern(torch.nn.intrinsic.LinearReLU)
@@ -1247,9 +1246,6 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
             node: Node,
             modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
-
-    def input_output_observed(self) -> bool:
-        return False
 
     def convert(self,
                 node: Node,

@@ -7,6 +7,7 @@ import functools
 import inspect
 import math
 import numbers
+import io
 import operator
 import os
 import pickle
@@ -17,6 +18,7 @@ import typing
 import types
 import warnings
 import unittest
+import torch.nn.utils._stateless as _stateless
 from math import sqrt
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
@@ -141,6 +143,7 @@ class Foo(object):  # noqa: B209
 
 class TestFX(JitTestCase):
     def setUp(self):
+        super().setUp()
         # Checking for mutable operations whil tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
@@ -151,6 +154,7 @@ class TestFX(JitTestCase):
             torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
+        super().tearDown()
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -686,6 +690,7 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    @unittest.skip("Hotfix for SEV remediation")
     def test_trace_buffer_slice(self):
         bs, d_hid = 10, 23
 
@@ -1026,6 +1031,24 @@ class TestFX(JitTestCase):
         traced_scripted = torch.jit.script(traced)
         self.assertEqual(traced_scripted(torch.rand(4)), 2)
 
+    def test_tuple_no_subscript(self):
+        def foo(x : Tuple):
+            return x[0]
+
+        traced = torch.fx.symbolic_trace(foo)
+        x = (torch.randn(5, 3),)
+        torch.testing.assert_allclose(traced(x), x[0])
+
+        bio = io.BytesIO()
+
+        torch.save(traced, bio)
+
+        bio.seek(0)
+
+        loaded = torch.load(bio)
+
+        torch.testing.assert_allclose(loaded(x), x[0])
+
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
             def forward(self, x):
@@ -1095,6 +1118,24 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         out = gm(input)
         self.assertEqual(out, ref_out)
+
+    def test_torch_op_overloads(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.add.Tensor(a, a)
+                return b
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        gm.graph.lint()
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
+        for node in gm.graph.nodes:
+            if node.op == 'call_function':
+                assert isinstance(node.target, torch._ops.OpOverload)
+                assert node.target.__name__ == 'add.Tensor'
 
     def test_pickle_torch_custom_ops(self):
         class M(torch.nn.Module):
@@ -2917,6 +2958,35 @@ class TestFX(JitTestCase):
         gm2.delete_all_unused_submodules()
         torch.testing.assert_allclose(gm2(inputs), model(inputs))
 
+    def test_fx_stateless(self):
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(1, 1)
+                self.register_buffer('buffer', torch.ones(1))
+
+            def forward(self, x):
+                return self.l1(x) + self.buffer
+
+        module = MockModule()
+        x = torch.rand((1, 1))
+        weight = torch.tensor([[1.0]], requires_grad=True)
+        bias = torch.tensor([0.0], requires_grad=True)
+        buffer = torch.tensor([0.0])
+        parameters = {'l1.weight': weight,
+                      'l1.bias': bias,
+                      'buffer': buffer}
+        fx_module = torch.fx.symbolic_trace(module)
+        res = _stateless.functional_call(fx_module, parameters, x)
+        res.backward()
+        self.assertIsNotNone(weight.grad)
+        self.assertIsNotNone(bias.grad)
+        self.assertIsNone(buffer.grad)
+        # Gradient was not calculated for the module stated and buffers
+        self.assertIsNone(module.l1.weight.grad)
+        self.assertIsNone(module.l1.bias.grad)
+        self.assertIsNone(module.buffer.grad)
+
     def test_tracing_graphmodules_as_leaf_submodules(self):
         class A(torch.nn.Module):
             def forward(self, t):
@@ -3310,6 +3380,34 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         ts_f = torch.jit.script(nf)
         self.assertEqual(nf(vals), ts_f(vals))
 
+    def test_custom_codegen_with_transformer(self):
+        class ListCodeGen(CodeGen):
+            def gen_fn_def(self, free_vars, maybe_return_annotation):
+                lst_unpack = f"""
+def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
+    {', '.join(free_vars)} = args_list"""
+                return lst_unpack
+
+            def additional_globals(self):
+                return [('List', typing.List)]
+
+            def process_inputs(self, *inputs):
+                assert(len(inputs) == 1)
+                return inputs[0]
+
+        def f(a, b):
+            return a + b
+
+        nf = symbolic_trace(f)
+        vals = [torch.randn(3), torch.randn(3)]
+        self.assertEqual(nf(*vals), f(*vals))
+
+        nf.graph.set_codegen(ListCodeGen())
+        nf.recompile()
+        self.assertEqual(nf(vals), f(*vals))
+
+        transformed_gm = Transformer(nf).transform()
+        self.assertEqual(nf(vals), transformed_gm(vals))
 
     def test_imul_code_print(self):
         graph = torch.fx.Graph()
@@ -3368,6 +3466,7 @@ class TestOperatorSignatures(JitTestCase):
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.maxDiff = None
 
         # Checking for mutable operations whil tracing is feature flagged
@@ -3376,6 +3475,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         torch.fx.proxy.TracerBase.check_mutable_operations = True
 
     def tearDown(self):
+        super().tearDown()
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
 
@@ -3614,12 +3714,14 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
+        super().setUp()
         # Checking for mutable operations whil tracing is feature flagged
         # Enable it in testing but not by default
         self.orig_tracer_mutable_flag = torch.fx.proxy.TracerBase.check_mutable_operations
         torch.fx.proxy.TracerBase.check_mutable_operations = True
 
     def tearDown(self):
+        super().tearDown()
         torch.fx.proxy.TracerBase.check_mutable_operations = self.orig_tracer_mutable_flag
 
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
