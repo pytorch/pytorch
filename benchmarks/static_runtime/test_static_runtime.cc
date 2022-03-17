@@ -406,13 +406,6 @@ TEST(StaticRuntime, LayerNorm) {
         return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False).clone()
   )JIT";
 
-#ifdef FBCODE_CAFFE2
-  script::Module module("module");
-  module.define(layer_norm_with_weights);
-  torch::jit::StaticModule smodule(module);
-  ASSERT_EQ(getNodeWithKind(smodule, "aten::layer_norm"), nullptr);
-  ASSERT_NE(getNodeWithKind(smodule, "static_runtime::layer_norm"), nullptr);
-#endif
   const auto a = torch::rand({1, 2, 2, 2});
   const auto b = torch::rand({3, 2, 2, 2});
   for (int normalized_size : {2, 3}) {
@@ -1272,13 +1265,23 @@ TEST(StaticRuntime, Full) {
         return (a.clone())
   )JIT";
 
-  auto dtype = at::ScalarType::Int;
   auto cpu = at::Device(DeviceType::CPU);
   c10::List<int64_t> size0{2, 5};
-  std::vector<IValue> args{size0, 4, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args{
+      size0, 4, at::ScalarType::Int, at::kStrided, cpu, false};
+  std::vector<IValue> args1{
+      size0, 4, at::ScalarType::Float, at::kStrided, cpu, false};
   c10::List<int64_t> size1{5, 6};
-  std::vector<IValue> args2{size1, 5, dtype, at::kStrided, cpu, false};
+  std::vector<IValue> args2{
+      size1, 5, at::ScalarType::Float, at::kStrided, cpu, false};
   testStaticRuntime(full_script, args);
+  testStaticRuntime(
+      full_script,
+      args,
+      args1,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/false);
   testStaticRuntime(full_script, args, args2);
 }
 

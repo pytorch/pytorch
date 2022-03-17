@@ -47,6 +47,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     timeout-minutes: 240
     env:
@@ -141,6 +142,7 @@ jobs:
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
           rm -rf ./*
   test_force_on_cpu_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (force_on_cpu, 1, 1, windows.4xlarge)
     timeout-minutes: 300
     env:
@@ -273,6 +275,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: win-vs2019-cuda11.3-py3-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -295,6 +298,7 @@ jobs:
         run: |
           rm -rf ./*
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, windows.8xlarge.nvidia.gpu)
     timeout-minutes: 300
     env:
@@ -435,6 +439,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: win-vs2019-cuda11.3-py3-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -457,6 +462,7 @@ jobs:
         run: |
           rm -rf ./*
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, windows.8xlarge.nvidia.gpu)
     timeout-minutes: 300
     env:
@@ -597,6 +603,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: win-vs2019-cuda11.3-py3-test
           PR_NUMBER: ${{ github.event.pull_request.number }}

@@ -7,23 +7,10 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default %}
-  pull_request:
-{%- endif -%}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-  push:
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
@@ -75,11 +62,10 @@ on:
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
-          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_x86_32"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec \
+          (echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec \
             -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
