@@ -1662,6 +1662,28 @@ TEST(StaticRuntime, Index) {
   testStaticRuntime(index_with_two_tensors_script, args_c, args_d);
 }
 
+TEST(StaticRuntime, IndexSelect) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %dim: int, %index: Tensor):
+        %bias: None = prim::Constant()
+        %ret = aten::index_select(%self, %dim, %index)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6});
+  auto dim0 = 0;
+  auto index0 = at::randint(0, 5, {6}, torch::kInt32);
+  std::vector<IValue> args{self0, dim0, index0};
+  testStaticRuntime(script, args);
+
+  auto self1 = at::rand({128});
+  auto dim1 = 0;
+  auto index1 = at::randint(0, 127, {127}, torch::kInt32);
+  std::vector<IValue> args2{self1, dim1, index1};
+  testStaticRuntime(script, args, args2);
+}
+
 TEST(StaticRuntime, ClampMin) {
   const auto clamp_min_int_script = R"JIT(
     def forward(self, a: Tensor, b: int):
