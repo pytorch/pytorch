@@ -230,6 +230,12 @@ void block_sparse_triangular_solve_vec(
             X_->data_ptr<scalar_t>(),
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
+
+#if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION < 11703)
+        // cusparse bsrsv2 and bsrsm2 has a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
+        // See {GITHUB PR PLACEHOLDER}
+        ::c10::cuda::device_synchronize();
+#endif
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -360,6 +366,12 @@ void block_sparse_triangular_solve_mat(
             ldx,
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
+
+#if defined(CUSPARSE_VERSION) && (CUSPARSE_VERSION < 11703)
+        // cusparse bsrsv2 and bsrsm2 has a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
+        // See {GITHUB PR PLACEHOLDER}
+        ::c10::cuda::device_synchronize();
+#endif
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
