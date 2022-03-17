@@ -209,12 +209,14 @@ class TestExpandedWeightFunctional(TestCase):
         weight = torch.randn(5, 5, dtype=torch.double, device=device) + 2
         weight_clone = weight.clone()
         idx = torch.randint(5, (3, 3), device=device)
+        idx[0, 0] = 1  # freq more than 1
+        idx[0, 1] = 1  # freq more than 1
         idx[1, 0] = 0  # padding_idx
         self.assertEqual(weight, weight_clone)
         res1 = torch.nn.functional.embedding(idx, weight, **kwargs)
         self.assertNotEqual(weight, weight_clone)
         res2 = torch.nn.functional.embedding(idx, weight_clone, **kwargs)
-        self.assertEqual(weight, weight_clone)
+        self.assertEqual(weight, weight_clone, msg=idx.__str__())
         self.assertEqual(res1, res2)
 
     def test_embedding_two(self, device):
@@ -222,6 +224,8 @@ class TestExpandedWeightFunctional(TestCase):
         weight = torch.randn(5, 5, dtype=torch.double, device=device) + 2
         weight_clone = weight.clone()
         idx = torch.randint(5, (3, 3), device=device)
+        idx[0, 0] = 1  # freq more than 1
+        idx[0, 1] = 1  # freq more than 1
         idx[1, 0] = 0  # padding_idx
         self.assertEqual(weight, weight_clone)
         res1 = torch.nn.functional.embedding(idx, weight, **kwargs)
