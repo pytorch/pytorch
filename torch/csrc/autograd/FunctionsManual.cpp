@@ -5243,41 +5243,48 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
-Tensor scatter_reduce_backward(const Tensor & grad,
-                               const Tensor& input,
-                               int dim,
-                               const Tensor & index,
-                               c10::string_view reduce,
-                               const Tensor & result){
-  Tensor grad_input;
+std::tuple<Tensor, Tensor> scatter_reduce_backward(
+  const Tensor& grad,
+  const Tensor& input,
+  int dim,
+  const Tensor& index,
+  const Tensor& src,
+  c10::string_view reduce,
+  bool include_input,
+  const Tensor & result) {
+  Tensor grad_input, grad_src;
 
-
-  // TODO: gather doesn't support broadcasting of input and index
-  // currently this works because scatter_reduce doesn't support broadcasting yet but
-  // this needs to be fixed when scatter_reduce is upgraded to support broadcasting
-  // by broadcasting index here too.
+  if (!grad.defined()) {
+    return std::make_tuple(grad_input, grad_src);
+  }
 
   if (reduce == "sum") {
-    grad_input = grad.gather(dim, index);
+    grad_input = grad;
+    grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_input = (grad * result).gather(dim, index) / input;
-    // handle nans in above computation when input = 0, we know result = 0 (0 / 0 -> nan)
-    // so just replace with 0
+    grad_input = (grad * result) / input;
     grad_input.masked_fill_(input == 0, 0);
+    grad_src = (grad * result).gather(dim, index) / src;
+    grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = zeros_like(grad);
-    N.scatter_add_(dim, index, ones_like(input));
-    Tensor N_input = N.gather(dim, index);
-    grad_input = grad.gather(dim, index) / N_input;
-    grad_input.masked_fill_(N_input == 0, 0);
+    Tensor N = include_input ? ones_like(grad) : ones_like(grad).scatter(dim, index, 0);
+    N.scatter_add_(dim, index, ones_like(src));
+    grad_input = grad / N;
+    Tensor N_src = N.gather(dim, index);
+    grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
+    grad_input = (input == result) * grad;
     Tensor value = result.gather(dim, index);
-    grad_input = (input == value) * grad.gather(dim, index);
+    grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
 
-  return grad_input;
+  if (!include_input) {
+    grad_input = grad_input.scatter(dim, index, 0);
+  }
+
+  return std::make_tuple(grad_input, grad_src);
 
 }
 

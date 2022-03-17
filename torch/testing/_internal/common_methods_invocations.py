@@ -23,7 +23,7 @@ from torch.testing._internal.common_dtype import (
     all_types, double_types, empty_types
 )
 from torch.testing._internal.common_device_type import \
-    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    (onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride,
      toleranceOverride, tol, has_cusolver)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off
@@ -6802,29 +6802,35 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
-def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad):
+def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
-    def _index(shape, max_index):
-        return torch.from_numpy(np.random.choice(max_index, size=shape)).to(dtype=torch.int64, device=device)
+    def _gather(shape, index_dim, max_indices):
+        return gather_variable(shape, index_dim, max_indices, device=device)
+
+    zero = torch.tensor(0, dtype=torch.long, device=device)
+    test_cases = (
+        ((M, S), 0, _gather((S, S), 1, M), (S, S)),
+        ((M, S), 1, _gather((S, S), 0, S), (S, S)),
+        ((M, S), -1, _gather((S, S), 0, S), (S, S)),
+        ((M, S), 0, _gather((M, S // 2), 1, M), (M, S // 2)),
+        ((M, S), 1, _gather((M, S // 2), 0, S), (M, S // 2)),
+        ((M, S), -1, _gather((M, S // 2), 0, S), (M, S // 2)),
+        ((), 0, zero.clone().detach(), ()),
+    )
 
     reduces = ["sum", "prod", "mean", "amax", "amin"]
-    shapes_and_dims = [((M,), 1), ((M, S), 2), ((M, M, S), 3), ((1, M, M, S), 4)]
-
     sample_inputs = []
-
-    for ((shape, dim), reduce) in itertools.product(shapes_and_dims, reduces):
-        for d in range(dim):
-            # Generate a random maximum integer that can appear in index array
-            max_index = np.random.randint(1, shape[d] * 2)
-            index = _index(shape, max_index)
-            sample_inputs.append(
-                SampleInput(
-                    _tensor(shape),
-                    args=(d, index, reduce),
-                )
+    for args, reduce, include_input in product(test_cases, reduces, [True, False]):
+        inp_shape, dim, index, src_shape = args
+        sample_inputs.append(
+            SampleInput(
+                _tensor(inp_shape),
+                args=(dim, index, _tensor(src_shape), reduce),
+                kwargs={'include_input': include_input}
             )
+        )
 
     return sample_inputs
 
@@ -15680,16 +15686,9 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'scatter_reduce',
-        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        decorators=(onlyCPU,),
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive',
-                         active_if=IS_WINDOWS),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive',
-                         active_if=IS_WINDOWS),
-        ),
     ),
 ]
 
