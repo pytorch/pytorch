@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/csrc/lazy/generated/LazyIr.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
