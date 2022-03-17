@@ -25,6 +25,9 @@ on:
       ANDROID_SIGN_PASS:
         description: android pass
         required: true
+      SCRIBE_GRAPHQL_ACCESS_TOKEN:
+        description: token for writing to scribe/scuba
+        required: true
 
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
@@ -164,14 +167,15 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
-          ARTIFACTS: ${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz
           ANDROID_BUILD_TYPE: prebuilt
+          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
         run: |
           # The artifact file is created inside docker container, which contains the result binaries.
           # Now unpackage it into the project folder. The subsequent script will scan project folder
           # to locate result binaries and report their sizes.
           # If artifact file is not provided it assumes that the project folder has been mounted in
           # the docker during build and already contains the result binaries, so this step can be skipped.
+          export ARTIFACTS=${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz
           if [ -n "${ARTIFACTS}" ]; then
             tar xf "${ARTIFACTS}" -C "${GITHUB_WORKSPACE}"
             cd "${GITHUB_WORKSPACE}"
