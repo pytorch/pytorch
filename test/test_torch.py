@@ -116,19 +116,6 @@ class TestVitalSignsCuda(TestCase):
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
-    # FIXME: Port this to ErrorInputs on where
-    @onlyCUDA
-    @dtypes(torch.float32)
-    def test_where_invalid_device(self, device, dtype):
-        for devices in [('cpu', device, device), (device, 'cpu', 'cpu'),
-                        (device, 'cpu', device), ('cpu', device, 'cpu')]:
-            condition = make_tensor(16, device=devices[0], dtype=torch.float32)
-            x = make_tensor(16, device=devices[1], dtype=torch.float32)
-            y = make_tensor(16, device=devices[2], dtype=torch.float32)
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Expected condition, x and y to be on the same device"):
-                torch.where(condition, x, y)
-
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
@@ -1758,23 +1745,6 @@ else:
                 aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
-
-    # FIXME: port to ErrorInputs
-    def test_cov_error(self, device):
-        def check(msg, *args, **kwargs):
-            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
-                torch.cov(*args, **kwargs)
-
-        a = torch.rand(2)
-        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
-        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
-        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
-        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
-        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
-        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
-        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
-        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
-        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
     @dtypes(*get_all_fp_dtypes())
@@ -7109,6 +7079,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_setting_real_imag_to_a_number(self):
+        x = torch.randn(4, dtype=torch.cfloat)
+        x.real = 0
+        x.imag = 0
+        zeros = torch.zeros(4)
+        self.assertEqual(x.real, zeros)
+        self.assertEqual(x.imag, zeros)
+
     def test_batch_norm_cpu_inference(self):
         # input nchw in (2,1,1,1), (2,2,2,2)
         inputs = [
@@ -7271,28 +7249,39 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors, but they have same number of elements
-            # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
-            if not warned:
-                self.assertWarnsRegex(UserWarning, "deprecated and the support will be removed",
-                                      lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)))
-                warned = True
-            else:
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(120\) must match the size of "
+                    r"tensor b \(5\) at non-singleton dimension 3"):
                 self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
-            self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(120\) at non-singleton dimension 3"):
+                self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors and they don't have same number of elements
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(4\) at non-singleton dimension 3"):
                 torch.normal(tensor2345, tensor4)
 
             # output and inputs are size compatible
             self.assertEqual(torch.normal(tensor2345, tensor2345, out=output2345).size(), (2, 3, 4, 5))
 
             # output and inputs are not size compatible
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                # inputs are expandable but have different broadcasted size than output
-                torch.normal(tensor2345, tensor2145, out=output345)
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                # inputs are not expandable but reshapeable, output size is not the same as mean
+            with self.assertWarnsRegex(
+                    UserWarning,
+                    "This behavior is deprecated, and in a future PyTorch "
+                    "release outputs will not be resized unless they have "
+                    "zero elements"):
+                self.assertEqual(torch.normal(tensor2345, tensor2145, out=output345).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(120\) at non-singleton dimension 3"):
+                # inputs are not expandable, output size is not the same as mean
                 torch.normal(tensor2345, tensor120, out=output345)
 
     def test_tensoriterator_output_setup(self):
