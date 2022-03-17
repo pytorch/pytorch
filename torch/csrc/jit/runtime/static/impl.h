@@ -551,6 +551,7 @@ class TORCH_API BlockRunner {
     float first_iter_time{0.0};
     float total_time{0.0};
     size_t out_nodes_count{0};
+    size_t native_nodes_count{0};
     size_t total_nodes_count{0};
     std::vector<float> time_per_node;
     std::unordered_map<std::string, float> time_per_node_type;

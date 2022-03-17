@@ -31,6 +31,9 @@ void initStaticModuleBindings(PyObject* module) {
       .def_readonly(
           "out_nodes_count", &StaticRuntime::IndividualMetrics::out_nodes_count)
       .def_readonly(
+          "native_nodes_count",
+          &StaticRuntime::IndividualMetrics::native_nodes_count)
+      .def_readonly(
           "total_nodes_count",
           &StaticRuntime::IndividualMetrics::total_nodes_count)
       .def_readonly(

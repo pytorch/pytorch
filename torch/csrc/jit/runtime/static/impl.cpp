@@ -1354,6 +1354,15 @@ void BlockRunner::benchmark(
             << 100.0 * (results.out_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << std::endl;
+  std::cout
+      << "Total number of 'out' variant nodes + 'native` nodes/total number of nodes: "
+      << (results.out_nodes_count + results.native_nodes_count) << "/"
+      << results.total_nodes_count << " ("
+      << 100.0 *
+          (static_cast<double>(
+               results.out_nodes_count + results.native_nodes_count) /
+           static_cast<double>(results.total_nodes_count))
+      << "%)" << std::endl;
 
   check_for_memory_leak();
 
@@ -1493,6 +1502,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
         results.out_nodes_count++;
       } else if (nodes_[i].has_native()) {
         results.native_nodes.insert(kind);
+        results.native_nodes_count++;
       }
       results.total_time += results.time_per_node[i];
     }
@@ -1606,6 +1616,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
       results.out_nodes_count++;
     } else if (nodes_[i].has_native()) {
       results.native_nodes.insert(kind);
+      results.native_nodes_count++;
     }
     results.total_time += results.time_per_node[i];
   }
