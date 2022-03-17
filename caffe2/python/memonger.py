@@ -805,13 +805,13 @@ def apply_recurrent_blob_assignments(op, blob_assignments, canonical_name):
     alias_dst_args = [a for a in op.arg if a.name.endswith("alias_dst")]
     for alias_dst in alias_dst_args:
         for i, blob in enumerate(alias_dst.strings):
-            alias_dst.strings[i] = canonical_name(blob.decode()).encode();
+            alias_dst.strings[i] = canonical_name(blob.decode()).encode()
 
     # Apply on link_external
     link_external_args = [a for a in op.arg if a.name.endswith("link_external")]
     for link_external in link_external_args:
         for i, blob in enumerate(link_external.strings):
-            link_external.strings[i] = canonical_name(blob.decode()).encode();
+            link_external.strings[i] = canonical_name(blob.decode()).encode()
 
     # Recurse into step nets
     step_args = [a for a in op.arg if a.name.endswith("step_net")]

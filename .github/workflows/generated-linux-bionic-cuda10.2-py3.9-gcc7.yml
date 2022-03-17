@@ -43,6 +43,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -260,11 +261,13 @@ jobs:
           docker system prune -af
 
   test_jit_legacy_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (jit_legacy, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: jit_legacy
@@ -491,20 +494,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-jit_legacy-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -524,11 +541,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_multigpu_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (multigpu, 1, 1, linux.16xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.16xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: multigpu
@@ -755,20 +774,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-multigpu-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -788,11 +821,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_nogpu_NO_AVX_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (nogpu_NO_AVX, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: nogpu_NO_AVX
@@ -1010,20 +1045,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-nogpu_NO_AVX-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -1043,11 +1092,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_nogpu_NO_AVX2_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (nogpu_NO_AVX2, 1, 1, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: nogpu_NO_AVX2
@@ -1265,20 +1316,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-nogpu_NO_AVX2-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -1298,11 +1363,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_distributed_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (distributed, 1, 1, linux.8xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.8xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: distributed
@@ -1529,20 +1596,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-distributed-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -1562,11 +1643,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_slow_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (slow, 1, 1, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: slow
@@ -1793,20 +1876,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-slow-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -1826,11 +1923,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: default
@@ -2057,20 +2156,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -2090,11 +2203,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, linux.4xlarge.nvidia.gpu)
     needs: build
     runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
       TEST_CONFIG: default
@@ -2321,20 +2436,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-2
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-cuda10.2-py3.9-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions

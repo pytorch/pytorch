@@ -1,3 +1,5 @@
+file_identifier "PTMF";
+
 namespace torch.jit.mobile.serialization;
 
 struct Int {
