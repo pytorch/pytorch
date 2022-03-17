@@ -11,7 +11,9 @@ namespace cuda {
 
 void validateIr(Fusion* fusion);
 
-void validateVectorize(Fusion* fusion);
+//! Validate vectorization and collect information on vectorization
+//! used in code generation as well as runtime validation.
+void validateAndCollectVectorizeInfo(Fusion* fusion);
 
 //! Validates partial split expressions. Partial split only uses an
 //! inner subdomain specified by start and stop offsets, ignoring the

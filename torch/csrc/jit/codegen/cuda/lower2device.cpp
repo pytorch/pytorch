@@ -255,13 +255,6 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
     std::cout << parallel_dimension_map_.toString() << std::endl;
   }
 
-  // Want to run this after parallel map is created
-  validateVectorize(fusion_);
-
-  // Extract TensorViews that are accessed in a vectorized way and track their
-  // word size.
-  fillVectorizeInfo();
-
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 
@@ -273,6 +266,10 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Scan the whole fusion and build mappings about halo extensions of
   // all IterDomains
   haloInfo().build(fusion_);
+
+  // Want to run this after parallel map and halo info map are
+  // created. vectorized_accesses_ and vectorized_set_info_ are filled.
+  validateAndCollectVectorizeInfo(fusion_);
 
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
@@ -365,66 +362,6 @@ GpuLower* GpuLower::current() {
   TORCH_INTERNAL_ASSERT(
       active_gpu_lower != nullptr, "No active GpuLower available");
   return active_gpu_lower;
-}
-
-// This was primarily copied from codegen.cpp::CudaKernelGenerator::handle(const
-// UnaryOp*)
-void GpuLower::fillVectorizeInfo() {
-  for (auto expr : fusion_->exprs()) {
-    if (expr->isA<UnaryOp>()) {
-      if (ir_utils::isTvOp(expr)) {
-        auto uop = expr->as<UnaryOp>();
-        auto out_tv = ir_utils::getTvOutput(expr);
-        auto out_domain = out_tv->domain()->domain();
-
-        bool is_vector_op = false;
-        int vector_word_size = 1;
-        bool vectorize_op = false;
-        bool misaligned_op = false;
-
-        for (auto id : out_domain) {
-          if (!isParallelTypeVectorize(id->getParallelType())) {
-            continue;
-          }
-
-          ExpressionEvaluator expr_eval(id->fusion());
-          auto vector_size_optional = expr_eval.evaluate(id->extent());
-
-          TORCH_INTERNAL_ASSERT(
-              vector_size_optional.has_value(),
-              "Could not evaluate constant value bound to vectorized dim.");
-
-          vector_word_size = (int)vector_size_optional.value();
-
-          vectorize_op = isParallelTypeVectorize(id->getParallelType());
-          break;
-        }
-        if (!vectorize_op) {
-          continue;
-        }
-
-        if (vectorized_accesses_.find(out_tv) != vectorized_accesses_.end()) {
-          vectorized_accesses_[out_tv] =
-              std::max(vectorized_accesses_[out_tv], vector_word_size);
-        } else {
-          vectorized_accesses_[out_tv] = vector_word_size;
-        }
-
-        TORCH_INTERNAL_ASSERT(
-            uop->in()->isA<TensorView>(),
-            "Input of vectorized uop must be a tensorview but found input: ",
-            uop->in()->toString());
-
-        TensorView* in_tv = uop->in()->as<TensorView>();
-        if (vectorized_accesses_.find(in_tv) != vectorized_accesses_.end()) {
-          vectorized_accesses_[in_tv] =
-              std::max(vectorized_accesses_[in_tv], vector_word_size);
-        } else {
-          vectorized_accesses_[in_tv] = vector_word_size;
-        }
-      }
-    }
-  }
 }
 
 } // namespace cuda

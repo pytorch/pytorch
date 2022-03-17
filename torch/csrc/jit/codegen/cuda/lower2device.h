@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
 #include <ostream>
@@ -147,6 +148,18 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return vectorized_accesses_;
   }
 
+  auto& vectorizedAccesses() {
+    return vectorized_accesses_;
+  }
+
+  const auto& vectorizedSetInfo() const {
+    return vectorized_set_info_;
+  }
+
+  auto& vectorizedSetInfo() {
+    return vectorized_set_info_;
+  }
+
   FusedReductionInfo& fusedReductionInfo() {
     return fused_reduction_info_;
   }
@@ -162,8 +175,6 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //  the parallel dimensions that need to be padded to a multiples of
   //  warp size.
   void collectPaddedParallelDims();
-
-  void fillVectorizeInfo();
 
  private:
   // Lowered Kernel IR
@@ -190,7 +201,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size
+  // std::unordered_map<TensorView*, VectorizationInfo> vectorized_accesses_;
   std::unordered_map<TensorView*, int> vectorized_accesses_;
+  // Info on each vectorized set op
+  std::vector<VectorizedSetInfo> vectorized_set_info_;
 
   Fusion* fusion_ = nullptr;
 };

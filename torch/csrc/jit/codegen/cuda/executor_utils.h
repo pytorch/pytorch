@@ -147,15 +147,18 @@ class WarpPaddedParallelExtents {
 //!  VectorizedTensorInfo:
 //!    Auxiliary data type for entry class VectorizedTensorValidation
 struct VectorizedTensorInfo {
+  //! Aligned vectorized fusion inputs
+  std::vector<int> aligned_vectorized_inp_tensor_pos;
+  //! Aligned vectorized fusion outputs
+  std::vector<int> aligned_vectorized_out_tensor_pos;
+  //! Misaligned vectorized input tensors
   std::unordered_set<TensorView*> global_inp_misaligned_tv;
+  //! Misaligned vectorized output tensors
   std::unordered_set<TensorView*> global_out_misaligned_tv;
-  std::unordered_map<TensorView*, int> tv_to_vector_word_size;
+  //! Positions of misaligned input tensors
   std::vector<int> inp_misaligned_tensors_pos;
+  //! Positions of misaligned output tensors
   std::vector<int> out_misaligned_tensors_pos;
-  std::unordered_map<int, int> inp_pos_to_word_size_map_to_verify;
-  std::unordered_map<int, int> out_pos_to_word_size_map_to_verify;
-  std::unordered_map<TensorView*, int>
-      intermediate_tv_to_word_size_map_to_verify;
 };
 
 //! Compile-time info to be cached in each FusionExecutor:

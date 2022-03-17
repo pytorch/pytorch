@@ -21672,6 +21672,110 @@ TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
   fe.compileFusion(&fusion);
 }
 
+// Repro of #1506
+TEST_F(NVFuserTest, FusionVectorizeContigIndex_CUDA) {
+  std::vector<int64_t> shape{14, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+
+  // Vectorize by 4 should be allowed
+  tv2->split(0, 4);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv2, 1);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+}
+
+// Make sure the same fusion as FusionVectorizeContigIndex fails if
+// not contig.
+TEST_F(NVFuserTest, FusionVectorizeContigIndexFail_CUDA) {
+  std::vector<int64_t> shape{14, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+
+  tv2->split(0, 4);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv2, 1);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+
+  // This should fail at the launch time as 14 is not divisible by the
+  // vector word size. The two domains are merged, but they are not
+  // contiguous, so contig indexing is not involved in this case.
+  ASSERT_ANY_THROW(fe.runFusion({t0}));
+}
+
+TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->split(0, 4);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const int n = 12;
+  auto t0 = at::randn({n}, options);
+  // Shift by one to make it non-aligned
+  auto t0_misaligned = at::randn({n + 1}, options).index({Slice(1)});
+  auto t1_misaligned = at::empty({n + 1}, options).index({Slice(1)});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+
+  // Pass misaligned input. This must fail.
+  ASSERT_ANY_THROW(fe.runFusion({t0_misaligned}));
+
+  // Pass misaligned output. This must fail too.
+  ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

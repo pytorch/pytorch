@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
 #include <unordered_map>
@@ -81,8 +82,8 @@ struct KernelSummary {
   std::unordered_map<const BroadcastOp*, ParallelTypeBitmap>
       broadcast_parallel_types;
 
-  // Track which tensor views are inputs or outputs of a vectorized operation
-  // and their maximum vectorized access size
+  //! Track which tensor views are inputs or outputs of a vectorized operation
+  //! and their maximum vectorized access size
   std::unordered_map<TensorView*, int> vectorized_accesses;
 
   // Sync map is needed to figure out if global memory buffers need to be marked
@@ -92,6 +93,9 @@ struct KernelSummary {
   // Parallel dimension map needed to set the correct properties of grid buffers
   // (is a dim inactive)
   ParallelDimensionMap parallel_dimension_map_;
+
+  //! Track information on vectorized set operations for runtime validation
+  std::vector<VectorizedSetInfo> vectorized_set_info;
 };
 
 class KernelInternalProxy;
@@ -123,7 +127,6 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   //!
   //! At this point we have a complete kernel definition and we can
   //! run analysis passes to build a KernelSummary.
-
   void finalize(std::vector<Expr*> top_level_exprs);
 
   const std::vector<Expr*>& topLevelExprs() const {
