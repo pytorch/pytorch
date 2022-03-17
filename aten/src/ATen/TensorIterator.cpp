@@ -292,16 +292,30 @@ void TensorIteratorBase::reorder_dimensions() {
 // See the [Common Dtype Computation] note
 ScalarType TensorIteratorBase::compute_common_dtype() {
   at::native::ResultTypeState state = {};
+  std::ostringstream input_dtypes;
+
   for (const auto& op : operands_) {
     if (op.is_output) {
       continue;
+    }
+
+    // Get input dtypes for error reporting.
+    if (!op.is_output) {
+      if (input_dtypes.tellp() == 0) {
+        input_dtypes << op.current_dtype;
+      } else {
+        input_dtypes << ", " << op.current_dtype;
+      }
     }
 
     state = at::native::update_result_type_state(op.tensor(), state);
   }
 
   common_dtype_ = at::native::result_type(state);
-  TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined);
+
+  TORCH_CHECK(
+    common_dtype_ != ScalarType::Undefined,
+    "Common dtype is undefined for given input dtypes: ", input_dtypes.str());
 
   return common_dtype_;
 }
@@ -340,8 +354,18 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   bool has_different_input_dtypes = false;
   bool has_different_output_dtypes = false;
   bool has_undefined_outputs = false;
+  std::ostringstream input_dtypes;
 
   for (auto& op : operands_) {
+    // Get input dtypes for error reporting.
+    if (!op.is_output) {
+      if (input_dtypes.tellp() == 0) {
+        input_dtypes << op.current_dtype;
+      } else {
+        input_dtypes << ", " << op.current_dtype;
+      }
+    }
+
     // Validates that all inputs have type information, and that
     //   if an output is missing type information that we can infer
     //   the device it should be allocated on.
@@ -406,7 +430,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     !(has_different_input_dtypes && !config.promote_inputs_to_common_dtype_ &&
       (has_undefined_outputs || config.enforce_safe_casting_to_output_ ||
        config.cast_common_dtype_to_outputs_)),
-    "Cannot promote types given these arguments");
+    "Type promotion unsupported for given input dtypes: ", input_dtypes.str());
 
   // Checks that all inputs and defined outputs are the same dtype, if requested
   if (config.check_all_same_dtype_ &&
