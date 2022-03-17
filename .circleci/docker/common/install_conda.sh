@@ -93,7 +93,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
 
-  # Install some other packages, including those needed for Python test reporting
+  # Install some other packages, including those needed for Python test reporting!
   # Pin SciPy because of failing distribution tests (see #60347)
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
