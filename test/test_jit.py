@@ -1094,6 +1094,22 @@ class TestJit(JitTestCase):
         checkBackwardTwiceScript(test_script_backward_twice_with_saved_values, (inp1, inp2), False)
         checkBackwardTwiceScript(test_script_backward_twice_with_saved_values, (inp1, inp2), True)
 
+    def test_autodiff_complex(self):
+        def foo(x: torch.Tensor, y: torch.Tensor, W: torch.Tensor):
+            return torch.exp(torch.mm(torch.complex(x, y), W.cfloat()))
+        
+        @torch.jit.script
+        def jitted_foo(x: torch.Tensor, y: torch.Tensor, W: torch.Tensor):
+            return torch.exp(torch.mm(torch.complex(x, y), W.cfloat()))
+        
+        x = torch.randn(128, 16, dtype=torch.float32, device='cuda:0')
+        y = torch.randn(128, 16, dtype=torch.float32, device='cuda:0')
+        W = torch.randn(16, 1, dtype=torch.float32, device='cuda:0', requires_grad=True)
+        W.data /= 4
+
+        for i in range(4):
+          self.assertTrue((foo(x, y, W).grad_fn is None) and (jitted_foo(x, y, W).grad_fn is None))
+
     def test_diff_subgraph_clones_constants(self):
         @torch.jit.script
         def f(x, y):
