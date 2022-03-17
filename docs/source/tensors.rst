@@ -593,6 +593,7 @@ Tensor class reference
     Tensor.scatter_
     Tensor.scatter_add_
     Tensor.scatter_add
+    Tensor.scatter_reduce_
     Tensor.scatter_reduce
     Tensor.select
     Tensor.select_scatter
