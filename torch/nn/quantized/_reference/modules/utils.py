@@ -50,8 +50,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
         model
         """
         # suppress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
-        # assert isinstance(self.weight_qscheme, torch.qscheme)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
@@ -61,8 +59,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
 
     def get_quantized_weight(self):
         # suppress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
-        # assert isinstance(self.weight_qscheme, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
