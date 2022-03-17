@@ -295,29 +295,23 @@ TracerResult trace_run(const std::string& input_module_path) {
 
   recordCustomClassesFromOpSchemas(root_ops, traced_operators, loaded_classes);
 
-  {
-    std::lock_guard<std::mutex> guard(KernelDTypeTracer::getMutex());
-    called_kernel_tags.insert(
-        kdtype_tracer.getCalledKernelTags().begin(),
-        kdtype_tracer.getCalledKernelTags().end());
-  }
+  kdtype_tracer.getCalledKernelTags().withLock(
+      [&](KernelDTypeTracer::kernel_tags_type& kernel_tags) {
+        called_kernel_tags.insert(kernel_tags.begin(), kernel_tags.end());
+      });
 
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
 
-  {
-    std::lock_guard<std::mutex> guard(CustomClassTracer::getMutex());
-    loaded_classes.insert(
-        custom_class_tracer.getLoadedClasses().begin(),
-        custom_class_tracer.getLoadedClasses().end());
-  }
+  custom_class_tracer.getLoadedClasses().withLock(
+      [&](CustomClassTracer::custom_classes_type& custom_classes) {
+        loaded_classes.insert(custom_classes.begin(), custom_classes.end());
+      });
 
-  {
-    std::lock_guard<std::mutex> guard(BuildFeatureTracer::getMutex());
-    build_features.insert(
-        build_feature_tracer.getBuildFeatures().begin(),
-        build_feature_tracer.getBuildFeatures().end());
-  }
+  build_feature_tracer.getBuildFeatures().withLock(
+      [&](BuildFeatureTracer::build_feature_type& bf) {
+        build_features.insert(bf.begin(), bf.end());
+      });
 
   TracerResult tracer_result = {
       root_ops,
