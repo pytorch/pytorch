@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()

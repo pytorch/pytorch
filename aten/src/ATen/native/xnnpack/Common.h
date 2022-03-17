@@ -1,7 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>

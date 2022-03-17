@@ -25,6 +25,7 @@
 #else
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/_empty_affine_quantized_native.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/quantize_per_channel_native.h>
 #include <ATen/ops/quantize_per_tensor_native.h>

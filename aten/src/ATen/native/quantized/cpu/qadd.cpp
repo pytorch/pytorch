@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <torch/library.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>

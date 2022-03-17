@@ -3,6 +3,8 @@
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
 
+#include <ATen/Context.h>
+
 namespace at {
 namespace native {
 namespace xnnpack {
