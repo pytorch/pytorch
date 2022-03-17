@@ -18,11 +18,14 @@ full_codegen:
   - avg_pool2d
   - avg_pool2d_backward
   - baddbmm
+  - bernoulli
+  - bernoulli_.float
   - binary_cross_entropy
   - binary_cross_entropy_backward
   - bitwise_and.Tensor
   - bitwise_or.Tensor
   - bmm
+  - cat
   - clamp
   - clamp_min
   - constant_pad_nd
@@ -96,10 +99,14 @@ full_codegen:
   - norm.ScalarOpt_dim
   - pow.Tensor_Scalar
   - pow.Tensor_Tensor
+  - random_
+  - random_.from
+  - random_.to
   - reciprocal
   - relu
   - relu_
   - remainder.Tensor
+  - repeat
   - rsqrt
   - scatter_add
   - sgn
@@ -112,9 +119,11 @@ full_codegen:
   - softplus_backward
   - sort
   - sqrt
+  - stack
   - std
   - std.dim
   - std.correction
+  - sub.Tensor
   - sum
   - sum.dim_IntList
   - tanh
@@ -134,9 +143,6 @@ full_codegen:
 supported:
   - as_strided
   - as_strided_
-  - bernoulli
-  - bernoulli_.float
-  - cat
   - clone
   - _copy_from
   - _copy_from_and_resize
@@ -150,25 +156,19 @@ supported:
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
-  - random_
-  - random_.from
-  - random_.to
-  - repeat
   - select.int
   - slice.Tensor
   - squeeze
   - squeeze.dim
   - squeeze_
   - squeeze_.dim
-  - stack
   - t
   - t_
+  - _to_copy
   - transpose.int
   - transpose_
   - unsqueeze
   - unsqueeze_
-  - sub.Tensor
-  - sub.Scalar
   - view
   - alias
   - _unsafe_view
