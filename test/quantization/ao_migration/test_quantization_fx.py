@@ -142,15 +142,14 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         ]
         self._test_function_import('fx.prepare', function_list)
 
-    # skipping for now, will enable in next PR
-    # def test_package_import_fx_convert(self):
-    #     self._test_package_import('fx.convert')
+    def test_package_import_fx_convert(self):
+        self._test_package_import('fx.convert')
 
-    # def test_function_import_fx_convert(self):
-    #     function_list = [
-    #         'convert'
-    #     ]
-    #     self._test_function_import('fx.convert', function_list)
+    def test_function_import_fx_convert(self):
+        function_list = [
+            'convert'
+        ]
+        self._test_function_import('fx.convert', function_list)
 
     def test_package_import_fx_fuse(self):
         self._test_package_import('fx.fuse')

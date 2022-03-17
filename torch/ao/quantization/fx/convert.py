@@ -525,7 +525,7 @@ def convert_custom_module(
     parent_name, name = _parent_name(node.target)
     setattr(modules[parent_name], name, quantized_custom_module)
 
-def _convert_do_not_use(
+def convert(
         model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
