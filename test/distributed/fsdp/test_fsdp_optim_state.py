@@ -89,8 +89,6 @@ class JaggedModel(torch.nn.Module):
         self.linear2 = LinearWithKBiases(5, 4, 0)
         self.linear3 = torch.nn.Sequential(
             Bias(4), Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
-            Bias(4), Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
-            Bias(4), Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
         )
         self.linear4 = LinearWithKBiases(4, 1, 2)
         self.relu = torch.nn.ReLU()
@@ -133,6 +131,7 @@ class WrappedJaggedModel(JaggedModel):
                 FSDP(Bias)
         linear2: LinearWithKBiases
         linear3: FSDP(Sequential)
+            Bias
             Bias
             Bias
             Bias
@@ -190,6 +189,7 @@ class AlternateWrappedJaggedModel(JaggedModel):
                 Bias
         linear2: LinearWithKBiases
         linear3: Sequential
+            Bias
             Bias
             Bias
             Bias
