@@ -7,7 +7,7 @@ from torch import nn
 from torch.nn.utils.parametrize import register_parametrization, remove_parametrizations
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests, expectedFailureParametrized)
+    TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests)
 from torch.testing._internal.common_subclass import subclass_db, DiagTensorBelow
 from torch.testing._internal.logging_tensor import LoggingTensor
 from unittest import expectedFailure
