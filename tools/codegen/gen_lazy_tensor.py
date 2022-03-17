@@ -203,6 +203,9 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     assert class_name is not None
 
     # Generate nativefunction declarations
+    # Note, eager registrations is set to False for the lazy TS backend as another LTC backend
+    # may want to register their own lazy kernels instead of registering the TS ones.
+    # The registration will lazily happen when init_ts_backend is called.
     gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
                                        grouped_native_functions, backend_key, autograd_key,
                                        backend_name, eager_registration=False)

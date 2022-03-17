@@ -73,6 +73,13 @@ TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {
 
   };
 
+  // For external backends, the EAGER_REGISTRATION macro will be set to 1,
+  // causing the module registration function to be called at the same time
+  // it used to be called, in other words, at c++ static initialization time.
+  // For LTC backends (i.e. the lazy TorchScript backend) the EAGER_REGISTRATION
+  // macro will be set to 0 makes the c++ static initializer simply install
+  // a function pointer, and then only upon initializing the LTC backend
+  // (i.e. via a call to say init_ts_backend) is it finally invoked.
   #if EAGER_REGISTRATION
   ${cpp_namespace}::Register${BackendName}${DispatchKey}Modules();
   #endif

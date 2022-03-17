@@ -234,6 +234,9 @@ def gen_dispatchkey_nativefunc_headers(
         'dispatch_declarations': backend_declarations + autograd_declarations,
         'BackendName': backend_name,
         'DispatchKey': backend_dispatch_key,
+        # If eager_registration is True, register the native functions
+        # for the dispatch key immediately on load. Otherwise, wait to
+        # register the functions until explicitly invoked
         'eager_registration': str(int(bool(eager_registration))),
     })
 
