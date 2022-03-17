@@ -3663,6 +3663,42 @@ TEST(StaticRuntime, autogen_nll_loss_backward) {
       /*check_resize=*/true);
 }
 
+TEST(StaticRuntime, autogen_smooth_l1_loss) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %target: Tensor, %reduction: int, %beta: float):
+        %bias: None = prim::Constant()
+        %ret = aten::smooth_l1_loss(%self, %target, %reduction, %beta)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto target0 = at::rand({6, 6, 6});
+  auto reduction0 = 1;
+  auto beta0 = 0.1;
+  std::vector<IValue> args{self0, target0, reduction0, beta0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto self1 = at::rand({22, 22, 22});
+  auto target1 = at::rand({22, 22, 22});
+  auto reduction1 = 1;
+  auto beta1 = 0.1;
+  std::vector<IValue> args2{self1, target1, reduction1, beta1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
 TEST(StaticRuntime, autogen_elu) {
   const std::string script = R"IR(
     graph(%self: Tensor, %alpha: int, %scale: int, %input_scale: int):
@@ -4100,6 +4136,40 @@ TEST(StaticRuntime, autogen_sigmoid_backward) {
   auto grad_output1 = at::rand({22, 22, 22});
   auto output1 = at::rand({22, 22, 22});
   std::vector<IValue> args2{grad_output1, output1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
+TEST(StaticRuntime, autogen_logit_backward) {
+  const std::string script = R"IR(
+    graph(%grad_output: Tensor, %self: Tensor, %eps: float?):
+        %bias: None = prim::Constant()
+        %ret = aten::logit_backward(%grad_output, %self, %eps)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto grad_output0 = at::rand({6, 6, 6});
+  auto self0 = at::rand({6, 6, 6});
+  auto eps0 = 0.1;
+  std::vector<IValue> args{grad_output0, self0, eps0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto grad_output1 = at::rand({22, 22, 22});
+  auto self1 = at::rand({22, 22, 22});
+  auto eps1 = 0.1;
+  std::vector<IValue> args2{grad_output1, self1, eps1};
   testStaticRuntime(
       script,
       args,

@@ -53,7 +53,9 @@ def ivalue_type_conversion_method(arg_type: Union[BaseType, OptionalType, Type])
         BaseTy.bool: ((False, "toBool()"), (False, "toOptional<bool>()")),
         BaseTy.Scalar: ((False, "toScalar()"), (False, "toOptional<at::Scalar>()")),
         BaseTy.ScalarType: ((False, "toScalarType()"), (False, "toOptional<at::ScalarType>()")),
-        BaseTy.str: ((False, "toStringView()"), (False, "toOptional<c10::string_view>()"))}
+        BaseTy.str: ((False, "toStringView()"), (False, "toOptional<c10::string_view>()")),
+        BaseTy.float: ((False, "toDouble()"), (False, "toOptional<double>()"))
+    }
 
     base_ty_object = None
     if isinstance(arg_type, BaseType):
@@ -106,7 +108,9 @@ def test_value_expression(arg_type: Union[BaseType, OptionalType, Type], index: 
         BaseTy.bool: "false",
         BaseTy.Scalar: "2",
         BaseTy.ScalarType: "at::ScalarType::Float",
-        BaseTy.str: "\"floor\""}
+        BaseTy.str: "\"floor\"",
+        BaseTy.float: "0.1",
+    }
 
     base_ty_object = None
     if isinstance(arg_type, BaseType):
