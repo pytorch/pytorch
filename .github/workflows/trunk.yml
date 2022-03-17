@@ -124,6 +124,7 @@ jobs:
       SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
       ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
       ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
+      SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64
