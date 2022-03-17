@@ -197,7 +197,7 @@ def get_previous_reports_for_branch(branch: str, ci_job_prefix: str = "") -> Lis
         encoding="ascii").strip()
     commit_date = datetime.fromtimestamp(int(commit_date_ts))
     # We go a day before this current commit to avoiding pulling incomplete reports
-    day_before_commit = str(commit_date - timedelta(days=1)).split(' ')[0]
+    day_before_commit = str(commit_date - timedelta(hours=1)).split(' ')[0]
     # something like git rev-list --before="2021-03-04" --max-count=10 --remotes="*origin/nightly"
     commits = subprocess.check_output(
         ["git", "rev-list", f"--before={day_before_commit}", "--max-count=10", f"--remotes=*{branch}"],
