@@ -84,8 +84,8 @@ class NestedTensor:
 
     def unbind(self, dim=None):
         if dim is None:
-            unbound = torch.ops.aten.unbind.int(self._impl, 0)
+            unbound = self._impl.unbind(0)
             if len(unbound) == 0:
                 return ()
             return unbound
-        return torch.ops.aten.unbind.int(self._impl, dim)
+        return self._impl.unbind(dim)
