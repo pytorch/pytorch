@@ -3375,7 +3375,7 @@ Example::
 """.format(**reproducibility_notes))
 
 add_docstr_all('scatter_reduce_', r"""
-Tensor.scatter_reduce_(dim, index, src, reduce, *, include_input=True) -> Tensor
+scatter_reduce_(dim, index, src, reduce, *, include_input=True) -> Tensor
 
 Reduces all values from the :attr:`src` tensor to the indices specified in
 the :attr:`index` tensor in the :attr:`input` tensor using the applied
@@ -4807,7 +4807,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 
 add_docstr_all('scatter_reduce',
                r"""
-scatter_reduce(input, dim, index, src, reduce) -> Tensor
+scatter_reduce(dim, index, src, reduce, *, include_input=True) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
 """)

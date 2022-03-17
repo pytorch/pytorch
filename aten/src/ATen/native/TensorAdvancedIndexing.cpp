@@ -1193,9 +1193,9 @@ static void scatter_reduce_exclude_input_helper(
   int64_t dim,
   const Tensor& index,
   SCATTER_GATHER_OP op) {
-  AT_DISPATCH_ALL_TYPES_AND3(
-    at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-    self.scalar_type(), "cuda_scatter_exclude_input_init", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half, at::ScalarType::BFloat16,
+    self.scalar_type(), "cuda_scatter_reduce_exclude_input_init", [&] {
     scalar_t init_val;
     switch (op) {
       case SCATTER_GATHER_OP::REDUCE_ADD:
@@ -1242,7 +1242,7 @@ void scatter_impl(
   if (reduce.has_value()) {
     auto op = meta::get_operator_enum(reduce.value());
     if (!reduce_includes_input) {
-      // scatter inits for reduction to appropriate indices
+      // scatter inits for reduction to appropriate indices (used by scatter_reduce.two)
       scatter_reduce_exclude_input_helper(mut_out, dim, index, op);
     }
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);

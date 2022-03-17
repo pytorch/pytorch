@@ -262,6 +262,10 @@ struct cuda_scatter_gather_base_kernel {
   }
 }; // struct cuda_scatter_gather_base_kernel
 
+
+// FIXME: this is the same as cuda_scatter_gather_base_kernel, with a different
+// dtype dispatch. Splitting out for now to ensure no regression to dtypes
+// supported by scatter/gather.
 struct cuda_scatter_reduce_two_base_kernel {
   template <typename func_t>
   void operator()(
@@ -304,7 +308,7 @@ struct cuda_scatter_reduce_two_base_kernel {
     auto index_stride = self_dim_stride;
 
 
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       iter.dtype(),
       "cuda_scatter_reduce_two_base_kernel_func", [&] {

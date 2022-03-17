@@ -303,7 +303,9 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
-
+// FIXME: this is the same as cpu_scatter_gather_base_kernel, when src is a Tensor,
+// with a different dtype dispatch. Splitting out for now to ensure no regression
+// to dtypes supported by scatter/gather.
 struct cpu_scatter_reduce_two_base_kernel {
   template <typename func_t>
   void operator()(const Tensor& self, int64_t dim,
@@ -333,7 +335,7 @@ struct cpu_scatter_reduce_two_base_kernel {
 
     int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / index_dim_size);
 
-    AT_DISPATCH_ALL_TYPES_AND2(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16, iter.dtype(),
       "scatter_reduce_two_cpu", [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;

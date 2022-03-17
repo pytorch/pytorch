@@ -3298,7 +3298,7 @@ else:
                                             [True, False, True, False, True]], device=device))
 
     # FIXME: move to test_scatter_gather_ops.py
-    @dtypes(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False))
+    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     def test_scatter_reduce(self, device, dtype):
         shapes = [((3, 5, 3), (3, 5, 3), (3, 5, 3)),
                   ((3, 5, 3), (2, 3, 3), (3, 5, 3))]
@@ -3343,10 +3343,7 @@ else:
 
                     if (reduce == "mean"):
                         counts.masked_fill_(counts == 0, 1)
-                        if expected.is_floating_point():
-                            expected /= counts
-                        else:
-                            expected.div_(counts, rounding_mode="floor")
+                        expected /= counts
 
                     self.assertTrue(torch.allclose(output, expected))
 

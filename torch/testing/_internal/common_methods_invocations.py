@@ -15686,15 +15686,9 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         'scatter_reduce',
-        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
-        skips=(
-            DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive',
-                         active_if=IS_WINDOWS),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive',
-                         active_if=IS_WINDOWS),
-        ),
     ),
 ]
 
