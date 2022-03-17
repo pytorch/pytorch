@@ -41,7 +41,6 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     convert_dynamic,
     skipIfNoFBGEMM,
-    skipIfNoCaffe2AtenFallback,
     EmbeddingBagModule,
     EmbeddingModule,
     EmbeddingWithStaticLinear,
@@ -63,6 +62,8 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
 )
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import skipIfNoCaffe2
+
 from hypothesis import given
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
@@ -1465,7 +1466,7 @@ class TestQuantizeEagerONNXExport(JitTestCase):
         onnx_model = export_to_onnx(model, data, input_names)
 
     @skipIfNoFBGEMM
-    @skipIfNoCaffe2AtenFallback
+    @skipIfNoCaffe2
     def test_lower_graph_linear(self):
         model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
@@ -1473,7 +1474,7 @@ class TestQuantizeEagerONNXExport(JitTestCase):
         self._test_lower_graph_impl(model, data)
 
     @skipIfNoFBGEMM
-    @skipIfNoCaffe2AtenFallback
+    @skipIfNoCaffe2
     def test_lower_graph_conv2d(self):
         model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)

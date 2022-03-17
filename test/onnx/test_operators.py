@@ -20,7 +20,7 @@ import os
 import shutil
 import tempfile
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import skipIfCaffe2AtenFallback
+from torch.testing._internal.common_utils import skipIfCaffe2
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
@@ -325,7 +325,7 @@ class TestOperators(TestCase):
         x = torch.randn(20, 16, 50)
         self.assertONNX(nn.MaxPool1d(3, stride=2, return_indices=True), x)
 
-    @skipIfCaffe2AtenFallback
+    @skipIfCaffe2
     def test_at_op(self):
         x = torch.randn(3, 4)
 
@@ -593,7 +593,7 @@ class TestOperators(TestCase):
         self.assertONNX(nn.BatchNorm2d(128, affine=False, momentum=0.3), x,
                         keep_initializers_as_inputs=True)
 
-    @skipIfCaffe2AtenFallback
+    @skipIfCaffe2
     def test_embedding_bags(self):
         emb_bag = nn.EmbeddingBag(10, 8)
         input = torch.tensor([1, 2, 3, 4]).long()
@@ -793,7 +793,7 @@ class TestOperators(TestCase):
         input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.assertONNX(BitshiftModel(), (input, input2), opset_version=11)
 
-    @skipIfCaffe2AtenFallback
+    @skipIfCaffe2
     def test_layer_norm_aten(self):
         model = torch.nn.LayerNorm([10, 10])
         x = torch.randn(20, 5, 10, 10)
@@ -985,7 +985,7 @@ class TestOperators(TestCase):
         unregister_custom_op_symbolic('::embedding', _onnx_opset_version)
 
     # This is test_aten_embedding_1 with shape inference on custom symbolic aten::embedding.
-    @skipIfCaffe2AtenFallback
+    @skipIfCaffe2
     def test_aten_embedding_2(self):
         _onnx_opset_version = 12
 

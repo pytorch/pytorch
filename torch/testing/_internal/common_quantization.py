@@ -295,14 +295,6 @@ def skipIfNoQNNPACK(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def skipIfNoCaffe2AtenFallback(fn):
-    reason = 'Certain quantized operations require Caffe2 to be built-in.'
-    if isinstance(fn, type):
-        if not torch.onnx._CAFFE2_ATEN_FALLBACK:
-            fn.__unittest_skip__ = True
-            fn.__unittest_skip_why__ = reason
-        return fn
-
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not torch.onnx._CAFFE2_ATEN_FALLBACK:
