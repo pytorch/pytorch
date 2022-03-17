@@ -84,7 +84,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
                  *,
-                 default: bool = True,
                  buffer_size: int = 10000,
                  unbatch_level: int = 0
                  ) -> None:
@@ -95,7 +94,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         else:
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
-        self._shuffle_enabled = default
+        self._shuffle_enabled = True
 
     @staticmethod
     def buffer_replace(buffer, x):
@@ -104,8 +103,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         buffer[idx] = x
         return val
 
-    def set_shuffle_settings(self, shuffle=True):
+    def set_shuffle(self, shuffle=True):
         self._shuffle_enabled = shuffle
+        return self
 
     def __iter__(self) -> Iterator[T_co]:
         if not self._shuffle_enabled:
