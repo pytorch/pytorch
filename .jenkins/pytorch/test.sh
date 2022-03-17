@@ -51,12 +51,10 @@ if [[ "$BUILD_ENVIRONMENT" == *slow-gradcheck* ]]; then
   export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda* && ( "$PYTORCH_TEST_WITH_SLOW" != "1" || "$PYTORCH_TEST_WITH_SLOW_GRADCHECK" == "ON" ) ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   # Used so that only cuda specific versions of tests are generated
   # mainly used so that we're not spending extra cycles testing cpu
   # devices on expensive gpu machines
-  # Don't disable cpu on the slow test, since there are no CPU-only
-  # slow tests.
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
@@ -520,7 +518,7 @@ test_torch_deploy() {
   ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
   "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_api --gtest_filter='IMethodTest.*'
+  "$TORCH_BIN_DIR"/test_deploy_gpu
   assert_git_not_dirty
 }
 
@@ -532,8 +530,9 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-
-if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *deploy* ]]; then
+  test_torch_deploy
+elif [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
@@ -546,9 +545,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1) ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1*-test1* ]]; then
-    test_torch_deploy
-  fi
   test_without_numpy
   install_torchvision
   test_python_shard 1
