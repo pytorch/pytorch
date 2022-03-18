@@ -431,7 +431,10 @@ class VectorizeValidator : public OptInDispatch {
         vector_size,
         " however, vector sizes only upto and including 16 bytes are supported.");
 
-    auto replay_exprs = StmtSort::getExprs(fusion, {v_id}, false);
+    auto replay_exprs = DependencyCheck::getAllExprsBetween(
+        {tv->getMaybeRFactorDomain().begin(),
+         tv->getMaybeRFactorDomain().end()},
+        {v_id});
 
     VectorizeValidator validator(v_id);
 
