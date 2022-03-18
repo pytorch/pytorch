@@ -5,6 +5,7 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <c10/util/llvmMathExtras.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -306,6 +307,120 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 }
 
 } // namespace
+
+// Environment config parser
+// Defined here, rather than its own .cpp file,
+// because parseArgs needs to know kLargeBuffer.
+class CachingAllocatorConfig {
+ public:
+  static AllocatorBackend allocator_backend() {
+    return instance().m_allocator_backend;
+  }
+
+  static size_t max_split_size() {
+    return instance().m_max_split_size;
+  }
+
+  // This is used to round-up allocation size to nearest power of 2 divisions.
+  // More description below in function roundup_power2_next_division
+  // As ane example, if we want 4 divisions between 2's power, this can be done
+  // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
+  static size_t roundup_power2_divisions() {
+    return instance().m_roundup_power2_divisions;
+  }
+
+ private:
+  static CachingAllocatorConfig& instance() {
+    static CachingAllocatorConfig* s_instance = ([]() {
+      auto inst = new CachingAllocatorConfig();
+      inst->parseArgs();
+      return inst;
+    })();
+    return *s_instance;
+  }
+
+  CachingAllocatorConfig()
+      : m_allocator_backend{AllocatorBackend::NATIVE},
+        m_max_split_size{std::numeric_limits<size_t>::max()},
+        m_roundup_power2_divisions(0) {}
+  AllocatorBackend m_allocator_backend;
+  size_t m_max_split_size;
+  size_t m_roundup_power2_divisions;
+
+  void parseArgs() {
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (val != NULL) {
+      const std::string config(val);
+
+      std::regex exp("[\\s,]+");
+      std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
+      std::sregex_token_iterator end;
+      std::vector<std::string> options(it, end);
+
+      bool used_native_specific_option(false);
+      bool used_cudaMallocAsync(false);
+
+      for (auto option : options) {
+        std::regex exp2("[:]+");
+        std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
+        std::sregex_token_iterator end2;
+        std::vector<std::string> kv(it2, end2);
+        if (kv.size() >= 2) {
+          /* Maximum split size in MB.  Limited to large size blocks */
+          if (kv[0].compare("max_split_size_mb") == 0) {
+            size_t val2 = stoi(kv[1]);
+            TORCH_CHECK(
+                val2 > kLargeBuffer / (1024 * 1024),
+                "CachingAllocator option max_split_size_mb too small, must be > ",
+                kLargeBuffer / (1024 * 1024),
+                "");
+            val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
+            val2 = std::min(
+                val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
+            m_max_split_size = val2 * 1024 * 1024;
+            used_native_specific_option = true;
+          } else if (kv[0].compare("roundup_power2_divisions") == 0) {
+            size_t val2 = stoi(kv[1]);
+            TORCH_CHECK(
+                llvm::isPowerOf2_64(val2),
+                "For roundups, the divisons has to be power of 2 ",
+                "");
+            m_roundup_power2_divisions = val2;
+            used_native_specific_option = true;
+          } else if (kv[0].compare("backend") == 0) {
+            TORCH_CHECK(((kv[1].compare("native") == 0) ||
+                         (kv[1].compare("cudaMallocAsync") == 0)),
+                        "Unknown allocator backend, "
+                        "options are native and cudaMallocAsync");
+            used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
+            if (used_cudaMallocAsync) {
+#if CUDA_VERSION >= 11040
+              int version;
+              C10_CUDA_CHECK(cudaDriverGetVersion(&version));
+              TORCH_CHECK(version >= 11040,
+                          "backend:cudaMallocAsync requires CUDA runtime "
+                          "11.4 or newer, but cudaDriverGetVersion returned ",
+                          version);
+              m_allocator_backend = AllocatorBackend::CUDAMALLOCASYNC;
+#else
+              TORCH_CHECK(false,
+                          "backend:cudaMallocAsync requires PyTorch to be built with "
+                          "CUDA 11.4 or newer, but CUDA_VERSION is ",
+                          CUDA_VERSION);
+#endif
+            }
+          } else {
+            TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
+          }
+        }
+      }
+
+      if (used_native_specific_option && used_cudaMallocAsync) {
+        TORCH_WARN("backend:cudaMallocAsync ignores max_split_size_mb");
+      }
+    }
+  }
+};
 
 class DeviceCachingAllocator {
  private:
@@ -733,11 +848,43 @@ class DeviceCachingAllocator {
     return result;
   }
 
+  // This function takes the size and number of divisions argument and rounds
+  // up the size argument for the nearest power-of-2 division.
+  // For example, if we need to round-up 1200 and number of divisions is 4,
+  // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  // them, the values are 1024, 1280, 1536, and 1792. So the function will
+  // return 1280 as the nearest ceiling of power-2 divison.
+  static size_t roundup_power2_next_division(size_t size, size_t divisions) {
+    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
+      return size;
+    }
+    if (llvm::isPowerOf2_64(size)) {
+      return size;
+    }
+
+    // divide the space between these 2's power into equal divisions
+    // If division is zero, return the power-of-2 ceiling.
+    size_t power2_floor = llvm::PowerOf2Floor(size);
+    size_t power2_divison =
+        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
+    if (C10_UNLIKELY(power2_divison == 0)) {
+      return (power2_floor << 1);
+    }
+    size_t round_size_floor = size & (~(power2_divison - 1));
+    return (round_size_floor == size) ? size
+                                      : round_size_floor + power2_divison;
+  }
+
   static size_t round_size(size_t size) {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      auto divisions = CachingAllocatorConfig::roundup_power2_divisions();
+      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+        return roundup_power2_next_division(size, divisions);
+      } else {
+        return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      }
     }
   }
 
@@ -1615,102 +1762,6 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 
 
 // General caching allocator utilities
-
-// Environment config parser
-// Defined here, rather than its own .cpp file,
-// because parseArgs needs to know kLargeBuffer.
-class CachingAllocatorConfig {
-  public:
-    static AllocatorBackend allocator_backend() {
-      return instance().m_allocator_backend;
-    }
-
-    static size_t max_split_size() {
-      return instance().m_max_split_size;
-    }
-
-  private:
-    static CachingAllocatorConfig& instance() {
-      static CachingAllocatorConfig* s_instance = ([]() {
-	  auto inst = new CachingAllocatorConfig();
-	  inst->parseArgs();
-	  return inst;
-	  })();
-      return *s_instance;
-    }
-
-    CachingAllocatorConfig()
-      : m_allocator_backend{AllocatorBackend::NATIVE},
-        m_max_split_size{std::numeric_limits<size_t>::max()} {}
-    AllocatorBackend m_allocator_backend;
-    size_t m_max_split_size;
-
-    void parseArgs() {
-      const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-      if (val != NULL) {
-	const std::string config(val);
-
-	std::regex exp("[\\s,]+");
-	std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
-	std::sregex_token_iterator end;
-	std::vector<std::string> options(it, end);
-
-	bool used_max_split_size_mb(false);
-	bool used_cudaMallocAsync(false);
-
-	for (auto option : options) {
-	  std::regex exp2("[:]+");
-	  std::sregex_token_iterator it2(option.begin(), option.end(), exp2, -1);
-	  std::sregex_token_iterator end2;
-	  std::vector<std::string> kv(it2, end2);
-	  if (kv.size() >= 2) {
-	    /* Maximum split size in MB.  Limited to large size blocks */
-	    if (kv[0].compare("max_split_size_mb") == 0) {
-	      size_t val2 = stoi(kv[1]);
-	      TORCH_CHECK(
-		  val2 > Native::kLargeBuffer / (1024 * 1024),
-		  "CachingAllocator option max_split_size_mb too small, must be > ",
-		  Native::kLargeBuffer / (1024 * 1024),
-		  "");
-	      val2 = std::max(val2, Native::kLargeBuffer / (1024 * 1024));
-	      val2 = std::min(
-		  val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
-	      m_max_split_size = val2 * 1024 * 1024;
-	      used_max_split_size_mb = true;
-	    } else if (kv[0].compare("backend") == 0) {
-	      TORCH_CHECK(((kv[1].compare("native") == 0) ||
-		    (kv[1].compare("cudaMallocAsync") == 0)),
-		  "Unknown allocator backend, "
-		  "options are native and cudaMallocAsync");
-	      used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
-	      if (used_cudaMallocAsync) {
-#if CUDA_VERSION >= 11040
-		int version;
-		C10_CUDA_CHECK(cudaDriverGetVersion(&version));
-		TORCH_CHECK(version >= 11040,
-		    "backend:cudaMallocAsync requires CUDA runtime "
-		    "11.4 or newer, but cudaDriverGetVersion returned ",
-		    version);
-		m_allocator_backend = AllocatorBackend::CUDAMALLOCASYNC;
-#else
-		TORCH_CHECK(false,
-		    "backend:cudaMallocAsync requires PyTorch to be built with "
-		    "CUDA 11.4 or newer, but CUDA_VERSION is ",
-		    CUDA_VERSION);
-#endif
-	      }
-	    } else {
-	      TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
-	    }
-	  }
-	}
-
-	if (used_max_split_size_mb && used_cudaMallocAsync) {
-	  TORCH_WARN("backend:cudaMallocAsync ignores max_split_size_mb");
-	}
-      }
-    }
-};
 
 // External config interface (declared in CUDACachingAllocator.h)
 // Should we bother having these two functions?

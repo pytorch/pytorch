@@ -377,6 +377,20 @@ Available options:
   due to 'out of memory' and showing a large amount of inactive split blocks.
   ``max_split_size_mb`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``max_split_size_mb`` is ignored.
+* ``roundup_power2_divisions`` helps with rounding the requested allocation
+  size to nearest power-2 division and making better use of the blocks. In
+  the native CUDACachingAllocator, the sizes are rounded up in multiple
+  of blocks size of 512, so this works fine for smaller sizes. However, this
+  can be inefficient for large near-by allocations as each will go to different
+  size of blocks and re-use of those blocks are minimized. This might create
+  lots of unused blocks and will waste GPU memory capacity. This option enables
+  the rounding of allocation size to nearest power-2 division. For example, if
+  we need to round-up size of 1200 and if number of divisions is 4,
+  the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
+  will be rounded to 1280 as the nearest ceiling of power-2 division.
+  ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
 
 .. note::
 
