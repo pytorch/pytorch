@@ -51,16 +51,18 @@ DynamicLayer::DynamicLayer(
     int64_t layerId,
     optional<int64_t> batchSize,
     optional<RandomnessType> randomness,
-    optional<bool> prev_grad_mode)
+    optional<bool> prev_grad_mode,
+    optional<bool> prev_fwd_grad_mode)
   :
     key_(key),
     layerId_(layerId),
     batchSize_(batchSize),
     randomness_(randomness),
-    prevGradMode_(prev_grad_mode)
+    prevGradMode_(prev_grad_mode),
+    prevFwdGradMode_(prev_fwd_grad_mode)
 {
   if (key_ == DispatchKey::Autograd) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value() || prev_fwd_grad_mode.has_value());
   }
 }
 
@@ -84,6 +86,10 @@ RandomnessType DynamicLayer::randomness() const {
 
 optional<bool> DynamicLayer::prevGradMode() const {
   return prevGradMode_;
+}
+
+optional<bool> DynamicLayer::prevFwdGradMode() const {
+  return prevFwdGradMode_;
 }
 
 using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
@@ -201,18 +207,19 @@ int64_t initAndPushDynamicLayer(
     DispatchKey key,
     optional<int64_t> batch_size,
     optional<RandomnessType> randomness,
-    optional<bool> prev_grad_mode) {
+    optional<bool> prev_grad_mode,
+    optional<bool> prev_fwd_grad_mode) {
   TORCH_INTERNAL_ASSERT(key == DispatchKey::Autograd || key == kBatchedKey);
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
   const auto layerId = 1 + dynamicLayerStack.size();
-  DynamicLayer new_layer(key, layerId, batch_size, randomness, prev_grad_mode);
+  DynamicLayer new_layer(key, layerId, batch_size, randomness, prev_grad_mode, prev_fwd_grad_mode);
   pushDynamicLayer(std::move(new_layer));
 
   auto& data = getGlobalDynmetaData();
 
   TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
   if (key == DispatchKey::Autograd) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value() || prev_fwd_grad_mode.has_value());
   }
   data[layerId] = std::make_shared<bool>(true);
   return layerId;
@@ -504,8 +511,9 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   auto cur_key = getDynamicLayerStack().back().key();
 
   optional<bool> prev_grad_mode = getDynamicLayerStack().back().prevGradMode();
+  optional<bool> prev_fwd_grad_mode = getDynamicLayerStack().back().prevFwdGradMode();
   if (cur_key == DispatchKey::Autograd) {
-    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
+    TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value() || prev_fwd_grad_mode.has_value());
   }
 
   auto unwrap = [&](const Tensor& tensor) {
@@ -576,9 +584,14 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 #endif
 
   // Re-dispatch
-  if (cur_key == DispatchKey::Autograd && *prev_grad_mode == false) {
+  if (cur_key == DispatchKey::Autograd && prev_grad_mode.has_value() && *prev_grad_mode == false) {
     // See NOTE [grad and vjp interaction with no_grad]
     c10::AutoGradMode guard(*prev_grad_mode);
+    op.callBoxed(stack);
+  }
+  else if (cur_key == DispatchKey::Autograd &&
+           prev_fwd_grad_mode.has_value() && prev_fwd_grad_mode.value() == false) {
+    c10::AutoFwGradMode guard(*prev_fwd_grad_mode);
     op.callBoxed(stack);
   } else {
     op.callBoxed(stack);

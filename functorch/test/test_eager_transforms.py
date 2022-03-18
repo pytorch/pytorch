@@ -28,7 +28,7 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import _argnums_partial
+from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
 from functorch._src.custom_function import custom_vjp
 
 # NB: numpy is a testing dependency!
@@ -1890,6 +1890,110 @@ class TestJvp(TestCase):
                 _ = jvp(lambda x: (x, aux), (x, ), (t, ), has_aux=True)
             with self.assertRaisesRegex(RuntimeError, r"Expected tensors, got unsupported type"):
                 _ = jvp(lambda x: (x, [x, aux]), (x, ), (t, ), has_aux=True)
+
+    def test_fwd_grad_enabled(self, device):
+        # Tests some private helper functions to enable/disable fwd grad mode
+        enabled = functorch._C.get_fwd_grad_enabled()
+        self.assertTrue(enabled)
+
+        try:
+            functorch._C.set_fwd_grad_enabled(False)
+            enabled = functorch._C.get_fwd_grad_enabled()
+            self.assertFalse(enabled)
+        finally:
+            functorch._C.set_fwd_grad_enabled(True)
+
+        enabled = functorch._C.get_fwd_grad_enabled()
+        self.assertTrue(enabled)
+
+    def test_autograd_function_disables_fwd_grad(self, device):
+        # Sanity check. We don't really assume this anywhere so
+        # it's fine if this breaks one day.
+        class MySquare(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                enabled = functorch._C.get_fwd_grad_enabled()
+                self.assertFalse(enabled)
+                return x * x
+
+            @staticmethod
+            def backward(ctx, gx):
+                return gx
+
+        x = torch.randn(3, requires_grad=True)
+        MySquare.apply(x)
+
+    def test_enable_fwd_grad(self, device):
+        # Tests a private helper function
+        try:
+            functorch._C.set_fwd_grad_enabled(False)
+            enabled = functorch._C.get_fwd_grad_enabled()
+            self.assertFalse(enabled)
+
+            with enable_fwd_grad():
+                enabled = functorch._C.get_fwd_grad_enabled()
+                self.assertTrue(enabled)
+
+            enabled = functorch._C.get_fwd_grad_enabled()
+            self.assertFalse(enabled)
+        finally:
+            functorch._C.set_fwd_grad_enabled(True)
+
+    def test_disable_fwd_grad_outside(self, device):
+        x = torch.randn([], device=device)
+        t = torch.ones_like(x)
+        with enable_fwd_grad(False):
+            _, y = jvp(torch.sin, (x,), (t,))
+        self.assertEqual(y, x.cos())
+
+    def test_disable_fwd_grad_inside(self, device):
+        def f(x):
+            with enable_fwd_grad(False):
+                shift = x ** 2
+            return x ** 2 - shift
+
+        x = torch.randn([], device=device)
+        t = torch.ones_like(x)
+        _, y = jvp(f, (x,), (t,))
+        self.assertEqual(y, 2 * x)
+        _, y = jvp(lambda x: jvp(f, (x,), (t,))[1], (x,), (t,))
+        self.assertEqual(y, 2)
+
+    def test_disable_fwd_grad_mixed(self, device):
+        def f(x):
+            with enable_fwd_grad(False):
+                shift = x ** 2
+            return x ** 2 - shift
+
+        x = torch.randn([], device=device)
+        t = torch.ones_like(x)
+        with enable_fwd_grad():
+            _, y = jvp(f, (x,), (t,))
+
+        self.assertEqual(y, 2 * x)
+
+    def test_jvp_inside_autograd_function(self, device):
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                t = torch.ones_like(x)
+                _, neg_sin_x = jvp(torch.cos, (x,), (t,))
+                ctx.save_for_backward(x)
+                return -neg_sin_x
+
+            @staticmethod
+            def backward(ctx, gx):
+                x, = ctx.saved_tensors
+                t = torch.ones_like(x)
+                _, cos_x = jvp(torch.sin, (x,), (t,))
+                return gx * cos_x
+
+        x = torch.randn([], device=device, requires_grad=True)
+        y = MySin.apply(x)
+        self.assertEqual(y, x.sin())
+
+        gx, = torch.autograd.grad(y, x)
+        self.assertEqual(gx, x.cos())
 
 
 class TestCustomFunction(TestCase):
