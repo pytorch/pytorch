@@ -2,6 +2,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -73,3 +74,10 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
   return std::make_tuple(unpacked_weight.to(at::kFloat), bias_);
 }
 #endif // USE_FBGEMM
+
+#if AT_MKLDNN_ENABLED()
+std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+      orig_weight_, orig_bias_);
+}
+#endif // #if AT_MKLDNN_ENABLED()
