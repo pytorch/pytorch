@@ -54,7 +54,8 @@ jobs:
       PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Populate CI build options
         run: |
