@@ -135,6 +135,7 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test statistics
         if: always()

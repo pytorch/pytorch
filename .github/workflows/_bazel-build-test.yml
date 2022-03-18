@@ -146,6 +146,7 @@ jobs:
         if: always()
         with:
           file-suffix: bazel-${{ github.job }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test statistics
         if: always()

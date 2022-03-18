@@ -146,6 +146,7 @@ jobs:
         if: always()
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Store Core dumps on S3
         uses: seemethere/upload-artifact-s3@v3
