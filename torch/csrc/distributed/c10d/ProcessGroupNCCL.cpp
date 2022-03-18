@@ -282,8 +282,7 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs,
-    bool desyncDebug)
+    const c10::optional<std::vector<at::Tensor>>& inputs)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
@@ -291,10 +290,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  if (desyncDebug) {
-    ncclStartEvents_ =
-        std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
-  }
+  ncclStartEvents_ =
+      std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclEndEvents_ =
       std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclComms_.resize(devices.size());
@@ -540,7 +537,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
-  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG);
+  // Infer desync debug from whether TORCH_DISTRIBUTED_DEBUG >= INFO
+  // Provide backward support of NCCL_DESYNC_DEBUG
+  desyncDebug_ = dist_debug_level_ >= DebugLevel::Info || parseEnvVarFlag(NCCL_DESYNC_DEBUG);
 
   if (blockingWait_) {
     if (asyncErrorHandling_ || desyncDebug_) {
@@ -579,21 +578,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
   }
 
-  const char* ncclDebugLevel = std::getenv("NCCL_DEBUG");
-
-  if (!ncclDebugLevel) {
-    ncclDebugLevel = "UNSET";
-  }
-
+  init();
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << "\nNCCL_DEBUG: " << ncclDebugLevel;
+            << options_->is_high_priority_stream;
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -1168,6 +1160,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // [Note 2 ]
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 
+  // At this point NCCL should have been initialized, hence we can accurately get
+  // the env value even if NCCL sets it by reading from nccl.conf file
+  if (getRank() == 0) {
+    LOG(INFO) << "NCCL_DEBUG: " << parse_env("NCCL_DEBUG");
+  }
+
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
     (void)i;
@@ -1340,8 +1338,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       opType,
       seq_,
       profilingTitle,
-      inputs,
-      desyncDebug_);
+      inputs);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {

@@ -189,6 +189,7 @@ def get_op_to_type_to_weight_extraction_fn() -> Dict[str, Dict[Callable, Callabl
             nnqat.Linear: mod_weight_detach,
             nnqd.Linear: mod_weight_bias_0,
             nniqat.LinearReLU: mod_weight_detach,
+            nniqat.LinearBn1d: mod_weight_detach,
             nn.modules.linear.NonDynamicallyQuantizableLinear: mod_weight_detach,
             # LSTM
             nn.LSTM: get_lstm_weight,

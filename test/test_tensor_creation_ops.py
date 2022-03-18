@@ -2138,14 +2138,6 @@ class TestTensorCreation(TestCase):
                     torch.double,
                     torch.bfloat16):
                 torch.set_default_dtype(t)
-            elif t in (
-                    torch.complex32,
-                    torch.qint8,
-                    torch.quint8,
-                    torch.qint32,
-                    torch.quint4x2,
-                    torch.quint2x4):
-                self.assertRaises(RuntimeError, lambda: torch.set_default_dtype(t))
             else:
                 self.assertRaises(TypeError, lambda: torch.set_default_dtype(t))
 
@@ -2840,8 +2832,6 @@ class TestTensorCreation(TestCase):
         self._test_signal_window_functions(window, dtype, device)
 
     @onlyNativeDeviceTypes
-    # See https://github.com/pytorch/pytorch/issues/72630
-    @skipMeta
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
@@ -3368,7 +3358,7 @@ class TestRandomTensorCreation(TestCase):
         std = torch.tensor(-1, dtype=torch.float32, device=device)
 
         for input in [0, a]:
-            with self.assertRaisesRegex(RuntimeError, r'normal_ expects std >= 0.0'):
+            with self.assertRaisesRegex(RuntimeError, r'normal expects std >= 0.0, but found std'):
                 torch.normal(input, -1, (10,))
 
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):

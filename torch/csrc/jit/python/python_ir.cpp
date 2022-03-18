@@ -200,6 +200,9 @@ void initPythonIRBindings(PyObject* module_) {
           [&](AliasDb& db, Value* v1, Value* v2) {
             return db.mayContainAlias(v1, v2);
           })
+      .def(
+          "has_writers",
+          [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
 
 #define GS(name) def(#name, &Graph ::name)
@@ -217,9 +220,14 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("enabled") = true)
       .def(
           "alias_db",
-          [](std::shared_ptr<Graph> g) {
-            return std::make_shared<AliasDb>(std::move(g));
-          })
+          [](std::shared_ptr<Graph> g,
+             bool isFrozen = false,
+             bool descend_function_calls = false) {
+            return std::make_shared<AliasDb>(
+                std::move(g), isFrozen, descend_function_calls);
+          },
+          py::arg("isFrozen") = false,
+          py::arg("descend_function_calls") = false)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -247,11 +255,13 @@ void initPythonIRBindings(PyObject* module_) {
             RawDataExportMap export_map;
             SymbolDimMap symbol_map;
             bool val_use_external_data_format = false;
+            NodeNameMap onnx_node_names;
             std::tie(
                 model_proto,
                 export_map,
                 symbol_map,
-                val_use_external_data_format) =
+                val_use_external_data_format,
+                onnx_node_names) =
                 export_onnx(
                     g,
                     initializers,
@@ -281,7 +291,8 @@ void initPythonIRBindings(PyObject* module_) {
             return std::make_tuple(
                 py::bytes(graph),
                 python_serialized_export_map,
-                val_use_external_data_format);
+                val_use_external_data_format,
+                onnx_node_names);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
@@ -926,6 +937,9 @@ void initPythonIRBindings(PyObject* module_) {
           [](const TypePtr& self) {
             return self->castRaw<InterfaceType>() != nullptr;
           })
+      .def(
+          "requires_grad",
+          [](const TypePtr& self) -> bool { return self->requires_grad(); })
       .def_property_readonly(
           "annotation_str", [](const std::shared_ptr<Type>& self) {
             return self->annotation_str();
