@@ -397,6 +397,7 @@ void TensorPipeAgent::startImpl() {
   int lowestPriority = std::numeric_limits<int>::max();
   std::string lowestPriorityTransport;
 
+  // Register transports
   for (auto& key : TensorPipeTransportRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.transports.has_value()) {
@@ -427,6 +428,7 @@ void TensorPipeAgent::startImpl() {
         priority, std::move(key), std::move(reg->transport));
   }
 
+  // Register channels
   for (auto& key : TensorPipeChannelRegistry()->Keys()) {
     int64_t priority = -1;
     if (opts_.channels.has_value()) {

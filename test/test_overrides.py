@@ -571,6 +571,16 @@ def generate_tensor_like_override_tests(cls):
             def instance_gen():
                 return TensorLike()
 
+        # FIXME The following code does not support kwonly args without defaults.
+        # The fix is easy, as one just needs to save these args when generating the variable
+        # annotated_args. The problem is that, if one does so, one finds a number
+        # of functions that have problematic signatures in native_functions.yaml.
+        # Fixing these would be BC breaking, so hence this terrible hack
+        # https://github.com/pytorch/pytorch/issues/67008
+        kwargs = {}
+        if hasattr(func, "__name__") and "linalg_solve_triangular" in func.__name__:
+            kwargs = {"upper": True}
+
         func_args = []
         is_method = is_tensor_method_or_property(func)
         if func in annotated_args:
@@ -633,7 +643,7 @@ def generate_tensor_like_override_tests(cls):
                 func_args += [instance_gen(), instance_gen()]
 
         def test(self):
-            ret = func(*func_args)
+            ret = func(*func_args, **kwargs)
             # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
             # This is currently the best check but doesn't work for, for example,
             # Tensor.__add__ because it redirects to Tensor.add.
@@ -729,7 +739,7 @@ class Wrapper:
         for a in args:
             if isinstance(a, cls):
                 args_of_this_cls.append(a)
-            elif isinstance(a, collections.Sequence):
+            elif isinstance(a, collections.abc.Sequence):
                 args_of_this_cls.extend(el for el in a if isinstance(el, cls))
         assert len(args_of_this_cls) > 0
         args_of_this_cls[0].used_calls.add(func)
@@ -837,10 +847,12 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
+                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',
                 'requires_grad',
+                'requires_grad_',
                 'retain_grad',
                 'size',
                 'stride',
@@ -857,6 +869,7 @@ class TestGradCheckOverride(TestCase):
                 torch.Tensor.numel,
                 torch.Tensor.retain_grad,
                 torch.Tensor.stride,
+                torch.Tensor.requires_grad_,
                 torch.autograd.grad,
                 torch.add,
             }

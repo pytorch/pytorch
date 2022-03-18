@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
@@ -13,9 +13,8 @@ namespace cuda {
 
 //! Update predicates with valid bool conditionals
 //!
-std::vector<kir::Expr*> generateConditionalFromPredicate(
-    Fusion* fusion,
-    const std::vector<kir::Expr*>& exprs);
+std::vector<Expr*> generateConditionalFromPredicate(
+    const std::vector<Expr*>& exprs);
 
 class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
  public:
@@ -26,13 +25,8 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
   //! \param expr Tensor expression
   bool canOmitPredicate(const Expr* expr) const;
 
-  //! True if expr does not need a predicate
-  //!
-  //! \param expr KIR tensor expr
-  bool canOmitPredicate(const kir::Expr* expr) const;
-
   //! Value to initialize out-of-bound regions
-  kir::Val* getInitValue(TensorView* tv) const;
+  Val* getInitValue(TensorView* tv) const;
 
   //! Dump to string for debugging
   std::string toString() const;
@@ -40,7 +34,7 @@ class TORCH_CUDA_CU_API PredicateElimination : public IterVisitor {
  private:
   using IterVisitor::handle;
 
-  void handle(Expr* expr) override;
+  void handle(Expr* expr) final;
 
   //! Set a value to initialize out-of-bound regions
   bool setDefaultInitValue(TensorView* tv);

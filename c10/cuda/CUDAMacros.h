@@ -1,7 +1,13 @@
 #pragma once
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
+
+// We have not yet modified the AMD HIP build to generate this file so
+// we add an extra option to specifically ignore it.
+#ifndef C10_CUDA_NO_CMAKE_CONFIGURE_FILE
 #include <c10/cuda/impl/cuda_cmake_macros.h>
+#endif // C10_CUDA_NO_CMAKE_CONFIGURE_FILE
+
 #endif
 
 // See c10/macros/Export.h for a detailed explanation of what the function

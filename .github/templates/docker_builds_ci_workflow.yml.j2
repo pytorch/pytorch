@@ -26,6 +26,7 @@ env:
 jobs:
 {% block docker_build +%}
   docker-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
@@ -40,11 +41,12 @@ jobs:
     name: docker-build (${{ matrix.docker_image_short_name }})
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(true) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       !{{ common.parse_ref() }}
       !{{ common.teardown_ec2_linux() }}
       - name: Hold runner for 2 hours or until ssh sessions have drained

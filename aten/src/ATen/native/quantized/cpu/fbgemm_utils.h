@@ -1,9 +1,8 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
@@ -100,15 +99,15 @@ struct TORCH_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   c10::optional<at::Tensor> bias_;
 
   at::Tensor apply(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override {
+      at::Tensor /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/) override {
     TORCH_INTERNAL_ASSERT(false);
   }
   at::Tensor apply_relu(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override {
+      at::Tensor /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/) override {
     TORCH_INTERNAL_ASSERT(false);
   }
 
@@ -196,6 +195,10 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point) override;
+
+  at::Tensor apply_dynamic(
+    const at::Tensor& input,
+    bool reduce_range) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
@@ -385,5 +388,6 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       bool pruned_weights,
       const c10::optional<at::Tensor>& per_sample_weights_,
       const c10::optional<at::Tensor>& compressed_indices_mapping,
-      bool include_last_offset) override;
+      bool include_last_offset,
+      bool is_embedding_op) override;
 };

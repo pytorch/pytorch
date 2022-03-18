@@ -1,10 +1,11 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
 //! Nodes in here should generally not be used by users. They should be behind
 //! the scenes and users shouldn't have to be aware of what they do to use the
@@ -19,6 +20,10 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+class ViewTransform;
+class Scope;
+class IrCloner;
+
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
 //! vals are `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
@@ -32,7 +37,7 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   4) split/merge
 class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
-  UnaryOp(UnaryOpType type, Val* out, Val* in);
+  UnaryOp(IrBuilderPasskey, UnaryOpType type, Val* out, Val* in);
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
@@ -61,7 +66,7 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
 //!  2) LT (A < B)
 class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
-  BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
+  BinaryOp(IrBuilderPasskey, BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
 
@@ -95,7 +100,11 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
   //! \param out The output tensor
   //! \param in The input tensor
   //! \param is_broadcast_dims True when output dim is a new broadcast domain
-  BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims);
+  BroadcastOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in,
+      std::vector<bool> is_broadcast_dims);
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
 
@@ -136,7 +145,12 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
 //! non-reduction/non-broadcast dimensions.
 class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
-  ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
+  ReductionOp(
+      IrBuilderPasskey,
+      BinaryOpType reduction_op_type,
+      Val* init,
+      Val* out,
+      Val* in);
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
@@ -167,6 +181,7 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   WelfordOp(
+      IrBuilderPasskey,
       Val* out_avg,
       Val* out_var,
       Val* out_N,
@@ -185,10 +200,6 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   Val* in() const {
     return in_avg_;
-  }
-
-  Val* init() const {
-    return init_avg_;
   }
 
   bool sameAs(const Statement* const other) const override;
@@ -253,7 +264,11 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
 class TORCH_CUDA_CU_API TransposeOp : public Expr {
  public:
-  TransposeOp(TensorView* out, TensorView* in, std::vector<int> new2old);
+  TransposeOp(
+      IrBuilderPasskey,
+      TensorView* out,
+      TensorView* in,
+      std::vector<int> new2old);
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
 
@@ -277,7 +292,13 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
 
 class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
-  TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
+  TernaryOp(
+      IrBuilderPasskey,
+      TernaryOpType type,
+      Val* out,
+      Val* in1,
+      Val* in2,
+      Val* in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
 
@@ -315,7 +336,12 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! \param out
   //! \param in
   //! \param offsets
-  ShiftOp(Val* out, Val* in, std::vector<int> offsets);
+  ShiftOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* in,
+      std::vector<int> offsets,
+      std::vector<int> pad_width);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
 
@@ -334,6 +360,16 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
     return offsets_;
   }
 
+  const std::vector<int>& padWidth() const {
+    return pad_width_;
+  }
+
+  bool hasPadding() const {
+    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto p) {
+      return p > 0;
+    });
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -343,16 +379,18 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! offsets_. The sign of each value indicates the direction of
   //! shifting.
   const std::vector<int> offsets_;
+  const std::vector<int> pad_width_;
 };
 
 //! Gather a window around each element.
 class TORCH_CUDA_CU_API GatherOp : public Expr {
  public:
   GatherOp(
+      IrBuilderPasskey,
       Val* out,
       Val* in,
-      std::vector<Int*> window_shape,
-      std::vector<std::vector<Int*>> pad_width);
+      std::vector<int> window_shape,
+      std::vector<std::vector<int>> pad_width);
 
   GatherOp(const GatherOp* src, IrCloner* ir_cloner);
 
@@ -374,15 +412,40 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
     return pad_width_;
   }
 
+  bool hasPadding() const {
+    return std::any_of(pad_width_.begin(), pad_width_.end(), [](const auto& p) {
+      return p[0] > 0 || p[1] > 0;
+    });
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
   //! Shape of a window gathered for each element.
-  std::vector<Int*> window_shape_;
+  std::vector<int> window_shape_;
   //! The size of zero-padding of each axis.
-  std::vector<std::vector<Int*>> pad_width_;
+  std::vector<std::vector<int>> pad_width_;
+};
+
+class TORCH_CUDA_CU_API ViewOp : public Expr {
+ public:
+  ViewOp(IrBuilderPasskey, TensorView* out, TensorView* in);
+
+  ViewOp(const ViewOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
 };
 
 // Friends for direct access to split
@@ -396,8 +459,18 @@ class IndexReferenceReplay;
 class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
   IterDomain(
+      IrBuilderPasskey,
       Val* start,
       Val* extent,
+      ParallelType parallel_type = ParallelType::Serial,
+      IterType iter_type = IterType::Iteration,
+      bool is_rfactor_domain = false);
+
+  IterDomain(
+      IrBuilderPasskey,
+      Val* start,
+      Val* extent,
+      Val* stop_offset,
       ParallelType parallel_type = ParallelType::Serial,
       IterType iter_type = IterType::Iteration,
       bool is_rfactor_domain = false);
@@ -407,15 +480,7 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   bool sameAs(const Statement* other) const override;
 
   // Returns a new IterDomain matching properties of this
-  // TODO: parallel_method->getParallelType
-  IterDomain* clone() const {
-    return new IterDomain(
-        start(),
-        extent(),
-        getParallelType(),
-        getIterType(),
-        isRFactorProduct());
-  }
+  IterDomain* clone() const;
 
   //! Clone a vector domains
   static std::vector<IterDomain*> clone(
@@ -423,8 +488,26 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
 
-  //! Run concretization pass and return the concretized domain of broadcast id
-  static const IterDomain* concretizeDomain(IterDomain* bcast_dom);
+  //! start_offset and stop_offset defines partial split. Only root
+  //! domains are allowed to have non-zero start and stop offsets.
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
+
+  //! trim_out_of_bounds controls how the values outside start and stop
+  //! positions are treated. The option is only valid with root
+  //! domains as non-root domains do not have valid start and stop
+  //! positions.
+  //!
+  //! \param trim_out_of_bounds Trims [0, start_] and [-stop_offset_, extent_]
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds);
 
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
@@ -441,6 +524,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   bool isGather() const {
     return getIterType() == IterType::Gather;
+  }
+
+  bool isStride() const {
+    return getIterType() == IterType::Stride;
   }
 
   bool isParallelized() const {
@@ -495,10 +582,56 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return start_;
   }
 
+  Val* stop() const;
+
+  Val* stopOffset() const;
+
   Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
   }
+
+  //! Dimension padding interface:
+  //!  2 modes are currently supported:
+  //!
+  //!   - mode 1: if to_size is given as a positive number,
+  //!      the dimension will be padded to the size so that
+  //!      this iterdomain will be compile-time constant
+  //!      size and it is the scheduler's responsibility
+  //!      to ensure no input larger than the padded size
+  //!      will be observed
+  //!
+  //!   - mode 2: if no to_size is given, this dimension
+  //!      is "dynamically" padded to next smallest multiple
+  //!      of a warp size, i.e. 17 padded to 32, 33 padded to 64
+  //!      based on the given input.
+  void padToMultipleOfWarp(c10::optional<int64_t> maybe_to_size = {}) {
+    // Currently only restricted to TIDx to generate warp reduce
+    TORCH_CHECK(
+        parallel_type_ == ParallelType::TIDx,
+        "padToMultipleOfWarp : warp padding only supported on TIDx parallel dimension");
+    is_padded_dimension_ = true;
+    if (maybe_to_size.has_value()) {
+      if (maybe_to_size.value() > 0) {
+        padded_to_size_ = maybe_to_size.value();
+      }
+    }
+  }
+
+  //! Indicates if this iterdomain had padding
+  //!  dynamical or statical
+  bool hasPaddingToMultipleOfWarp() const {
+    return is_padded_dimension_;
+  }
+
+  //! Returns a concrete value if this iterdomain
+  //!  has been padded to a statical size.
+  c10::optional<int64_t> getMaybeSizeAfterPadding() const {
+    return padded_to_size_;
+  }
+
+  //! True if range of iteration domain isn't across the full extent
+  bool maybePartial() const;
 
   //! Check if IterDomain is a broadcast axis with compile-time
   //! known extent. This is the case with all size-1 IterDomains on
@@ -519,22 +652,36 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return isReduction() && extent()->isOneInt();
   }
 
+  //! Split for stride by a given factor. It effectively does an inner
+  //! split by the factor and sets the inner domain as a Stride
+  //! domain.
+  std::pair<IterDomain*, IterDomain*> stridedSplit(int factor);
+
+  // TODO: Remove
+  bool isSimple() const {
+    return definition() == nullptr;
+  }
+
  protected:
   friend TensorDomain;
   friend ReplayTransformations;
   friend IndexReferenceReplay;
 
-  static std::pair<IterDomain*, IterDomain*> split(
-      IterDomain* in,
-      Val* factor,
-      bool inner_split);
-
  private:
+  //! Valid range is defined as [start:-stop_offset]
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
+  //! Distance of stop from the end
+  Val* const stop_offset_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
   bool is_rfactor_domain_ = false;
+  bool is_padded_dimension_ = false;
+  c10::optional<int64_t> padded_to_size_ = c10::nullopt;
+
+  // TODO: Remove only used in kernel IR because IterDomains don't maintain
+  // definitions of split/merge.
+  bool is_simple_ = true;
 };
 
 //! TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
@@ -554,15 +701,18 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 class TORCH_CUDA_CU_API TensorDomain : public Val {
  public:
   explicit TensorDomain(
+      IrBuilderPasskey,
       std::vector<IterDomain*> root_domain,
       std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(
+      IrBuilderPasskey,
       std::vector<IterDomain*> root_domain,
       std::vector<IterDomain*> domain,
       std::vector<bool> contiguity = std::vector<bool>());
 
   TensorDomain(
+      IrBuilderPasskey,
       std::vector<IterDomain*> root_domain,
       std::vector<IterDomain*> rfactor_domain,
       std::vector<IterDomain*> domain,
@@ -593,6 +743,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
     return contiguity_;
   }
 
+  void setContiguity(const std::vector<bool>& contig);
+
   std::string getContiguityString() const {
     std::stringstream ss;
     for (auto b : contiguity()) {
@@ -604,6 +756,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
+  bool hasGridBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
   bool hasVectorize() const;
@@ -644,6 +798,9 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   size_t posOf(IterDomain* id) const;
 
+  //! Returns a position of a root domain
+  size_t rootPosOf(IterDomain* id) const;
+
   // Split "axis" into 2 axes
   //! inner_split dictates if the factor section of the split should be inside
   //! the
@@ -652,7 +809,11 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   //! tv[id{extent}] -> tv[id{ceilDiv(extent, factor)}, id{factor}]
   //! e.g. split(0, 4, inner_split = false) will result in:
   //! tv[id{extent}] -> tv[id{factor}, id{ceilDiv(extent, factor)}]
-  void split(int axis_, Val* factor, bool inner_split);
+  void split(
+      int axis_,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds = false);
 
   // Merge axis_o and axis_i. axis_i is the fast changing dimension. Resulting
   // axis is by default placed at original position axis_o
@@ -660,6 +821,10 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   // Reorder axes according to map[old_pos] = new_pos
   void reorder(const std::unordered_map<int, int>& old2new);
+
+  // Transform TensorView according to merge and split transformations
+  TensorDomain* view(
+      const std::vector<std::shared_ptr<ViewTransform>>& transforms);
 
   static std::vector<IterDomain*> orderedAs(
       const std::vector<IterDomain*>& td,
@@ -681,7 +846,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   std::vector<IterDomain*> no_bcast_domain_;
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
-  const std::vector<bool> contiguity_;
+  std::vector<bool> contiguity_;
   bool has_nontrivial_reduction_;
 };
 
@@ -690,12 +855,20 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 //! remainer or outside.
 class TORCH_CUDA_CU_API Split : public Expr {
  public:
+  // start_offset and stop_offset are used to express partial
+  // split. Only the partial domain from start_offset to stop_offset
+  // is split and the outer sub-regions are ignored. Note that both
+  // start_offset and stop_offset are distance from the left end and
+  // right ends, respectively.
   Split(
+      IrBuilderPasskey,
       IterDomain* outer,
       IterDomain* inner,
       IterDomain* in,
       Val* factor,
-      bool inner_split = true);
+      bool inner_split = true,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
 
   Split(const Split* src, IrCloner* ir_cloner);
 
@@ -716,6 +889,19 @@ class TORCH_CUDA_CU_API Split : public Expr {
     return inner_split_;
   }
 
+  Val* startOffset() const {
+    TORCH_INTERNAL_ASSERT(start_offset_ != nullptr);
+    return start_offset_;
+  }
+
+  Val* stopOffset() const {
+    TORCH_INTERNAL_ASSERT(stop_offset_ != nullptr);
+    return stop_offset_;
+  }
+
+  //! Utility function to compute the split extent.
+  static Val* extent(Val* in_extent, Val* start_offset, Val* stop_offset);
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -724,18 +910,25 @@ class TORCH_CUDA_CU_API Split : public Expr {
   IterDomain* const in_ = nullptr;
   Val* const factor_ = nullptr;
   bool inner_split_ = true;
+  //! Start position of the input domain. Non-zero means partial
+  //! split. Elements until this offset are ignored.
+  Val* const start_offset_ = nullptr;
+  //! Offset from extent of the input domain. Non-zero means partial
+  //! split. Elements after this offset are ignored.
+  Val* const stop_offset_ = nullptr;
 };
 
 //! Merge the IterDomains outer and inner into one domain, outer and inner
 //! dictate which will be traversed first (inner). Both IterDomains must be of
 //! the same iter or reduction type, as well as the same parallelization
 //! strategy if there is one
-//!
-//! \todo Should this be a unary op type?
-//!
 class TORCH_CUDA_CU_API Merge : public Expr {
  public:
-  Merge(IterDomain* out, IterDomain* outer, IterDomain* inner);
+  Merge(
+      IrBuilderPasskey,
+      IterDomain* out,
+      IterDomain* outer,
+      IterDomain* inner);
 
   Merge(const Merge* src, IrCloner* ir_cloner);
 
@@ -767,9 +960,7 @@ class TORCH_CUDA_CU_API Merge : public Expr {
 //!
 class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  NamedScalar(std::string name, DataType dtype)
-      : Val(ValType::NamedScalar, dtype), name_(name) {}
+  NamedScalar(IrBuilderPasskey passkey, std::string name, DataType dtype);
 
   NamedScalar(const NamedScalar* src, IrCloner* ir_cloner);
 
@@ -780,9 +971,11 @@ class TORCH_CUDA_CU_API NamedScalar : public Val {
   bool sameAs(const Statement* other) const override;
 
   //! Return the named scalar extent of a parallel dimension (e.g. blockDim.x)
+  //! WARNING: Only works with Fusion container at the moment
   static NamedScalar* getParallelDim(ParallelType p_type);
 
   //! Return the named scalar index of a parallel dimension (e.g. threadIdx.x)
+  //! WARNING: Only works with Fusion container at the moment
   static NamedScalar* getParallelIndex(ParallelType p_type);
 
   //! Return the parallel type of this NamedScalar if it is an extent of a

@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <memory>

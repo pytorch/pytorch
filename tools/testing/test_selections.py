@@ -156,7 +156,8 @@ def _query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]
 
 
 def _query_changed_test_files() -> List[str]:
-    cmd = ["git", "diff", "--name-only", "origin/master", "HEAD"]
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
+    cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if proc.returncode != 0:
@@ -236,7 +237,7 @@ def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str
     prioritized_tests = []
     # Try using historic stats from PR.
     if is_reordering_by_pr and HAVE_BOTO3:
-        pr_number = os.environ.get("CIRCLE_PR_NUMBER", "")
+        pr_number = os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER", ""))
         if len(pr_number):
             ci_job_prefix = _get_stripped_CI_job()
             s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(

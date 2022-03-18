@@ -670,6 +670,17 @@ TEST(OperatorRegistrationTest, whenRegisterWithLazyKernelAndCatchAll_AutogradLaz
   whenRegisterWithLazyBackendsAndCatchAll_AutogradLazyBackendsIsNotFilled(DispatchKey::Lazy);
 }
 
+TEST(OperatorRegistrationTest, whenregisteringwithinvalidoverloadname) {
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy.default", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "default is not a legal overload name for aten operators");
+  expectThrows<c10::Error>([] {
+    auto registrar = c10::RegisterOperators().op("_test::dummy.__name__", c10::RegisterOperators::options()
+      .kernel(DispatchKey::CPU, [] (const int64_t&) {}));
+  }, "__name__ is not a legal overload name for aten operators");
+}
+
 TEST(OperatorRegistrationTest, givenLambdaKernel_whenRegisteringWithMismatchingCppSignatures_thenFails) {
   expectThrows<c10::Error>([] {
     auto registrar = c10::RegisterOperators().op("_test::dummy", c10::RegisterOperators::options()
@@ -1241,6 +1252,16 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     makeDeeplyNestedObject(), [] (const DeeplyNestedType& v) {EXPECT_EQ("1", v.get(0).at("key").get(0).value().at(1));},
     makeDeeplyNestedObject(), [] (const IValue& v) {EXPECT_EQ("1", v.to<DeeplyNestedType>().get(0).at("key").get(0).value().at(1));},
     "(Dict(str, Dict(int, str)?[])[] a) -> Dict(str, Dict(int, str)?[])[]");
+}
+
+TEST(NewOperatorRegistrationTest, erroroutwithinvalidoverloadname) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  expectThrows<c10::Error>([&] {
+   m.def("dummy.default(Tensor self) -> Tensor");
+  }, "default is not a legal overload name for aten operators");
+  expectThrows<c10::Error>([&] {
+   m.def("dummy.__name__(Tensor self) -> Tensor");
+  }, "__name__ is not a legal overload name for aten operators");
 }
 
 TEST(NewOperatorRegistrationTest, testBasics) {

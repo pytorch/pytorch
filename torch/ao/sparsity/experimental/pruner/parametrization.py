@@ -46,7 +46,10 @@ class ActivationReconstruction:
             indices.append(slice(0, size, 1))
         indices[1] = valid_columns
 
-        reconstructed_tensor = torch.zeros(sizes)
+        reconstructed_tensor = torch.zeros(sizes,
+                                           dtype=output.dtype,
+                                           device=output.device,
+                                           layout=output.layout)
         reconstructed_tensor[indices] = output
         return reconstructed_tensor
 

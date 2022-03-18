@@ -236,6 +236,7 @@ class Module:
 
     dump_patches: bool = False
 
+    _version: int = 1
     r"""This allows better BC support for :meth:`load_state_dict`. In
     :meth:`state_dict`, the version number will be saved as in the attribute
     `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
@@ -246,7 +247,6 @@ class Module:
     be bumped, and the module's `_load_from_state_dict` method can compare the
     version number and do appropriate changes if the state dict is from before
     the change."""
-    _version: int = 1
 
     training: bool
     _is_full_backward_hook: Optional[bool]
@@ -403,7 +403,7 @@ class Module:
         For example, let's say you have an ``nn.Module`` ``A`` that
         looks like this:
 
-        .. code-block::text
+        .. code-block:: text
 
             A(
                 (net_b): Module(
@@ -555,7 +555,7 @@ class Module:
         """
         raise RuntimeError(
             "Reached a code path in Module.get_extra_state() that should never be called. "
-            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
     def set_extra_state(self, state: Any):
@@ -570,7 +570,7 @@ class Module:
         """
         raise RuntimeError(
             "Reached a code path in Module.set_extra_state() that should never be called. "
-            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+            "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
             "to report this bug.")
 
     def _apply(self, fn):
@@ -895,7 +895,7 @@ class Module:
                 warnings.warn(
                     "Complex modules are a new feature under active development whose design may change, "
                     "and some modules might not work as expected when using complex tensors as parameters or buffers. "
-                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.md "
+                    "Please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml "
                     "if a complex module does not work as expected.")
 
         def convert(t):
@@ -1277,26 +1277,78 @@ class Module:
         if getattr(self.__class__, "get_extra_state", Module.get_extra_state) is not Module.get_extra_state:
             destination[extra_state_key] = self.get_extra_state()
 
-    # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
-    # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
+    def _state_dict_impl(self, destination, prefix, keep_vars):
+        r"""Holds the actual implementation of
+        :meth:`~torch.nn.Module.state_dict`, with recursive calls for
+        descendants of this module.
+
+        In rare cases, users can call this directly to provide a custom
+        :attr:`destination`.
+
+        Args:
+            destination (dict): a dict where state will be stored
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+            keep_vars (bool): whether NOT to return buffers detached from
+                autograd
+        """
+        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
+        self._save_to_state_dict(destination, prefix, keep_vars)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+        for hook in self._state_dict_hooks.values():
+            hook_result = hook(self, destination, prefix, local_metadata)
+            if hook_result is not None:
+                destination = hook_result
+        return destination
+
+    # TODO: Deprecated, destination is becoming private. Remove this signature when BC allows
+    # See https://github.com/pytorch/pytorch/issues/72778#issuecomment-1039263869
     T_destination = TypeVar('T_destination', bound=Mapping[str, Tensor])
 
     @overload
     def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
         ...
 
-    # TODO: Remove string escape once Python-3.6 no longer supported
-    # See https://github.com/python/mypy/issues/6904#issuecomment-496207426
+    # TODO: Remove string escape once Python-3.7.0 is no longer supported
+    # typing.OrderedDict with generics can be used in Python-3.7.2+ or later
+    # See https://github.com/pytorch/pytorch/issues/74087
     @overload
-    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> 'OrderedDict[str, Tensor]':
+    def state_dict(self, *, prefix: str = ..., keep_vars: bool = ...) -> "OrderedDict[str, Tensor]":
         ...
 
-    def state_dict(self, destination=None, prefix='', keep_vars=False):
+    def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
         r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
+
+        This can be called as
+
+        .. function:: state_dict(*, prefix='', keep_vars=False)
+           :noindex:
+
+        .. function:: state_dict(destination, prefix='', keep_vars=False)
+           :noindex:
+
+        .. warning::
+            The second signature is deprecated and should not be used. It's only
+            temporarily kept for backward compatibility and will be removed in
+            a future release. Use the first signature instead.
+
+        Args:
+            destination (dict, optional): Deprecated. This dict is returned
+                with the module state saved in it. It should also have an
+                attribute ``_metadata: dict`` to save metadata of the module
+                state. If it's not provided, an ``OrderedDict`` is created and
+                returned. Default: ``None``
+            prefix (str, optional): a prefix added to parameter and buffer
+                names to compose the keys in dict. Default: ``''``
+            keep_vars (bool, optional): by default the :class:`~torch.Tensor` s
+                returned in the state dict are detached from autograd. If it's
+                set to ``True``, detaching is not performed. Default: ``False``
 
         Returns:
             dict:
@@ -1308,19 +1360,31 @@ class Module:
             ['bias', 'weight']
 
         """
-        if destination is None:
+
+        # TODO: positional args parsing is just for BC. Remove on transition to kwargs-only
+        warn_msg = []
+        if len(args) > 0:
+            warn_msg.append('positional arguments')
+            if destination is None:
+                destination = args[0]
+            if len(args) > 1 and prefix == '':
+                prefix = args[1]
+            if len(args) > 2 and keep_vars is False:
+                keep_vars = args[2]
+
+        if destination is not None:
+            warn_msg.append('argument "destination"')
+        else:
             destination = OrderedDict()
             destination._metadata = OrderedDict()
-        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
-        self._save_to_state_dict(destination, prefix, keep_vars)
-        for name, module in self._modules.items():
-            if module is not None:
-                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
-        for hook in self._state_dict_hooks.values():
-            hook_result = hook(self, destination, prefix, local_metadata)
-            if hook_result is not None:
-                destination = hook_result
-        return destination
+
+        if warn_msg:
+            # DeprecationWarning is ignored by default
+            warnings.warn(
+                " and ".join(warn_msg) + " are deprecated. nn.Module.state_dict will not accept them in the future. "
+                "Refer to https://pytorch.org/docs/master/generated/torch.nn.Module.html#torch.nn.Module.state_dict for details.")
+
+        return self._state_dict_impl(destination, prefix, keep_vars)
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
         r"""These hooks will be called with arguments: `state_dict`, `prefix`,
@@ -1387,6 +1451,13 @@ class Module:
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+                if not torch.overrides.is_tensor_like(input_param):
+                    error_msgs.append('While copying the parameter named "{}", '
+                                      'expected torch.Tensor or Tensor-like object from checkpoint but '
+                                      'received {}'
+                                      .format(key, type(input_param)))
+                    continue
+
                 # This is used to avoid copying uninitialized parameters into
                 # non-lazy modules, since they dont have the hook to do the checks
                 # in such case, it will error when accessing the .shape attribute.
@@ -1666,7 +1737,7 @@ class Module:
             memo: a memo to store the set of modules already added to the result
             prefix: a prefix that will be added to the name of the module
             remove_duplicate: whether to remove the duplicated module instances in the result
-            or not
+                or not
 
         Yields:
             (string, Module): Tuple of name and module

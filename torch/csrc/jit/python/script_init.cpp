@@ -1,19 +1,28 @@
 #include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/code.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
+#include <torch/csrc/jit/operator_upgraders/utils.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -24,13 +33,15 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -39,6 +50,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 
 #include <pybind11/functional.h>
@@ -1008,6 +1020,27 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
+  py::class_<UpgraderEntry>(m, "_UpgraderEntry")
+      .def(py::init<int, std::string, std::string>())
+      .def_property_readonly(
+          "bumped_at_version",
+          [](const UpgraderEntry& self) { return self.bumped_at_version; })
+      .def_property_readonly(
+          "upgrader_name",
+          [](const UpgraderEntry& self) { return self.upgrader_name; })
+      .def_property_readonly("old_schema", [](const UpgraderEntry& self) {
+        return self.old_schema;
+      });
+
+  py::class_<UpgraderRange>(m, "_UpgraderRange")
+      .def(py::init<int, int>())
+      .def_property_readonly(
+          "min_version",
+          [](const UpgraderRange& self) { return self.min_version; })
+      .def_property_readonly("max_version", [](const UpgraderRange& self) {
+        return self.max_version;
+      });
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
         return Object(
@@ -1361,7 +1394,12 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_class",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_class(name); });
+             const std::string& name) { return self->get_class(name); })
+      .def(
+          "drop_all_functions",
+          [](const std::shared_ptr<CompilationUnit>& self) {
+            self->drop_all_functions();
+          });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1522,6 +1560,15 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def_property_readonly("owner", &Method::owner);
+  m.def("_generate_upgraders_graph", &generate_upgraders_graph);
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
@@ -1701,7 +1748,20 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
+  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
+
+  m.def("_get_upgraders_map_size", &get_upgraders_map_size);
+  m.def("_dump_upgraders_map", &dump_upgraders_map);
+
+  m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
+  m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
+
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
+  m.def("_get_max_operator_version", &getMaxOperatorVersion);
+  m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
+  m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
+  m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
       "import_ir_module",
       [](std::shared_ptr<CompilationUnit> cu,
@@ -2150,10 +2210,6 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-  m.def(
-      "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });

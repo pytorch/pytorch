@@ -4,7 +4,7 @@
 
 namespace c10 {
 
-// See example implementations in TensorBody.h and intrusive_ptr.h.
+// See example implementation in TensorBase.h and TensorBody.h.
 // Synopsis:
 //
 // repr_type -- type to use to store an owned T in ExclusivelyOwned.
@@ -40,19 +40,18 @@ struct ExclusivelyOwnedTraits;
 
 /// ExclusivelyOwned is a smart-pointer-like wrapper around an
 /// exclusively-owned instance of some type T that normally has
-/// mandatory reference counting (currently Tensor or
-/// c10::intrusive_ptr). If you have an isolated piece of code that
-/// knows that it has sole ownership of an object of one of these
-/// types (i.e., because you created it directly or using a factory
-/// function) and that object will not escape from that isolated piece
-/// of code, then moving the object into an ExclusivelyOwned will
-/// avoid an atomic reference count decrement at destruction time.
+/// mandatory reference counting (currently just Tensor). If you have
+/// an isolated piece of code that knows that it has sole ownership of
+/// an object of one of these types (i.e., because you created it
+/// directly or using a factory function) and that object will not
+/// escape from that isolated piece of code, then moving the object
+/// into an ExclusivelyOwned will avoid an atomic reference count
+/// decrement at destruction time.
 ///
-/// If you directly create the Tensor/intrusive_ptr in the first
+/// If you directly create the Tensor in the first
 /// place, you can use the in_place constructor of ExclusivelyOwned to
 /// additionally avoid doing any stores to initialize the refcount &
-/// weakcount. (Do note, however, that in this case you should
-/// probably just use std::unique_ptr instead of intrusive_ptr if applicable.)
+/// weakcount.
 template <typename T>
 class ExclusivelyOwned {
   using EOT = ExclusivelyOwnedTraits<T>;
@@ -111,9 +110,7 @@ class ExclusivelyOwned {
 
   // NOTE: the equivalent operation on MaybeOwned is a moving
   // operator*. For ExclusivelyOwned, take() and operator*() may well
-  // have different return types (e.g., for intrusive_ptr, take()
-  // returns c10::intrusive_ptr<T> whereas operator* returns T&), so
-  // they are different functions.
+  // have different return types, so they are different functions.
   T take() && {
     return EOT::take(repr_);
   }

@@ -15,6 +15,7 @@ bool isFloatingPointType(DataType dtype) {
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
+    case DataType::BFloat16:
       return true;
     case DataType::Int:
     case DataType::Int32:
@@ -33,6 +34,7 @@ bool isIntegralType(DataType dtype) {
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
+    case DataType::BFloat16:
       return false;
     case DataType::Int:
     case DataType::Int32:
@@ -61,11 +63,6 @@ bool alsoBooleanOperator(const UnaryOpType uopt) {
   return uopt >= UnaryOpType::Not && uopt <= UnaryOpType::Not;
 }
 
-bool noFullIntegerSupport(const BinaryOpType bopt) {
-  return bopt == BinaryOpType::Div || bopt == BinaryOpType::Pow ||
-      bopt == BinaryOpType::Fmod;
-}
-
 // Return highest on list (smallest enum val)
 DataType promote_type(const DataType& t1, const DataType& t2) {
   TORCH_CHECK(
@@ -90,6 +87,9 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
       (t1 == ValType::Scalar || t1 == ValType::NamedScalar)) {
     return ValType::Scalar;
   }
+  if (t1 == ValType::NamedScalar && t2 == ValType::NamedScalar) {
+    return ValType::Scalar;
+  }
   TORCH_CHECK(false, "Expected promotable ValTypes but got: ", t1, " and ", t2);
 }
 
@@ -103,12 +103,14 @@ static const char* data_type2string(DataType t) {
       return "float";
     case DataType::Half:
       return "__half";
+    case DataType::BFloat16:
+      return "__bfloat";
     case DataType::Int:
       return "int64_t";
     case DataType::Int32:
       return "int";
     case DataType::Null:
-      return "nullptr";
+      return "null_type";
     default:
       break;
   }
@@ -128,6 +130,10 @@ static const char* val_type2string(ValType t) {
       return "Scalar";
     case ValType::NamedScalar:
       return "NamedScalar";
+    case ValType::Predicate:
+      return "Predicate";
+    case ValType::TensorIndex:
+      return "TensorIndex";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }
@@ -145,12 +151,38 @@ static const char* expr_type2string(ExprType t) {
       return "ReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
+    case ExprType::WelfordOp:
+      return "WelfordOp";
+    case ExprType::TransposeOp:
+      return "TransposeOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
+    case ExprType::GatherOp:
+      return "GatherOp";
+    case ExprType::ViewOp:
+      return "ViewOp";
     case ExprType::Split:
       return "Split";
     case ExprType::Merge:
       return "Merge";
+    case ExprType::Allocate:
+      return "Allocate";
+    case ExprType::Sync:
+      return "Sync";
+    case ExprType::InitMagicZero:
+      return "InitMagicZero";
+    case ExprType::UpdateMagicZero:
+      return "UpdateMagicZero";
+    case ExprType::ForLoop:
+      return "ForLoop";
+    case ExprType::IfThenElse:
+      return "IfThenElse";
+    case ExprType::GridReduction:
+      return "GridReduction";
+    case ExprType::GridBroadcast:
+      return "GridBroadcast";
+    case ExprType::GridWelford:
+      return "GridWelford";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -282,9 +314,6 @@ bool needFloatSuffix(BinaryOpType t) {
     case BinaryOpType::Atan2:
     case BinaryOpType::Div:
     case BinaryOpType::Fmod:
-    case BinaryOpType::Max:
-    case BinaryOpType::Min:
-    case BinaryOpType::Pow:
       return true;
     default:
       return false;
@@ -314,11 +343,17 @@ static const char* binary_op_type2string(BinaryOpType t) {
     case BinaryOpType::Sub:
       return "sub";
 
-    // Logical Ops
+    // Integer Ops
     case BinaryOpType::Mod:
       return "mod";
     case BinaryOpType::CeilDiv:
       return "ceilDiv";
+    case BinaryOpType::Lshift:
+      return "lshift";
+    case BinaryOpType::Rshift:
+      return "rshift";
+
+    // Logical Ops
     case BinaryOpType::And:
       return "and";
     case BinaryOpType::Eq:
@@ -344,6 +379,8 @@ static const char* binary_op_integer_op2string(BinaryOpType t) {
       return "max";
     case BinaryOpType::Min:
       return "min";
+    case BinaryOpType::Fmod:
+      return "fmod";
     default:
       break;
   }
@@ -474,6 +511,8 @@ static const char* iter_type2string(IterType t) {
       return "b";
     case IterType::Gather:
       return "g";
+    case IterType::Stride:
+      return "s";
     default:
       // Don't try to print t as it would recursively call this function
       TORCH_INTERNAL_ASSERT(false, "Unexpected IterType");
@@ -503,25 +542,42 @@ const unsigned int _WORD_SHIFT = 16;
 constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
+
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
   switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
+    case supported_switch_pair(DataType::Int, DataType::Float):
+    case supported_switch_pair(DataType::Int32, DataType::Float):
     case supported_switch_pair(DataType::Double, DataType::Float):
       return "(float)";
+    case supported_switch_pair(DataType::Int32, DataType::Int):
+    case supported_switch_pair(DataType::Float, DataType::Int):
+    case supported_switch_pair(DataType::Double, DataType::Int):
+      return "(int64_t)";
+    case supported_switch_pair(DataType::Int, DataType::Int32):
+    case supported_switch_pair(DataType::Float, DataType::Int32):
+    case supported_switch_pair(DataType::Double, DataType::Int32):
+      return "(int32_t)";
+    case supported_switch_pair(DataType::Int, DataType::Double):
+    case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
       return "(double)";
-    case supported_switch_pair(DataType::Int32, DataType::Float):
-      return "(float)";
-    case supported_switch_pair(DataType::Int, DataType::Float):
-      return "(double)";
-    case supported_switch_pair(DataType::Int32, DataType::Int):
-      return "(int64_t)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
+    case supported_switch_pair(DataType::Float, DataType::BFloat16):
+      return "__float2bfloat";
     case supported_switch_pair(DataType::Half, DataType::Float):
       return "__half2float";
+    case supported_switch_pair(DataType::BFloat16, DataType::Float):
+      return "__bfloat2float";
+    case supported_switch_pair(DataType::Bool, DataType::Double):
+      return "double";
     case supported_switch_pair(DataType::Bool, DataType::Float):
       return "float";
+    case supported_switch_pair(DataType::Bool, DataType::Int):
+      return "int64_t";
+    case supported_switch_pair(DataType::Bool, DataType::Int32):
+      return "int32_t";
     default:
       return nullptr;
   }
@@ -537,6 +593,8 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
       return DataType::Float;
     case at::ScalarType::Half:
       return DataType::Half;
+    case at::ScalarType::BFloat16:
+      return DataType::BFloat16;
     case at::ScalarType::Long:
       return DataType::Int;
     case at::ScalarType::Int:
@@ -556,6 +614,8 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
       return at::ScalarType::Float;
     case DataType::Half:
       return at::ScalarType::Half;
+    case DataType::BFloat16:
+      return at::ScalarType::BFloat16;
     case DataType::Int:
       return at::ScalarType::Long;
     case DataType::Int32:
@@ -638,6 +698,7 @@ std::string typePrefix(const DataType data_type) {
       return "d";
     case DataType::Float:
     case DataType::Half:
+    case DataType::BFloat16:
       return "f";
     case DataType::Int:
     case DataType::Int32:
@@ -683,6 +744,8 @@ size_t dataTypeSize(DataType type) {
       return sizeof(float);
     case DataType::Half:
       return sizeof(at::Half);
+    case DataType::BFloat16:
+      return sizeof(at::BFloat16);
     case DataType::Int:
       return sizeof(uint64_t);
     case DataType::Int32:

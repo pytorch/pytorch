@@ -411,12 +411,6 @@ class TestDataLoaderUtils(TestCase):
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
 
 
-class TestFFI(TestCase):
-    def test_deprecated(self):
-        with self.assertRaisesRegex(ImportError, "torch.utils.ffi is deprecated. Please use cpp extensions instead."):
-            from torch.utils.ffi import create_extension  # type: ignore[attr-defined] # noqa: F401
-
-
 @unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command, timeout=30):
@@ -862,6 +856,14 @@ class TestExtensionUtils(TestCase):
         # No supporting for override
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
+
+
+class TestCppExtensionUtils(TestCase):
+    def test_cpp_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
+
+    def test_cc_compiler_is_ok(self):
+        self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
 
 
 if __name__ == '__main__':

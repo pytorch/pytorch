@@ -9,8 +9,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
 
-#include <THC/THC.h>
-
 namespace at {
 namespace native {
 
@@ -432,6 +430,8 @@ inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) 
 }
 
 Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
+  check_cat_no_zero_dim(inputs);
+  dimension = legacy_cat_wrap_dim(dimension, inputs);
 
   // previously, size [0] tensors were the only possible empty tensors; thus, it
   // wasn't possible to cat empty tensors unless all the other tensors were

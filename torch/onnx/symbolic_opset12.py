@@ -119,9 +119,9 @@ def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduc
     if reduction == 0:
         return output
     elif reduction == 1:
-        return g.op("ReduceMean", output)
+        return g.op("ReduceMean", output, keepdims_i=0)
     elif reduction == 2:
-        return g.op("ReduceSum", output)
+        return g.op("ReduceSum", output, keepdims_i=0)
     else:
         return sym_help._onnx_unsupported("binary_cross_entropy_with_logits with reduction other than none, mean, or sum")
 
@@ -174,7 +174,7 @@ def unfold(g, input, dimension, size, step):
         from torch.onnx.symbolic_opset9 import unfold as _unfold
         return _unfold(g, input, dimension, const_size, const_step)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+        return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
 
     sizedim = sym_help._get_tensor_dim_size(input, dimension)
     if sizedim is not None:

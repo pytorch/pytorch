@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/Export.h>
 
 namespace c10d {
 
@@ -85,7 +86,7 @@ class TORCH_API GradBucket {
 // Requires implementing 1) `runHook` method that communicates gradients
 // asynchronously, and 2) `parseHookResult` method that converts the hook
 // result into a tensor.
-class TORCH_PYTHON_API CommHookInterface {
+class TORCH_API CommHookInterface {
  public:
   virtual ~CommHookInterface() = default;
 
@@ -121,9 +122,8 @@ inline at::Tensor parseCppCommHookResult(
 
 // This CppCommHook interface only requires implementing runHook method that
 // potentially uses a state.
-// Still need TORCH_PYTHON_API instead of TORCH_API to support Windows platform.
 template <typename T>
-class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
+class CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 

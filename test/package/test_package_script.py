@@ -120,6 +120,29 @@ class TestPackageScript(PackageTestCase):
             )
         )
 
+    def test_package_script_class_referencing_self(self):
+        import package_a.fake_script_class as fake
+
+        obj = fake.UsesIdListFeature()
+        # intentionally script here to fill the compilation cache, to make sure
+        # there is no false sharing between scripted types coming from the
+        # package vs. outside environment.
+        torch.jit.script(obj)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.intern("**")
+            exporter.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        importer = PackageImporter(buffer)
+        obj_loaded = importer.load_pickle("obj", "obj.pkl")
+        scripted_obj_loaded = torch.jit.script(obj_loaded)
+
+        # Make sure the scripted object can be serialized without error.
+        buffer2 = scripted_obj_loaded.save_to_buffer()
+        torch.jit.load(BytesIO(buffer2))
+
     def test_different_package_script_class(self):
         """Test a case where the script class defined in the package is
         different than the one defined in the loading environment, to make

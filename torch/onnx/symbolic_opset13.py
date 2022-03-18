@@ -152,7 +152,7 @@ def _reduce_op_symbolic(onnx_op_name):
             # all-reduce path
             return sym_help._handle_reduce_dim_none(g, self, onnx_op_name)
         else:
-            keepdim = sym_help._get_const(keepdim, 'i', 'keepdim')
+            keepdim = sym_help._get_const(keepdim, "i", "keepdim")
             return g.op(onnx_op_name, self, dim, keepdims_i=keepdim)
     return symbolic
 
@@ -237,7 +237,6 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
             output_sizes[idx], input_sizes[idx] = 0, -1
-    print(output_sizes, input_sizes)
 
     cond_dynamic_repeats = (repeats_dim == 1 and repeats_sizes[0] is None)
     # If input size is dynamic or repeats vector is dynamic

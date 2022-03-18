@@ -29,7 +29,8 @@ else:
 
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type, TYPE_CHECKING
+from typing import Set, Type, TYPE_CHECKING, Union
+import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -42,6 +43,8 @@ __all__ = [
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
     'lobpcg', 'use_deterministic_algorithms',
     'are_deterministic_algorithms_enabled',
+    'is_deterministic_algorithms_warn_only_enabled',
+    'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -373,6 +376,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
     and if only nondeterministic algorithms are available they will throw a
     :class:`RuntimeError` when called.
 
+    .. note:: :func:`torch.set_deterministic_debug_mode` offers an alternative
+        interface for this feature.
+
     The following normally-nondeterministic operations will act
     deterministically when ``mode=True``:
 
@@ -500,6 +506,62 @@ def is_deterministic_algorithms_warn_only_enabled():
     """
     return _C._get_deterministic_algorithms_warn_only()
 
+def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
+    r"""Sets the debug mode for deterministic operations.
+
+    .. note:: This is an alternative interface for
+        :func:`torch.use_deterministic_algorithms`. Refer to that function's
+        documentation for details about affected operations.
+
+    Args:
+        debug_mode(str or int): If "default" or 0, don't error or warn on
+            nondeterministic operations. If "warn" or 1, warn on
+            nondeterministic operations. If "error" or 2, error on
+            nondeterministic operations.
+    """
+
+    # NOTE: builtins.int is used here because int in this scope resolves
+    # to torch.int
+    if not isinstance(debug_mode, (builtins.int, str)):
+        raise TypeError(f'debug_mode must be str or int, but got {type(debug_mode)}')
+
+    if isinstance(debug_mode, str):
+        if debug_mode == 'default':
+            debug_mode = 0
+        elif debug_mode == 'warn':
+            debug_mode = 1
+        elif debug_mode == 'error':
+            debug_mode = 2
+        else:
+            raise RuntimeError(
+                'invalid value of debug_mode, expected one of `default`, '
+                f'`warn`, `error`, but got {debug_mode}')
+
+    if debug_mode == 0:
+        _C._set_deterministic_algorithms(False)
+    elif debug_mode == 1:
+        _C._set_deterministic_algorithms(True, warn_only=True)
+    elif debug_mode == 2:
+        _C._set_deterministic_algorithms(True)
+    else:
+        raise RuntimeError(
+            'invalid value of debug_mode, expected 0, 1, or 2, '
+            f'but got {debug_mode}')
+
+def get_deterministic_debug_mode() -> builtins.int:
+    r"""Returns the current value of the debug mode for deterministic
+    operations. Refer to :func:`torch.set_deterministic_debug_mode`
+    documentation for more details.
+    """
+
+    if _C._get_deterministic_algorithms():
+        if _C._get_deterministic_algorithms_warn_only():
+            return 1
+        else:
+            return 2
+    else:
+        return 0
+
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.
@@ -532,101 +594,101 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase, TypedStorage
+from .storage import _StorageBase, _TypedStorage
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
-# dtype, use torch.storage.TypedStorage directly.
+# dtype, use torch.storage._TypedStorage directly.
 
-class UntypedStorage(_C.ByteStorageBase, _StorageBase):
+class _UntypedStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
-class ByteStorage(TypedStorage):
+class ByteStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(TypedStorage):
+class DoubleStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(TypedStorage):
+class FloatStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(TypedStorage):
+class HalfStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(TypedStorage):
+class LongStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(TypedStorage):
+class IntStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(TypedStorage):
+class ShortStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(TypedStorage):
+class CharStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(TypedStorage):
+class BoolStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(TypedStorage):
+class BFloat16Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(TypedStorage):
+class ComplexDoubleStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(TypedStorage):
+class ComplexFloatStorage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-class QUInt8Storage(TypedStorage):
+class QUInt8Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint8
 
-class QInt8Storage(TypedStorage):
+class QInt8Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint8
 
-class QInt32Storage(TypedStorage):
+class QInt32Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.qint32
 
-class QUInt4x2Storage(TypedStorage):
+class QUInt4x2Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint4x2
 
-class QUInt2x4Storage(TypedStorage):
+class QUInt2x4Storage(_TypedStorage):
     @classproperty
     def dtype(self):
         return torch.quint2x4
 
 _storage_classes = {
-    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
+    _UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
     ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
     QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
     ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
@@ -747,6 +809,7 @@ from torch import random as random
 from torch import distributions as distributions
 from torch import testing as testing
 import torch.backends.cuda
+import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
@@ -755,6 +818,9 @@ import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
+
+from torch.nested._nestedtensor import NestedTensor
+from torch.nested._nestedtensor import nested_tensor
 
 _C._init_names(list(torch._storage_classes))
 
@@ -823,3 +889,6 @@ def _register_device_module(device_type, module):
         raise RuntimeError("The runtime module of '{}' has already "
                            "been registered with '{}'".format(device_type, getattr(m, device_type)))
     setattr(m, device_type, module)
+
+# expose return_types
+from . import return_types

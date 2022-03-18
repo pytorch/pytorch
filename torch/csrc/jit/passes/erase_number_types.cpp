@@ -4,6 +4,8 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
+#include <ATen/ScalarOps.h>
+
 namespace torch {
 namespace jit {
 

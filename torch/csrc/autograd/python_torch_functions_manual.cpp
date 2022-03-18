@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/cuda_lazy_init.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <fmt/format.h>
 #include <Python.h>
@@ -510,7 +511,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "linspace(Scalar start, Scalar end, int64_t? steps=None, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "linspace(Scalar start, Scalar end, int64_t steps, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<9> parsed_args;
@@ -519,7 +520,7 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
     return handle_torch_function(_r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
   if (_r.isNone(3)) {
-    // aten::linspace(Scalar start, Scalar end, int? steps=None, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    // aten::linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
     // This leads to problem in the operator argument checks,
@@ -532,22 +533,22 @@ static PyObject * THPVariable_linspace(PyObject* self_, PyObject* args, PyObject
         .pinned_memory(_r.toBool(7));
     torch::utils::maybe_initialize_cuda(options);
 
-    auto dispatch_linspace = [](Scalar start, Scalar end, c10::optional<int64_t> steps, TensorOptions options) -> Tensor {
+    auto dispatch_linspace = [](Scalar start, Scalar end, int64_t steps, TensorOptions options) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return torch::linspace(start, end, steps, options);
     };
-    return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), options));
+    return wrap(dispatch_linspace(_r.scalar(0), _r.scalar(1), _r.toInt64(2), options));
   } else {
     // aten::linspace.out(Scalar start, Scalar end, int? steps=None, *, Tensor(a!) out) -> Tensor(a!)
     check_out_type_matches(_r.tensor(3), _r.scalartype(4),
                            _r.isNone(4), _r.layoutOptional(5),
                            _r.device(6), _r.isNone(6));
 
-    auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps) -> Tensor {
+    auto dispatch_linspace_out = [](Tensor out, Scalar start, Scalar end, int64_t steps) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return at::linspace_out(out, start, end, steps);
     };
-    return wrap(dispatch_linspace_out(_r.tensor(3), _r.scalar(0), _r.scalar(1), _r.toInt64Optional(2)).set_requires_grad(_r.toBool(8)));
+    return wrap(dispatch_linspace_out(_r.tensor(3), _r.scalar(0), _r.scalar(1), _r.toInt64(2)).set_requires_grad(_r.toBool(8)));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -558,7 +559,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "logspace(Scalar start, Scalar end, int64_t? steps=None, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "logspace(Scalar start, Scalar end, int64_t steps, double base=10.0, *, Tensor out=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   }, /*traceable=*/true);
 
   ParsedArgs<10> parsed_args;
@@ -567,7 +568,7 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
     return handle_torch_function(_r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
   }
   if (_r.isNone(4)) {
-    // aten::logspace(Scalar start, Scalar end, int? steps=None, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+    // aten::logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
     // NOTE: r.scalartype(X) gives the default dtype if r.isNone(X)
     // This leads to problem in the operator argument checks,
@@ -580,23 +581,95 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
         .pinned_memory(_r.toBool(8));
     torch::utils::maybe_initialize_cuda(options);
 
-    auto dispatch_logspace = [](Scalar start, Scalar end, c10::optional<int64_t> steps, double base, TensorOptions options) -> Tensor {
+    auto dispatch_logspace = [](Scalar start, Scalar end, int64_t steps, double base, TensorOptions options) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return torch::logspace(start, end, steps, base, options);
     };
-    return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3), options));
+    return wrap(dispatch_logspace(_r.scalar(0), _r.scalar(1), _r.toInt64(2), _r.toDouble(3), options));
   } else {
-    // aten::logspace.out(Scalar start, Scalar end, int? steps=None, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
+    // aten::logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
     check_out_type_matches(_r.tensor(4), _r.scalartype(5),
                            _r.isNone(5), _r.layoutOptional(6),
                            _r.device(7), _r.isNone(7));
 
-    auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, c10::optional<int64_t> steps, double base) -> Tensor {
+    auto dispatch_logspace_out = [](Tensor out, Scalar start, Scalar end, int64_t steps, double base) -> Tensor {
       pybind11::gil_scoped_release no_gil;
       return at::logspace_out(out, start, end, steps, base);
     };
-    return wrap(dispatch_logspace_out(_r.tensor(4), _r.scalar(0), _r.scalar(1), _r.toInt64Optional(2), _r.toDouble(3)).set_requires_grad(_r.toBool(9)));
+    return wrap(dispatch_logspace_out(_r.tensor(4), _r.scalar(0), _r.scalar(1), _r.toInt64(2), _r.toDouble(3)).set_requires_grad(_r.toBool(9)));
   }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__to_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  return wrap(wrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__from_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_from_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto unwrapped = at::functionalization::impl::from_functional_tensor(self_);
+  return wrap(unwrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__is_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_is_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  if (at::functionalization::impl::isFunctionalTensor(self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__sync(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  at::functionalization::impl::sync(self_);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__enable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, true);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__disable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, false);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -617,6 +690,12 @@ static PyMethodDef torch_functions_manual[] = {
   {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"linspace", castPyCFunctionWithKeywords(THPVariable_linspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"logspace", castPyCFunctionWithKeywords(THPVariable_logspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_is_functional_tensor", castPyCFunctionWithKeywords(THPVariable__is_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_to_functional_tensor", castPyCFunctionWithKeywords(THPVariable__to_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_from_functional_tensor", castPyCFunctionWithKeywords(THPVariable__from_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sync", castPyCFunctionWithKeywords(THPVariable__sync), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_enable_functionalization", castPyCFunctionWithKeywords(THPVariable__enable_functionalization), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_disable_functionalization", castPyCFunctionWithKeywords(THPVariable__disable_functionalization), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},

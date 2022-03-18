@@ -12,15 +12,19 @@ from torch.ao.quantization import (
     PlaceholderObserver,
     NoopObserver,
     FakeQuantize,
-    FixedQParamsFakeQuantize,
+    FixedQParamsObserver,
     default_debug_qconfig,
     default_observer,
     default_histogram_observer,
     default_per_channel_weight_observer,
     get_observer_dict,
     prepare,
+    prepare_qat,
+    convert,
     QConfig,
     FusedMovingAvgObsFakeQuantize,
+    get_embedding_qat_module_mappings,
+    get_embedding_static_quant_module_mappings,
 )
 
 import torch.nn as nn
@@ -56,54 +60,78 @@ from torch.testing._internal.common_quantized import (
     to_tensor,
 )
 
+from torch.testing._internal.common_quantization import (
+    DeFusedEmbeddingBagLinear,
+)
+
 NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestObserver(QuantizationTestCase):
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_per_tensor_observers(self, qdtype, qscheme, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
-        if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
+        if (qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric) or qdtype == torch.qint32:
             reduce_range = False
         ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
                         MovingAverageMinMaxObserver(averaging_constant=0.5,
                                                     dtype=qdtype,
                                                     qscheme=qscheme,
                                                     reduce_range=reduce_range)]
+
+        def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
+            eps = torch.tensor([tolerance])
+            if dtype == torch.qint8:
+                if reduce_range:
+                    quant_min, quant_max = -64, 63
+                else:
+                    quant_min, quant_max = -128, 127
+            elif dtype == torch.quint8:
+                if reduce_range:
+                    quant_min, quant_max = 0, 127
+                else:
+                    quant_min, quant_max = 0, 255
+            elif dtype == torch.qint32:
+                quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
+
+            min_val_neg = torch.tensor([0.])
+            max_val_pos = torch.tensor([input_scale * max_val]) if qdtype is torch.qint32 else torch.tensor([max_val])
+
+            scale, zero_point = 1.0, 0
+            if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
+                scale = torch.max(-min_val_neg, max_val_pos) / (float(quant_max - quant_min) / 2)
+                scale = torch.max(scale, eps)
+                if dtype == torch.quint8:
+                    zero_point = 128
+            else:
+                scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)
+                zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
+                zero_point = torch.clamp(zero_point, quant_min, quant_max)
+            return scale, zero_point
+
         for myobs in ObserverList:
             # Calculate Qparams should return with a warning for observers with no data
             qparams = myobs.calculate_qparams()
+            input_scale = 2**16 if qdtype is torch.qint32 else 1
             if type(myobs) == MinMaxObserver:
-                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
+                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0]) * input_scale
             else:
                 # Moving average of min/max for x and y matches that of
                 # extreme values for x/y used for minmax observer
-                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0])
+                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
+                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0]) * input_scale
 
             result = myobs(x)
             result = myobs(y)
             self.assertEqual(result, y)
-            self.assertEqual(myobs.min_val, 1.0)
-            self.assertEqual(myobs.max_val, 8.0)
+            self.assertEqual(myobs.min_val, 1.0 * input_scale)
+            self.assertEqual(myobs.max_val, 8.0 * input_scale)
             qparams = myobs.calculate_qparams()
-            if reduce_range:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745 * 255 / 127
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
-                else:
-                    ref_scale = 0.0313725 * 255 / 127
-                    ref_zero_point = -64 if qdtype is torch.qint8 else 0
-            else:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
-                else:
-                    ref_scale = 0.0313725
-                    ref_zero_point = -128 if qdtype is torch.qint8 else 0
+            ref_scale, ref_zero_point = _get_ref_params(reduce_range, qscheme, qdtype, input_scale, 1.0, 8.0)
+
             self.assertEqual(qparams[1].item(), ref_zero_point)
             self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
             state_dict = myobs.state_dict()
@@ -361,9 +389,9 @@ class TestObserver(QuantizationTestCase):
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
                     PerChannelMinMaxObserver,
                     MovingAveragePerChannelMinMaxObserver, HistogramObserver,
-                    FakeQuantize, FixedQParamsFakeQuantize]
+                    FakeQuantize, FixedQParamsObserver]
         for obs_cls in obs_list:
-            if obs_cls is FixedQParamsFakeQuantize:
+            if obs_cls is FixedQParamsObserver:
                 obs = obs_cls(0.1, 0)
             else:
                 obs = obs_cls()
@@ -372,7 +400,7 @@ class TestObserver(QuantizationTestCase):
             x = obs(x)
 
     def _test_memoryless(self, obs_class):
-        obs = obs_class(memoryless=True)
+        obs = obs_class(averaging_constant=1)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -383,10 +411,10 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(params, obs.calculate_qparams())
 
     def test_memoryless_minmaxobserver(self):
-        self._test_memoryless(MinMaxObserver)
+        self._test_memoryless(MovingAverageMinMaxObserver)
 
     def test_memoryless_perchannelminmaxobserver(self):
-        self._test_memoryless(PerChannelMinMaxObserver)
+        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -812,7 +840,7 @@ class TestDistributed(QuantizationTestCase):
                 torch.ao.quantization.DeQuantStub(),
             )
 
-            torch.ao.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            torch.ao.quantization.fuse_modules_qat(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
             model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
             torch.ao.quantization.prepare_qat(model, inplace=True)
@@ -853,7 +881,7 @@ class TestDistributed(QuantizationTestCase):
 
             model = Model()
             # fuse it
-            fused_model = torch.ao.quantization.fuse_modules(
+            fused_model = torch.ao.quantization.fuse_modules_qat(
                 model,
                 [['conv', 'bn']],
             )
@@ -1136,12 +1164,13 @@ class TestFusedObsFakeQuantModule(TestCase):
         qconfigs = [torch.ao.quantization.default_embedding_qat_qconfig,
                     torch.ao.quantization.default_embedding_qat_qconfig_4bit]
         for qconfig in qconfigs:
-            model = Model()
+            model = Model().train()
             indices = torch.randint(0, 10, (5, 12))
 
             model.qconfig = qconfig
 
-            quant_model = torch.quantization.prepare_qat(model)
+            quant_model = prepare_qat(model,
+                                      mapping=get_embedding_qat_module_mappings())
 
             count_fake_quant = 0
             for name, mod in quant_model.named_modules():
@@ -1151,13 +1180,53 @@ class TestFusedObsFakeQuantModule(TestCase):
             self.assertEqual(count_fake_quant, 2)
 
             quant_model(indices)
-            inference_gm = torch.quantization.convert(quant_model.eval().cpu())
+
+            # Ensure that EmbeddingBags have float zero_point values
+            self.assertEqual(quant_model.emb1.weight_fake_quant.zero_point.dtype, torch.float32)
+            self.assertEqual(quant_model.emb2.weight_fake_quant.zero_point.dtype, torch.float32)
+
+            inference_gm = convert(quant_model.eval().cpu(),
+                                   mapping=get_embedding_static_quant_module_mappings())
 
             # Ensure that EmbeddingBags are now quantized with the appropriate bitwidth.
             self.assertEqual(type(inference_gm.emb1), torch.nn.quantized.EmbeddingBag)
             self.assertEqual(type(inference_gm.emb2), torch.nn.quantized.EmbeddingBag)
             self.assertEqual(inference_gm.emb1.dtype, qconfig.weight().dtype)
             self.assertEqual(inference_gm.emb2.dtype, qconfig.weight().dtype)
+
+    def test_embedding_qat_config(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = DeFusedEmbeddingBagLinear()
+                indices = torch.randint(0, 10, (5, 12))
+                quant_model = prepare_qat(model,
+                                          mapping=get_embedding_qat_module_mappings())
+
+                count_fake_quant = 0
+                count_activation_postproc = 0
+                for name, mod in quant_model.named_modules():
+                    if name.endswith('weight_fake_quant'):
+                        count_fake_quant += 1
+                    if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
+                        count_activation_postproc += 1
+                # One for embeddings, one for linear layer.
+                self.assertEqual(count_fake_quant, 2)
+                # One for embeddings (but it is a NoOp), One for quantize, one for linear layer.
+                self.assertEqual(count_activation_postproc, 3)
+
+                self.assertEqual(type(quant_model.emb.weight_fake_quant), FakeQuantize)
+                self.assertEqual(quant_model.emb.weight_fake_quant.zero_point.dtype, torch.float32)
+                self.assertEqual(type(quant_model.emb.activation_post_process), NoopObserver)
+                self.assertEqual(type(quant_model.linear.weight_fake_quant), FusedMovingAvgObsFakeQuantize)
+                self.assertEqual(type(quant_model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
+
+                quant_model(indices)
+                inference_gm = convert(quant_model,
+                                       mapping=get_embedding_static_quant_module_mappings())
+                # Ensure that Embedding is now quantized
+                self.assertEqual(type(inference_gm.emb), torch.nn.quantized.Embedding)
+                # Ensure that Linear is now quantized
+                self.assertEqual(type(inference_gm.linear), torch.nn.quantized.Linear)
 
     def test_default_fused_qat_config(self):
         class Model(nn.Module):

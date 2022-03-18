@@ -190,6 +190,18 @@ Example::
     :members:
     :inherited-members:
 
+.. note ::
+  The RPC framework does not automatically retry any
+  :meth:`~torch.distributed.rpc.rpc_sync`,
+  :meth:`~torch.distributed.rpc.rpc_async` and
+  :meth:`~torch.distributed.rpc.remote` calls. The reason being that there is
+  no way the RPC framework can determine whether an operation is idempotent or
+  not and whether it is safe to retry. As a result, it is the application's
+  responsibility to deal with failures and retry if necessary. RPC communication
+  is based on TCP and as a result failures could happen due to network failures
+  or intermittent network connectivity issues. In such scenarios, the application
+  needs to retry appropriately with reasonable backoffs to ensure the network
+  isn't overwhelmed by aggressive retries.
 
 .. _rref:
 
@@ -261,11 +273,7 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 Distributed Optimizer
 ---------------------
 
-.. warning ::
-    Distributed optimizer is not currently supported when using CUDA tensors
-
-.. automodule:: torch.distributed.optim
-    :members: DistributedOptimizer
+See the `torch.distributed.optim <https://pytorch.org/docs/master/distributed.optim.html>`__ page for documentation on distributed optimizers.
 
 Design Notes
 ------------

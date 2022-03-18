@@ -9,7 +9,7 @@ using namespace std;
 using namespace dnnlowp;
 
 using MulFp32Op =
-    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>;
+    BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>;
 
 template <typename T>
 class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {

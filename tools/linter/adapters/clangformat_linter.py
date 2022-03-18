@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any, List, NamedTuple, Optional
 
 
@@ -25,7 +26,7 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: str
+    path: Optional[str]
     line: Optional[int]
     char: Optional[int]
     code: str
@@ -34,7 +35,6 @@ class LintMessage(NamedTuple):
     original: Optional[str]
     replacement: Optional[str]
     description: Optional[str]
-    bypassChangedLineFiltering: Optional[bool]
 
 
 def as_posix(name: str) -> str:
@@ -115,7 +115,6 @@ def check_file(
                     "Please report an issue in pytorch/pytorch with the "
                     "label 'module: lint'"
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
     except (OSError, subprocess.CalledProcessError) as err:
@@ -144,7 +143,6 @@ def check_file(
                         stdout=err.stdout.decode("utf-8").strip() or "(empty)",
                     )
                 ),
-                bypassChangedLineFiltering=None,
             )
         ]
 
@@ -163,7 +161,6 @@ def check_file(
             original=original.decode("utf-8"),
             replacement=replacement.decode("utf-8"),
             description="See https://clang.llvm.org/docs/ClangFormat.html.\nRun `lintrunner -a` to apply this patch.",
-            bypassChangedLineFiltering=True,
         )
     ]
 
@@ -213,6 +210,23 @@ def main() -> None:
     )
 
     binary = os.path.normpath(args.binary) if IS_WINDOWS else args.binary
+    if not Path(binary).exists():
+        lint_message = LintMessage(
+            path=None,
+            line=None,
+            char=None,
+            code="CLANGFORMAT",
+            severity=LintSeverity.ERROR,
+            name="init-error",
+            original=None,
+            replacement=None,
+            description=(
+                f"Could not find clang-format binary at {binary}, "
+                "did you forget to run `lintrunner init`?"
+            ),
+        )
+        print(json.dumps(lint_message._asdict()), flush=True)
+        sys.exit(0)
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=os.cpu_count(),

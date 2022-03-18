@@ -1,14 +1,13 @@
 from typing import Any, Dict, List
 
-from torch.utils.data import (
-    DFIterDataPipe,
-    IterDataPipe,
-    functional_datapipe,
-)
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
 
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
 
 # TODO(VitalyFedyunin): Add error when two different traces get combined
+
+
 class DataFrameTracedOps(DFIterDataPipe):
     def __init__(self, source_datapipe, output_var):
         self.source_datapipe = source_datapipe
@@ -16,7 +15,7 @@ class DataFrameTracedOps(DFIterDataPipe):
 
     def __iter__(self):
         for item in self.source_datapipe:
-            yield self.output_var.calculate_me(item)
+            yield self.output_var.apply_ops(item)
 
 
 #  TODO(VitalyFedyunin): Extract this list from the DFIterDataPipe registred functions
@@ -25,16 +24,16 @@ DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map'
 
 
 class Capture(object):
-    # All operations are shared across entire InitialCapture, need to figure out what if we join two captures
+    # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
     ctx: Dict[str, List[Any]]
 
     def __init__(self):
         self.ctx = {'operations': [], 'variables': []}
 
     def __str__(self):
-        return self.ops_str()
+        return self._ops_str()
 
-    def ops_str(self):
+    def _ops_str(self):
         res = ""
         for op in self.ctx['operations']:
             if len(res) > 0:
@@ -45,8 +44,6 @@ class Capture(object):
     def __getattr__(self, attrname):
         if attrname == 'kwarg':
             raise Exception('no kwargs!')
-        if attrname in DATAPIPES_OPS:
-            return (self.as_datapipe()).__getattr__(attrname)
         return CaptureGetAttr(self, attrname, ctx=self.ctx)
 
     def __getitem__(self, key):
@@ -76,44 +73,6 @@ class Capture(object):
         t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         self.ctx['operations'].append(t)
         return var
-
-    def as_datapipe(self):
-        return DataFrameTracedOps(
-            self.ctx['variables'][0].source_datapipe, self)
-
-    def raw_iterator(self):
-        return self.as_datapipe().__iter__()
-
-    def __iter__(self):
-        return iter(self._dataframes_as_tuples())
-
-    def batch(self, batch_size=10):
-        dp = self._dataframes_per_row()._dataframes_concat(batch_size)
-        dp = dp.as_datapipe().batch(1, wrapper_class=DataChunkDF)
-        dp._dp_contains_dataframe = True
-        return dp
-
-    def groupby(self,
-                group_key_fn,
-                *,
-                buffer_size=10000,
-                group_size=None,
-                unbatch_level=0,
-                guaranteed_group_size=None,
-                drop_remaining=False):
-        if unbatch_level != 0:
-            dp = self.unbatch(unbatch_level)._dataframes_per_row()
-        else:
-            dp = self._dataframes_per_row()
-        dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
-                                      guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
-        return dp
-
-    def shuffle(self, *args, **kwargs):
-        return self._dataframes_shuffle(*args, **kwargs)
-
-    def filter(self, *args, **kwargs):
-        return self._dataframes_filter(*args, **kwargs)
 
 
 class CaptureF(Capture):
@@ -159,24 +118,17 @@ class CaptureVariable(Capture):
     def execute(self):
         return self.calculated_value
 
-    def calculate_me(self, dataframe):
+    def apply_ops(self, dataframe):
+        # TODO(VitalyFedyunin): Make this calculation thread safe (as currently it updates pointer)
         self.ctx['variables'][0].calculated_value = dataframe
         for op in self.ctx['operations']:
             op.execute()
         return self.calculated_value
 
 
-class CaptureInitial(CaptureVariable):
-
-    def __init__(self):
-        new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': []}
-        super().__init__(None, new_ctx)
-        self.name = 'input_%s' % self.name
-
-
 class CaptureGetItem(Capture):
-    left : Capture
-    key : Any
+    left: Capture
+    key: Any
 
     def __init__(self, left, key, ctx):
         self.ctx = ctx
@@ -191,9 +143,9 @@ class CaptureGetItem(Capture):
 
 
 class CaptureSetItem(Capture):
-    left : Capture
-    key : Any
-    value : Capture
+    left: Capture
+    key: Any
+    value: Capture
 
     def __init__(self, left, key, value, ctx):
         self.ctx = ctx
@@ -283,8 +235,61 @@ def get_val(capture):
         return capture
 
 
+class CaptureInitial(CaptureVariable):
+
+    def __init__(self):
+        new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': []}
+        super().__init__(None, new_ctx)
+        self.name = 'input_%s' % self.name
+
+
+class CaptureDataFrame(CaptureInitial):
+    pass
+
+
+class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
+    def as_datapipe(self):
+        return DataFrameTracedOps(
+            self.ctx['variables'][0].source_datapipe, self)
+
+    def raw_iterator(self):
+        return self.as_datapipe().__iter__()
+
+    def __iter__(self):
+        return iter(self._dataframes_as_tuples())
+
+    def batch(self, batch_size=10, drop_last: bool = False, wrapper_class=DataChunkDF):
+        dp = self._dataframes_per_row()._dataframes_concat(batch_size)
+        dp = dp.as_datapipe().batch(1, drop_last=drop_last, wrapper_class=wrapper_class)
+        dp._dp_contains_dataframe = True
+        return dp
+
+    def groupby(self,
+                group_key_fn,
+                *,
+                buffer_size=10000,
+                group_size=None,
+                guaranteed_group_size=None,
+                drop_remaining=False):
+        dp = self._dataframes_per_row()
+        dp = dp.as_datapipe().groupby(group_key_fn, buffer_size=buffer_size, group_size=group_size,
+                                      guaranteed_group_size=guaranteed_group_size, drop_remaining=drop_remaining)
+        return dp
+
+    def shuffle(self, *args, **kwargs):
+        return self._dataframes_shuffle(*args, **kwargs)
+
+    def filter(self, *args, **kwargs):
+        return self._dataframes_filter(*args, **kwargs)
+
+    def __getattr__(self, attrname):  # ?
+        if attrname in DATAPIPES_OPS:
+            return (self.as_datapipe()).__getattr__(attrname)
+        return super().__getattr__(attrname=attrname)
+
+
 @functional_datapipe('trace_as_dataframe')
-class DataFrameTracer(CaptureInitial, IterDataPipe):
+class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):
     source_datapipe = None
 
     def __init__(self, source_datapipe):

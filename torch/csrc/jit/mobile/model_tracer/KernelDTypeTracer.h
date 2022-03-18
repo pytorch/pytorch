@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/record_function.h>
+#include <c10/util/Synchronized.h>
 #include <map>
 #include <set>
 #include <string>
@@ -28,24 +29,8 @@ struct KernelDTypeTracer final {
    */
   typedef std::map<std::string, std::set<std::string>> kernel_tags_type;
 
-  KernelDTypeTracer() {
-    auto recorder_cb = [](const at::RecordFunction& fn)
-        -> std::unique_ptr<at::ObserverContext> {
-      std::string name = fn.name().str();
-      size_t dollar_pos = name.find_first_of('$');
-      std::string kernel_tag = name.substr(0, dollar_pos);
-      std::string dtype = name.substr(dollar_pos + 1);
-
-      getCalledKernelTags()[kernel_tag].insert(dtype);
-      return nullptr;
-    };
-
-    handle_ = at::addGlobalCallback(
-        at::RecordFunctionCallback(recorder_cb)
-            .scopes({at::RecordScope::KERNEL_FUNCTION_DTYPE}));
-  }
-
-  static kernel_tags_type& getCalledKernelTags();
+  KernelDTypeTracer();
+  static c10::Synchronized<kernel_tags_type>& getCalledKernelTags();
 
   ~KernelDTypeTracer() {
     at::removeCallback(handle_);

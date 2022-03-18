@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 
 #include <c10/util/Logging.h>

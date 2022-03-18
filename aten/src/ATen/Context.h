@@ -3,6 +3,7 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/LinalgBackend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -67,6 +68,15 @@ class TORCH_API Context {
   static long versionCUDART() {
     return detail::getCUDAHooks().versionCUDART();
   }
+  static bool hasCuDNN() {
+    return detail::getCUDAHooks().hasCuDNN();
+  }
+  static long versionCuDNN() {
+    return detail::getCUDAHooks().versionCuDNN();
+  }
+  static bool hasCuSOLVER() {
+    return detail::getCUDAHooks().hasCuSOLVER();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -84,27 +94,18 @@ class TORCH_API Context {
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
-  THCState* lazyInitCUDA() {
+  void lazyInitCUDA() {
     std::call_once(thc_init,[&] {
-      thc_state = detail::getCUDAHooks().initCUDA();
+      detail::getCUDAHooks().initCUDA();
     });
-    return thc_state.get();
   }
-  THHState* lazyInitHIP() {
+  void lazyInitHIP() {
     std::call_once(thh_init,[&] {
-      thh_state = detail::getHIPHooks().initHIP();
+      detail::getHIPHooks().initHIP();
     });
-    return thh_state.get();
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
-  }
-  THCState* getTHCState() {
-    // AT_ASSERT(thc_state);
-    return thc_state.get();
-  }
-  THHState* getTHHState() {
-    return thh_state.get();
   }
 
   static bool setFlushDenormal(bool on);
@@ -121,6 +122,9 @@ class TORCH_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+
+  at::LinalgBackend linalgPreferredBackend() const;
+  void setLinalgPreferredBackend(at::LinalgBackend);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -202,6 +206,8 @@ class TORCH_API Context {
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
+  bool allowFP16ReductionCuBLAS() const;
+  void setAllowFP16ReductionCuBLAS(bool);
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines() ;
@@ -239,7 +245,9 @@ class TORCH_API Context {
   bool benchmark_cudnn = false;
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
+  bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
+  at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
   #ifdef C10_MOBILE
   bool release_original_weights = true;
   #else
@@ -247,8 +255,6 @@ class TORCH_API Context {
   #endif
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
-  std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
-  std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };

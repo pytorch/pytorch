@@ -55,6 +55,8 @@ void Alias::add_update(const at::Tensor& updated_val, const std::vector<ViewMeta
 const Tensor apply_update(const Alias::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
+  if (update.view_metas.size() == 0) return t;
+
   std::vector<at::Tensor> tmp_values({base});
   for (size_t i = 0; i < update.view_metas.size() - 1; ++i) {
     at::Tensor next_view = update.view_metas[i].forward_fn(tmp_values.back(), update.view_metas[i].out_index);

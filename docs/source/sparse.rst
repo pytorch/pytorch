@@ -1,3 +1,5 @@
+.. automodule:: torch.sparse
+
 .. currentmodule:: torch
 
 .. _sparse-docs:
@@ -315,6 +317,11 @@ acquired using methods :meth:`torch.Tensor.indices()` and
 
   .. See https://github.com/pytorch/pytorch/pull/45695 for a new API.
 
+  .. warning::
+    Calling :meth:`torch.Tensor._values()` will return a *detached* tensor.
+    To track gradients, :meth:`torch.Tensor.coalesce().values()` must be
+    used instead.
+
 Constructing a new sparse COO tensor results a tensor that is not
 coalesced:
 
@@ -496,6 +503,7 @@ The following Tensor methods are related to sparse tensors:
     Tensor.sparse_dim
     Tensor.sparse_mask
     Tensor.to_sparse
+    Tensor.to_sparse_coo
     Tensor.to_sparse_csr
     Tensor.indices
     Tensor.values
@@ -584,6 +592,7 @@ Torch functions specific to sparse Tensors
     sparse_csr_tensor
     sparse.sum
     sparse.addmm
+    sparse.sampled_addmm
     sparse.mm
     sspaddmm
     hspmm

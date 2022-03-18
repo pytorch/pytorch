@@ -51,7 +51,7 @@ Skip connections
 ^^^^^^^^^^^^^^^^
 
 Certain models like ResNeXt are not completely sequential and have skip
-connections between layers. Naively implementing as part of pipeling
+connections between layers. Naively implementing as part of pipeline
 parallelism would imply that we need to copy outputs for certain layers through
 multiple GPUs till we eventually reach the GPU where the layer for the skip
 connection resides. To avoid this copy overhead, we provide APIs below to stash

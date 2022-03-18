@@ -77,10 +77,8 @@ struct Shader::Factory::Compiler final {
     options.SetWarningsAsErrors();
   #ifdef DEBUG
     options.SetGenerateDebugInfo();
-    options.SetOptimizationLevel(shaderc_optimization_level_zero);
-  #else
-    options.SetOptimizationLevel(shaderc_optimization_level_performance);
   #endif /* DEBUG */
+    options.SetOptimizationLevel(shaderc_optimization_level_zero);
   }
 
   std::vector<uint32_t> compile(const char* const source) const {

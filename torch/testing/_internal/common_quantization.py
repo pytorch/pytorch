@@ -14,12 +14,13 @@ import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
+    default_dynamic_qat_qconfig,
     default_embedding_qat_qconfig,
 )
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, quantize
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, quantize
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
@@ -401,6 +402,8 @@ class QuantizationTestCase(TestCase):
            type(module) not in float_to_observed_module_class_mapping.values() and \
            not isinstance(module, _FusedModule):
             for child in module.children():
+                if type(child) in [nn.Dropout]:
+                    continue
                 self.checkObservers(child, propagate_qconfig_list, prepare_custom_config_dict)
 
     def checkQuantDequant(self, mod):
@@ -629,7 +632,7 @@ class QuantizationTestCase(TestCase):
                 str(expected_node_list))
 
     def printGraphModule(self, graph_module, print_str=True):
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(remove_duplicate=False))
         node_infos = []
         for n in graph_module.graph.nodes:
             node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
@@ -869,13 +872,12 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
-            result_prepared = copy.deepcopy(prepared)
-            qgraph = convert_fx(prepared)
-            qgraph_reference = convert_fx(prepared_copy, is_reference=True)
+            qgraph = convert_fx(copy.deepcopy(prepared))
+            qgraph_reference = convert_fx(copy.deepcopy(prepared), is_reference=True)
             result = qgraph(*inputs)
-            result_quantized = copy.deepcopy(qgraph)
             result_reference = qgraph_reference(*inputs)
-            result_quantized_reference = copy.deepcopy(qgraph_reference)
+            qgraph_copy = copy.deepcopy(qgraph)
+            qgraph_reference_copy = copy.deepcopy(qgraph_reference)
 
             qgraph_to_check = qgraph_reference if is_reference else qgraph
             if print_debug_info:
@@ -885,10 +887,11 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
-            return {"prepared": result_prepared,
-                    "quantized": result_quantized,
-                    "quantized_reference": result_quantized_reference,
-                    "result": result}
+            return {"prepared": prepared_copy,
+                    "quantized": qgraph_copy,
+                    "quantized_reference": qgraph_reference_copy,
+                    "quantized_output": result,
+                    "quantized_reference_output": result_reference}
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
@@ -939,8 +942,8 @@ class QuantizationTestCase(TestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_embedding.qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                     weight=float_qparams_observer)
+            float_embedding.qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                              weight=float_qparams_observer)
 
         prepare_dynamic(float_embedding)
 
@@ -1192,7 +1195,11 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
         return x
 
     def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
+            torch.quantization.fuse_modules_qat(self, [['conv', 'bn', 'relu']], inplace=True)
+        else:
+            torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
 
 class TwoLayerConvModel(torch.nn.Module):
     def __init__(self):
@@ -1461,7 +1468,11 @@ class InnerModule(torch.nn.Module):
                 if isinstance(named_children[idx + 1][1], torch.nn.ReLU):
                     fusable_layers.append([current_name,
                                            named_children[idx + 1][0]])
-        torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+        # TODO: remove this check and define two fuse_modules function on this module
+        if self.training:
+            torch.ao.quantization.fuse_modules_qat(self, fusable_layers, inplace=True)
+        else:
+            torch.ao.quantization.fuse_modules(self, fusable_layers, inplace=True)
 
 class FunctionalLinear(torch.nn.Module):
     def __init__(self):
@@ -1648,6 +1659,37 @@ class ManualLinearQATModel(torch.nn.Module):
         x = self.fc2(x)
         return self.dequant(x)
 
+class ManualDropoutQATModel(torch.nn.Module):
+    r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
+    """
+    def __init__(self, qengine):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.dropout = torch.nn.Dropout(0.5)
+
+    def forward(self, x):
+        x = self.quant(x)
+        x = self.fc1(x)
+        x = self.dropout(x)
+        return self.dequant(x)
+
+class ManualLinearDynamicQATModel(torch.nn.Module):
+    r"""A Module that uses a dynamic QAT by default.
+    """
+    def __init__(self, qconfig=None):
+        super().__init__()
+        self.qconfig = qconfig or default_dynamic_qat_qconfig
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
+
 class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
     and contains both linear and conv modules
@@ -1682,6 +1724,29 @@ class ManualEmbeddingBagLinear(nn.Module):
     def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
                 per_sample_weights: Optional[torch.Tensor] = None):
         x = self.emb(input, offsets, per_sample_weights)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
+
+class DeFusedEmbeddingBagLinear(nn.Module):
+    r"""A module to simulate QAT embedding bag with a linear layer,
+    this module uses a separate embedding and bagging op, similar
+    to that which is described in the EmbeddingBag documentation.
+
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.emb = nn.Embedding(num_embeddings=10, embedding_dim=12)
+        self.emb.qconfig = default_embedding_qat_qconfig
+        self.bagging_op = torch.sum
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x = self.bagging_op(self.emb(input), dim=1)
         x = self.quant(x)
         x = self.linear(x)
         return self.dequant(x)
@@ -1827,6 +1892,28 @@ class DummyObserver(torch.nn.Module):
         return x
 
 
+class ModelForConvTransposeBNFusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.ConvTranspose1d(3, 3, 1)
+        self.bn1 = nn.BatchNorm1d(3)
+        self.conv2 = nn.ConvTranspose2d(3, 3, 1)
+        self.bn2 = nn.BatchNorm2d(3)
+        self.conv3 = nn.ConvTranspose3d(3, 3, 1)
+        self.bn3 = nn.BatchNorm3d(3)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = x.unsqueeze(2)
+        x = self.conv2(x)
+        x = self.bn2(x)
+        x = x.unsqueeze(2)
+        x = self.conv3(x)
+        x = self.bn3(x)
+        return x
+
+
 class ModelWithFunctionals(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1876,7 +1963,11 @@ class ResNetBase(torch.nn.Module):
         return out
 
     def fuse_model(self):
-        torch.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+        # TODO: remove this check and define two fuse_model function on this module
+        if self.training:
+            torch.ao.quantization.fuse_modules_qat(self, [['conv1', 'bn1', 'relu1']], inplace=True)
+        else:
+            torch.ao.quantization.fuse_modules(self, [['conv1', 'bn1', 'relu1']], inplace=True)
 
 class ModelMultipleOps(torch.nn.Module):
     def __init__(self):

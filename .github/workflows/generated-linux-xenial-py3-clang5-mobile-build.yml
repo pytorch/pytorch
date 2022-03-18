@@ -5,10 +5,15 @@ name: linux-xenial-py3-clang5-mobile-build
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, unassigned]
   push:
+    tags:
+      - 'ciflow/all/*'
+      - 'ciflow/linux/*'
+      - 'ciflow/mobile/*'
+      - 'ciflow/trunk/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -28,42 +33,26 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   AWS_DEFAULT_REGION: us-east-1
-  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
   group: linux-xenial-py3-clang5-mobile-build-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
 
-  ciflow_should_run:
-    runs-on: ubuntu-18.04
-    timeout-minutes: 240
-    env:
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/mobile') }}
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: ${{ (github.repository == 'pytorch/pytorch') && (
-            (github.event_name == 'push') ||
-            (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/mobile')) ||
-            ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
-         }}
-    steps:
-      - name: noop
-        run: echo running ciflow_should_run
-      - name: print labels
-        run: echo "${LABELS}"
-
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
-    needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
       JOB_BASE_NAME: linux-xenial-py3-clang5-mobile-build-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       - name: Display EC2 information
         shell: bash
         run: |
@@ -77,13 +66,24 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
         run: |
@@ -95,8 +95,8 @@ jobs:
           docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Clean workspace
         run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm -f ~/.ssh/authorized_keys
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
@@ -107,9 +107,14 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -164,11 +169,12 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -177,9 +183,9 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
-            -e CIRCLE_PR_NUMBER \
-            -e CIRCLE_SHA1 \
-            -e CIRCLE_BRANCH \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -204,9 +210,9 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME

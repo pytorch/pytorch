@@ -5,6 +5,7 @@ from .proxy import Proxy
 from ._symbolic_trace import Tracer
 from ._compatibility import compatibility
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+import inspect
 
 @compatibility(is_backward_compatible=True)
 class Interpreter:
@@ -171,7 +172,13 @@ class Interpreter:
             # remaining values from the args list.
             return list(self.args_iter)
         else:
-            return next(self.args_iter)
+            try:
+                return next(self.args_iter)
+            except StopIteration as si:
+                if len(args) > 0:
+                    return args[0]
+                else:
+                    raise RuntimeError(f'Expected positional argument for parameter {target}, but one was not passed in!')
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -375,6 +382,7 @@ class Transformer(Interpreter):
     def __init__(self, module):
         super().__init__(module)
         self.new_graph = Graph()
+        self.new_graph.set_codegen(module.graph._codegen)
 
         class TransformerTracer(Tracer):
             def __init__(self, graph: Graph):
@@ -401,7 +409,8 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.placeholder(target), self.tracer)
+        default_value = next(iter(args)) if args else inspect.Signature.empty
+        return Proxy(self.new_graph.placeholder(target, default_value=default_value), self.tracer)
 
     @compatibility(is_backward_compatible=True)
     def get_attr(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Proxy:

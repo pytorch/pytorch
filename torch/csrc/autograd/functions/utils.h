@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <functional>
 #include <memory>

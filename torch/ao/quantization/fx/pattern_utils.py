@@ -5,6 +5,7 @@ from torch.fx.graph import (
 )
 from .quantization_types import Pattern
 from ..qconfig import QConfigAny
+from ..fake_quantize import FixedQParamsFakeQuantize
 # from .quantization_patterns import BinaryOpQuantizeHandler
 from ..observer import ObserverBase
 
@@ -27,17 +28,20 @@ def get_default_fusion_patterns() -> Dict[Pattern, QuantizeHandler]:
     return DEFAULT_FUSION_PATTERNS
 
 DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
-# a map from pattern to activation_post_process(observer/fake_quant) consstructor for output activation
+
+# Mapping from pattern to activation_post_process(observer/fake_quant) constructor for output activation
 # e.g. pattern: torch.sigmoid,
-#      output_activation_post_process: default_affine_fixed_qparam_fake_quant
-DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP = dict()
+#      output_activation_post_process: default_affine_fixed_qparams_fake_quant
+DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP = dict()
+DEFAULT_OUTPUT_OBSERVER_MAP = dict()
 
 # Register pattern for both static quantization and qat
-def register_quant_pattern(pattern, output_activation_post_process=None):
+def register_quant_pattern(pattern, fixed_qparams_observer=None):
     def insert(fn):
         DEFAULT_QUANTIZATION_PATTERNS[pattern] = fn
-        if output_activation_post_process is not None:
-            DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP[pattern] = output_activation_post_process
+        if fixed_qparams_observer is not None:
+            DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[pattern] = FixedQParamsFakeQuantize.with_args(observer=fixed_qparams_observer)
+            DEFAULT_OUTPUT_OBSERVER_MAP[pattern] = fixed_qparams_observer
         return fn
     return insert
 
@@ -47,9 +51,11 @@ def get_default_quant_patterns() -> Dict[Pattern, QuantizeHandler]:
 
 # a map from pattern to output activation post process constructor
 # e.g. torch.sigmoid -> default_affine_fixed_qparam_fake_quant
-def get_default_output_activation_post_process_map() -> Dict[Pattern, ObserverBase]:
-    return DEFAULT_OUTPUT_ACTIVATION_POST_PROCESS_MAP
-
+def get_default_output_activation_post_process_map(is_training) -> Dict[Pattern, ObserverBase]:
+    if is_training:
+        return DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP
+    else:
+        return DEFAULT_OUTPUT_OBSERVER_MAP
 
 # Example use of register pattern function:
 # @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))

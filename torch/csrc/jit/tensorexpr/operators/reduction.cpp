@@ -53,12 +53,12 @@ Tensor computeSum(
     std::iota(axes.begin(), axes.end(), 0);
   }
   // Axes go into reduction dimensions.
-  std::vector<DimArg> reductionDims;
+  std::vector<ExprHandle> reductionDims;
   reductionDims.reserve(rank);
   for (size_t axis : axes) {
     reductionDims.emplace_back(sizes[axis]);
   }
-  std::vector<DimArg> outputDims;
+  std::vector<ExprHandle> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
   for (size_t dim = 0; dim < rank; ++dim) {
@@ -111,22 +111,27 @@ Tensor computeMean(
   if (outputType) {
     dtype = Dtype(*outputType);
   }
+  bool keepdim = false;
   BufHandle ResultBuf("mean", outputShape, dtype);
   BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
-  std::vector<ExprHandle> mean_dims_expr;
+  std::vector<ExprHandle> extra_args;
+  if (inputs.size() > 2) {
+    keepdim = c10::get<bool>(inputs[2]);
+  }
+
   if (auto mean_dims = c10::get_if<IntList>(&inputs[1])) {
-    mean_dims_expr = c10::fmap<ExprHandle>(*mean_dims);
+    extra_args = c10::fmap<ExprHandle>(*mean_dims);
   } else {
     // When dims argument is not specified, reduce over all dimensions
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
-      mean_dims_expr.emplace_back(idx);
+      extra_args.emplace_back(idx);
     }
   }
+  extra_args.push_back(LongImm::make(static_cast<int64_t>(keepdim)));
   return Tensor(
       ResultBuf.node(),
-      ExternalCall::make(
-          ResultBuf, "nnc_aten_mean", {InputBuf}, mean_dims_expr));
+      ExternalCall::make(ResultBuf, "nnc_aten_mean", {InputBuf}, extra_args));
 }
 
 Tensor computeMax(

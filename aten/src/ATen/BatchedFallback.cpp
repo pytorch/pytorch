@@ -66,13 +66,16 @@ static bool isInplaceOp(const c10::FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
-static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
+static void warnFallback(const c10::FunctionSchema& schema) {
   if (!globalContext().areVmapFallbackWarningsEnabled()) {
     return;
   }
-  auto uses_stack = is_inplace ? "" : " and stack";
-  TORCH_WARN("Batching rule not implemented for ", schema.operator_name(), " falling back "
-             "to slow (for loop", uses_stack, ") implementation");
+  TORCH_WARN("There is a performance drop because we have not yet implemented ",
+             "the batching rule for ", schema.operator_name(), ". ",
+             "We've moved development of vmap to to functorch "
+             "(https://github.com/pytorch/functorch), please try functorch.vmap "
+             "instead and/or file ",
+             " an issue on GitHub so that we can prioritize its implementation.");
 }
 
 // The general flow of the algorithm is as follows.
@@ -88,7 +91,7 @@ static void warnFallback(const c10::FunctionSchema& schema, bool is_inplace) {
 //   the operator, and then pop the results off the stack.
 void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
-  warnFallback(schema, /*in_place*/true);
+  warnFallback(schema);
 
   const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
@@ -260,7 +263,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   TORCH_CHECK(num_returns >= 1,
               "Batching rule not implemented for ", schema.operator_name(), ". ",
               "The fallback path does not support operations with no returns.");
-  warnFallback(schema, /*in_place*/false);
+  warnFallback(schema);
 
   const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);

@@ -61,11 +61,7 @@ class UpsampleNearestOp final : public Operator<Context> {
     int scaled_d3 = d3 / scale_;
 
 #ifdef _OPENMP
-#if (_OPENMP >= 201307)
-#pragma omp parallel for simd
-#else
 #pragma omp parallel for
-#endif
 #endif
     for (int i = 0; i < d1; ++i) {
       for (int j = 0; j < d2; ++j) {

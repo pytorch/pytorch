@@ -623,5 +623,42 @@ class TestAutocast(JitTestCase):
         self.assertEqual(t0.grad.dtype, ref_t0.grad.dtype)
         self.assertEqual(t1.grad.dtype, ref_t1.grad.dtype)
 
-if __name__ == '__main__':
+    @unittest.skipIf(not TEST_CUDA, "No cuda")
+    def test_jit_call_method_under_autocast(self):
+        @torch.jit.interface
+        class Iface(torch.nn.Module):
+            def forward(self, x, y) -> torch.Tensor:
+                pass
+
+        class Impl(Iface):
+            def forward(self, x, y):
+                return torch.mm(x, y)
+
+        class Thing1(torch.nn.Module):
+            impl: Iface
+
+            def forward(self, x, y):
+                with torch.cuda.amp.autocast():
+                    a = torch.mm(x, y)
+                    b = self.impl.forward(a, x)
+                    return b
+
+        scripted_impl = torch.jit.script(Impl())
+        thing1 = Thing1()
+        thing1.impl = scripted_impl
+        scripted_thing1 = torch.jit.script(thing1)
+        x = torch.rand([2, 2])
+        y = torch.rand([2, 2])
+
+        # make sure this doesn't throw an error
+        with torch.cuda.amp.autocast():
+            ans = scripted_thing1.forward(x, y)
+        self.assertEqual(torch.mm(torch.mm(x, y), x), ans)
+
+        # sanity check: this isn't supported currently when global autocasting
+        # isn't enabled
+        self.assertRaises(RuntimeError, lambda: scripted_thing1.forward(x, y))
+
+
+if __name__ == "__main__":
     run_tests()
