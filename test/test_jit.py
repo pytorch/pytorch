@@ -11048,6 +11048,7 @@ dedent """
             FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
 
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_autodiff_complex(self):
         def foo(x: torch.Tensor, y: torch.Tensor, W: torch.Tensor):
