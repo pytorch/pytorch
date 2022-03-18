@@ -8,6 +8,7 @@ namespace torch {
 namespace jit {
 
 TEST(AddIfThenElseOpTest, AddIfThenElseOpSimple) {
+EXPECT_TRUE(false); // tracer
   const auto src = R"IR(
         graph(%cond: bool, %a: Tensor, %b: Tensor):
             %result: Tensor = prim::If(%cond)

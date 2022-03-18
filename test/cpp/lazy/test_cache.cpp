@@ -32,6 +32,7 @@ class CacheNode : public Node {
 };
 
 TEST(CacheTest, BasicTest) {
+  EXPECT_FALSE(true); // tracer bullet to see if/which OSS CI jobs run this
   std::shared_ptr<CacheNode> a = std::make_shared<CacheNode>("a");
   std::shared_ptr<CacheNode> b = std::make_shared<CacheNode>("b");
   std::shared_ptr<CacheNode> c = std::make_shared<CacheNode>("c");
