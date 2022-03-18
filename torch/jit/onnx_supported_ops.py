@@ -13,7 +13,7 @@ class TorchSchema:
     optional_arguments: List[str]
     returns: List[str]
     opset: List[int]
-    
+
     def __init__(self, schema, symbolic=False) -> None:
         if symbolic is False:
             self.name = schema.name
@@ -29,7 +29,7 @@ class TorchSchema:
             self.optional_arguments = []
             self.returns = []
             self.opsets = []
-    
+
     def __str__(self) -> str:
         s = f"{self.name}.{self.overload_name}("
         s += ", ".join(self.arguments)
@@ -39,14 +39,14 @@ class TorchSchema:
         s += " in opsets "
         s += ", ".join(str(opset) for opset in self.opsets)
         return s
-    
+
     def __eq__(self, other) -> bool:
         if not isinstance(other, TorchSchema):
             return False
         if (
             self.name == other.name
             # TODO: Handle overloads
-            #and 
+            #and
             #    (
             #        len(self.arguments) == len(other.arguments)
             #        or len(self.optional_arguments) == 1
@@ -55,13 +55,13 @@ class TorchSchema:
             return True
         return False
 
-    
+
     def is_aten(self) -> bool:
         return self.name[:6] == "aten::"
-    
+
     def is_backward(self) -> bool:
         return "backward" in self.name
-    
+
     def overload_handler(self) -> bool:
 
         def has_out(self):
@@ -69,16 +69,16 @@ class TorchSchema:
                    self.overload_name == "output" or \
                    "output" in self.overload_name or \
                    "_out" in self.overload_name
-        
+
         # Named tensors not supported by TorchScript compiler
         def has_dimname(self):
             return self.overload_name == "Dimname" or \
                    self.overload_name == "dimname" or \
                    "name" in self.overload_name
-        
+    
         def is_inplace(self):
             return self.name[-1] == "_"
-        
+    
         def add_to_optional_arguments(self):
             if self.overload_name in self.arguments:
                 #self.arguments.remove(self.overload_name)
@@ -87,7 +87,7 @@ class TorchSchema:
             #    if self.overload_name == "padding":
             #        print("Re")
             #    self.arguments.append(self.overload_name)
-        
+
         elim_cond = has_dimname(self) or has_out(self) or is_inplace(self)
         if not elim_cond:
             add_to_optional_arguments(self)
@@ -157,7 +157,7 @@ def get_onnx_supported_ops():
             opname, opsets = schema.name[6:], symbolic_schemas[schema.name[6:]].opsets
             if schema not in supported_ops:
                 supported_ops.append(symbolic_schemas[opname])
-                onnx_supported_ops.append((opname, opsets))
+                onnx_supported_ops.append((opname, " ".join([str(o) for o in opsets])))
         else:
             unsupported_ops.append(schema)
     onnx_supported_ops = sorted(onnx_supported_ops, key=lambda x : x[0])
