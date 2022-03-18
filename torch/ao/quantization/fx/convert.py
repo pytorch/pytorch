@@ -68,6 +68,13 @@ FUSED_MODULE_CLASSES = (
     torch.nn.intrinsic.ConvReLU3d,
 )
 
+FLOAT_WEIGHTED_MODULE_CLASSES = (
+    torch.nn.Linear,
+    torch.nn.Conv1d,
+    torch.nn.Conv2d,
+    torch.nn.Conv3d,
+)
+
 QAT_MODULE_CLASSES = (
     torch.nn.qat.Linear,
     torch.nn.qat.Conv2d,
@@ -746,6 +753,11 @@ def convert(
                     node, modules, model, is_reference, backend_config_dict)
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
+                # extra check for fused module classes to make sure they are fused module classes
+                # of target modules
+                if type(modules[node.target]) in FUSED_MODULE_CLASSES and \
+                   type(modules[node.target][0]) not in FLOAT_WEIGHTED_MODULE_CLASSES:
+                    continue
                 convert_weighted_module(
                     node, modules, observed_node_names, quantized_reference_module_mapping, qconfig_map)
             elif type(modules[node.target]) in custom_module_classes:
