@@ -96,9 +96,8 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
 
     The input contains only the positional arguments given to the module.
     Keyword arguments won't be passed to the hooks and only to the ``forward``.
-    The hook can modify the output. It can modify the input inplace but
-    it will not have effect on forward since this is called after
-    :func:`forward` is called.
+    You can optionally modify the output of the module by returning a new value
+    that will be replacing the output from the :func:`forward` function.
 
     Returns:
         :class:`torch.utils.hooks.RemovableHandle`:
@@ -1067,10 +1066,10 @@ class Module:
             hook(module, input, output) -> None or modified output
 
         The input contains only the positional arguments given to the module.
-        Keyword arguments won't be passed to the hooks and only to the ``forward``.
-        The hook can modify the output. It can modify the input inplace but
-        it will not have effect on forward since this is called after
-        :func:`forward` is called.
+        Keyword arguments won't be passed to the hooks and only to the
+        ``forward``. You can optionally modify the output of the module by
+        returning a new value that will be replacing the output from the
+        :func:`forward` function.
 
         Returns:
             :class:`torch.utils.hooks.RemovableHandle`:
