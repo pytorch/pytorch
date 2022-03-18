@@ -1,9 +1,9 @@
 #pragma once
 
-#include <c10/util/Exception.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <torch/csrc/deploy/Exception.h>
 #include <unistd.h>
 #include <cerrno>
 #include <cstdio>
@@ -20,18 +20,21 @@ namespace deploy {
 struct MemFile {
   explicit MemFile(const char* filename_) : fd_(0), mem_(nullptr), n_bytes_(0) {
     fd_ = open(filename_, O_RDONLY);
-    TORCH_CHECK(fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
+    MULTIPY_CHECK(
+        fd_ != -1, "failed to open {}: {}" + filename_ + strerror(errno));
     // NOLINTNEXTLINE
     struct stat s;
     if (-1 == fstat(fd_, &s)) {
       close(fd_); // destructors don't run during exceptions
-      TORCH_CHECK(false, "failed to stat {}: {}", filename_, strerror(errno));
+      MULTIPY_CHECK(
+          false, "failed to stat {}: {}" + filename_ + strerror(errno));
     }
     n_bytes_ = s.st_size;
     mem_ = mmap(nullptr, n_bytes_, PROT_READ, MAP_SHARED, fd_, 0);
     if (MAP_FAILED == mem_) {
       close(fd_);
-      TORCH_CHECK(false, "failed to mmap {}: {}", filename_, strerror(errno));
+      MULTIPY_CHECK(
+          false, "failed to mmap {}: {}" + filename_ + strerror(errno));
     }
   }
   MemFile(const MemFile&) = delete;
