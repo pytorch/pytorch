@@ -842,7 +842,7 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
   torch::lazy::LTCTensorImpl* ltc_tensor_impl = dynamic_cast<torch::lazy::LTCTensorImpl*>(tensor_impl);
   //printf("as_strided_tensorimpl is tensor impl: %p? is LTC tensor impl: %p?\n", tensor_impl, ltc_tensor_impl);
   if (ltc_tensor_impl) {
-    auto self2 = ltc_tensor_impl->tensor().ToTensor(false);
+    auto self2 = ltc_tensor_impl->tensor()->ToTensor(false);
     //printf("new tensor is lazy: %d? is cuda: %d? has storage %d\n", self2.is_cuda(), self2.is_lazy(), self2.has_storage());
 
     auto storage_offset = storage_offset_.value_or(self2.storage_offset());
@@ -1139,9 +1139,9 @@ Tensor alias_with_sizes_and_strides(
   torch::lazy::LTCTensorImpl* ltc_tensor_impl = dynamic_cast<torch::lazy::LTCTensorImpl*>(tensor_impl);
   //printf(" is tensor impl: %p? is LTC tensor impl: %p?\n", tensor_impl, ltc_tensor_impl);
   if (ltc_tensor_impl) {
-    auto self2 = ltc_tensor_impl->tensor().ToTensor(false);
+    auto self2 = ltc_tensor_impl->tensor()->ToTensor(false);
     printf("new tensor is lazy: %d? is cuda: %d? has storage %d\n", self2.is_cuda(), self2.is_lazy(), self2.has_storage());
-    auto self3 = ltc_tensor_impl->tensor().ToTensor(true);
+    auto self3 = ltc_tensor_impl->tensor()->ToTensor(true);
     printf("new tensor is lazy: %d? is cuda: %d? has storage %d\n", self3.is_cuda(), self3.is_lazy(), self3.has_storage());
 
     self_ = at::detail::make_tensor<TensorImpl>(

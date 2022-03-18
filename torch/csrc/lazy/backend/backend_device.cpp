@@ -68,7 +68,7 @@ c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   // TORCH_INTERNAL_ASSERT(tensor.device().has_value(), "need to have value\n");
   // return GetOrCreateLtcTensor(tensor, atenDeviceToBackendDevice(tensor.device()));
   if (auto lt = TryGetLtcTensor(tensor)) {
-    return lt.GetDevice();
+    return lt->GetDevice();
   } else {
     c10::Device device("lazy");
     device.set_index(tensor.device().index());
