@@ -3600,6 +3600,45 @@ class TestQuantizeFx(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+    @skipIfNoFBGEMM
+    def test_dynamic_with_fusion_multiple_uses(self):
+        """
+        Tests that dynamic quantization APIs work with Linear + Relu fusion
+        """
+        class LinearRelu(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.relu(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear_relu = LinearRelu()
+
+            def forward(self, x):
+                x = self.linear_relu(x)
+                x = self.linear_relu(x)
+                return x
+
+        for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            model = M().eval()
+            qconfig_dict = {
+                "": qconfig
+            }
+            m = prepare_fx(model, qconfig_dict)
+            m = convert_fx(m)
+            m(torch.rand(5, 5))
+            node_list = [
+                ns.call_module(nniqd.LinearReLU),
+                ns.call_module(nniqd.LinearReLU),
+            ]
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
     def test_ref_linear_module(self):
         """ Make sure the numerics for models with ref linear module
         matches models with fbgemm/qnnpack module
