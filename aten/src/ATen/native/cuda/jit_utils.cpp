@@ -120,6 +120,11 @@ const std::string jit_common_types = R"ESCAPE(
   Array() = default;
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
+  __device__ Array(T x) {
+    for (int i = 0; i < size; i++) {
+      data[i] = x;
+    }
+  }
   };
 
   ${half_string}
@@ -888,6 +893,7 @@ std::string generate_reduction_code(
       at::jit::TemplateEnv env;
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
+      env.s("result_type", result_type);
       env.s("name", name);
       env.s("traits_string", "");
       env.s("complex_body_string", "");
@@ -896,10 +902,10 @@ std::string generate_reduction_code(
       env.s("bfloat16_string", "");
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);
+      env.s("output_vec_size", std::to_string(vec_size));
       static auto cuda_template = at::jit::CodeTemplate(
         jit_common_types + load_code_template("/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/reduction_template.cuh"));
       const auto code = cuda_template.format(env);
-//      std::cout << code << "\n";
       return code;
 
 }
@@ -983,9 +989,7 @@ c10::optional<std::string> get_cache_dir() {
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-
   initializeCudaContext();
-
   // Acquires CUDA and nvrtc versions and whether we're compiling to ptx or SASS
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int cuda_major = 0, cuda_minor = 0, nvrtc_major = 0, nvrtc_minor = 0;
@@ -1080,7 +1084,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data();
-    throw std::runtime_error(cu.str() + code);
+    throw std::runtime_error(code + cu.str());
   }
 
   size_t ptx_size = 0;

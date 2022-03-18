@@ -907,14 +907,13 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   std::string name = "sum";
   std::string func = jiterator_stringify(
-  template <typename T>
-  T combine(T a, T b) {
+  scalar_t combine(scalar_t a, scalar_t b) {
     return a+b;
   }
   );
   auto code = at::cuda::jit::generate_reduction_code(1, func, name,
                                                "float", "float", "float",
-                                               true, false, 0);
+                                               true, false, 1);
   at::cuda::jit::jit_pwise_function(code, "reduction_"+name);
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
