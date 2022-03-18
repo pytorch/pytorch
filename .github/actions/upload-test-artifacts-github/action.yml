@@ -1,0 +1,27 @@
+name: Upload test artifacts to GitHub
+
+description: Upload various artifacts produced by our testing process
+
+inputs:
+  file-suffix:
+    description: Suffix to add to the filename of the artifacts
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Store Test Downloaded JSONs on Github
+      uses: actions/upload-artifact@v2
+      with:
+        name: test-jsons-${{ inputs.file-suffix }}.zip
+        retention-days: 14
+        if-no-files-found: warn
+        path: test/**/*.json
+
+    - name: Store Test Reports on Github
+      uses: actions/upload-artifact@v2
+      with:
+        name: test-reports-${{ inputs.file-suffix }}.zip
+        retention-days: 14
+        if-no-files-found: error
+        path: test/**/*.xml

@@ -5,6 +5,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict
+import datetime
 
 import rockset
 import boto3  # type: ignore[import]
@@ -20,10 +21,13 @@ S3_RESOURCE = boto3.resource("s3")
 
 def parse_xml_report(report: Path, workflow_id: int):
     """Convert a test report xml file into a JSON-serializable list of test cases."""
-    job_id = report.stem.rpartition("_")[0]
-    print(f"Parsing test report: {report}, id: {job_id}")
+    # Retrieve the job id from the report path. In our GHA workflows, we append
+    # the job id to the end of the report name, so `report` looks like:
+    #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
+    # and we want to get `5596745227` out of it.
+    job_id = int(report.parts[0].rpartition("_")[2])
 
-    # We tack the job name onto the end in upload-test-artifacts
+    print(f"Parsing test report: {report}, job id: {job_id}")
     root = ET.parse(
         report,
         ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)),  # type: ignore [call-arg]
@@ -49,6 +53,19 @@ def process_xml_element(element):
     # becomes:
     #     {"name": "test_foo", "classname": "test_bar"}
     ret.update(element.attrib)
+
+    # By default, all attributes are strings. Apply a few special conversions
+    # here for well-known attributes so that they are the right type in Rockset.
+    if line := ret.get("line"):
+        ret["line"] = int(line)
+    if time := ret.get("time"):
+        ret["time"] = float(time)
+    if timestamp := ret.get("timestamp"):
+        # Timestamps reported are not valid ISO8601 because they have no timezone. Add one.
+        # This assumes that
+        ret["timestamp"] = (
+            datetime.datetime.fromisoformat(timestamp).astimezone().isoformat()
+        )
 
     # Convert inner and outer text into special dict elements.
     # e.g.
@@ -76,7 +93,7 @@ def process_xml_element(element):
     return ret
 
 
-def get_artifact_urls(workflow_run_id) -> Dict[Path, str]:
+def get_artifact_urls(workflow_run_id: int) -> Dict[Path, str]:
     """Get all workflow artifacts with 'test-report' in the name."""
     response = requests.get(
         f"{PYTORCH_REPO}/actions/runs/{workflow_run_id}/artifacts?per_page=100",
@@ -93,64 +110,40 @@ def get_artifact_urls(workflow_run_id) -> Dict[Path, str]:
     return artifact_urls
 
 
-def extract_job_test_reports(job_report_path):
-    with zipfile.ZipFile(job_report_path, "r") as job_artifact_zip:
-        p = Path(job_report_path)
-        unzipped_report_path = Path(p.stem + "-unzipped")
-        job_artifact_zip.extractall(unzipped_report_path)
+def unzip(p: Path):
+    """Unzip the provided zipfile to a similarly-named directory.
 
-        return unzipped_report_path.glob("**/*.xml")
+    Returns None if `p` is not a zipfile.
 
-
-def get_unzipped_path(p: Path) -> Path:
-    """Return a unique path for unzipped stuff to go, based on the path provided.
-
-    Looks like: /tmp/test-reports.zip -> /tmp/test-reports-unzipped/
+    Looks like: /tmp/test-reports.zip -> /tmp/unzipped-test-reports/
     """
-    return p.with_name(p.stem + "-unzipped")
+    assert p.is_file()
+    unzipped_dir = p.with_name("unzipped-" + p.stem)
+
+    with zipfile.ZipFile(p, "r") as zip:
+        zip.extractall(unzipped_dir)
 
 
-def unzip_glob(p: Path):
-    """Unzip all zip files, recursively through subdirs"""
-    job_reports_paths = p.glob("**/*.zip")
-
-    for job_reports_path in job_reports_paths:
-        with zipfile.ZipFile(job_reports_path, "r") as job_artifact_zip:
-            unzipped_report_path = get_unzipped_path(job_reports_path)
-            job_artifact_zip.extractall(unzipped_report_path)
-
-
-def download_and_extract_artifact(artifact_name: Path, artifact_url: str) -> Path:
+def download_and_extract_artifact(artifact_name: Path, artifact_url: str):
     response = requests.get(artifact_url, headers=REQUEST_HEADERS)
+    print(f"Downloading and extracting {artifact_name}")
     with open(artifact_name, "wb") as f:
         f.write(response.content)
-
-    # The hierarchy looks like:
-    # test-reports-workflow-artifact.zip
-    # ├─ test-reports-job1.zip
-    # └─ test-reports-job2.zip
-    # Extract them all!
-    with zipfile.ZipFile(artifact_name, "r") as artifact_zip:
-        unzipped_artifact_path = get_unzipped_path(artifact_name)
-        artifact_zip.extractall(unzipped_artifact_path)
-
-        unzip_glob(unzipped_artifact_path)
-
-    return unzipped_artifact_path
+    unzip(artifact_name)
 
 
-def download_and_extract_s3_reports(workflow_run_id):
+def download_and_extract_s3_reports(workflow_run_id: int):
     bucket = S3_RESOURCE.Bucket("gha-artifacts")
     objs = bucket.objects.filter(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/artifact/test-reports"
     )
 
     for obj in objs:
-        p = Path(obj.key).name
+        p = Path(Path(obj.key).name)
+        print(f"Downloading and extracting {p}")
         with open(p, "wb") as f:
             f.write(obj.get()["Body"].read())
-
-    unzip_glob(Path("."))
+        unzip(p)
 
 
 if __name__ == "__main__":
@@ -166,12 +159,12 @@ if __name__ == "__main__":
     download_and_extract_s3_reports(args.workflow_run_id)
     artifact_urls = get_artifact_urls(args.workflow_run_id)
     for name, url in artifact_urls.items():
-        unzipped_path = download_and_extract_artifact(Path(name), url)
+        download_and_extract_artifact(Path(name), url)
 
     # Parse the reports and transform them to JSON
     test_cases = []
     for xml_report in Path(".").glob("**/*.xml"):
-        test_cases.extend(parse_xml_report(xml_report, args.workflow_run_id))
+        test_cases.extend(parse_xml_report(xml_report, int(args.workflow_run_id)))
 
     # Write the JSON to rockset
     print(f"Writing {len(test_cases)} test reports to Rockset")
@@ -179,3 +172,4 @@ if __name__ == "__main__":
         api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
     client.Collection.retrieve("test_run").add_docs(test_cases)
+    print("Done!")

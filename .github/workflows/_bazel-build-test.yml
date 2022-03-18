@@ -141,12 +141,17 @@ jobs:
         uses: ./.github/actions/chown-workspace
         if: always()
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts
+        uses: ./.github/actions/upload-test-artifacts-s3
         if: always()
         with:
-          file-suffix: bazel-${{ github.job }}
-          gh-token: ${{ secrets.GITHUB_TOKEN }}
+          file-suffix: bazel-${{ github.job }}_${{ steps.get-job-id.outputs.job-id }}
 
       - name: Upload test statistics
         if: always()
