@@ -1364,8 +1364,6 @@ class FullyShardedDataParallel(nn.Module):
         self,
         prefix: str = "",
         recurse: bool = True,
-        *args,
-        **kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
         Overrides :meth:`torch.nn.Module.named_parameters()` to intercept
@@ -1376,13 +1374,13 @@ class FullyShardedDataParallel(nn.Module):
         # Determine which logic to use based on the context at call time
         if getattr(self, "training_state", None) != TrainingState_.SUMMON_FULL_PARAMS:
             for param_name, param in torch.nn.Module.named_parameters(
-                self, prefix=prefix, recurse=recurse, *args, **kwargs,
+                self, prefix=prefix, recurse=recurse,
             ):
                 # Do not modify the behavior if not in `summon_full_params()`
                 yield (param_name, param)
         else:
             for param_name, param in torch.nn.Module.named_parameters(
-                self, prefix=prefix, recurse=recurse, *args, **kwargs,
+                self, prefix=prefix, recurse=recurse,
             ):
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
