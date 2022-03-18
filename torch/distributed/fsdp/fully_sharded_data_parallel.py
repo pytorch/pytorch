@@ -1366,26 +1366,19 @@ class FullyShardedDataParallel(nn.Module):
         **kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
-        Overrides :meth:`torch.nn.Module.named_parameters()` to intercept
-        parameter names and remove all occurrences of the FSDP-specific
-        flattened parameter prefix when inside the :meth:`summon_full_params`
-        context manager.
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of the FSDP-specific flattened parameter prefix
+        when inside the :meth:`summon_full_params` context manager.
         """
         # Determine which logic to use based on the context at call time
-        if getattr(self, "training_state", None) != TrainingState_.SUMMON_FULL_PARAMS:
-            for param_name, param in torch.nn.Module.named_parameters(
-                self, *args, **kwargs,
-            ):
-                # Do not modify the behavior if not in `summon_full_params()`
-                yield (param_name, param)
-        else:
-            for param_name, param in torch.nn.Module.named_parameters(
-                self, *args, **kwargs,
-            ):
+        in_summon_full_params = getattr(self, "training_state", None) == \
+            TrainingState_.SUMMON_FULL_PARAMS
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            if in_summon_full_params:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
                 param_name = param_name.replace(FSDP_PREFIX, "")
-                yield (param_name, param)
+            yield (param_name, param)
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's
