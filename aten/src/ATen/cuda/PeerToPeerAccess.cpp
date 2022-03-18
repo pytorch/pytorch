@@ -54,6 +54,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
   C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
   if (access) {
     if (using_cudaMallocAsync) {
+#if CUDA_VERSION >= 11040
       // Double-checks allocator backend hasn't changed, which would definitely be an error.
       TORCH_INTERNAL_ASSERT(CUDACachingAllocator::allocatorBackend() ==
                             CUDACachingAllocator::AllocatorBackend::CUDAMALLOCASYNC);
@@ -67,6 +68,9 @@ bool get_p2p_access(int dev, int dev_to_access) {
       desc.location.id = dev;
       desc.flags = cudaMemAccessFlagsProtReadWrite;
       C10_CUDA_CHECK(cudaMemPoolSetAccess(mempool, &desc, 1 /* numDescs */));
+#else
+      TORCH_INTERNAL_ASSERT(false);
+#endif
     } else {
       TORCH_INTERNAL_ASSERT(CUDACachingAllocator::allocatorBackend() ==
                             CUDACachingAllocator::AllocatorBackend::NATIVE);

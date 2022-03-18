@@ -613,7 +613,7 @@ DeviceStats getDeviceStats(int device) {
 
 void resetAccumulatedStats(int device) {
   assertValidDevice(device);
-  TORCH_WARN("For backend:cudaMallocAsync, resetAccumulatedStats has no effect.");
+  TORCH_WARN_ONCE("For backend:cudaMallocAsync, resetAccumulatedStats has no effect.");
 }
 
 void resetPeakStats(int device) {
