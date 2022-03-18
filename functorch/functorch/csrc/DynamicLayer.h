@@ -30,7 +30,8 @@ struct TORCH_API DynamicLayer {
       int64_t layerId,
       optional<int64_t> batchSize = nullopt,
       optional<RandomnessType> randomness = nullopt,
-      optional<bool> prev_grad_mode = nullopt);
+      optional<bool> prev_grad_mode = nullopt,
+      optional<bool> pre_fwd_grad_mode = nullopt);
 
   DispatchKey key() const;
   int64_t layerId() const;
@@ -41,6 +42,9 @@ struct TORCH_API DynamicLayer {
 
   // only valid for grad-based transforms
   optional<bool> prevGradMode() const;
+
+  // only valid for jvp transform
+  optional<bool> prevFwdGradMode() const;
  private:
   DispatchKey key_;
   int64_t layerId_;
@@ -50,13 +54,15 @@ struct TORCH_API DynamicLayer {
   optional<int64_t> batchSize_;
   optional<RandomnessType> randomness_;
   optional<bool> prevGradMode_;
+  optional<bool> prevFwdGradMode_;
 };
 
 TORCH_API int64_t initAndPushDynamicLayer(
     DispatchKey key,
     optional<int64_t> batch_size = nullopt,
     optional<RandomnessType> randomness = nullopt,
-    optional<bool> prev_grad_mode = nullopt);
+    optional<bool> prev_grad_mode = nullopt,
+    optional<bool> prev_fwd_grad_mode = nullopt);
 TORCH_API DynamicLayer popDynamicLayerAndDeleteMetadata();
 TORCH_API c10::optional<DynamicLayer> maybeCurrentDynamicLayer();
 TORCH_API const std::vector<DynamicLayer>& getDynamicLayerStack();

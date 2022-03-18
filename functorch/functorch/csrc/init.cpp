@@ -16,6 +16,7 @@
 #include <functorch/csrc/PointwiseOperatorCompileCache.h>
 #include <functorch/csrc/CompileCache.h>
 #include <functorch/csrc/CustomFunction.h>
+#include <c10/core/AutogradState.h>
 
 
 namespace at {
@@ -147,6 +148,14 @@ RandomnessType get_randomness_enum(const std::string& randomness) {
     }
 }
 
+void set_fwd_grad_enabled(bool enabled) {
+  AutogradState::get_tls_state().set_fw_grad_mode(enabled);
+}
+
+bool get_fwd_grad_enabled() {
+  return AutogradState::get_tls_state().get_fw_grad_mode();
+}
+
 int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
@@ -154,6 +163,18 @@ int64_t _grad_increment_nesting() {
 }
 
 int64_t _grad_decrement_nesting() {
+  auto layer = popDynamicLayerAndDeleteMetadata();
+  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Autograd);
+  return layer.layerId();
+}
+
+int64_t _jvp_increment_nesting() {
+  // See NOTE [grad and vjp interaction with no_grad]
+  bool prev_fwd_grad_mode = get_fwd_grad_enabled();
+  return initAndPushDynamicLayer(at::DispatchKey::Autograd, nullopt, nullopt, nullopt, prev_fwd_grad_mode);
+}
+
+int64_t _jvp_decrement_nesting() {
   auto layer = popDynamicLayerAndDeleteMetadata();
   TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Autograd);
   return layer.layerId();
@@ -268,6 +289,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_vmap_decrement_nesting", &at::functorch::_vmap_decrement_nesting, "remove batch dim");
   m.def("_grad_increment_nesting", &at::functorch::_grad_increment_nesting, "remove batch dim");
   m.def("_grad_decrement_nesting", &at::functorch::_grad_decrement_nesting, "remove batch dim");
+  m.def("_jvp_increment_nesting", &at::functorch::_jvp_increment_nesting);
+  m.def("_jvp_decrement_nesting", &at::functorch::_jvp_decrement_nesting);
   m.def("_wrap_for_grad", &at::functorch::_wrap_for_grad, "wrap as gradtrackingtensor");
   m.def("_unwrap_for_grad", &at::functorch::_unwrap_for_grad, "unwrap from gradtrackingtensor");
   m.def("_set_vmap_fallback_warning_enabled", &at::functorch::setVmapFallbackWarningEnabled, "Set vmap fallback warnings");
@@ -292,6 +315,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_set_dynamic_layer_keys_included", &at::functorch::_set_dynamic_layer_keys_included);
   m.def("dump_dls", &at::functorch::dump_dls);
   m.def("dump_local_tls", &at::functorch::dump_local_tls);
+  m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
+  m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
   at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
   at::functorch::initCompileCacheBindings(m.ptr());
   initDispatchBindings(m.ptr());
