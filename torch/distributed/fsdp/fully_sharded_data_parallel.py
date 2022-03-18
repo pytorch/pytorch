@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
+FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 
 class ShardingStrategy(Enum):
@@ -1363,6 +1364,8 @@ class FullyShardedDataParallel(nn.Module):
         self,
         prefix: str = "",
         recurse: bool = True,
+        *args,
+        **kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
         Overrides :meth:`torch.nn.Module.named_parameters()` to intercept
@@ -1371,8 +1374,7 @@ class FullyShardedDataParallel(nn.Module):
         context manager.
         """
         # Determine which logic to use based on the context at call time
-        if not hasattr(self, "training_state") or \
-                self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
+        if getattr(self, "training_state", None) != TrainingState_.SUMMON_FULL_PARAMS:
             for param_name, param in torch.nn.Module.named_parameters(
                 self, prefix=prefix, recurse=recurse
             ):
@@ -1382,10 +1384,9 @@ class FullyShardedDataParallel(nn.Module):
             for param_name, param in torch.nn.Module.named_parameters(
                 self, prefix=prefix, recurse=recurse,
             ):
-                # Remove any instances of "_fsdp_wrapped_module._fpw_module.";
-                # there can be multiple in the case of nested FSDP modules
-                fsdp_prefix = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
-                param_name = param_name.replace(fsdp_prefix, "")
+                # Remove any instances of the FSDP-specific prefix; there can
+                # be multiple in the case of nested FSDP modules
+                param_name = param_name.replace(FSDP_PREFIX, "")
                 yield (param_name, param)
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
