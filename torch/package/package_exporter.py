@@ -674,7 +674,7 @@ class PackageExporter:
                         action=_ModuleProviderAction.MOCK,
                         error=PackagingErrorReason.MOCKED_BUT_STILL_USED,
                         error_context=f"Object(s) '{fields}' from module `{module_name}` was mocked out during packaging "
-                                      f"but is being used in resource - `{resource}` in package `{package}`. ",
+                        f"but is being used in resource - `{resource}` in package `{package}`. ",
                         provided=True,
                     )
                 else:
