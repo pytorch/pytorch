@@ -211,10 +211,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto requantize_multiplier = act_scale * weight_scale / output_scale;
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
-  c10::optional<at::Tensor> after_scales_bias;
-  c10::optional<at::Tensor> after_add;
   c10::optional<at::Tensor> broadcasted_bias;
-  c10::optional<at::Tensor> after_relu;
   auto weight = orig_weight_.int_repr();
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
@@ -229,11 +226,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
-    after_scales_bias = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-    after_add = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  }
-  if (kReluFused) {
-    after_relu = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   }
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
@@ -271,15 +263,15 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     uids = {'x', 'y', 'w', 's', 'r'};
     if (bias_.has_value()) {
       data_ptrs.insert(data_ptrs.end(), {broadcasted_bias.value().data_ptr(), bias_multiplier_tensor.value().data_ptr(),
-                                         after_scales_bias.value().data_ptr(), after_add.value().data_ptr()});
+                                         broadcasted_bias.value().data_ptr(), conv_output.data_ptr()});
       uids.insert(uids.end(), {'b', 'c', 'd', 'e'});
       if (kReluFused) {
-        data_ptrs.emplace_back(after_relu.value().data_ptr()),
+        data_ptrs.emplace_back(conv_output.data_ptr()),
         uids.emplace_back('f');
       }
     } else {
       if (kReluFused) {
-        data_ptrs.emplace_back(after_relu.value().data_ptr());
+        data_ptrs.emplace_back(conv_output.data_ptr());
         uids.emplace_back('f');
       }
     }
@@ -315,28 +307,27 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     // we can't directly assign bias_mult_op becauase operator= is deleted for cudnn_frontend::Operation;
     // alternatively, I think we can use std::unique_ptr and dynamically allocate these builder ops
     // but here, we chose to do it statically. c10::optional<T>::emplace() enables this approach
-    // TODO: can we assign the result back into bias and get rid of after_scales_bias? pending NVIDIA response
 
     // bias_mult_op computes bias_fp32 / (act_scale * w_scale) or bias_fp32 * (1 / (act_scale * w_scale))
     // where bias_multiplier = (1 / (act_scale * w_scale))
     // output is a fp32 tensor
+    // we use inplace operation here where the output is assigned to the input
     bias_mult_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(getTensorDescriptor(broadcasted_bias.value(), 'b', getAlignment(broadcasted_bias.value())))
       .setbDesc(getTensorDescriptor(bias_multiplier_tensor.value(), 'c', getAlignment(bias_multiplier_tensor.value())))
-      .setyDesc(getTensorDescriptor(after_scales_bias.value(), 'd', getAlignment(after_scales_bias.value())))
+      .setyDesc(getTensorDescriptor(broadcasted_bias.value(), 'd', getAlignment(broadcasted_bias.value())))
       .setpwDesc(getPointWiseMulDescriptor(at::native::getCudnnDataType(bias_multiplier_tensor.value())))
       .build());
 
-    // TODO: can we assign the result back into conv_output and get rid of after_add?
-
     // computes (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)])
-    // where the 1st and 2nd summands is conv_output and after_scales_bias, resp.
+    // where the 1st and 2nd summands is conv_output and broadcasted_bias, resp.
     // output is a fp32 tensor
+    // we use inplace operation here where the output is assigned to the input
     sum_conv_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(conv_op.getOutputTensor())
-      .setbDesc(getTensorDescriptor(after_scales_bias.value(), 'd', getAlignment(after_scales_bias.value())))
-      .setyDesc(getTensorDescriptor(after_add.value(), 'e', getAlignment(after_add.value())))
-      .setpwDesc(getPointWiseAddDescriptor(at::native::getCudnnDataType(after_scales_bias.value())))
+      .setbDesc(getTensorDescriptor(broadcasted_bias.value(), 'd', getAlignment(broadcasted_bias.value())))
+      .setyDesc(getTensorDescriptor(conv_output, 'e', key.output_alignment))
+      .setpwDesc(getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
       .build());
   }
 
@@ -346,11 +337,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   c10::optional<cudnn_frontend::Operation> relu_op;
   std::shared_ptr<cudnn_frontend::OpaqueBackendPointer> tensor2requant_ptr = bias_.has_value() ? sum_conv_bias_op.value().getOutputTensor() : conv_op.getOutputTensor();
   if (kReluFused) {
-    // TODO: can we assign the result back into conv_output and get rid of after_relu?
+    // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
-      .setyDesc(getTensorDescriptor(after_relu.value(), 'f', getAlignment(after_relu.value())))
-      .setpwDesc(getPointWiseReluDescriptor(at::native::getCudnnDataType(after_relu.value())))
+      .setyDesc(getTensorDescriptor(conv_output, 'f', key.output_alignment))
+      .setpwDesc(getPointWiseReluDescriptor(at::native::getCudnnDataType(conv_output)))
       .build());
   }
 
