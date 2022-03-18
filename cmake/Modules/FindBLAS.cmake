@@ -289,6 +289,28 @@ if((NOT BLAS_LIBRARIES)
   endif()
 endif()
 
+# BLAS in SSL2 library?
+if((NOT BLAS_LIBRARIES)
+    AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "ssl2")))
+  if(CMAKE_CXX_COMPILER MATCHES ".*/FCC$"
+      AND CMAKE_C_COMPILER MATCHES ".*/fcc$")
+    check_fortran_libraries(
+    BLAS_LIBRARIES
+    BLAS
+    sgemm
+    "-SSL2;--linkfortran"
+    "fjlapackexsve")
+    if (BLAS_LIBRARIES)
+      set(BLAS_INFO "ssl2")
+      set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -SSL2 --linkfortran")
+    endif (BLAS_LIBRARIES)
+  else()
+    message(STATUS "Not built using fcc and FCC.")
+    message(STATUS "CMAKE_C_COMPILER: ${CMAKE_C_COMPILER}")
+    message(STATUS "CMAKE_CXX_COMPILER: ${CMAKE_CXX_COMPILER}")
+  endif()
+endif()
+
 # Generic BLAS library?
 if((NOT BLAS_LIBRARIES)
     AND ((NOT WITH_BLAS) OR (WITH_BLAS STREQUAL "generic")))
