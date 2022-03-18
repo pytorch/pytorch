@@ -21269,6 +21269,10 @@ TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
+  if (disableIndexHoisting()) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -21318,6 +21322,11 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
       innermost_loop = first_expr_loop;
     }
     const auto& exprs = innermost_loop->body().exprs();
+    TORCH_CHECK(!exprs.empty(), "No expression found");
+    TORCH_CHECK(
+        exprs.at(0)->isA<kir::Allocate>(),
+        "Invalid expression: ",
+        exprs.at(0)->toString());
     auto hoisted_index = exprs.at(0)->as<kir::Allocate>()->buffer();
     kir::Predicate* pred = nullptr;
     for (auto expr : exprs) {
@@ -21434,6 +21443,10 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
 
 // Hoist indices for vectorized tensors
 TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
+  if (disableIndexHoisting()) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
