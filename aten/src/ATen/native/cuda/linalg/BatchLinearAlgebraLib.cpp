@@ -657,6 +657,8 @@ void svd_cusolver(const Tensor& A,
   // Need to pass a copy of A, since A will be rewritten inside the function call
   if (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n)) {
     svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
+  } else if (batch_size > 1 && m >= 3 * n /* gesvda heuristics: tall and thin matrix */) {
+    svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
   } else {
     svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
   }
