@@ -1362,8 +1362,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def named_parameters(
         self,
-        prefix: str = "",
-        recurse: bool = True,
+        *args,
         **kwargs,
     ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """
@@ -1372,20 +1371,16 @@ class FullyShardedDataParallel(nn.Module):
         flattened parameter prefix when inside the :meth:`summon_full_params`
         context manager.
         """
-        # Use `kwargs` in case `nn.Module.named_parameters()` takes additional
-        # keyword arguments in the future
-        kwargs["prefix"] = prefix
-        kwargs["recurse"] = recurse
         # Determine which logic to use based on the context at call time
         if getattr(self, "training_state", None) != TrainingState_.SUMMON_FULL_PARAMS:
             for param_name, param in torch.nn.Module.named_parameters(
-                self, **kwargs,
+                self, *args, **kwargs,
             ):
                 # Do not modify the behavior if not in `summon_full_params()`
                 yield (param_name, param)
         else:
             for param_name, param in torch.nn.Module.named_parameters(
-                self, **kwargs,
+                self, *args, **kwargs,
             ):
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
