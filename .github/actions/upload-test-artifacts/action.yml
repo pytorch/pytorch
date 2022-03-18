@@ -32,7 +32,7 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{{ steps.get-job-id.outputs.job-id }}}
+        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{ steps.get-job-id.outputs.job-id }}
       run: |
         # Remove any previous test jsons if they exist
         rm -f test-jsons-*.zip
@@ -42,7 +42,7 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{{ steps.get-job-id.outputs.job-id }}}
+        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{ steps.get-job-id.outputs.job-id }}
       run: |
         # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
@@ -53,7 +53,7 @@ runs:
       if: runner.os == 'Windows'
       shell: powershell
       env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{{ steps.get-job-id.outputs.job-id }}}
+        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{ steps.get-job-id.outputs.job-id }}
       run: |
         # -ir => recursive include all files in pattern
         7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
@@ -62,7 +62,7 @@ runs:
       if: runner.os == 'Windows'
       shell: powershell
       env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{{ steps.get-job-id.outputs.job-id }}}
+        FILE_SUFFIX: ${{ inputs.file-suffix }}_${{ steps.get-job-id.outputs.job-id }}
       run: |
         # -ir => recursive include all files in pattern
         7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml'
