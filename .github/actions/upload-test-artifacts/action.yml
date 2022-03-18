@@ -97,7 +97,7 @@ runs:
       uses: actions/upload-artifact@v2
       if: inputs.use-gha
       with:
-        name: test-reports-${{ inputs.file-suffix }}_${{{ steps.get-job-id.outputs.job-id }}}.zip
+        name: test-reports-${{ inputs.file-suffix }}_${{ steps.get-job-id.outputs.job-id }}.zip
         retention-days: 14
         if-no-files-found: error
         path: test-reports-*.zip
