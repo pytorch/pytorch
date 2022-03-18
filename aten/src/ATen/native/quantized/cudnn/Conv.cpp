@@ -199,14 +199,16 @@ at::SmallVector<int64_t, 4> MakeConvOutputShape<2>(
 // the parameter quantized_output is a quantized tensor
 template <int kSpatialDim>
 template <bool kReluFused>
-void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input,
-                                                           double bias_multiplier, double requantize_multiplier) {
+void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
   if (quantized_output.numel() == 0) {
     return;
   }
   at::Tensor conv_output = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
   // TODO: combine empty & fill_ using full_like or full
   at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  auto act_scale = input.q_scale();
+  auto weight_scale = orig_weight_.q_scale();
+  auto requantize_multiplier = act_scale * weight_scale / output_scale;
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> after_scales_bias;
@@ -225,6 +227,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     broadcasted_bias.value() = broadcasted_bias.value().broadcast_to(quantized_output.sizes());
     broadcasted_bias.value() = broadcasted_bias.value().contiguous(c10::MemoryFormat::ChannelsLast);
     bias_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+    auto bias_multiplier = 1.0 / (act_scale * weight_scale);
     bias_multiplier_tensor.value().fill_(bias_multiplier);
     after_scales_bias = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
     after_add = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
@@ -240,13 +243,14 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto padding_vec = padding_.vec();
   auto stride_vec = stride_.vec();
   auto dilation_vec = dilation_.vec();
-  setConvolutionParams(&key.params, input, weight, padding_vec, stride_vec, dilation_vec, groups_, deterministic, allow_tf32);
+  setConvolutionParams(&key.params, input, orig_weight_, padding_vec, stride_vec, dilation_vec, groups_, deterministic, allow_tf32);
+
   // operator datatype needs to be int32 for int8 convolution, but we can
   // set the datatype for output tensor to int32 or fp32
   key.params.dataType = CUDNN_DATA_INT32;
   key.input_alignment = getAlignment(input);
   key.output_alignment = getAlignment(conv_output);
-  key.weight_alignment = getAlignment(weight);
+  key.weight_alignment = getAlignment(orig_weight_);
   if (bias_.has_value()) {
     key.bias_alignment = getAlignment(broadcasted_bias.value());
   } else {
@@ -261,7 +265,7 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     data_ptrs.reserve(10);
     uids.reserve(10);
     data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), conv_output.data_ptr(),
-                                           reinterpret_cast<int8_t*>(weight.data_ptr()),
+                                           reinterpret_cast<int8_t*>(orig_weight_.data_ptr()),
                                            requantize_multiplier_tensor.data_ptr(),
                                            reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
     uids = {'x', 'y', 'w', 's', 'r'};
@@ -298,9 +302,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // where act_fp32 and w_fp32 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
+      .setxDesc(getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
       .setyDesc(getTensorDescriptor(conv_output, 'y', key.output_alignment))
-      .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
+      .setwDesc(getTensorDescriptor(orig_weight_.sizes(), orig_weight_.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding_vec, stride_vec, dilation_vec))
       .build();
   // std::cout << "operator:" << conv_op.describe() << std::endl;
@@ -390,8 +394,10 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto& fallback_list = fallback.getFallbackList();
 
   cudnn_frontend::EngineConfigList filtered_configs;
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
+  // because we removed the int_repr call and now input is a quantized tensor, we will pass in
+  // at::kChar instead of input.scalar_type()
+  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
+  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
 
   for (auto &cfg : engine_configs) {
     try {
@@ -449,14 +455,8 @@ at::Tensor PackedConvWeightCudnn<kSpatialDim>::apply_impl(
       at::MemoryFormat::ChannelsLast);
   // requantization
   // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
-  // TODO:  note we will remove the int_repr() in a subsequent PR, so we can move the computations for
-  // the multipliers into the helper function
-  auto act_scale = act.q_scale();
-  auto weight_scale = orig_weight_.q_scale();
-  auto requantize_multiplier = act_scale * weight_scale / output_scale;
-  auto bias_multiplier = 1.0 / (act_scale * weight_scale);
   apply_impl_helper<kReluFused>(
-      quantized_output, act.int_repr(), bias_multiplier, requantize_multiplier);
+      quantized_output, act, output_scale);
   return quantized_output;
 }
 
