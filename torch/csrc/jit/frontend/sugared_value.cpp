@@ -123,6 +123,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_vulkan", "prim"},
            {"is_meta", "prim"},
            {"is_leaf", "aten"},
+           {"is_nested", "prim"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
            {"T", "prim"},

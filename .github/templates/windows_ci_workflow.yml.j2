@@ -18,30 +18,7 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: !{{ build_environment }}
 
-on:
-{%- if on_pull_request %}
-  pull_request:
-{%- endif %}
-  push:
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-{%- if not is_scheduled %}
-    branches:
-      - master
-      - main
-      - release/*
-{%- endif %}
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
@@ -76,6 +53,7 @@ env:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -138,6 +116,7 @@ jobs:
 
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     timeout-minutes: !{{ timeout_after + 30 }}
     env:
