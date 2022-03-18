@@ -142,7 +142,7 @@ jobs:
         uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
-          file-suffix: $bazel-${{ github.job }}
+          file-suffix: bazel-${{ github.job }}
 
       - name: Upload test statistics
         if: always()
