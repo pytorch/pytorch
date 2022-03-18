@@ -96,7 +96,7 @@ def normalize_as_list(x):
 aot_autograd_decompositions = {}
 
 
-@register_decomposition(aten.rsub.Tensor, aot_autograd_decompositions)
+@register_decomposition([aten.rsub.Scalar, aten.rsub.Tensor], aot_autograd_decompositions)
 def rsub(a, b, alpha=1):
     return -aten.sub(a, b)
 
