@@ -3,8 +3,9 @@ import torch.fx as fx
 import torch.nn as nn
 from functools import partial
 from typing import Callable, Iterable, Optional, Tuple, Union
+
 from .aot_autograd import aot_function, aot_module
-from .decompositions import decomposition_table
+from .decompositions import get_decompositions
 from .partitioners import draw_graph, min_cut_rematerialization_partition
 import time
 
@@ -272,9 +273,7 @@ default_decompositions = set(
         aten.silu_backward,
     ]
 )
-default_decompositions = {
-    k: v for k, v in decomposition_table.items() if k in default_decompositions
-}
+default_decompositions = get_decompositions(default_decompositions)
 
 
 def print_compile(fx_g, _):
