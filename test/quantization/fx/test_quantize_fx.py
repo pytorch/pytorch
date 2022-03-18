@@ -3639,6 +3639,46 @@ class TestQuantizeFx(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+    @skipIfNoFBGEMM
+    def test_dynamic_linear_input_multiple_use(self):
+        """
+        Tests input for dynamic linear being used by multiple ops
+        """
+        class LinearRelu(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.relu(x)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod1 = LinearRelu()
+                self.mod2 = LinearRelu()
+
+            def forward(self, x):
+                y1 = self.mod1(x)
+                y2 = self.mod2(x)
+                return y1 + y2
+
+        for qconfig in [float16_dynamic_qconfig, default_dynamic_qconfig]:
+            model = M().eval()
+            qconfig_dict = {
+                "": qconfig
+            }
+            m = prepare_fx(model, qconfig_dict)
+            m = convert_fx(m)
+            m(torch.rand(5, 5, 5))
+            node_list = [
+                ns.call_module(nniqd.LinearReLU),
+                ns.call_module(nniqd.LinearReLU),
+            ]
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
     def test_ref_linear_module(self):
         """ Make sure the numerics for models with ref linear module
         matches models with fbgemm/qnnpack module
