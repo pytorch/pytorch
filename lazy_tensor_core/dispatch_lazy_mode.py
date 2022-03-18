@@ -34,20 +34,21 @@ def f(x):
 def run_model() :
     torch.manual_seed(42) 
     tests = 1
+
+    # initialize tensor on `cuda`
     inputs = [torch.randn(8, 8, device='cuda') for _ in range(tests) ]
  
-    with torch.autograd.profiler.emit_nvtx() :
-        for step in range(tests) :
-            torch.cuda.nvtx.range_push("STEP: " + str(step))
-            print(inputs[step])
-            print(inputs[step].device)
-            with lazy_execute() : 
-                loss = f(inputs[step])
-                print(loss.device)
-            torch.cuda.nvtx.range_pop()
+    for step in range(tests) :
+        print(inputs[step])
+        print(inputs[step].device)  # tensor started on `cuda`
+        with lazy_execute() : 
+            loss = f(inputs[step])  # within lazy context, all tensors are lazily evaluated
             print(loss.device)
-            print(loss)
-            print(metrics.metrics_report())
+        # tensor should still reside on `cuda` device, we just need to
+        # move/access eager tensor wrapped inside LTCTensorImpl
+        print(loss.device)
+        print(loss)
+        print(metrics.metrics_report())
 
 if __name__ == "__main__" :
     run_model()
