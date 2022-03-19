@@ -935,59 +935,61 @@ TEST(ExternalCall, Inlining) {
 }
 
 TEST(ExternalCall, JitCustomFusionOp) {
-  const char *cutom_op_schema_literal = "nnc_custom::add_mul(Tensor a, Tensor b, Tensor c) -> Tensor";
-  const char *external_func_name = "nnc_add_mul";
+  const char* cutom_op_schema_literal =
+      "nnc_custom::add_mul(Tensor a, Tensor b, Tensor c) -> Tensor";
+  const char* external_func_name = "nnc_add_mul";
 
-  auto add_mul_lowering_func = [external_func_name](
-      const std::vector<torch::jit::tensorexpr::ArgValue>& inputs,
-      const std::vector<torch::jit::tensorexpr::ExprHandle>& output_shape,
-      const c10::optional<torch::jit::tensorexpr::ScalarType>& output_type,
-      at::Device device) {
-    auto output_dtype = Dtype(*output_type);
-    torch::jit::tensorexpr::BufHandle result_buf("nnc_add_mul_res_buf", output_shape, output_dtype);
-    const torch::jit::tensorexpr::BufHandle& a = c10::get<torch::jit::tensorexpr::BufHandle>(inputs[0]);
-    const torch::jit::tensorexpr::BufHandle& b = c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
-    const torch::jit::tensorexpr::BufHandle& c = c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
-    torch::jit::tensorexpr::StmtPtr s = torch::jit::tensorexpr::ExternalCall::make(
-        result_buf,
-        external_func_name,
-        {a, b, c},
-        {});
-    return Tensor(result_buf.node(), s);
-  };
+  auto add_mul_lowering_func =
+      [external_func_name](
+          const std::vector<torch::jit::tensorexpr::ArgValue>& inputs,
+          const std::vector<torch::jit::tensorexpr::ExprHandle>& output_shape,
+          const c10::optional<torch::jit::tensorexpr::ScalarType>& output_type,
+          at::Device device) {
+        auto output_dtype = Dtype(*output_type);
+        torch::jit::tensorexpr::BufHandle result_buf(
+            "nnc_add_mul_res_buf", output_shape, output_dtype);
+        const torch::jit::tensorexpr::BufHandle& a =
+            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[0]);
+        const torch::jit::tensorexpr::BufHandle& b =
+            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
+        const torch::jit::tensorexpr::BufHandle& c =
+            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
+        torch::jit::tensorexpr::StmtPtr s =
+            torch::jit::tensorexpr::ExternalCall::make(
+                result_buf, external_func_name, {a, b, c}, {});
+        return Tensor(result_buf.node(), s);
+      };
 
-  auto add_mul_external_func = [](
-      int64_t bufs_num,
-      void** buf_data,
-      int64_t* buf_ranks,
-      int64_t* buf_dims,
-      int64_t* buf_strides,
-      int8_t* buf_dtypes,
-      int64_t args_num,
-      int64_t* extra_args) {
-  };
+  auto add_mul_external_func = [](int64_t bufs_num,
+                                  void** buf_data,
+                                  int64_t* buf_ranks,
+                                  int64_t* buf_dims,
+                                  int64_t* buf_strides,
+                                  int8_t* buf_dtypes,
+                                  int64_t args_num,
+                                  int64_t* extra_args) {};
 
-  torch::jit::RegisterOperators reg(
-      {Operator(
-          cutom_op_schema_literal,
-          [](const Node* node) -> Operation {
-            return [](Stack& _stack) {
-              auto a = std::move(peek(_stack, 0, 3)).toTensor();
-              auto b = std::move(peek(_stack, 1, 3)).toTensor();
-              auto c = std::move(peek(_stack, 2, 3)).toTensor();
-              drop(_stack, 3);
-              auto result = (a + b) * c;
-              pack(_stack, std::move(result));
-              return 0;
-            };
-          },
-          c10::AliasAnalysisKind::FROM_SCHEMA)});
+  torch::jit::RegisterOperators reg({Operator(
+      cutom_op_schema_literal,
+      [](const Node* node) -> Operation {
+        return [](Stack& _stack) {
+          auto a = std::move(peek(_stack, 0, 3)).toTensor();
+          auto b = std::move(peek(_stack, 1, 3)).toTensor();
+          auto c = std::move(peek(_stack, 2, 3)).toTensor();
+          drop(_stack, 3);
+          auto result = (a + b) * c;
+          pack(_stack, std::move(result));
+          return 0;
+        };
+      },
+      c10::AliasAnalysisKind::FROM_SCHEMA)});
 
   auto& custom_operator_set = torch::jit::tensorexpr::getCustomOperatorSet();
   custom_operator_set.insert({cutom_op_schema_literal});
 
   auto& te_lowering_registry = torch::jit::tensorexpr::getNNCLoweringRegistry();
-  te_lowering_registry.insert(parseSchema(cutom_op_schema_literal), add_mul_lowering_func);
+  te_lowering_registry.insert(
+      parseSchema(cutom_op_schema_literal), add_mul_lowering_func);
 
   auto& te_nnc_func_registry = torch::jit::tensorexpr::getNNCFunctionRegistry();
   te_nnc_func_registry[external_func_name] = add_mul_external_func;
@@ -1006,20 +1008,18 @@ TEST(ExternalCall, JitCustomFusionOp) {
   auto static_graph_case = graph->copy();
   FuseTensorExprs(static_graph_case, 1);
   torch::jit::testing::FileCheck()
-    .check("prim::TensorExprGroup_")
-    ->check("nnc_custom::add_mul")
-    ->run(*static_graph_case);
+      .check("prim::TensorExprGroup_")
+      ->check("nnc_custom::add_mul")
+      ->run(*static_graph_case);
 
   auto dynamic_graph_case = graph->copy();
   FuseTensorExprs(dynamic_graph_case, 1, false, true);
   torch::jit::testing::FileCheck()
-    .check("prim::TensorExprGroup_")
-    ->check("nnc_custom::add_mul")
-    ->run(*dynamic_graph_case);
+      .check("prim::TensorExprGroup_")
+      ->check("nnc_custom::add_mul")
+      ->run(*dynamic_graph_case);
 #else
-  torch::jit::testing::FileCheck()
-    .check("nnc_custom::add_mul")
-    ->run(*graph);
+  torch::jit::testing::FileCheck().check("nnc_custom::add_mul")->run(*graph);
 #endif
 }
 
