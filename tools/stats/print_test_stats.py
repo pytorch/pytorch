@@ -748,7 +748,9 @@ def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
         "test_data_parallel_module_kwargs_only",
         "test_data_parallel_module_kwargs_only_empty_list",
         "test_data_parallel_module_kwargs_only_empty_dict",
-        "test_data_parallel_module_kwargs_only_empty_tuple"
+        "test_data_parallel_module_kwargs_only_empty_tuple",
+        "test_cpp_extensions_aot_ninja",
+        "test_cpp_extensions_aot_no_ninja",
     ]
 
     # Do not run checks for tests that use repeat_test_for_types decorator as they do not go well with our retry
