@@ -75,10 +75,10 @@ class TorchSchema:
             return self.overload_name == "Dimname" or \
                    self.overload_name == "dimname" or \
                    "name" in self.overload_name
-    
+
         def is_inplace(self):
             return self.name[-1] == "_"
-    
+
         def add_to_optional_arguments(self):
             if self.overload_name in self.arguments:
                 #self.arguments.remove(self.overload_name)
