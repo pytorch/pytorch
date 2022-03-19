@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/csrc/lazy/generated/LazyIr.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
@@ -23,9 +24,11 @@ class TestLeafNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
-
+  const Shape& shape(size_t i) const override { return shape_; }
+  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
  private:
   size_t param_;
+  Shape shape_;
 };
 
 TEST(IrTest, BasicTest) {
