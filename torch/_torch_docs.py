@@ -4602,18 +4602,20 @@ Returns:
 Example::
     >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
     ...                   weight=torch.tensor([1., 2., 4., 8.]))
-        histogramdd_return_type(hist=tensor([[0., 1., 0.],
-                                                [2., 0., 0.],
-                                                [4., 0., 8.]]),
-                                bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
-                                            tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+        torch.return_types.histogramdd(
+            hist=tensor([[0., 1., 0.],
+                         [2., 0., 0.],
+                         [4., 0., 8.]]),
+            bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                       tensor([0.0000, 0.6667, 1.3333, 2.0000])))
 
     >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=[2, 2],
     ...                   range=[0., 1., 0., 1.], density=True)
-        histogramdd_return_type(hist=tensor([[2., 0.],
-                                                [0., 2.]]),
-                                bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
-                                            tensor([0.0000, 0.5000, 1.0000])))
+        torch.return_types.histogramdd(
+           hist=tensor([[2., 0.],
+                        [0., 2.]]),
+           bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                      tensor([0.0000, 0.5000, 1.0000])))
 
 """)
 
