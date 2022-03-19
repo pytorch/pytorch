@@ -1344,6 +1344,11 @@ Tensor kaiser_window(
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("kaiser_window", options, window_length);
+  // short-circuit for `meta`.
+  if (device == kMeta) {
+    return at::empty({window_length}, options);
+  }
+
   if (window_length == 0) {
     return at::empty({0}, options);
   }
