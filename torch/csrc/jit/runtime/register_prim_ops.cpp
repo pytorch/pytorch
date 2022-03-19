@@ -702,6 +702,17 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "prim::IfThenElse(bool cond, Any(a) x, Any(b) y) -> Any(a|b)"),
+        [](Stack& stack) {
+          const auto cond = stack[stack.size() - 3].toBool();
+          stack[stack.size() - 3] =
+              std::move(stack[stack.size() - (cond ? 2 : 1)]);
+          stack.pop_back();
+          stack.pop_back();
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
         [](Stack& stack) {
           IValue x = pop(stack);
@@ -2274,6 +2285,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_nested(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_nested());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::name(Tensor a) -> str?"),
         [](Stack& stack) {
           at::Tensor a;
@@ -2454,8 +2473,22 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::AutogradAdd(Any a, Any b) -> Any"),
         [](Stack& stack) {
-          at::Tensor a, b;
-          pop(stack, a, b);
+          IValue i_a = pop(stack);
+          IValue i_b = pop(stack);
+          if (i_a.isNone() && i_b.isNone()) {
+            stack.emplace_back(at::Tensor{});
+            return;
+          }
+          if (i_a.isNone()) {
+            stack.emplace_back(i_b.toTensor());
+            return;
+          }
+          if (i_b.isNone()) {
+            stack.emplace_back(i_a.toTensor());
+            return;
+          }
+          at::Tensor a = i_a.toTensor();
+          at::Tensor b = i_b.toTensor();
           // NOLINTNEXTLINE(bugprone-branch-clone)
           if (!a.defined() && !b.defined()) {
             // undef + undef == undef

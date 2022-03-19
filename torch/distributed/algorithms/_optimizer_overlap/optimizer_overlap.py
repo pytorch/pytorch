@@ -2,7 +2,7 @@ from abc import ABC
 import inspect
 from typing import Dict, Type
 
-from torch.distributed._fsdp import FullyShardedDataParallel
+from torch.distributed.fsdp import FullyShardedDataParallel
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import Optimizer
 from torch.distributed.optim import as_functional_optim

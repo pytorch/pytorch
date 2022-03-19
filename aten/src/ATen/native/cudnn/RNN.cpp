@@ -788,17 +788,23 @@ namespace {
       return CUDNN_RNN_ALGO_STANDARD;
     }
 
+    // Persistent algos typically don't work for packed inputs with sequence lengths that vary
+    // across batch elements, and will return CUDNN_STATUS_NOT_SUPPORTED if attempted. See
+    // https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#features-of-rnn-functions
+    if (!tensors.is_input_packed()) {
+      auto cudnnDataType = getCudnnDataType(input);
 #if CUDNN_VERSION >= 8201 // 8.2.1
-    if (use_rnn_persist_small_h(rnn, tensors, forward)) {
-      return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
-    }
+      if (cudnnDataType != CUDNN_DATA_DOUBLE) {
+        if (use_rnn_persist_small_h(rnn, tensors, forward)) {
+          return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
+        }
+      }
 #endif
-
-    if (getCudnnDataType(input) == CUDNN_DATA_HALF &&
-        !tensors.is_input_packed()) {
-      if (use_persist_common_heuristics(rnn, tensors) &&
-          use_persist_device_heuristics(rnn, tensors)) {
-        return CUDNN_RNN_ALGO_PERSIST_STATIC;
+      if (cudnnDataType == CUDNN_DATA_HALF) {
+        if (use_persist_common_heuristics(rnn, tensors) &&
+            use_persist_device_heuristics(rnn, tensors)) {
+          return CUDNN_RNN_ALGO_PERSIST_STATIC;
+        }
       }
     }
 

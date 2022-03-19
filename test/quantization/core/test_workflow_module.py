@@ -68,50 +68,70 @@ NP_RANDOM_SEED = 19
 tolerance = 1e-6
 
 class TestObserver(QuantizationTestCase):
-    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8, torch.qint32)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
     def test_per_tensor_observers(self, qdtype, qscheme, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
-        if qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric:
+        if (qdtype == torch.quint8 and qscheme == torch.per_tensor_symmetric) or qdtype == torch.qint32:
             reduce_range = False
         ObserverList = [MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range),
                         MovingAverageMinMaxObserver(averaging_constant=0.5,
                                                     dtype=qdtype,
                                                     qscheme=qscheme,
                                                     reduce_range=reduce_range)]
+
+        def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
+            eps = torch.tensor([tolerance])
+            if dtype == torch.qint8:
+                if reduce_range:
+                    quant_min, quant_max = -64, 63
+                else:
+                    quant_min, quant_max = -128, 127
+            elif dtype == torch.quint8:
+                if reduce_range:
+                    quant_min, quant_max = 0, 127
+                else:
+                    quant_min, quant_max = 0, 255
+            elif dtype == torch.qint32:
+                quant_min, quant_max = -1 * (2 ** 31), (2 ** 31) - 1
+
+            min_val_neg = torch.tensor([0.])
+            max_val_pos = torch.tensor([input_scale * max_val]) if qdtype is torch.qint32 else torch.tensor([max_val])
+
+            scale, zero_point = 1.0, 0
+            if qscheme == torch.per_tensor_symmetric or qscheme == torch.per_channel_symmetric:
+                scale = torch.max(-min_val_neg, max_val_pos) / (float(quant_max - quant_min) / 2)
+                scale = torch.max(scale, eps)
+                if dtype == torch.quint8:
+                    zero_point = 128
+            else:
+                scale = torch.max((max_val_pos - min_val_neg) / float(quant_max - quant_min), eps)
+                zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
+                zero_point = torch.clamp(zero_point, quant_min, quant_max)
+            return scale, zero_point
+
         for myobs in ObserverList:
             # Calculate Qparams should return with a warning for observers with no data
             qparams = myobs.calculate_qparams()
+            input_scale = 2**16 if qdtype is torch.qint32 else 1
             if type(myobs) == MinMaxObserver:
-                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0])
+                x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
+                y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0]) * input_scale
             else:
                 # Moving average of min/max for x and y matches that of
                 # extreme values for x/y used for minmax observer
-                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0])
+                x = torch.tensor([0.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
+                y = torch.tensor([2.0, 5.0, 5.0, 6.0, 7.0, 10.0]) * input_scale
 
             result = myobs(x)
             result = myobs(y)
             self.assertEqual(result, y)
-            self.assertEqual(myobs.min_val, 1.0)
-            self.assertEqual(myobs.max_val, 8.0)
+            self.assertEqual(myobs.min_val, 1.0 * input_scale)
+            self.assertEqual(myobs.max_val, 8.0 * input_scale)
             qparams = myobs.calculate_qparams()
-            if reduce_range:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745 * 255 / 127
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
-                else:
-                    ref_scale = 0.0313725 * 255 / 127
-                    ref_zero_point = -64 if qdtype is torch.qint8 else 0
-            else:
-                if qscheme == torch.per_tensor_symmetric:
-                    ref_scale = 0.062745
-                    ref_zero_point = 0 if qdtype is torch.qint8 else 128
-                else:
-                    ref_scale = 0.0313725
-                    ref_zero_point = -128 if qdtype is torch.qint8 else 0
+            ref_scale, ref_zero_point = _get_ref_params(reduce_range, qscheme, qdtype, input_scale, 1.0, 8.0)
+
             self.assertEqual(qparams[1].item(), ref_zero_point)
             self.assertEqual(qparams[0].item(), ref_scale, atol=1e-5, rtol=0)
             state_dict = myobs.state_dict()
@@ -380,7 +400,7 @@ class TestObserver(QuantizationTestCase):
             x = obs(x)
 
     def _test_memoryless(self, obs_class):
-        obs = obs_class(memoryless=True)
+        obs = obs_class(averaging_constant=1)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -391,10 +411,10 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(params, obs.calculate_qparams())
 
     def test_memoryless_minmaxobserver(self):
-        self._test_memoryless(MinMaxObserver)
+        self._test_memoryless(MovingAverageMinMaxObserver)
 
     def test_memoryless_perchannelminmaxobserver(self):
-        self._test_memoryless(PerChannelMinMaxObserver)
+        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -820,7 +840,7 @@ class TestDistributed(QuantizationTestCase):
                 torch.ao.quantization.DeQuantStub(),
             )
 
-            torch.ao.quantization.fuse_modules(model, [['1', '2', '3'], ['4', '5']], inplace=True)
+            torch.ao.quantization.fuse_modules_qat(model, [['1', '2', '3'], ['4', '5']], inplace=True)
 
             model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
             torch.ao.quantization.prepare_qat(model, inplace=True)
@@ -861,7 +881,7 @@ class TestDistributed(QuantizationTestCase):
 
             model = Model()
             # fuse it
-            fused_model = torch.ao.quantization.fuse_modules(
+            fused_model = torch.ao.quantization.fuse_modules_qat(
                 model,
                 [['conv', 'bn']],
             )

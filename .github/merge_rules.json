@@ -1,20 +1,81 @@
 [
    {
-    "name": "ONNX exporter",
-    "patterns": ["torch/onnx/**", "torch/csrc/jit/passes/onnx/**", "torch/csrc/jit/passes/onnx.*", "test/onnx/**", "docs/source/onnx.rst"],
-    "approved_by": ["garymm"],
-    "mandatory_app_id": 12274
+      "name": "ONNX exporter",
+      "patterns": [
+         ".jenkins/caffe2/*",
+         "docs/source/onnx.rst",
+         "test/onnx/**",
+         "tools/onnx/**",
+         "torch/_C/__init__.pyi.in",
+         "torch/csrc/jit/passes/onnx.*",
+         "torch/csrc/jit/passes/onnx/**",
+         "torch/csrc/jit/serialization/export.*",
+         "torch/csrc/jit/serialization/onnx.*",
+         "torch/csrc/onnx/**",
+         "torch/onnx/**"
+      ],
+      "approved_by": ["BowenBao", "garymm"],
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
-    "name": "NVFuser",
-    "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
-    "approved_by": ["csarofeen", "ngimel"],
-    "mandatory_app_id": 12274
+      "name": "NVFuser",
+      "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
+      "approved_by": ["csarofeen", "ngimel"],
+      "mandatory_checks_name": ["Facebook CLA Check"]
    },
    {
-    "name": "OSS CI",
-    "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**"],
-    "approved_by": ["seemethere", "malfet", "suo"],
-    "mandatory_app_id": 12274
+      "name": "OSS CI",
+      "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
+      "approved_by": ["janeyx99", "ezyang", "atalman"],
+      "mandatory_checks_name": ["Facebook CLA Check"]
+   },
+   {
+      "name": "Documentation",
+      "patterns": ["docs/**", "torch/*docs.py"],
+      "approved_by": ["mruberry", "ngimel", "janeyx99"],
+      "mandatory_checks_name": ["Facebook CLA Check"]
+   },
+   {
+      "name": "Android",
+      "patterns": ["android/**", "test/mobile/**"],
+      "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
+      "mandatory_checks_name": ["Facebook CLA Check"]
+   },
+   {
+      "name": "iOS",
+      "patterns": ["ios/**", "test/mobile/**"],
+      "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
+      "mandatory_checks_name": ["Facebook CLA Check"]
+   },
+   {
+      "name": "superuser",
+      "patterns": ["*"],
+      "approved_by": [
+         "albanD",
+         "anjali411",
+         "bdhirsh",
+         "cpuhrsch",
+         "dagitses",
+         "ejguan",
+         "ezyang",
+         "gchanan",
+         "george-qi",
+         "jbschlosser",
+         "malfet",
+         "mikaylagawarecki",
+         "mruberry",
+         "ngimel",
+         "NivekT",
+         "osalpekar",
+         "saketh-are",
+         "samdow",
+         "seemethere",
+         "soulitzer",
+         "suo",
+         "VitalyFedyunin",
+         "wenleix",
+         "zou3519"
+      ],
+      "mandatory_checks_name": ["Facebook CLA Check"]
    }
 ]

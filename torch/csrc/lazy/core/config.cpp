@@ -7,6 +7,16 @@ C10_DEFINE_bool(
     false,
     "Enable parameter aliasing support");
 
+C10_DEFINE_bool(
+    torch_lazy_handle_special_scalars,
+    false,
+    "Handle special scalars 0 and 1 diffrently");
+
+C10_DEFINE_bool(
+    torch_lazy_use_thread_pool,
+    false,
+    "Use thread pool to schedule backend execution");
+
 C10_DEFINE_int(
     torch_lazy_compilation_cache_size,
     1024,

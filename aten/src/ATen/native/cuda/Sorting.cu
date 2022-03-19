@@ -55,10 +55,10 @@ __global__ void gatherKthValue(
   radixSelect<
       scalar_t,
       typename TopKTypeConfig<scalar_t>::RadixType,
-      index_t,
-      false>(
+      index_t>(
       inputSliceStart,
       k,
+      false,
       inputSliceSize,
       inputWithinSliceStride,
       smem,
@@ -146,10 +146,10 @@ __global__ void gatherMedian(
   radixSelect<
       scalar_t,
       typename TopKTypeConfig<scalar_t>::RadixType,
-      index_t,
-      false>(
+      index_t>(
       inputSliceStart,
       k + 1,
+      false,
       inputSliceSize,
       inputWithinSliceStride,
       smem,

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
@@ -16,8 +17,6 @@ namespace torch {
 namespace jit {
 
 namespace {
-using graph_rewrite_helper::getFuncName;
-using graph_rewrite_helper::getValue;
 using graph_rewrite_helper::PatternInfo;
 
 // dynamic quantization ops for activation: choose_qparams, quant, dequant
@@ -1471,38 +1470,6 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
 }
 
 } // namespace
-
-void SwapFunctionalLinear(Module& module) {
-  for (auto& method : module.get_methods()) {
-    std::shared_ptr<Graph> g = method.graph();
-    SwapFunctionalLinear(g);
-  }
-  for (Module m : module.children()) {
-    SwapFunctionalLinear(m);
-  }
-}
-
-void SwapFunctionalLinear(std::shared_ptr<Graph>& graph) {
-  std::string functional_linear = R"(
-graph(%linear, %input, %weight, %bias):
-  %r = prim::CallFunction(%linear, %input, %weight, %bias)
-  return (%r) )";
-  std::string aten_linear = R"(
-graph(%linear, %input, %weight, %bias):
-  %r = aten::linear(%input, %weight, %bias)
-  return (%r) )";
-  auto filter = [](const Match& match,
-                   const std::unordered_map<std::string, Value*>& vmap) {
-    const auto& match_vmap = match.values_map;
-    auto linear = getValue("linear", match_vmap, vmap);
-    auto func_name = getFuncName(linear);
-    return func_name == "linear";
-  };
-  SubgraphRewriter rewriter;
-  rewriter.RegisterRewritePattern(functional_linear, aten_linear);
-  // TODO: runOnGraph takes const ref?
-  rewriter.runOnGraph(graph, filter);
-}
 
 void ReplicateQuant(std::shared_ptr<Graph>& graph) {
   std::stack<Block*> blocks_to_visit;

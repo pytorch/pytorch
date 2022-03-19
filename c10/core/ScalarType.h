@@ -307,7 +307,7 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
-static inline ScalarType toValueType(ScalarType t) {
+static inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;

@@ -1,5 +1,11 @@
 #pragma once
+#include <c10/util/Flags.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
+
+C10_DECLARE_bool(torch_jit_static_then_dynamic);
+
+C10_DECLARE_bool(torch_jit_always_dynamic);
 
 namespace torch {
 namespace jit {
@@ -34,12 +40,21 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
       Stack& stack,
       size_t remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
-  void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
+  void runProfilingOptimizations(
+      std::shared_ptr<Graph>& graph,
+      size_t remaining_depth);
   void replaceFallbackGraphWithFallbackFunction(Block* b);
+  FusionBehavior getCurrentBehavior(size_t remaining_depth);
+  void runNoGradOptimizations(
+      std::shared_ptr<Graph>& graph,
+      size_t remaining_bailout_depth);
+  void runFinalOptimizations(std::shared_ptr<Graph>& graph);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+  FusionStrategy fusion_strategy_;
+
   // this plan is used if getGraphExecutorOptimize is unset
   c10::optional<ExecutionPlan> fallback_plan_;
   // fallback functions are inserted for tensorexpr fusion groups

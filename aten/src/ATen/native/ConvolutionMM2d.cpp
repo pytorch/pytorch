@@ -122,7 +122,7 @@ static inline void slow_conv2d_shape_check(
 
   // Allow for empty batch size and channel size but not other dimensions
   TORCH_CHECK(ndim == 4, "Expected 4D input tensor, but got: ", input.sizes());
-  for (int64_t dim = 2; dim < ndim; ++dim) {
+  for (const auto dim : c10::irange(2, ndim)) {
     TORCH_CHECK(input.size(dim) != 0,
                 "Expected non-zero size for input dimension ", dim,
                 ", but got input shape: ", input.sizes(), ". Only the batch and channel dimensions support size 0.");
@@ -444,7 +444,7 @@ static void slow_conv2d_backward_weight_out_cpu_template(
     auto grad_weight_2d_a = grad_weight_2d.accessor<scalar_t, 2>();
     auto finput_a = finput.accessor<scalar_t, 3>();
 
-    for (int64_t t = 0; t < batch_size; t++) {
+    for (const auto t : c10::irange(batch_size)) {
       auto grad_output_t = grad_output_a[t];
       auto finput_t = finput_a[t];
 

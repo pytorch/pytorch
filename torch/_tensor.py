@@ -46,7 +46,9 @@ def _rebuild_from_type_v2(func, new_type, args, state):
     if new_type is Tensor:
         return func(*args)
 
-    ret = func(*args).as_subclass(new_type)
+    ret = func(*args)
+    if type(ret) is not new_type:
+        ret = ret.as_subclass(new_type)
     # Tensor does define __setstate__ even though it doesn't define
     # __getstate__. So only use __setstate__ if it is NOT the one defined
     # on Tensor
@@ -92,8 +94,16 @@ class Tensor(torch._C._TensorBase):
             # does accurate alias tracking; however, the code below
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
-            if self.is_sparse or self.device.type in ['xla', 'mlc', 'ort', 'meta', 'hpu']:
+            if self.is_sparse or self.device.type in ['lazy', 'xla', 'mlc', 'ort', 'meta', 'hpu'] or \
+                    (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError("The default implementation of __deepcopy__() for wrapper subclasses "
+                                       "only works for subclass types that implement clone() and for which "
+                                       "cloning returns another instance of the same subclass. You should either "
+                                       "properly implement clone() for your subclass or override __deepcopy__() "
+                                       "if it is intended behavior for clone() to return an instance of a "
+                                       "different type.")
             else:
                 new_storage = self.storage().__deepcopy__(memo)
                 if self.is_quantized:
@@ -109,9 +119,9 @@ class Tensor(torch._C._TensorBase):
                     else:
                         raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
                     # TODO: Once we decide to break serialization FC, no longer
-                    # need to wrap with TypedStorage
+                    # need to wrap with _TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        torch.storage.TypedStorage(
+                        torch.storage._TypedStorage(
                             wrap_storage=new_storage._untyped(),
                             dtype=self.dtype),
                         self.storage_offset(),
@@ -120,8 +130,20 @@ class Tensor(torch._C._TensorBase):
                         quantizer_params,
                         self.requires_grad,
                         self._backward_hooks)
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError("The default implementation of __deepcopy__() for quantized tensors "
+                                           "expects the tensor returned by torch._utils._rebuild_qtensor() to "
+                                           "match the type of the instance being copied. If you encounter this, "
+                                           "please open an issue on PyTorch's GitHub.")
                 else:
                     new_tensor = self.new_empty([])
+                    if type(new_tensor) is not type(self):
+                        raise RuntimeError("The default implementation of __deepcopy__() for non-wrapper subclasses "
+                                           "only works for subclass types that implement new_empty() and for which "
+                                           "that function returns another instance of the same subclass. You should "
+                                           "either properly implement new_empty() for your subclass or override "
+                                           "__deepcopy__() if it is intended behavior for new_empty() to return "
+                                           "an instance of a different type.")
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
@@ -132,7 +154,9 @@ class Tensor(torch._C._TensorBase):
                 new_tensor.grad = self.grad.__deepcopy__(memo)
 
             if not type(self) is Tensor:
-                new_tensor = new_tensor.as_subclass(type(self))  # type: ignore[arg-type]
+                if type(new_tensor) is not type(self):
+                    raise RuntimeError("Type of deepcopy result does not match the type of the source tensor. "
+                                       "If you encounter this, please open an issue on PyTorch's GitHub.")
 
                 # Plain Tensors don't have slots
                 slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
@@ -232,9 +256,9 @@ class Tensor(torch._C._TensorBase):
             else:
                 raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
+            # need to wrap with _TypedStorage
             args_qtensor = (
-                torch.storage.TypedStorage(
+                torch.storage._TypedStorage(
                     wrap_storage=self.storage()._untyped(),
                     dtype=self.dtype),
                 self.storage_offset(),
@@ -254,11 +278,34 @@ class Tensor(torch._C._TensorBase):
                 raise NotImplementedError(
                     'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
+        elif self.is_sparse_csr:
+            if self.layout == torch.sparse_csr:
+                args_sparse_csr = (self.layout,
+                                   (self.crow_indices(),
+                                    self.col_indices(),
+                                    self.values(),
+                                    self.size()))
+            else:
+                raise NotImplementedError(
+                    'sparse csr tensor __reduce_ex__ for layout `%s`' % (self.layout))
+            return (torch._utils._rebuild_sparse_csr_tensor, args_sparse_csr)
+        elif self.data_ptr() == 0 and type(self) is not torch.Tensor:
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
         else:
             # TODO: Once we decide to break serialization FC, no longer
-            # need to wrap with TypedStorage
+            # need to wrap with _TypedStorage
             args = (
-                torch.storage.TypedStorage(
+                torch.storage._TypedStorage(
                     wrap_storage=self.storage()._untyped(),
                     dtype=self.dtype),
                 self.storage_offset(),
@@ -819,9 +866,9 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
-        # NB: this returns old fashioned TypedStorage, e.g., FloatStorage, as it
+        # NB: this returns old fashioned _TypedStorage, e.g., FloatStorage, as it
         # would be pretty pointless otherwise (it would always return
-        # UntypedStorage)
+        # _UntypedStorage)
         return type(self.storage())
 
     def refine_names(self, *names):
@@ -1020,20 +1067,7 @@ class Tensor(torch._C._TensorBase):
             25
 
        """
-        if self.is_sparse:
-            return self
-        if self.is_sparse_csr:
-            crow_indices = self.crow_indices()
-            col_indices = self.col_indices()
-            indices = torch._convert_indices_from_csr_to_coo(crow_indices, col_indices,
-                                                             out_int32=crow_indices.dtype == torch.int32)
-            return torch.sparse_coo_tensor(indices,
-                                           self.values(),
-                                           size=self.shape,
-                                           dtype=self.dtype,
-                                           device=self.device)
-        else:
-            return self.to_sparse()
+        return self.to_sparse()
 
     def to_sparse_csr(self):
         """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
@@ -1133,6 +1167,8 @@ class Tensor(torch._C._TensorBase):
                 return ret
             else:
                 return _convert(ret, cls)
+
+    __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
     def __dlpack__(self, stream=None):
         """

@@ -199,7 +199,7 @@ struct ProfilingRecord {
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
-  void insertShapeProfile(Node* n, size_t offset);
+  void insertShapeProfile(Node* n, size_t offset, const TypePtr& input_type);
   ProfilingRecord(std::shared_ptr<Graph> g);
 };
 
