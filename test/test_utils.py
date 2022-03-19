@@ -1,5 +1,4 @@
 # Owner(s): ["high priority"]
-import pathlib
 import sys
 import os
 import contextlib
