@@ -134,7 +134,7 @@ $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
                 return "arf"
 
         # Wobbles depending on NDEBUG mode of pybind11
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
         self.assertRaisesRegexp(
@@ -686,6 +686,12 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         x = SubTensor(torch.randn(2, requires_grad=True))
         x.neg()
         self.assertEqual(called, [torch.ops.aten.neg.default])
+
+    def test_construct_int_tensor(self):
+        class SubTensor(torch.Tensor):
+            pass
+        # should not fail
+        SubTensor(torch.zeros(2, dtype=torch.int))
 
     def test_multiple_ops_subclass(self):
         # This is a Direct Subclass, don't do that!
