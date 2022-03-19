@@ -813,6 +813,17 @@ class TestHub(TestCase):
             assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
 
     @retry(Exception, tries=3)
+    def test_trust_repo_builtin_trusted_owners(self):
+        torch.hub.load(
+            'pytorch/vision',
+            'resnet18',
+            force_reload=True,
+            trust_repo="check"
+        )
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
+
+    @retry(Exception, tries=3)
     def test_trust_repo_none(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
