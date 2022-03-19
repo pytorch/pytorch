@@ -54,8 +54,8 @@ class TORCH_API SequenceNum {
   void increment();
   // Increment num_ and return the old value. Will throw if not set.
   uint64_t getAndIncrement();
-  // Sets num_
-  void set(const uint64_t num);
+  // Sets num_ to new_num.
+  void set(const uint64_t new_num);
   // Returns true if this SequenceNum is properly initialized with a value, else
   // false.
   bool isSet() const;
@@ -63,6 +63,9 @@ class TORCH_API SequenceNum {
   SequenceNum& operator=(const SequenceNum& other);
 
  private:
+  // Returns a copy of num_.
+  c10::optional<uint64_t> num() const;
+
   // The underlying sequence number, if set.
   c10::Synchronized<c10::optional<uint64_t>> num_;
 };

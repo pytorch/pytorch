@@ -12,7 +12,9 @@ from torch.fx.graph import (
 )
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
+from collections import namedtuple
 import operator
+import warnings
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -111,7 +113,7 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Union[Callable, str], Dict[str, Any]]:
+def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
     ''' Given an activation_post_process module,
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
@@ -137,14 +139,17 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
-    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8]:
+    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
         reduce_range = torch.backends.quantized.engine == "fbgemm"
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
-        raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
-    assert quantize_op is not None
+        warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
+        return None
     return node_type, quantize_op, qparams
 
 def quantize_node(
@@ -193,7 +198,10 @@ def quantize_node(
         module_path = ""
     root_module = modules['']
     graph = quantized_graph
-    node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
+    maybe_quantize_node_info = get_quantize_node_info(obs_module)
+    assert maybe_quantize_node_info is not None, \
+        f"Expecting quantize node info not to be None, observer: {obs_module}"
+    node_type, quantize_op, qparams = maybe_quantize_node_info
     inputs = [in_node]
 
     for key, value in qparams.items():
@@ -464,6 +472,74 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         cache[node] = result
     return result
 
+def all_node_args_except_first(node: Node) -> List[int]:
+    """
+    Returns all node arg indices after first
+    """
+    return list(range(1, len(node.args)))
+
+def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
+    """
+    Constructs a function that takes a node as arg and returns the arg_indices
+    that are valid for node.args
+    """
+    def arg_indices_func(node: Node) -> List[int]:
+        return [i for i in arg_indices if i < len(node.args)]
+    return arg_indices_func
+
+NodeInfo = namedtuple("NodeInfo", "op target")
+
+# this dict identifies which indices of a node are non tensors
+# so that they can be propagated correctly since inserting observers
+# for them would cause errors
+
+NON_OBSERVABLE_ARG_DICT: Dict[NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
+    NodeInfo("call_method", "masked_fill") : {
+        torch.bool: return_arg_list([1]),
+        float: return_arg_list([2])
+    },
+    NodeInfo("call_method", "permute") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "repeat") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "reshape") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "size") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "transpose") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", torch.transpose) : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "unsqueeze") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "unsqueeze_") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", torch.unsqueeze) : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "view") : {
+        int: all_node_args_except_first
+    },
+}
+
+EMPTY_ARG_DICT: Dict[Union[type, torch.dtype], Callable[[Node], List[int]]] = {}
+
+def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
+    """
+    Returns a dict with of non float tensor types as keys and values which correspond to a
+    function to retrieve the list (which takes the node as an argument)
+    """
+    info = NodeInfo(node.op, node.target)
+
+    return NON_OBSERVABLE_ARG_DICT.get(info, EMPTY_ARG_DICT)
 
 def node_return_type_is_int(node: Node) -> bool:
     """
@@ -472,13 +548,6 @@ def node_return_type_is_int(node: Node) -> bool:
     """
     return node.op == 'call_method' and node.target == 'size'
 
-def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
-    """
-    Returns indexes of boolean Tensor args
-    """
-    if node.op == "call_method" and node.target == "masked_fill":
-        return [1]
-    return []
 
 def is_get_tensor_info_node(node: Node) -> bool:
     """ Returns True if this node is a node that takes a Tensor as input and output some
