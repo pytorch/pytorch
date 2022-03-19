@@ -5,6 +5,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/jit_macros.h>
 
 namespace at { namespace native {
 
@@ -26,13 +27,18 @@ struct nansum_functor {
   }
 };
 
+const char op_name[] = "prod";
+
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
   void operator()(TensorIterator& iter) {
-    gpu_reduce_kernel<scalar_t, out_t>(
-        iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
-          return a * b;
-        }), 1);
+    std::string func = jiterator_stringify(
+    scalar_t combine(scalar_t a, scalar_t b) {
+      return a+b;
+    }
+    );
+    jitted_gpu_reduce_kernel<op_name, scalar_t, out_t>(
+        iter, func, 0);
   }
 };
 

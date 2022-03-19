@@ -50,8 +50,9 @@ NvrtcFunction jit_pwise_function(
 void launch_jitted_pwise_function(
     NvrtcFunction function,
     void* args[],
-    const int nBlocks,
-    const int kBlockSize);
+    const dim3 nBlocks,
+    const dim3 kBlockSize,
+    const int smem=0);
 
 template <typename T>
 struct delayed_false : std::false_type {

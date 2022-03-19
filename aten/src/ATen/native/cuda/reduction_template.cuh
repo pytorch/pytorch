@@ -225,7 +225,7 @@ namespace reducer {
 }
 
 
-struct ReduceOp {
+struct ReduceJitOp {
   using scalar_t = ${scalar_type};
   using arg_t = ${scalar_type};
   using out_scalar_t = ${result_type};
@@ -709,16 +709,9 @@ struct ReduceOp {
 
     return value;
   }
-
-
-
 };
 
-
-
-
-
-  extern "C"
-  __global__ void reduction_${name}_kernel(const int numel){
-
-  }
+extern "C"
+__global__ void reduction_${name}_kernel(ReduceJitOp r){
+  r.run();
+}

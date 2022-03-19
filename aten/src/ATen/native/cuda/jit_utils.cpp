@@ -1150,24 +1150,26 @@ NvrtcFunction jit_pwise_function(
 void launch_jitted_pwise_function(
     NvrtcFunction function,
     void* args[],
-    const int nBlocks,
-    const int kBlockSize) {
+    const dim3 nBlocks,
+    const dim3 kBlockSize,
+    const int smem) {
   initializeCudaContext();
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
   AT_CUDA_DRIVER_CHECK(nvrtc.cuLaunchKernel(
     function.function,
-    nBlocks,
-    1,
-    1,
-    kBlockSize,
-    1,
-    1,
+    nBlocks.x,
+    nBlocks.y,
+    nBlocks.z,
+    kBlockSize.x,
+    kBlockSize.y,
+    kBlockSize.z,
     0,
     stream,
     args,
     nullptr));
 }
+
 
 }}} // at::cuda::jit

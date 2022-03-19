@@ -71,7 +71,8 @@ static inline void launch_jitted_unrolled_kernel(
   std::tuple<Args...> extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  const int64_t grid = (N + block_work_size() - 1) / block_work_size();
+  //casting result to int is always safe, intermediate is int64 and won't overflow
+  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
   static std::mutex _jiterator_mutex;
   static std::vector<at::cuda::jit::NvrtcFunction> fns(c10::cuda::device_count());
@@ -115,7 +116,8 @@ static inline void launch_jitted_unrolled_kernel(
     args[i + 7] = extra_args_array[i];
   }
 
-  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
+  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1},
+  {num_threads(), 1, 1});
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -129,7 +131,8 @@ template<
 static inline void launch_jitted_vectorized_kernel(DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
 at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  const int64_t grid = (N + block_work_size() - 1) / block_work_size();
+  // N is still int64_t for the computation, but it's always safe to cast result to int
+  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
   const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
@@ -196,7 +199,7 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
       args[i + 3] = extra_args_array[i];
     }
 
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1}, {num_threads(), 1, 1});
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     auto ic = TrivialOffsetCalculator<arity>();
@@ -219,7 +222,7 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
       // since 7 slots are already filled in `args`
       args[i + 7] = extra_args_array[i];
     }
-    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
+    at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1}, {num_threads(), 1, 1});
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
