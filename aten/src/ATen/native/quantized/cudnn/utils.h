@@ -1,6 +1,6 @@
-// #pragma once
+#pragma once
 /*
-This file contains some of the auxiliary functions used by both Conv.cpp & Linear.cpp
+This file contains some of the auxiliary functions used by both Conv.cpp & Linear.cpp (introduced in a later PR)
 */
 
 #ifdef USE_CUDA
