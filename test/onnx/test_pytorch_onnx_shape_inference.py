@@ -6,6 +6,7 @@ import numpy as np
 from torch.onnx.symbolic_helper import (_set_onnx_shape_inference,
                                         _onnx_main_opset,
                                         _set_opset_version)
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 def expect_tensor(scalar_type, shape=None):
     def verify(actual_type):
@@ -75,6 +76,23 @@ class TestONNXShapeInference(unittest.TestCase):
         constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
         self.run_test(g, constant_of_shape.node(), expect_tensor("Float", shape=(None, None, None, None)))
 
+    def test_gather_dynamic_index(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16]))
+        indices = g.addInput()
+        indices.setType(indices.type().with_dtype(torch.int64).with_sizes([None]))
+        output = g.op("Gather", input, indices, axis_i=1)
+        self.run_test(g, output.node(), expect_tensor("Float", shape=([None, None, 16, 16])))
+
+    def test_gather_scalar_index(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16]))
+        indices = self.insert_tensor_constant(g, torch.tensor(1))
+        output = g.op("Gather", input, indices, axis_i=1)
+        self.run_test(g, output.node(), expect_tensor("Float", shape=([None, 16, 16])))
+
     def test_reshape(self):
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(2, 16, 5, 5))
@@ -101,6 +119,15 @@ class TestONNXShapeInference(unittest.TestCase):
         constant = self.insert_tensor_constant(g, torch.tensor([0, 0, -1]))
         output = g.op("Reshape", input, constant)
         self.run_test(g, output.node(), expect_tensor(None, shape=(None, None, 16)))
+
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_reshape_allowzero(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_sizes([3, 4, 0]))
+        constant = self.insert_tensor_constant(g, torch.tensor([0, 4, 3]))
+        output = g.op("Reshape", input, constant, allowzero_i=1)
+        self.run_test(g, output.node(), expect_tensor(None, shape=(0, 4, 3)))
 
     def test_slice(self):
         g = self.create_empty_graph()
