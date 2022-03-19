@@ -241,6 +241,17 @@ class TestExpandedWeightFunctional(TestCase):
         for (res, exp) in zip(result, expected):
             self.assertEqual(res, exp, atol=1e-4, rtol=5e-5)
 
+    def test_embedding(self, device):
+        kwargs = {'max_norm': 1., 'padding_idx': 0}
+        weight = torch.tensor([[2., 1.75, 1.5], [-1., 3., 2.5], [3., -1., 2.5],
+                               [-0.5, -0.5, 3.], [-1., 0., 1.5]], device=device)
+        idx = torch.tensor([[1, 1, 1], [0, 2, 4], [3, 2, 0]], device=device)
+        weight_clone = weight.clone()
+        self.assertEqual(weight, weight_clone)
+        res1 = torch.nn.functional.embedding(idx, weight, **kwargs)
+        self.assertNotEqual(weight, weight_clone)
+        res2 = torch.nn.functional.embedding(idx, weight_clone, **kwargs)
+        self.assertEqual(res1, res2)
 
 class TestExpandedWeightModule(TestCase):
     def _do_test(self, module, input):
