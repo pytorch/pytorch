@@ -41,7 +41,7 @@ def check_metadata_consistency(wrapper_tensor):
         check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor)
 
 def is_view_fn(func):
-    return func.__name__ in {
+    return func.overloadpacket.__name__ in {
         'as_strided',
         'detach',
         'diagonal',
@@ -81,7 +81,7 @@ def is_view_fn(func):
 # manually populated from native_functions that have inplace_view: True.
 # In the future we will probably be able to grab that list directly
 def is_inplace_view_fn(func):
-    return func.__name__ in {
+    return func.overloadpacket.__name__ in {
         'as_strided_',
         'detach_',
         'squeeze_',
@@ -122,7 +122,7 @@ class CompositeCompliantTensor(torch.Tensor):
         def wrap(e):
             return CompositeCompliantTensor(e) if isinstance(e, torch.Tensor) else e
 
-        if func.__name__ in ('set_', 'resize_'):
+        if func.overloadpacket.__name__ in ('set_', 'resize_'):
             raise RuntimeError(
                 f"{func.__name__} is not allowed to be called inside of "
                 f"CompositeImplicitAutograd operators.")
