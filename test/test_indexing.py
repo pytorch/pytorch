@@ -692,7 +692,7 @@ class TestIndexing(TestCase):
             self.assertEqual(v[boolIndices].shape, v[uint8Indices].shape)
             self.assertEqual(v[boolIndices], v[uint8Indices])
             self.assertEqual(v[boolIndices], tensor([True], dtype=torch.bool, device=device))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10, ), dtype=torch.bool, device=device)
@@ -713,7 +713,7 @@ class TestIndexing(TestCase):
         with warnings.catch_warnings(record=True) as w:
             self.assertEqual(v[mask].shape, (3, 7, 3))
             self.assertEqual(v[mask], torch.stack([v[0], v[2], v[3]]))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
         v = torch.tensor([1.], device=device)
         self.assertEqual(v[v == 0], torch.tensor([], device=device))
@@ -725,7 +725,7 @@ class TestIndexing(TestCase):
             warnings.simplefilter("always")
             y.index_put_((mask, ), y[mask], accumulate=True)
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
@@ -876,7 +876,7 @@ class TestIndexing(TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
-            self.assertEquals(len(w), 2)
+            self.assertEqual(len(w), 2)
 
     def test_byte_mask2d(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -1130,7 +1130,7 @@ class TestIndexing(TestCase):
 
         with warnings.catch_warnings(record=True) as w:
             x[b] = value
-            self.assertEquals(len(w), 1)
+            self.assertEqual(len(w), 1)
 
         self.assertEqual(x[0], value)
         self.assertEqual(x[1], torch.arange(4., 8, device=device))
