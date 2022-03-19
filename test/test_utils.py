@@ -735,6 +735,7 @@ class TestHub(TestCase):
 
     def tearDown(self):
         # cleanup
+        # test
         folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
         if os.path.exists(folder_path):
             shutil.rmtree(folder_path)
