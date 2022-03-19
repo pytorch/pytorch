@@ -30,6 +30,7 @@ env:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     env:
       JOB_BASE_NAME: macos-10-15-py3-arm64
