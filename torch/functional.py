@@ -442,18 +442,20 @@ else:
         Example::
             >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
             ...                   weight=torch.tensor([1., 2., 4., 8.]))
-                histogramdd_return_type(hist=tensor([[0., 1., 0.],
-                                                     [2., 0., 0.],
-                                                     [4., 0., 8.]]),
-                                        bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
-                                                   tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+                torch.return_types.histogramdd(
+                    hist=tensor([[0., 1., 0.],
+                                 [2., 0., 0.],
+                                 [4., 0., 8.]]),
+                    bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                               tensor([0.0000, 0.6667, 1.3333, 2.0000])))
 
             >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=[2, 2],
             ...                   range=[0., 1., 0., 1.], density=True)
-                histogramdd_return_type(hist=tensor([[2., 0.],
-                                                     [0., 2.]]),
-                                        bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
-                                                   tensor([0.0000, 0.5000, 1.0000])))
+                torch.return_types.histogramdd(
+                    hist=tensor([[2., 0.],
+                                 [0., 2.]]),
+                    bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                               tensor([0.0000, 0.5000, 1.0000])))
 
         """
         if isinstance(bins, int):
@@ -476,7 +478,7 @@ else:
             bin_edges = bins
             hist = _VF._histogramdd_from_bin_tensors(input, bin_edges, weight=weight, density=density)
 
-        return torch.return_type.histogramdd(hist, bin_edges)
+        return torch.return_types.histogramdd((hist, bin_edges))
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:
