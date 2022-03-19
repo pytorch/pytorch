@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/utils/memory.h>
@@ -657,6 +658,14 @@ struct SymbolicShapeGraphAnalyzer {
 
       if (!partial_evaluated_graphs.count(curr)) {
         GRAPH_DEBUG("No graph ", getHeader(curr));
+
+        // If the custom operator does not register shape function,
+        // the custom operator is responsible to handle the dynamic shape
+        // within the func body.
+        if (curr->isMemberOf(tensorexpr::getCustomOperatorSet())) {
+          continue;
+        }
+
         return c10::nullopt;
       }
 

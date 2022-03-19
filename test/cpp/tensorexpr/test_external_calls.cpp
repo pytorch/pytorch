@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <test/cpp/tensorexpr/test_utils.h>
+#include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -933,7 +935,7 @@ TEST(ExternalCall, Inlining) {
 }
 
 TEST(ExternalCall, JitCustomFusionOp) {
-  const char *cutom_op_shcema = "nnc_custom::add_mul(Tensor a, Tensor b, Tensor c) -> Tensor";
+  const char *cutom_op_schema_literal = "nnc_custom::add_mul(Tensor a, Tensor b, Tensor c) -> Tensor";
   const char *external_func_name = "nnc_add_mul";
 
   auto add_mul_lowering_func = [external_func_name](
@@ -967,7 +969,7 @@ TEST(ExternalCall, JitCustomFusionOp) {
 
   torch::jit::RegisterOperators reg(
       {Operator(
-          cutom_op_shcema,
+          cutom_op_schema_literal,
           [](const Node* node) -> Operation {
             return [](Stack& _stack) {
               auto a = std::move(peek(_stack, 0, 3)).toTensor();
@@ -982,10 +984,10 @@ TEST(ExternalCall, JitCustomFusionOp) {
           c10::AliasAnalysisKind::FROM_SCHEMA)});
 
   auto& custom_operator_set = torch::jit::tensorexpr::getCustomOperatorSet();
-  custom_operator_set.insert({cutom_op_shcema});
+  custom_operator_set.insert({cutom_op_schema_literal});
 
   auto& te_lowering_registry = torch::jit::tensorexpr::getNNCLoweringRegistry();
-  te_lowering_registry.insert(torch::jit::parseSchema(cutom_op_shcema), add_mul_lowering_func);
+  te_lowering_registry.insert(parseSchema(cutom_op_schema_literal), add_mul_lowering_func);
 
   auto& te_nnc_func_registry = torch::jit::tensorexpr::getNNCFunctionRegistry();
   te_nnc_func_registry[external_func_name] = add_mul_external_func;
@@ -999,12 +1001,21 @@ TEST(ExternalCall, JitCustomFusionOp) {
 
   auto graph = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, graph.get());
-  FuseTensorExprs(graph, /* min_group_size= */ 1);
+
 #ifdef TORCH_ENABLE_LLVM
+  auto static_graph_case = graph->copy();
+  FuseTensorExprs(static_graph_case, 1);
   torch::jit::testing::FileCheck()
     .check("prim::TensorExprGroup_")
     ->check("nnc_custom::add_mul")
-    ->run(*graph);
+    ->run(*static_graph_case);
+
+  auto dynamic_graph_case = graph->copy();
+  FuseTensorExprs(dynamic_graph_case, 1, false, true);
+  torch::jit::testing::FileCheck()
+    .check("prim::TensorExprGroup_")
+    ->check("nnc_custom::add_mul")
+    ->run(*dynamic_graph_case);
 #else
   torch::jit::testing::FileCheck()
     .check("nnc_custom::add_mul")

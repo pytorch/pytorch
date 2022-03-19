@@ -1097,6 +1097,7 @@ class TensorExprFuser {
       // aten::cat, though it does not have a shape function.
       REQ(node->kind() == prim::ListConstruct ||
           node->kind() == prim::TensorExprGroup ||
+          node->isMemberOf(tensorexpr::getCustomOperatorSet()) ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 
