@@ -594,7 +594,7 @@ class TestHub(TestCase):
     def setUp(self):
         self.previous_hub_dir = torch.hub.get_dir()
         self.tmpdir = tempfile.TemporaryDirectory('hub_dir')
-        torch.hub.set_dir(str(self.tmpdir))
+        torch.hub.set_dir(self.tmpdir.name)
         self.trusted_list_path = os.path.join(torch.hub.get_dir(), "trusted_list")
 
     def tearDown(self):
