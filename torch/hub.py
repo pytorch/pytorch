@@ -162,6 +162,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 
+
 def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
@@ -178,9 +179,10 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
     # To check if cached repo exists, we need to normalize folder names.
-    repo_dir = os.path.join(hub_dir, '_'.join([repo_owner, repo_name, normalized_br]))
+    owner_name_branch = '_'.join([repo_owner, repo_name, normalized_br])
+    repo_dir = os.path.join(hub_dir, owner_name_branch)
     # Check that the repo is in the trusted list
-    _check_repo(repo_owner, repo_name, normalized_br, trust_repo=trust_repo, calling_fn=calling_fn)
+    _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo=trust_repo, calling_fn=calling_fn)
 
     use_cache = (not force_reload) and os.path.exists(repo_dir)
 
@@ -212,35 +214,27 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
     return repo_dir
 
-def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load"):
+def _check_repo_is_trusted(repo_owner, repo_name, owner_name_branch, trust_repo, calling_fn="load"):
     hub_dir = get_dir()
     filepath = os.path.join(hub_dir, "trusted_list")
-    filepath_legacy = os.path.join(hub_dir, "trusted_list_legacy")
 
     if not os.path.exists(filepath):
         Path(filepath).touch()
-
-    if not os.path.exists(filepath_legacy):
-        # Initialize legacy file with all existing repos
-        repos = next(os.walk(hub_dir))[1]
-        with open(filepath_legacy, "w") as file:
-            for _repo in repos:
-                if _repo != "checkpoints":
-                    file.write(_repo + "\n")
-
-    # load list
     with open(filepath, 'r') as file:
         trusted_repos = tuple(line.strip() for line in file)
-    with open(filepath_legacy, 'r') as file:
-        trusted_repos_legacy = tuple(line.strip() for line in file)
+
+    # To minimize friction of introducing the new trust_repo mechanism, we consider that
+    # if a repo was already downloaded by torchhub, then it is already trusted (even if it's not in the allowlist)
+    trusted_repos_legacy = next(os.walk(hub_dir))[1]
+
     owner_name = '_'.join([repo_owner, repo_name])
-    owner_name_branch = '_'.join([repo_owner, repo_name, repo_branch])
+    is_trusted = (
+        owner_name in trusted_repos
+        or owner_name_branch in trusted_repos_legacy
+        or repo_owner in _TRUSTED_REPO_OWNERS
+    )
 
-    is_trusted = any(owner_name == trusted_repo for trusted_repo in trusted_repos)
-    is_trusted = is_trusted or any(owner_name_branch == trusted_repo for trusted_repo in trusted_repos_legacy)
-    is_trusted = is_trusted or repo_owner in _TRUSTED_REPO_OWNERS
-
-    # TODO: Remove `None` option in future version and change the default to "check"
+    # TODO: Remove `None` option in 1.14 and change the default to "check"
     if trust_repo is None:
         if not is_trusted:
             warnings.warn(
@@ -264,7 +258,7 @@ def _check_repo(repo_owner, repo_name, repo_branch, trust_repo, calling_fn="load
         else:
             raise ValueError(f"Unrecognized response {response}.")
 
-    # At this point we're sure that the user trusts the repo
+    # At this point we're sure that the user trusts the repo (or wants to trust it)
     if not is_trusted:
         with open(filepath, "a") as file:
             file.write(owner_name + "\n")
@@ -360,7 +354,7 @@ def list(github, force_reload=False, skip_validation=False, trust_repo=None):
             - If ``None``: this will raise a warning, inviting the user to set
               ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
               is only present for backward compatibility and will be removed in
-              the future.
+              v1.14.
 
             Default is ``None`` and will eventually change to ``"check"`` in a future version.
 
@@ -415,7 +409,7 @@ def help(github, model, force_reload=False, skip_validation=False, trust_repo=No
             - If ``None``: this will raise a warning, inviting the user to set
               ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
               is only present for backward compatibility and will be removed in
-              the future.
+              v1.14.
 
             Default is ``None`` and will eventually change to ``"check"`` in a future version.
     Example:
@@ -476,7 +470,7 @@ def load(repo_or_dir, model, *args, source='github', trust_repo=None, force_relo
             - If ``None``: this will raise a warning, inviting the user to set
               ``trust_repo`` to either ``False``, ``True`` or ``"check"``. This
               is only present for backward compatibility and will be removed in
-              the future.
+              v1.14.
 
             Default is ``None`` and will eventually change to ``"check"`` in a future version.
         force_reload (bool, optional): whether to force a fresh download of

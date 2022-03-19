@@ -592,6 +592,16 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
+    def setUp(self):
+        self.previous_hub_dir = torch.hub.get_dir()
+        self.tmpdir = tempfile.TemporaryDirectory('hub_dir')
+        torch.hub.set_dir(str(self.tmpdir))
+        self.trusted_list_path = os.path.join(torch.hub.get_dir(), "trusted_list")
+
+    def tearDown(self):
+        torch.hub.set_dir(self.previous_hub_dir)  # probably useless
+        self.tmpdir.cleanup()
+
     @retry(Exception, tries=3)
     def test_load_from_github(self):
         hub_model = hub.load(
@@ -607,7 +617,7 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
         local_dir = hub._get_cache_or_reload(
-            'ailzhang/torchhub_example', force_reload=False)
+            'ailzhang/torchhub_example', force_reload=False, trust_repo=True, calling_fn=None)
         hub_model = hub.load(
             local_dir,
             'mnist',
@@ -727,113 +737,121 @@ class TestHub(TestCase):
                 'If it\'s a commit from a forked repo'):
             model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True, trust_repo=True)
 
-    def tearDown(self):
-        # cleanup
-        # test
-        folder_path = os.path.join(torch.hub.get_dir(), 'ailzhang_torchhub_example_master')
-        if os.path.exists(folder_path):
-            shutil.rmtree(folder_path)
-
-        file_path = os.path.join(torch.hub.get_dir(), 'trusted_list')
-        if os.path.exists(file_path):
-            with open(file_path, "r") as f:
-                lines = f.readlines()
-            with open(file_path, "w") as f:
-                for line in lines:
-                    if line.strip("\n") != "ailzhang_torchhub_example":
-                        f.write(line)
-
-        file_path_legacy = os.path.join(torch.hub.get_dir(), 'trusted_list_legacy')
-        if os.path.exists(file_path_legacy):
-            with open(file_path_legacy, "r") as f:
-                lines = f.readlines()
-            with open(file_path_legacy, "w") as f:
-                for line in lines:
-                    if line.strip("\n") != "ailzhang_torchhub_example_master":
-                        f.write(line)
-
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='')
-    def test_untrusted_repo(self, unused_patch_input):
+    def test_trust_repo_false_emptystring(self, unused_patch_input):
         # patch sends the patched function as input, hence the extra arg
-        with self.assertRaisesRegex(
-                Exception,
-                'Untrusted repository.'):
-            model = torch.hub.load(
+        with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
+            torch.hub.load(
                 'ailzhang/torchhub_example',
                 'mnist_zip_1_6',
                 force_reload=True,
-                trust_repo=False)
+                trust_repo=False
+            )
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
-    def test_untrusted_repo_prompt(self, unused_patch_input):
-        with self.assertRaisesRegex(
-                Exception,
-                'Untrusted repository.'):
-            model = torch.hub.load(
+    def test_trust_repo_false_no(self, unused_patch_input):
+        with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
+            torch.hub.load(
                 'ailzhang/torchhub_example',
                 'mnist_zip_1_6',
                 force_reload=True,
-                trust_repo="check")
+                trust_repo=False
+            )
+
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
-    def test_trusted_repo(self, unused_patch_input):
-        model = torch.hub.load(
+    def test_trusted_repo_false_yes(self, unused_patch_input):
+        torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
             force_reload=True,
-            trust_repo=False)
+            trust_repo=False
+        )
+        with open(self.trusted_list_path) as f:
+            assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
+
+    @retry(Exception, tries=3)
+    @patch('builtins.input', return_value='no')
+    def test_trust_repo_check_no(self, unused_patch_input):
+        with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
+            torch.hub.load(
+                'ailzhang/torchhub_example',
+                'mnist_zip_1_6',
+                force_reload=True,
+                trust_repo="check"
+            )
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
-    def test_check_repo(self, unused_patch_input):
-        model = torch.hub.load(
+    def test_trust_repo_check_yes(self, unused_patch_input):
+        torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
             force_reload=True,
-            trust_repo="check")
+            trust_repo="check"
+        )
+        with open(self.trusted_list_path) as f:
+            assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
 
     @retry(Exception, tries=3)
-    @patch('builtins.input', return_value='')
-    def test_trust_repo_skippromt(self, unused_patch_input):
-        model = torch.hub.load(
+    def test_trust_repo_true(self):
+        torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
             force_reload=True,
-            trust_repo=True)
+            trust_repo=True
+        )
+        with open(self.trusted_list_path) as f:
+            assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
 
     @retry(Exception, tries=3)
-    def test_none_repo(self):
+    def test_trust_repo_none(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            model = torch.hub.load(
+            torch.hub.load(
                 'ailzhang/torchhub_example',
                 'mnist_zip_1_6',
                 force_reload=True,
-                trust_repo=None)
+                trust_repo=None
+            )
             assert len(w) == 1
             assert issubclass(w[-1].category, UserWarning)
             assert "You are about to download and run code from an untrusted repository" in str(w[-1].message)
 
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
+
     @retry(Exception, tries=3)
-    @patch('builtins.input', return_value='n')
-    def test_check_repo_legacy(self, unused_patch_input):
-        # add repo to legacy
-        file_path_legacy = os.path.join(torch.hub.get_dir(), 'trusted_list_legacy')
-        if not os.path.exists(file_path_legacy):
-            pathlib.Path(file_path_legacy).touch()
-        with open(file_path_legacy, "a") as f:
-            f.write('ailzhang_torchhub_example_master')
-        # the repo + branch is in the legacy list so it is considered
-        # a trusted repo, and the user isn't prompted anything
-        model = torch.hub.load(
+    def test_trust_repo_legacy(self):
+        # We first download a repo and then delete the allowlist file
+        # Then we check that the repo is indeed trusted without a prompt,
+        # because it was already downloaded in the past.
+        torch.hub.load(
             'ailzhang/torchhub_example',
             'mnist_zip_1_6',
             force_reload=True,
-            trust_repo='check')
+            trust_repo=True
+        )
+        os.remove(self.trusted_list_path)
 
+        torch.hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            force_reload=True,
+            trust_repo="check"
+        )
+
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
