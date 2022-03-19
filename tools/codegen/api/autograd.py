@@ -353,7 +353,7 @@ def match_differentiability_info(
                         # We want to...
                         #   Match: self_t.op1(other_p.op2(arg))
                         #   Avoid: self_t.op1(args) + self_t.op2(args)
-                        #   Avoid: self_t.op1(other_p.op2(arg))+ self_t.op2(args)
+                        #   Avoid: self_t.op1(other_p.op2(arg)) + self_t.op2(args)
                         def check_parens_nest_level_gt_zero(s: str) -> bool:
                             level = 1
                             for ch in s:
