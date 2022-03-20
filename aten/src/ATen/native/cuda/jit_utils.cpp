@@ -916,15 +916,13 @@ std::string generate_reduction_code(
         env.s("traits_string", get_traits_string());
         env.s("complex_body_string", get_complex_body_string());
         env.s("complex_math_string", get_complex_math_string());
+        env.s("complex", std::to_string(1));
       } else {
         env.s("traits_string", "");
         env.s("complex_body_string", "");
         env.s("complex_math_string", "");
+        env.s("complex", std::to_string(0));
       }
-
-
-      env.s("complex_body_string", "");
-      env.s("complex_math_string", "");
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));

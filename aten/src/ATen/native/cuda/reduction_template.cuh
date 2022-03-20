@@ -91,6 +91,17 @@
     return __shfl_down_sync(mask, value, delta, width);
   }
 
+
+  #if ${complex}
+  template <typename T>
+  __device__ __forceinline__ std::complex<T> WARP_SHFL_DOWN(std::complex<T> value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+  {
+    return std::complex<T>(
+        __shfl_down_sync(mask, value.real(), delta, width),
+        __shfl_down_sync(mask, value.imag(), delta, width));
+  }
+  #endif
+
   // aligned vector generates vectorized load/store on CUDA
   template<typename scalar_t, int vec_size>
   struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
