@@ -68,7 +68,7 @@ namespace at {
         for(const auto j : c10::irange(tensors.size())) {
           const Tensor& tensor = tensors[j];
           if (tensor._is_zerotensor()) {
-            // TODO: assert requires_grad=False
+            TORCH_CHECK(!tensor.requires_grad(), "ZeroTensors are immutable, requires_grad must be False");
             //_like should not propagate zerotensor dispatch key
             TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
