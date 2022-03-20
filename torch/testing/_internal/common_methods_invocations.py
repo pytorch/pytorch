@@ -2254,12 +2254,14 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
         ((0, 1, 3), (0, 10, 3))
     )
 
+    sample_kwargs = kwargs.get('sample_kwargs', {})
+
     for shape_lhs, shape_rhs in shapes:
         lhs = make_arg(shape_lhs, **op.lhs_make_tensor_kwargs)
         rhs = make_arg(shape_rhs, **op.rhs_make_tensor_kwargs)
         broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
 
-        yield SampleInput(lhs, args=(rhs,), kwargs=kwargs, broadcasts_input=broadcasts_input)
+        yield SampleInput(lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
 
 
 # Note that these references inputs use scalars for the SampleInput.input value,
@@ -9174,7 +9176,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, rounding_mode="trunc"),
+                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="trunc")),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -9185,7 +9187,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, rounding_mode="floor"),
+                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="floor")),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -9329,7 +9331,7 @@ op_db: List[OpInfo] = [
                         # Fails on XLA
                         # False is not true : Tensors failed to compare as equal!
                         # Attempted to compare equality of tensors with different dtypes
-                        DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
                     )),
     UnaryUfuncInfo('frac',
                    ref=lambda x: np.modf(x)[0],
@@ -9969,7 +9971,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("67470!"), 'TestCommon', 'test_noncontiguous_samples'),
                # Fails on XLA.
                # AssertionError: False is not true : Tensors failed to compare as equal!
-               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
@@ -10291,7 +10293,7 @@ op_db: List[OpInfo] = [
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu', dtypes=(torch.long,)),
                # AssertionError: False is not true : Tensors failed to compare as equal!
-               DecorateInfo(unittest.expectedFailure, 'TestOpInfo',
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo',
                             device_type='xla', dtypes=(torch.long,)),
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
@@ -12281,7 +12283,7 @@ op_db: List[OpInfo] = [
                             'TestMathBits', 'test_conj_view'),
                # Fails on XLA.
                # AssertionError: False is not true : Tensors failed to compare as equal
-               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla', dtypes=(torch.long,)),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cuda', active_if=TEST_WITH_ROCM),
@@ -13818,7 +13820,7 @@ op_db: List[OpInfo] = [
                #                                          ~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # Not Implemented on XLA.
-               DecorateInfo(unittest.expectedFailure, 'TestOpInfo', device_type='xla'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', device_type='xla'),
            )),
     OpInfo('histogramdd',
            dtypes=floating_types(),
