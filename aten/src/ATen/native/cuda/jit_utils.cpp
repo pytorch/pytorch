@@ -884,8 +884,9 @@ std::string generate_reduction_code(
     int nOutputs,
     const std::string& func,
     const std::string& name,
+    const int vt0,
     const std::string& f_inputs_type,
-    const std::string& compute_type,
+    const std::string& reduction_accum_type,
     const std::string& result_type,
     bool contiguous,
     bool vectorized,
@@ -894,12 +895,36 @@ std::string generate_reduction_code(
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
       env.s("result_type", result_type);
+      env.s("reduction_accum_type", reduction_accum_type);
+      env.s("vt0", std::to_string(vt0));
       env.s("name", name);
       env.s("traits_string", "");
+      // reductions don't support dynamic casting, so the only way to get nonstandard types
+      // is through input
+      if (f_inputs_type == "at::Half") {
+        env.s("half_string", jiterator_half_support_literal);
+      } else {
+        env.s("half_string", "");
+      }
+      if (f_inputs_type == "at::BFloat16") {
+        env.s("bfloat16_string", jiterator_bfloat16_support_literal);
+      } else {
+        env.s("bfloat16_string", "");
+      }
+      if (f_inputs_type == "std::complex<float>" ||
+          f_inputs_type == "std::complex<double>" ) {
+        env.s("traits_string", get_traits_string());
+        env.s("complex_body_string", get_complex_body_string());
+        env.s("complex_math_string", get_complex_math_string());
+      } else {
+        env.s("traits_string", "");
+        env.s("complex_body_string", "");
+        env.s("complex_math_string", "");
+      }
+
+
       env.s("complex_body_string", "");
       env.s("complex_math_string", "");
-      env.s("half_string", "");
-      env.s("bfloat16_string", "");
       env.s("cmath_string", get_cmath_string());
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));
@@ -1165,7 +1190,7 @@ void launch_jitted_pwise_function(
     kBlockSize.x,
     kBlockSize.y,
     kBlockSize.z,
-    0,
+    smem,
     stream,
     args,
     nullptr));

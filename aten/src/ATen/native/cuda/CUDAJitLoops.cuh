@@ -118,7 +118,6 @@ static inline void launch_jitted_unrolled_kernel(
 
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1},
   {num_threads(), 1, 1});
-  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template<
@@ -200,7 +199,6 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
     }
 
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, {grid, 1, 1}, {num_threads(), 1, 1});
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     auto ic = TrivialOffsetCalculator<arity>();
     auto oc = TrivialOffsetCalculator<1>();

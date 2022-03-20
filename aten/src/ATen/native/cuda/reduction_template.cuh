@@ -1,3 +1,4 @@
+  //TODO move offset calculator to its own template string
   template <typename T>
   struct DivMod {
   T div;
@@ -203,23 +204,26 @@
 namespace reducer {
 
   using scalar_t = ${scalar_type};
+  using arg_t = ${reduction_accum_type};
+  using out_scalar_t = ${result_type};
+
 
   inline __device__ ${functor}
 
-  inline __device__ scalar_t project(scalar_t arg) {
-    return (scalar_t) arg;
+  inline __device__ out_scalar_t project(arg_t arg) {
+    return (out_scalar_t) arg;
   }
 
-  inline __device__ scalar_t warp_shfl_down(scalar_t arg, int offset) {
+  inline __device__ arg_t warp_shfl_down(arg_t arg, int offset) {
     return WARP_SHFL_DOWN(arg, offset);
   }
 
-  inline __device__ scalar_t translate_idx(scalar_t acc, int64_t /*idx*/) {
+  inline __device__ arg_t translate_idx(arg_t acc, int64_t /*idx*/) {
     return acc;
   }
 
   // wrap a normal reduction that ignores the index
-  inline __device__ scalar_t reduce(scalar_t acc, scalar_t val, int64_t idx) {
+  inline __device__ arg_t reduce(arg_t acc, arg_t val, int64_t idx) {
      return combine(acc, val);
   }
 }
@@ -227,7 +231,7 @@ namespace reducer {
 
 struct ReduceJitOp {
   using scalar_t = ${scalar_type};
-  using arg_t = ${scalar_type};
+  using arg_t = ${reduction_accum_type};
   using out_scalar_t = ${result_type};
 
   using InputCalculator = OffsetCalculator<1>;
@@ -236,8 +240,6 @@ struct ReduceJitOp {
 //   static constexpr bool can_accumulate_in_output =
 //     std::is_convertible<arg_t, out_scalar_t>::value
 //     && std::is_convertible<out_scalar_t, arg_t>::value;
-
-  static constexpr float acc_buffer_multiplier = (float)sizeof(arg_t) / sizeof(out_scalar_t);
 
   static constexpr int input_vec_size = ReduceConfig::input_vec_size;
 
@@ -427,7 +429,7 @@ struct ReduceJitOp {
     uint32_t idx = config.input_idx();
     const uint32_t end = config.num_inputs;
     const uint32_t stride = config.step_input;
-    const int vt0=4;
+    const int vt0=${vt0};
 
     using arg_vec_t = Array<arg_t, output_vec_size>;
     using load_t = aligned_vector<scalar_t, output_vec_size>;

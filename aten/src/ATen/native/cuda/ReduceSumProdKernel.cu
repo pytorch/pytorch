@@ -33,7 +33,7 @@ template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_
 struct prod_functor {
   void operator()(TensorIterator& iter) {
     std::string func = jiterator_stringify(
-    scalar_t combine(scalar_t a, scalar_t b) {
+    scalar_t combine(arg_t a, arg_t b) {
       return a+b;
     }
     );
