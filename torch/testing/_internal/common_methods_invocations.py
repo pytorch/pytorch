@@ -8785,12 +8785,9 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_autograd=False,
                     supports_one_python_scalar=True,
+                    rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.skip("Skipped! runtime error: shift exponent -9 is negative"),
-                                     'TestBinaryUfuncs',
-                                     device_type='cpu',
-                                     active_if=TEST_WITH_ASAN),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -8798,12 +8795,9 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
                     supports_autograd=False,
                     supports_one_python_scalar=True,
+                    rhs_make_tensor_kwargs=dict(low=0),
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.skip("Skipped! runtime error: shift exponent -9 is negative"),
-                                     'TestBinaryUfuncs',
-                                     device_type='cpu',
-                                     active_if=TEST_WITH_ASAN),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
@@ -11952,7 +11946,7 @@ op_db: List[OpInfo] = [
                         # nan vs nan comparisons
                         # https://github.com/pytorch/pytorch/issues/74279
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
-                        #-3.43399e+38 is outside the range of representable values of type 'float'
+                        # -3.43399e+38 is outside the range of representable values of type 'float'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                     )),
     OpInfo('qr',
