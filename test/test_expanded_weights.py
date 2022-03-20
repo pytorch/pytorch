@@ -191,9 +191,15 @@ class TestExpandedWeightFunctional(TestCase):
                 sample_input = SampleInput(sample_input.args[0].clone(),
                                            args=(sample_input.input.clone(),),
                                            kwargs=sample_input.kwargs)
+                problem_input = "max_norm" in sample_input.kwargs and "padding_idx" in sample_input.kwargs
+                if problem_input:
+                    print(sample_input.input)
+                    print(sample_input.args)
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
             expanded_weight_result = run_op(op, ew_input, *ew_args, **ew_kwargs)
+            if op.name == "nn.functional.embedding" and problem_input:
+                print(sample_input.args)
             normal_result = run_op(op, sample_input.input, *sample_input.args, **sample_input.kwargs)
             self.assertEqual(expanded_weight_result, normal_result, msg=(sample_input.kwargs.__str__()))
 
