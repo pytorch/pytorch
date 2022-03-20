@@ -186,9 +186,13 @@ class SampleInput(object):
     def numpy(self):
         def to_numpy(t):
             if isinstance(t, torch.Tensor):
+                if t.dtype is torch.bfloat16:
+                    return t.detach().cpu().to(torch.float32).numpy()
                 return t.detach().cpu().numpy()
             elif isinstance(t, torch.dtype):
                 return torch_to_numpy_dtype_dict[t]
+
+            return t
 
         return self.transform(to_numpy)
 
@@ -196,8 +200,10 @@ class SampleInput(object):
         def to_noncontiguous(t):
             if isinstance(t, torch.Tensor):
                 return noncontiguous_like(t)
-            if isinstance(t, torch.dtype):
+            elif isinstance(t, torch.dtype):
                 return t
+
+            return t
 
         return self.transform(to_noncontiguous)
 
@@ -871,7 +877,7 @@ class OpInfo(object):
         """
         samples = self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
 
-        if 'include_conjugated_inputs' in kwargs and kwargs.get('include_conjugated_inputs'):
+        if kwargs.get('include_conjugated_inputs', False):
             conj_samples = self.conjugate_sample_inputs(device, dtype, requires_grad, **kwargs)
             samples_list = list(samples)
             samples_list.extend(conj_samples)
@@ -890,7 +896,7 @@ class OpInfo(object):
         if self.reference_inputs_func is None:
             return self.sample_inputs_func(self, device, dtype, requires_grad, **kwargs)
 
-        if 'include_conjugated_inputs' in kwargs and kwargs.get('include_conjugated_inputs'):
+        if kwargs.get('include_conjugated_inputs', False):
             raise NotImplementedError
 
         return self.reference_inputs_func(self, device, dtype, requires_grad, **kwargs)
@@ -2049,7 +2055,6 @@ def generate_elementwise_binary_small_value_tensors(op, *, device, dtype, requir
     lhs = torch.tensor(l_vals, device=device, dtype=dtype, requires_grad=requires_grad)
     rhs = torch.tensor(r_vals, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    print(rhs)
     yield SampleInput(lhs, args=(rhs,))
 
 def generate_elementwise_binary_large_value_tensors(op, *, device, dtype, requires_grad=False):
@@ -2254,9 +2259,7 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
         rhs = make_arg(shape_rhs, **op.rhs_make_tensor_kwargs)
         broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
 
-        sample_kwargs = kwargs.get('sample_kwargs', {})
-
-        yield SampleInput(lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
+        yield SampleInput(lhs, args=(rhs,), kwargs=kwargs, broadcasts_input=broadcasts_input)
 
 
 # Note that these references inputs use scalars for the SampleInput.input value,
@@ -2322,7 +2325,8 @@ class BinaryUfuncInfo(OpInfo):
                  **kwargs):
 
         # Elementwise binary operations perform the equivalent of test_reference_testing
-        #   in test_binary_ufuncs, but with additional test granularity.
+        #   in test_binary_ufuncs, but with additional test granularity. So the
+        #   generic test_ops.py test is skipped because it's redundant.
         common_skips = (
             DecorateInfo(unittest.skip('Skipping redundant test.'),
                          'TestCommon',
@@ -3154,7 +3158,7 @@ def sample_inputs_comparison_ops(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     lhs = make_arg((S, S))
-    yield SampleInput(lhs.clone(), args=(lhs.clone(),))
+    yield SampleInput(lhs, args=(lhs.clone(),))
 
 def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
@@ -8781,8 +8785,10 @@ op_db: List[OpInfo] = [
                     supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN"),
-                                     'TestBinaryUfuncs', device_type='cpu'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     device_type='cpu',
+                                     active_if=TEST_WITH_ASAN),
                     )),
     BinaryUfuncInfo('bitwise_right_shift',
                     op=torch.bitwise_right_shift,
@@ -8792,8 +8798,10 @@ op_db: List[OpInfo] = [
                     supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN"),
-                                     'TestBinaryUfuncs', device_type='cpu'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     device_type='cpu',
+                                     active_if=TEST_WITH_ASAN),
                     )),
     OpInfo('combinations',
            op=torch.combinations,
@@ -9166,7 +9174,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="trunc")),
+                    sample_inputs_func=partial(sample_inputs_elementwise_binary, rounding_mode="trunc"),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,
@@ -9177,7 +9185,7 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="floor")),
+                    sample_inputs_func=partial(sample_inputs_elementwise_binary, rounding_mode="floor"),
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     supports_fwgrad_bwgrad=True,

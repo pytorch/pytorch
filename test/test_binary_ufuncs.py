@@ -94,17 +94,9 @@ class TestBinaryUfuncs(TestCase):
             l = sample.input
             r = sample.args[0]
 
-            def to_numpy(x):
-                if isinstance(x, torch.Tensor):
-                    if dtype is torch.bfloat16:
-                        return x.cpu().to(torch.float32).numpy()
-                    return x.cpu().numpy()
-                else:
-                    # Assumes x is a scalar
-                    return x
-
-            l_numpy = to_numpy(l)
-            r_numpy = to_numpy(r)
+            np_input, np_args, np_kwargs = sample.numpy()
+            l_numpy = np_input
+            r_numpy = np_args[0]
 
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
