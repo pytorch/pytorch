@@ -8787,7 +8787,7 @@ op_db: List[OpInfo] = [
                     supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.expectedFailure,
+                        DecorateInfo(unittest.skip("Skipped! runtime error: shift exponent -9 is negative"),
                                      'TestBinaryUfuncs',
                                      device_type='cpu',
                                      active_if=TEST_WITH_ASAN),
@@ -8800,7 +8800,7 @@ op_db: List[OpInfo] = [
                     supports_one_python_scalar=True,
                     skips=(
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
-                        DecorateInfo(unittest.expectedFailure,
+                        DecorateInfo(unittest.skip("Skipped! runtime error: shift exponent -9 is negative"),
                                      'TestBinaryUfuncs',
                                      device_type='cpu',
                                      active_if=TEST_WITH_ASAN),
@@ -9182,7 +9182,11 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True),),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    skips=(
+                        # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
+                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_working'),
+                    )),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
@@ -9193,7 +9197,11 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True),),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    skips=(
+                        # RuntimeError: MALFORMED INPUT: Unhandled node kind (in computeValue): aten::div
+                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_working'),
+                    )),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,
@@ -11944,6 +11952,8 @@ op_db: List[OpInfo] = [
                         # nan vs nan comparisons
                         # https://github.com/pytorch/pytorch/issues/74279
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients'),
+                        #-3.43399e+38 is outside the range of representable values of type 'float'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                     )),
     OpInfo('qr',
            op=torch.qr,
