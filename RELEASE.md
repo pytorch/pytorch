@@ -47,7 +47,7 @@ Following Requirements needs to be met prior to final RC Cut:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
-  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/main)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/nightly)
 
 ## Cutting release branches
 
