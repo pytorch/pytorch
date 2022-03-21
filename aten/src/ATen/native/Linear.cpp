@@ -13,7 +13,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
 namespace at { namespace native {
 
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
@@ -33,12 +32,28 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
+  } else if (input.dim() > 2 && bias->defined() && input.is_contiguous()) {
+    //only fold input dimension when it is contiguous
+    //otherwise reshape may cause actual data move that is slow in GPU
+    auto original_dim = input.sizes();
+    at::DimVector newshape(2, 1);
+    at::DimVector outshape(input.dim());
+    int idx = 0;
+    for(; idx < input.dim()-1; ++idx) {
+      newshape[0] *= original_dim[idx];
+      outshape[idx] = original_dim[idx];
+    }
+    newshape[1] = original_dim[idx];
+    outshape[idx] = weight.sizes()[0];
+    auto output = at::addmm(*bias, input.reshape(newshape), weight.t());
+    return output.reshape(outshape);
+  } else {
+    auto output = at::matmul(input, weight.t());
+    if (bias->defined()) {
+      output.add_(*bias);
+    }
+    return output;
   }
-  auto output = at::matmul(input, weight.t());
-  if (bias->defined()) {
-    output.add_(*bias);
-  }
-  return output;
 }
 
 Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
