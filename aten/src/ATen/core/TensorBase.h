@@ -462,6 +462,11 @@ class TORCH_API TensorBase {
     return impl_->is_inference();
   }
 
+  // Returns if a `Tensor` is a NestedTensor.
+  bool is_nested() const {
+    return impl_->is_nested();
+  }
+
   /// If a tensor is a quantized tensor, returns its quantizer
   /// TODO: it's not in native_functions.yaml yet as it's not exposed to python
   QuantizerPtr quantizer() const;
@@ -866,7 +871,7 @@ struct MaybeOwnedTraits<at::TensorBase> {
     return &borrow;
   }
 
-  static bool debugBorrowIsValid(const borrow_type& borrow) {
+  static bool debugBorrowIsValid(const borrow_type& /*borrow*/) {
     return true;
   }
 };

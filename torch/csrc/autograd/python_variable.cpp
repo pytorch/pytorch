@@ -1,5 +1,3 @@
-#include <torch/csrc/autograd/python_variable.h>
-
 #include <torch/csrc/THP.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -151,10 +149,12 @@ static const char* VOLATILE_WARNING =
 
 static bool check_has_torch_dispatch(PyObject *obj) {
   PyTypeObject *tp = Py_TYPE(obj);
+  py::object attr = PyObject_FastGetAttrString(obj, "__torch_dispatch__");
   return (
     !THPVariable_CheckTypeExact(tp) &&
     // TODO: test if Python key is disabled
-    PyObject_FastGetAttrString(obj, "__torch_dispatch__").ptr() != nullptr
+    attr.ptr() != nullptr &&
+    attr.ptr() != torch::disabled_torch_dispatch_impl()
   );
 }
 
@@ -414,7 +414,12 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // to continue on to the underlying CPU/CUDA kernel advertised by the dispatch
   // key, which will immediately segfault because the data pointer is null.  By
   // forcing users to define __torch_dispatch__ we ensure this does not happen
-  TORCH_CHECK_TYPE(PyObject_FastGetAttrString(cls, "__torch_dispatch__").ptr() != nullptr,
+  // TODO: This check is not complete; because the user can disable torch
+  // dispatch and then go again, triggering segfault.  TBH I'm thinking I want
+  // to delete this function entirely
+  py::object attr = PyObject_FastGetAttrString(cls, "__torch_dispatch__");
+  TORCH_CHECK_TYPE(attr.ptr() != nullptr && attr.ptr() != torch::disabled_torch_dispatch_impl()
+,
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
@@ -1003,6 +1008,17 @@ PyObject *THPVariable_is_complex(THPVariable *self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPVariable_is_nested(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "is_nested");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_nested());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject *THPVariable_dtype(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
@@ -1057,28 +1073,28 @@ PyObject *THPVariable_get_imag(THPVariable* self, void *unused)
   END_HANDLE_TH_ERRORS
 }
 
-int THPVariable_set_real(THPVariable *self, THPVariable *real, void *unused)
+int THPVariable_set_real(PyObject* self, PyObject* real, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto& real_ = THPVariable_Unpack(real);
+  auto self_real = at::real(self_);
+  auto real_ = valueToTensor(self_real.options(), real, self_real.device());
   {
     pybind11::gil_scoped_release no_gil;
-    auto self_real = at::real(self_);
     self_real.copy_(real_);
     return 0;
   }
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-int THPVariable_set_imag(THPVariable* self, THPVariable *imag, void *unused)
+int THPVariable_set_imag(PyObject* self, PyObject* imag, void *unused)
 {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
-  auto& imag_ = THPVariable_Unpack(imag);
+  auto self_imag = at::imag(self_);
+  auto imag_ = valueToTensor(self_imag.options(), imag, self_imag.device());
   {
     pybind11::gil_scoped_release no_gil;
-    auto self_imag = at::imag(self_);
     self_imag.copy_(imag_);
     return 0;
   }
@@ -1121,6 +1137,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_complex", (getter)THPVariable_is_complex, nullptr, nullptr, nullptr},
   {"is_quantized", (getter)THPVariable_is_quantized, nullptr, nullptr, nullptr},
   {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
+  {"is_nested", (getter)THPVariable_is_nested, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
   {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
   {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
@@ -1260,7 +1277,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs
   HANDLE_TH_ERRORS
   TORCH_CHECK(type != &THPVariableType, "Cannot directly construct _TensorBase; subclass it and then construct that");
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
-  auto tensor = torch::utils::legacy_tensor_ctor(torch::tensors::get_default_dispatch_key(), torch::tensors::get_default_scalar_type(), args, kwargs);
+  auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
   // given a raw pointer that will refcount bump
   return THPVariable_NewWithVar(
@@ -1677,6 +1694,7 @@ void concrete_dispatch_fn(
   // Parse the name into namespace and name (no overload_name)
   // TODO: put this into the library
   const auto& qualified_name = op.operator_name().name;
+  const auto& overload_name = schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
   // Make me some null terminated strings
@@ -1697,6 +1715,12 @@ void concrete_dispatch_fn(
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+  py::handle torch_api_function_overload;
+  if (overload_name == "") {
+    torch_api_function_overload = torch_api_function.attr("default");
+  } else {
+    torch_api_function_overload = torch_api_function.attr(overload_name.c_str());
+  }
   std::string module_name_str = "torch.ops." + ns_str;
 
   // About all the pointers:
@@ -1788,7 +1812,7 @@ void concrete_dispatch_fn(
     args.ptr(),
     kwargs.ptr(),
     func_name,
-    torch_api_function.ptr(),
+    torch_api_function_overload.ptr(),
     module_name_str.c_str(),
     "__torch_dispatch__"
   ));
@@ -1828,7 +1852,7 @@ c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter
     args.ptr(),
     kwargs.ptr(),
     "detach",
-    py::module::import("torch").attr("ops").attr("aten").attr("detach").ptr(),
+    py::module::import("torch").attr("ops").attr("aten").attr("detach").attr("default").ptr(),
     "torch.ops.aten",
     "__torch_dispatch__"
   ));
