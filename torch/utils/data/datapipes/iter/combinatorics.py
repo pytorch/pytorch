@@ -94,7 +94,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         else:
             self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
         self.buffer_size = buffer_size
-        self._shuffle_enabled = True
+        self._enabled = True
 
     @staticmethod
     def buffer_replace(buffer, x):
@@ -104,11 +104,11 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
         return val
 
     def set_shuffle(self, shuffle=True):
-        self._shuffle_enabled = shuffle
+        self._enabled = shuffle
         return self
 
     def __iter__(self) -> Iterator[T_co]:
-        if not self._shuffle_enabled:
+        if not self._enabled:
             for x in self.datapipe:
                 yield x
         else:
