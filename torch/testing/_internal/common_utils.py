@@ -646,6 +646,12 @@ def run_tests(argv=UNITTEST_ARGS):
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
+        from xmlrunner.result import _XMLTestResult  # type: ignore[import]
+
+        class XMLTestResultVerbose(_XMLTestResult):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
@@ -653,7 +659,10 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+            output=test_report_path,
+            verbosity=2 if verbose else 1,
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
