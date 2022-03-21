@@ -12826,9 +12826,8 @@ class TestNNDeviceType(NNTestCase):
             (2, 6, 4, 2, 2): 4,
         }
         for shape, g in bad_shape_g.items():
-            gn = nn.GroupNorm(g, shape[1])
-            input = torch.empty(*shape, device=device, dtype=dtype).uniform_(0, 10)
-            self.assertRaises(RuntimeError, lambda: gn(input))
+            with self.assertRaises(ValueError):
+                gn = nn.GroupNorm(g, shape[1])
 
     def _test_GroupNorm_cuda_half(self):
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
@@ -14431,6 +14430,20 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
             inp = torch.randn(1, 0, 50, 32, 32, device=device)
             mod(inp)
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_out_size(self, device):
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[0, 1])
+        inp = torch.rand([16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((16, 50, 0, 1), device=device))
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_out_size(self, device):
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[0, 1, 1])
+        inp = torch.rand([16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
 
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
