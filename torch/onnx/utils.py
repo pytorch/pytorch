@@ -819,7 +819,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
             params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(
-                graph, params_dict, hasattr(model, "training") and model.training)
+                graph, params_dict, getattr(model, "training", False))
             if export_params:
                 proto, export_map, val_use_external_data_format, node_names = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
