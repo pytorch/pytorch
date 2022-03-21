@@ -38,7 +38,7 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 ## Cutting a release branch preparations
 
-Following Requirements needs to be met in order to perform successful RC Cut:
+Following Requirements needs to be met prior to final RC Cut:
 
 * Resolve all outstanding issues in the [milestones](https://github.com/pytorch/pytorch/milestone/28) before first RC cut is completed. After RC cut is completed follwong script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
