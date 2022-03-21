@@ -591,6 +591,10 @@ std::vector<Shape> compute_shape_repeat(const at::Tensor & self, at::IntArrayRef
   return {Shape(self.scalar_type(), target_size)};
 }
 
+std::vector<Shape> compute_shape_uniform_(at::Tensor & self, double from, double to, c10::optional<at::Generator> generator) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 // Restore unused-parameters warnings
 #pragma GCC diagnostic pop
 

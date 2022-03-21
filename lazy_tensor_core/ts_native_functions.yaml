@@ -135,6 +135,7 @@ full_codegen:
   - tril
   - triu
   - trunc
+  - uniform_
   - upsample_bilinear2d
   - upsample_bilinear2d_backward
   - upsample_nearest2d

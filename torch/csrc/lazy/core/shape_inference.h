@@ -63,6 +63,7 @@ TORCH_API std::vector<Shape> compute_shape_std(const at::Tensor & self, c10::opt
 TORCH_API std::vector<Shape> compute_shape_sum(const at::Tensor & self, c10::optional<at::ScalarType> dtype);
 TORCH_API std::vector<Shape> compute_shape__to_copy(const at::Tensor & self, c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout, c10::optional<at::Device> device, c10::optional<bool> pin_memory, bool non_blocking, c10::optional<at::MemoryFormat> memory_format);
 TORCH_API std::vector<Shape> compute_shape_trace(const at::Tensor & self);
+TORCH_API std::vector<Shape> compute_shape_uniform_(at::Tensor & self, double from, double to, c10::optional<at::Generator> generator);
 TORCH_API std::vector<Shape> compute_shape_zero_(at::Tensor & self);
 
 } // namespace lazy
