@@ -75,7 +75,7 @@ void test_atomic_mul() {
   for (int i = 0; i < arraysize; ++i) {
     a[i] = 2;
     sum[i] = 2;
-    answer[i] = pow(sum[i], static_cast<T>(factor));
+    answer[i] = pow(sum[i], static_cast<T>(factor + 1));
   }
 
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
