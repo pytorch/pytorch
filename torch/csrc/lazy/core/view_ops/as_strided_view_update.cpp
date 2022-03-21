@@ -17,7 +17,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(
           ltc_as_strided_view_update,
           {target, input},
           [&]() {
-            return Shape(GetShapeFromTsValue(target).scalar_type(), size);
+            return Shape(target.shape().scalar_type(), size);
           },
           /*num_outputs=*/1,
           MHash(size, stride, storage_offset)),
