@@ -132,7 +132,7 @@ jobs:
     uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
     with:
       build-environment: linux-bionic-py3.7-clang9-slow
-      docker-image-name: pytorch-linux-bionic-py3.7-clang9-slow
+      docker-image-name: pytorch-linux-bionic-py3.7-clang9
 
   linux-bionic-py3_7-clang9-slow-test:
     name: linux-bionic-py3.7-clang9-slow

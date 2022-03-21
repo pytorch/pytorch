@@ -724,7 +724,7 @@ LINUX_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="linux-bionic-py3.7-clang9-slow",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.7-clang9-slow",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.7-clang9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         num_test_shards=2,
         enable_default_test=False,
