@@ -2583,7 +2583,7 @@ class TestLinalg(TestCase):
             if has_cusolver():
                 backends.append("cusolver")
 
-        ns = (5, 2, 0)
+        ns = (12, 4, 2, 0)
         batches = ((), (0,), (1,), (2,), (2, 1), (0, 2))
 
         for backend in backends:
