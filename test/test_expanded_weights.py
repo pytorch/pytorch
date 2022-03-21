@@ -243,9 +243,12 @@ class TestExpandedWeightFunctional(TestCase):
 
     def test_embedding(self, device):
         kwargs = {'max_norm': 1., 'padding_idx': 0}
-        weight = torch.tensor([[2., 1.75, 1.5], [-1., 3., 2.5], [3., -1., 2.5],
-                               [-0.5, -0.5, 3.], [-1., 0., 1.5]], device=device)
-        idx = torch.tensor([[1, 1, 1], [0, 2, 4], [3, 2, 0]], device=device)
+        weight = torch.tensor([[6.8647, 5.8554, 16.9691, 2.6789, -15.6294],
+                               [-14.9554, 7.7531, 12.4223, -16.0599, 15.8149],
+                               [17.4140, -3.0240, 2.9351, -0.8682, -17.2839],
+                               [9.9553, 17.8714, -3.2633, -5.9660, 15.1439],
+                               [-0.7989, 16.1427, -11.6595, -1.4572, -7.4903]], device=device)
+        idx = torch.tensor([[1, 1, 3], [0, 0, 4], [2, 1, 0]], device=device)
         weight_clone = weight.clone()
         self.assertEqual(weight, weight_clone)
         res1 = torch.nn.functional.embedding(idx, weight, **kwargs)
