@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 
+#include <c10/util/irange.h>
 #include <libgen.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
@@ -291,6 +292,7 @@ TEST(TorchpyTest, RegisterModule) {
   }
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(TorchpyTest, FxModule) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);
@@ -317,6 +319,7 @@ TEST(TorchpyTest, FxModule) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+#endif
 
 // Moving a tensor between interpreters should share the underlying storage.
 TEST(TorchpyTest, TensorSerializationSharing) {
@@ -379,7 +382,7 @@ TEST(TorchpyTest, SharedLibraryLoad) {
     try {
       I.global("libtest_deploy_lib", "raise_exception")(no_args);
       ASSERT_TRUE(false); // raise_exception did not throw?
-    } catch (std::runtime_error& err) {
+    } catch (std::exception& err) {
       ASSERT_TRUE(std::string(err.what()).find("yet") != std::string::npos);
     }
     in_another_module = 6;
