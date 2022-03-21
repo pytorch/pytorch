@@ -310,7 +310,7 @@ Val* ForLoop::step() const {
 bool ForLoop::isTrivial() const {
   // These loops are not materialized
   if (vectorize() || iter_domain()->isBroadcast() ||
-      iter_domain()->isStride()) {
+      iter_domain()->isStride() || iter_domain()->isMma()) {
     return true;
   }
 

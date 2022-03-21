@@ -126,6 +126,12 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
   }
 };
 
+void assertOnWarpOps(const Expr* expr) {
+  TORCH_INTERNAL_ASSERT(
+      !expr->isA<MmaOp>(),
+      "Mma op: cannot eliminate predicate for mma op, tiling not valid");
+}
+
 } // namespace
 
 std::vector<Expr*> generateConditionalFromPredicate(
@@ -151,6 +157,8 @@ class PredicateAnalyzer : public OptOutDispatch {
     // of the parallelized axis is the actual size of the axis, not
     // the number of threads. Since the number of threads can be
     // larger than the axis size, it's not safe to skip predication
+
+    // Check that parallel dimension will not generate out of bound index
     if (!(producer->getMemoryType() == MemoryType::Local &&
           consumer->getMemoryType() == MemoryType::Local)) {
       return true;
@@ -355,6 +363,10 @@ void PredicateElimination::handle(Expr* expr) {
   }
 
   if (needsPredicate(expr)) {
+    // Warp primitives are currently limited to un-predicated usage,
+    //   predicating these ops will require extra steps to ensure that
+    //   the whole warp will get the same value.
+    assertOnWarpOps(expr);
     return;
   }
 
@@ -389,6 +401,11 @@ void PredicateElimination::handle(Expr* expr) {
     // difference.
     if (expr->isA<ReductionOp>()) {
       setReductionInitValue(input, expr->as<ReductionOp>()->init());
+      continue;
+    }
+
+    if (expr->isA<MmaOp>()) {
+      setReductionInitValue(input, expr->as<MmaOp>()->init());
       continue;
     }
 

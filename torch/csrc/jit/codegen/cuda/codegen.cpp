@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -461,6 +462,21 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     bool is_vector_op = false;
     size_t vector_word_size = 1;
 
+    if (uop->out()->isA<kir::TensorIndex>()) {
+      auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
+      if (std::any_of(
+              out_tv->domain()->domain().begin(),
+              out_tv->domain()->domain().end(),
+              [&](IterDomain* id) { return id->isMma(); })) {
+        auto mma = dynamic_cast<MmaOp*>(
+            uop->out()->as<kir::TensorIndex>()->view()->definition());
+        TORCH_INTERNAL_ASSERT(
+            mma != nullptr, "CodeGen: mma op not in mma loop");
+        genMmaInitialization(mma, uop);
+        return;
+      }
+    }
+
     if (vectorize_scope_ && uop->out()->isA<kir::TensorIndex>()) {
       auto ti = uop->out()->as<kir::TensorIndex>();
 
@@ -857,6 +873,74 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (!print_inline_) {
       code_ << ";\n";
     }
+  }
+
+  std::string genArchString(MmaOptions options) {
+    std::stringstream ss;
+    if (isVolta(options.macro)) {
+      ss << "Volta";
+    } else if (isTuring(options.macro)) {
+      ss << "Turing";
+    } else if (isAmpere(options.macro)) {
+      ss << "Ampere";
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "mma macro unknown arch");
+    }
+    return ss.str();
+  }
+
+  std::string genMmaOp(const MmaOp* mma, bool init = false) {
+    std::stringstream ss;
+    auto options = mma->options();
+    ss << genArchString(options) << "::";
+    if (init) {
+      ss << "init";
+    }
+    ss << toString(options.macro) << toString(options.operand_layout);
+    // TODO: additional parameter could be removed by swizzling iterdomain
+    auto acc_stride = mma->accStride();
+    TORCH_INTERNAL_ASSERT(acc_stride > 0);
+    ss << "<" << acc_stride << ">";
+    return ss.str();
+  }
+
+  void genMmaOperands(const MmaOp* mma) {
+    std::stringstream ss;
+    auto options = mma->options();
+    auto in_a = mma->inA()->as<kir::TensorIndex>()->view();
+    auto dtype = in_a->getDataType().value();
+    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << getInputARegisterSize(options.macro) << ","
+             << getInputARegisterSize(options.macro) << ">*>(&"
+             << gen(mma->inA()) << "),\n";
+    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << getInputBRegisterSize(options.macro) << ","
+             << getInputBRegisterSize(options.macro) << ">*>(&"
+             << gen(mma->inB()) << ")";
+  }
+
+  void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {
+    auto options = mma->options();
+
+    indent() << genMmaOp(mma, true) << "(reinterpret_cast<Array<"
+             << mma->out()->getDataType().value() << ","
+             << getOutputRegisterSize(mma->options().macro) << ","
+             << getOutputRegisterSize(mma->options().macro) << ">*>"
+             << "(&" << gen(uop->out()) << "));\n";
+  }
+
+  void handle(const MmaOp* mma) final {
+    auto options = mma->options();
+    auto in_a = mma->inA()->as<kir::TensorIndex>();
+    auto out = mma->out()->as<kir::TensorIndex>();
+    indent() << genMmaOp(mma) << "(\n";
+    indent() << kTab << "reinterpret_cast<Array<"
+             << out->view()->getDataType().value() << ","
+             << getOutputRegisterSize(options.macro) << ","
+             << getOutputRegisterSize(options.macro) << ">*>(&"
+             << gen(mma->out()) << "),\n";
+    genMmaOperands(mma);
+    code_ << ");\n";
   }
 
   std::string genReductionOp(BinaryOpType op_type, Val* out) {

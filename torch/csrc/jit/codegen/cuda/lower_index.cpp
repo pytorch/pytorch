@@ -449,6 +449,15 @@ void IndexLowering::handleGridWelford(WelfordOp* indexed_wop) {
   }
 }
 
+void IndexLowering::handle(const MmaOp* mma) {
+  const auto a = lowerSrcIndex(mma->inA(), mma->out());
+  const auto b = lowerSrcIndex(mma->inB(), mma->out());
+  const auto out = lowerDstIndex(mma->out());
+  auto mma_indexed =
+      IrBuilder::create<MmaOp>(out, a, b, mma->init(), mma->options());
+  pushBack(mma_indexed);
+}
+
 void IndexLowering::handle(const BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTvOp(bop));
 

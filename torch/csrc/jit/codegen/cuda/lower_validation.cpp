@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <limits>
 
 namespace torch {
@@ -791,6 +792,95 @@ void validatePartialSplit(Fusion* fusion) {
       if (!split->stopOffset()->isZeroInt()) {
         validateSplit(
             split->stopOffset(), valid_range.second, err_msg_prefix.str());
+      }
+    }
+  }
+}
+
+namespace {
+
+//! Utility to make sure targeted gpu capability is
+//!  higher than provided major.minor.
+void validateMinimumArch(int major, int minor) {
+  auto prop = at::cuda::getCurrentDeviceProperties();
+  TORCH_INTERNAL_ASSERT(prop->major >= major);
+  if (prop->major == major) {
+    TORCH_INTERNAL_ASSERT(prop->minor >= minor);
+  }
+}
+
+//! Validates that the operand and result tensors
+//!  of mma ops are swizzled and also validates
+//!  specialization of tidx as lane id.
+void validateMmaTensors(MmaOp* mma) {
+  bool tidx_validated = false;
+  std::vector<TensorView*> to_validate = {
+      mma->inA()->as<TensorView>(),
+      mma->inB()->as<TensorView>(),
+      mma->out()->as<TensorView>()};
+
+  for (auto tv : to_validate) {
+    for (auto id : tv->domain()->domain()) {
+      auto ptype = id->getParallelType();
+      if (ptype == ParallelType::TIDx) {
+        TORCH_INTERNAL_ASSERT(
+            id->isMmaSwizzled(),
+            "TIDx for mma input/output must be set by WarpMmaSwizzler",
+            id,
+            tv);
+        if (!tidx_validated) {
+          // Check that TIDx is exact lane_id
+          const auto& paralel_dim_map =
+              GpuLower::current()->parallelDimensionMap();
+          TORCH_INTERNAL_ASSERT(
+              paralel_dim_map.isExact(ptype) &&
+                  paralel_dim_map.get(ptype)->getInt().has_value() &&
+                  paralel_dim_map.get(ptype)->getInt().value() ==
+                      at::cuda::warp_size(),
+              "TIDx is reserved for lane id in mma kernels, and it needs to be exactly a warp");
+          tidx_validated = true;
+        }
+      }
+    }
+  }
+
+  // Note: this check will be relaxed in a follow up.
+  auto validate_operand_ids = [](const TensorView* tv) {
+    TORCH_INTERNAL_ASSERT(
+        std::all_of(
+            tv->domain()->domain().begin() + tv->getComputeAtPosition(),
+            tv->domain()->domain().end(),
+            [](IterDomain* id) {
+              return id->isMmaSwizzled() ||
+                  (id->isBroadcast() &&
+                   id->getParallelType() == ParallelType::Serial);
+            }),
+        "All id's on the right of CA pos needs to be mma-swizzled by WarpMmaSwizzler\n",
+        tv);
+  };
+
+  validate_operand_ids(mma->inA()->as<TensorView>());
+  validate_operand_ids(mma->inB()->as<TensorView>());
+}
+
+} // namespace
+
+//! Validate data format and GPU arch compatibility of scheduled
+//!  mma operators on the fusion.
+void validateMma(Fusion* fusion) {
+  auto exprs = StmtSort::getExprs(fusion);
+
+  for (auto expr : exprs) {
+    if (auto mma = dynamic_cast<MmaOp*>(expr)) {
+      validateMmaTensors(mma);
+
+      switch (mma->options().macro) {
+        case MmaOptions::MacroType::Volta_16_16_4:
+          validateMinimumArch(7, 0);
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(false, "validate mma: unsupported macro");
+          break;
       }
     }
   }

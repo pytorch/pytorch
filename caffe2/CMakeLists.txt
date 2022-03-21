@@ -943,6 +943,7 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/type_traits.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensorcore.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )

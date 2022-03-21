@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 
 // Cleanup
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -1047,6 +1048,21 @@ bool TensorView::isEmptyTensor() const {
       });
 }
 
+void TensorView::applyMmaSwizzle(MmaOptions options) {
+  switch (options.operand) {
+    case MmaOptions::Operand::NotOperand:
+      mma_util::WarpMmaSwizzler::scheduleMmaWarpOutput(this, options);
+      break;
+    case MmaOptions::Operand::A:
+    case MmaOptions::Operand::B:
+      mma_util::WarpMmaSwizzler::scheduleOperandRead(this, options);
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown operand flag");
+      break;
+  }
+}
+
 TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
   TORCH_CHECK(shape_.empty() || shape_.size() == ndims);
   TORCH_CHECK(contiguity_.empty() || contiguity_.size() == ndims);
@@ -1109,6 +1125,13 @@ TensorView* TensorViewBuilder::build() const {
   // Create the final TensorView
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
+}
+
+void TensorView::configureMma(MmaOptions options) {
+  TORCH_CHECK(definition(), "configureMma: invalid for input tensor ", this);
+  auto mma = dynamic_cast<MmaOp*>(definition());
+  TORCH_CHECK(mma, "configureMma: invalid for non-mma output: ", this);
+  mma->configureOptions(options);
 }
 
 } // namespace cuda

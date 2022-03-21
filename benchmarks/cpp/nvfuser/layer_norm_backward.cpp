@@ -64,8 +64,7 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
   if (dtype != DataType::Float) {
     layer_norm_results.grad_input =
         castOp(dtype, layer_norm_results.grad_input);
-    layer_norm_results.grad_bias =
-        castOp(dtype, layer_norm_results.grad_bias);
+    layer_norm_results.grad_bias = castOp(dtype, layer_norm_results.grad_bias);
     layer_norm_results.grad_weight =
         castOp(dtype, layer_norm_results.grad_weight);
   }

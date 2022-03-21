@@ -237,6 +237,24 @@ void OptOutMutator::mutate(WelfordOp* wop) {
       wop->isFused());
 }
 
+void OptOutMutator::mutate(MmaOp* mma) {
+  Val* out = maybeMutated(mma->out());
+  Val* in_a = maybeMutated(mma->inA());
+  Val* in_b = maybeMutated(mma->inB());
+  Val* init = mma->init();
+
+  if (out->sameAs(mma->out()) && in_a->sameAs(mma->inA()) &&
+      in_b->sameAs(mma->inB())) {
+    return;
+  }
+
+  auto container = mma->container();
+  auto options = mma->options();
+  container->removeExpr(mma);
+  auto new_mma =
+      IrBuilder::create<MmaOp>(container, out, in_a, in_b, init, options);
+}
+
 void OptOutMutator::mutate(BroadcastOp* bop) {
   Val* out = maybeMutated(bop->out());
   Val* in = maybeMutated(bop->in());

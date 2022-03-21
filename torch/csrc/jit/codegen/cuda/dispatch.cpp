@@ -104,6 +104,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
       return;
+    case ExprType::MmaOp:
+      ptr(handler)->handle(expr->as<MmaOp>());
+      return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
       return;
@@ -241,6 +244,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
       return;
     case ExprType::WelfordOp:
       ptr(handler)->handle(expr->as<WelfordOp>());
+      return;
+    case ExprType::MmaOp:
+      ptr(handler)->handle(expr->as<MmaOp>());
       return;
     case ExprType::BroadcastOp:
       ptr(handler)->handle(expr->as<BroadcastOp>());
@@ -390,6 +396,9 @@ void Expr::mutatorDispatch(T mutator, Expr* expr) {
       return;
     case ExprType::WelfordOp:
       ptr(mutator)->mutate(expr->as<WelfordOp>());
+      return;
+    case ExprType::MmaOp:
+      ptr(mutator)->mutate(expr->as<MmaOp>());
       return;
     case ExprType::BroadcastOp:
       ptr(mutator)->mutate(expr->as<BroadcastOp>());
@@ -605,6 +614,9 @@ void OptOutConstDispatch::handle(const ReductionOp* stmt) {
 void OptOutConstDispatch::handle(const WelfordOp* stmt) {
   unhandled(stmt);
 }
+void OptOutConstDispatch::handle(const MmaOp* stmt) {
+  unhandled(stmt);
+}
 void OptOutConstDispatch::handle(const BroadcastOp* stmt) {
   unhandled(stmt);
 }
@@ -714,6 +726,9 @@ void OptOutDispatch::handle(ReductionOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(WelfordOp* stmt) {
+  unhandled(stmt);
+}
+void OptOutDispatch::handle(MmaOp* stmt) {
   unhandled(stmt);
 }
 void OptOutDispatch::handle(BroadcastOp* stmt) {

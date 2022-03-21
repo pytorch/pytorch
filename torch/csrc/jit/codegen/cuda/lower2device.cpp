@@ -255,6 +255,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
     std::cout << parallel_dimension_map_.toString() << std::endl;
   }
 
+  // Validate mma data format and compatibility if any on the fusion.
+  validateMma(fusion_);
+
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 

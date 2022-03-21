@@ -30,6 +30,7 @@
 #include <nvfuser_resources/index_utils.h>
 #include <nvfuser_resources/random_numbers.h>
 #include <nvfuser_resources/tensor.h>
+#include <nvfuser_resources/tensorcore.h>
 #include <nvfuser_resources/tuple.h>
 #include <nvfuser_resources/type_traits.h>
 #include <nvfuser_resources/warp.h>
@@ -96,6 +97,7 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::warp_cu;
+  ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::fused_reduction_cu;
 
   // Random utilities

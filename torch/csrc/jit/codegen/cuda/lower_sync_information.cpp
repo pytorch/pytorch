@@ -187,6 +187,12 @@ void SyncMap::build(Fusion* fusion) {
         // map going from parallel index type (only size 6 for grid/block dims)
         // to the iteration domain of that parallel type.
         for (auto parallel_type : kParallelTypeThreads) {
+          // TIDx is reserved for lane_id in the case of mma ops.
+          //  It is swizzled and handled separately in validateMma.
+          if (parallel_type == ParallelType::TIDx && expr->isA<MmaOp>()) {
+            continue;
+          }
+
           auto parallel_type_i = getParallelTypeBitMapOffset(parallel_type);
 
           auto p_id = producer_parallel_ids[parallel_type_i];

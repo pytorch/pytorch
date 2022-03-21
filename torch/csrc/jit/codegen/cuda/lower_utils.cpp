@@ -93,6 +93,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
@@ -453,6 +454,19 @@ class ReplaceExprInput : private kir::ExprMutator {
           replaced_inputs.value().at(node->inAvg()),
           replaced_inputs.value().at(node->inVar()),
           replaced_inputs.value().at(node->inN()));
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
+  void handle(MmaOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<MmaOp>(
+          node->out(),
+          replaced_inputs.value().at(node->inA()),
+          replaced_inputs.value().at(node->inB()),
+          node->init(),
+          node->options());
       registerReplaceWithPredicate(node, replacement);
     }
   }

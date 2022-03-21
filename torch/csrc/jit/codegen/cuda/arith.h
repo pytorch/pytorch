@@ -558,6 +558,28 @@ TORCH_CUDA_CU_API TensorView* gather(
     const std::vector<int>& strides = {},
     bool trim_out_of_bounds = false);
 
+//! A fused pointwise multiply and sum
+//!  operator that instantiates the following
+//!  fused pattern:
+//!     c = mul(tv_a, tv_b);
+//!     return sum(c, axes)
+//!
+//! \param tv_a first multiply operand
+//! \param tv_b second multiply operand
+//! \param axes axes to sum over
+//! \param init sum initial value
+//!
+//! Note & TODO:
+//!   currently only support lowering to a mma op
+//!   through this interface and only support fp16 inputs.
+//!   will support converting back to multiply and reduce in
+//!   a follow up.
+TORCH_CUDA_CU_API TensorView* fusedMultiplySum(
+    TensorView* tv_a,
+    TensorView* tv_b,
+    const std::vector<int>& axes,
+    Val* init = nullptr);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

@@ -73,6 +73,7 @@ class BinaryOp;
 class TernaryOp;
 class ReductionOp;
 class WelfordOp;
+class MmaOp;
 class BroadcastOp;
 class TransposeOp;
 class ShiftOp;
@@ -132,6 +133,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const TernaryOp* stmt);
   virtual void handle(const ReductionOp* stmt);
   virtual void handle(const WelfordOp* stmt);
+  virtual void handle(const MmaOp* stmt);
   virtual void handle(const BroadcastOp* stmt);
 
   virtual void handle(const Split* stmt);
@@ -184,6 +186,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(TernaryOp* stmt);
   virtual void handle(ReductionOp* stmt);
   virtual void handle(WelfordOp* stmt);
+  virtual void handle(MmaOp* stmt);
   virtual void handle(BroadcastOp* stmt);
 
   virtual void handle(Split* stmt);
@@ -277,6 +280,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual void mutate(TernaryOp*);
   virtual void mutate(ReductionOp*);
   virtual void mutate(WelfordOp*);
+  virtual void mutate(MmaOp*);
   virtual void mutate(BroadcastOp*);
 
   virtual void mutate(Split*);

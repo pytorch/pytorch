@@ -90,6 +90,7 @@ enum class ExprType {
   ReductionOp,
   BroadcastOp,
   WelfordOp,
+  MmaOp,
   TransposeOp,
   ShiftOp,
   GatherOp,
@@ -220,6 +221,7 @@ enum class ParallelType {
   MisalignedVectorize,
   Unroll,
   Unswitch,
+  Mma,
   Serial
 };
 

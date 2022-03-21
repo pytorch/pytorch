@@ -456,6 +456,11 @@ void IrPrinter::handle(const ShiftOp* sop) {
            << "}, {" << sop->padWidth() << "} )\n";
 }
 
+void IrPrinter::handle(const MmaOp* mma) {
+  indent() << mma->out() << " = mma(" << mma->inA() << "," << mma->inB();
+  os_ << ")\n";
+}
+
 void IrPrinter::handle(const GatherOp* op) {
   indent() << op->out() << " = gather( " << op->in() << ", {";
   bool no_comma = true;

@@ -21082,7 +21082,7 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
 }
 #endif
 
-TEST_F(NVFuserTest, FusionIssue1430) {
+TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
   // Derived from an expression sorting issue when using loop map, now expr
   // sorting uses parallel map.
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();

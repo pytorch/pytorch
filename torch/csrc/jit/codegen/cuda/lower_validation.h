@@ -23,6 +23,10 @@ void validateAndCollectVectorizeInfo(Fusion* fusion);
 //! calculated that are necessary for output values.
 void validatePartialSplit(Fusion* fusion);
 
+//! Validate data format and GPU arch compatibility of scheduled
+//!  mma operators on the fusion.
+void validateMma(Fusion* fusion);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

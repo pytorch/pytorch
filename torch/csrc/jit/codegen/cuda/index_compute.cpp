@@ -827,6 +827,13 @@ indexMapFromTV(
 
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
 
+  // Check if the current op has an implicit loop implemented
+  //  within an mma instruction.
+  bool within_mma_loops =
+      std::any_of(loops.begin(), loops.end(), [](kir::ForLoop* fl) {
+        return fl->iter_domain()->isMma();
+      });
+
   // When indexed as a producer, the parallel types of the the
   // producer domains may not be the same as those of the loops, but
   // that's still valid parallelization. However, in that case, using
@@ -862,8 +869,15 @@ indexMapFromTV(
 
   for (auto loop : loops) {
     Val* idx = nullptr;
-    const auto same_parallel_type =
-        as_consumer || find_matching_parallel_domain(loop->iter_domain());
+    const auto same_parallel_type = as_consumer ||
+        find_matching_parallel_domain(loop->iter_domain()) ||
+        // Note && TODO:
+        //  mma swizzled lane_id does not map naturally from producer
+        //   to consumer but they should still be detected as same
+        //   parallel type. In a follow up may want to extent
+        //   find_matching_parallel_domain to cover this case.
+        (within_mma_loops &&
+         loop->iter_domain()->getParallelType() == ParallelType::TIDx);
     // See also LoopNestGenerator::pushAlloc.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
