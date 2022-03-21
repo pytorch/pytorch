@@ -13,6 +13,7 @@ on:
       - 'ciflow/trunk/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -42,6 +43,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -64,6 +66,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -159,8 +169,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -249,234 +260,14 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  test_distributed_1_1:
-    name: test (distributed, 1, 1, linux.rocm.gpu)
-    needs: build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
-      DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
-      TEST_CONFIG: distributed
-      SHARD_NUMBER: 1
-      NUM_TEST_SHARDS: 1
-      PR_BODY: ${{ github.event.pull_request.body }}
-    steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-          submodules: recursive
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Determine shm-size
-        run: |
-          shm_size="1g"
-          case "${BUILD_ENVIRONMENT}" in
-            *cuda*)
-              shm_size="2g"
-              ;;
-            *rocm*)
-              shm_size="8g"
-              ;;
-          esac
-          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
-      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
-        name: Download PyTorch Build Artifacts
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}
-      - name: Unzip artifacts
-        run: |
-          unzip -o artifacts.zip
-      - name: Output disk space left
-        run: |
-          df -H
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
-      - name: Test
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
-        run: |
-          set -x
-
-          if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.jenkins/caffe2/test.sh
-          else
-            TEST_COMMAND=.jenkins/pytorch/test.sh
-          fi
-          # detached container should get cleaned up by teardown_ec2_linux
-          # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BUILD_ENVIRONMENT \
-            -e PR_NUMBER \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e GITHUB_ACTIONS \
-            -e IN_CI \
-            -e IS_GHA \
-            -e BRANCH \
-            -e SHA1 \
-            -e AWS_DEFAULT_REGION \
-            -e IN_WHEEL_TEST \
-            -e SHARD_NUMBER \
-            -e JOB_BASE_NAME \
-            -e TEST_CONFIG \
-            -e NUM_TEST_SHARDS \
-            -e PR_BODY \
-            -e PYTORCH_RETRY_TEST_CASES \
-            -e PR_LABELS \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e SCCACHE_BUCKET \
-            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --ulimit stack=10485760:83886080 \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --shm-size="${SHM_SIZE}" \
-            --tty \
-            --detach \
-            --name="${container_name}" \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
-          )
-          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
-          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
-          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
-          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
-      - name: Install render_test_results dependencies
-        if: always()
-        shell: bash
-        run: |
-          python3 -m pip install junitparser==2.1.1 rich==10.9.0
-      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
-        if: always()
-        shell: bash
-        # Encoding is weird on windows, just try to default to utf-8 if possible
-        env:
-          PYTHONIOENCODING: "utf-8"
-        run: |
-          python3 tools/render_junit.py test/
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: '${{ github.job }}-distributed-1-1-linux.rocm.gpu'
-        run: |
-          # Remove any previous test jsons if they exist
-          rm -f test-jsons-*.zip
-          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Downloaded JSONs on Github
-        if: always()
-        with:
-          retention-days: 14
-          if-no-files-found: warn
-          path:
-            test-jsons-*.zip
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: '${{ github.job }}-distributed-1-1-linux.rocm.gpu'
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-      - uses: actions/upload-artifact@v2
-        name: Store Test Reports on Github
-        if: always()
-        with:
-          name: test-reports
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            test-reports-*.zip
-      - name: Upload test statistics
-        if: always()
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}'
-        shell: bash
-        run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
   test_default_1_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 2, linux.rocm.gpu)
     needs: build
     runs-on: linux.rocm.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
       TEST_CONFIG: default
@@ -563,8 +354,9 @@ jobs:
         run: |
           df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -674,16 +466,21 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Kill containers, clean up images
         if: always()
@@ -694,11 +491,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_2_2:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 2, linux.rocm.gpu)
     needs: build
     runs-on: linux.rocm.gpu
-    timeout-minutes: 240
+    timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
       TEST_CONFIG: default
@@ -785,8 +584,9 @@ jobs:
         run: |
           df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -896,16 +696,21 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-bionic-rocm4.5-py3.7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Kill containers, clean up images
         if: always()
