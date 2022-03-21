@@ -116,8 +116,7 @@ struct TORCH_API PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim
   void apply_impl_helper(
       const at::Tensor& quantized_output,
       const at::Tensor& input,
-      double bias_multiplier,
-      double requantize_multiplier);
+      double output_scale);
 };
 
 #endif  // HAS_CUDNN_V8
