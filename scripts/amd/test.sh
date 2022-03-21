@@ -28,3 +28,4 @@ ls
 
 # tests
 # python test_fx.py --verbose
+python test_ops.py --verbose 2>&1 TestMathBitsCUDA | tee $LOG_DIR/TestMathBitsCUDA.log
