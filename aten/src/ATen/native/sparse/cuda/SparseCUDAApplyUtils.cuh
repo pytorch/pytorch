@@ -350,14 +350,14 @@ __global__ void coalesceValuesKernel(
   }
 }
 
-// coalesceValuesKernel when Acctype is bool. Can be eliminated using
+// coalesceValuesKernel when Dtype/Acctype is bool. Can be eliminated using
 // `if constexpr` when CUDA codes will be compiled under C++-17, see
 // gh-56055 for blockers.
-template <typename Dtype>
+template<typename Dtype>
 C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE*4)
 __global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
-  Dtype *values, Dtype *newValues,
+  bool *values, bool *newValues,
   int64_t nnz, int64_t newNnz, int64_t stride) {
 
   int seg = blockIdx.x * 4 + threadIdx.y;
@@ -384,7 +384,7 @@ __global__ void coalesceValuesKernel(
         int featureDim = startFeature + ii * C10_WARP_SIZE;
         if (featureDim < stride)
         {
-          tmp[ii] |= static_cast<bool>(values[valueRow + featureDim]);
+          tmp[ii] |= values[valueRow + featureDim];
         }
       }
     }
@@ -394,7 +394,7 @@ __global__ void coalesceValuesKernel(
       int featureDim = startFeature + ii * C10_WARP_SIZE;
       if (featureDim < stride)
       {
-        newValues[newValueRow + featureDim] = static_cast<Dtype>(tmp[ii]);
+        newValues[newValueRow + featureDim] = tmp[ii];
       }
     }
   }
