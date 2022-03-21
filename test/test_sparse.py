@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample
+    DeterministicGuard, first_sample, IS_LINUX
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -21,7 +21,7 @@ from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
@@ -43,6 +43,8 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
 class TestSparse(TestCase):
 
     def setUp(self):
+        TestCase.setUp(self)
+
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
         def sparse_empty_factory(*args, **kwargs):
@@ -188,8 +190,8 @@ class TestSparse(TestCase):
         self.assertEqual(x._values().numel(), 0)
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
-    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 1e-2})
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -663,8 +665,9 @@ class TestSparse(TestCase):
         test_shape(3, 0, [0, 0, 100, 5, 5, 5, 0])
 
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
-    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
+    @skipIfRocm
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
+    @precisionOverride({torch.bfloat16: 2e-2})
     def test_Sparse_to_Sparse_copy_(self, device, dtype, coalesced):
         # This is for testing torch.copy_(SparseTensor, SparseTensor)
         sparse_dims = 3
@@ -1240,10 +1243,10 @@ class TestSparse(TestCase):
         true_result = (bias.to_dense() + torch.matmul(weight.to_dense(), x)).to_sparse()
         self.assertEqual(self.safeToDense(res), self.safeToDense(true_result))
 
+    # TODO: remove skipIf when https://github.com/pytorch/pytorch/pull/73428 lands
     @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
-    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
-    @precisionOverride({torch.bfloat16: 1e-1})
+    @unittest.skipIf(IS_WINDOWS or IS_LINUX, "See https://github.com/pytorch/pytorch/issues/73145")
+    @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     def test_sparse_addmm(self, device, dtype, coalesced):
         def test_shape(m, n, p, nnz, broadcast, alpha_beta=None):
             if alpha_beta is None:
@@ -1265,8 +1268,7 @@ class TestSparse(TestCase):
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
-            if dtype == torch.double or dtype == torch.cdouble:
-                gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
+            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
 
         test_shape(7, 8, 9, 20, False, None)
         test_shape(7, 8, 9, 20, True, None)
@@ -1406,17 +1408,15 @@ class TestSparse(TestCase):
         _test_spadd()
         _test_spadd_hybrid()
 
+    @onlyCUDA
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     def test_sparse_add_out_bfloat16(self, device, dtype, coalesced):
         # fp32
         x, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
         y, _, _ = self._gen_sparse(3, 5, 10, dtype, device, coalesced)
-        x = x.float()
-        y = y.float()
-        if device == 'cuda':
-            x = x.cuda()
-            y = y.cuda()
+        x = x.float().cuda()
+        y = y.float().cuda()
         res_fp32 = torch.add(x, y)
 
         # bfloat16
@@ -1635,7 +1635,6 @@ class TestSparse(TestCase):
         _test_basic_ops_hybrid()
 
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
     def test_add_dense_sparse_mismatch(self, device, dtype):
         def test_shape(dense_size, sparse_dims_shape, dense_dims_shape, sparse_size):
             x = torch.zeros(dense_size, dtype=dtype, device=device)
@@ -1674,7 +1673,7 @@ class TestSparse(TestCase):
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
-    @dtypesIfCPU(torch.double, torch.cdouble, torch.bfloat16)
+    @unittest.skipIf(IS_WINDOWS, "See https://github.com/pytorch/pytorch/issues/73173")
     def test_sparse_mask(self, device, dtype, coalesced):
         def _test_sparse_mask_fixed():
             i = self.index_tensor([
@@ -3227,7 +3226,7 @@ class TestSparse(TestCase):
                   *get_all_fp_dtypes(
                       include_half=(CUDA11OrLater and SM53OrLater),
                       include_bfloat16=(CUDA11OrLater and SM80OrLater)))
-    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
+    @precisionOverride({torch.bfloat16: 2.5e-2, torch.float16: 2.5e-2, torch.complex64: 1e-2, torch.float32: 1e-2})
     def test_sparse_matmul(self, device, dtype, coalesced):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors.
@@ -3365,7 +3364,7 @@ class TestSparse(TestCase):
             (), (1,), (2,), (1, 1), (3, 1), (3, 2), (4, 1, 1), (4, 3, 2)
         )
         for s0, s1 in itertools.combinations(sizes, r=2):
-            t = make_tensor(s0, device, dtype, low=-9, high=9)
+            t = make_tensor(s0, dtype=dtype, device=device, low=-9, high=9)
             for sparse_dims in range(1, len(s0) + 1):
                 s = t.to_sparse(sparse_dims)
                 if can_broadcast(s0, s1):

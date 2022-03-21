@@ -63,6 +63,7 @@ from torch._six import string_classes
 from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.xnnpack
 from enum import Enum
 from statistics import mean
 import functools
@@ -978,6 +979,14 @@ def _test_function(fn, device):
         return fn(self, device)
     return run_test_function
 
+def skipIfNoXNNPACK(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.backends.xnnpack.enabled:
+            raise unittest.SkipTest('XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNoLapack(fn):
     @wraps(fn)
@@ -2024,7 +2033,7 @@ class TestCase(expecttest.TestCase):
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        self.assertEqual(actual, expected, exact_device=False)
+        self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
