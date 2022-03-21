@@ -2,7 +2,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/util/irange.h>
-#include <c10/util/C++17.h>
 
 namespace at {
 namespace native {
