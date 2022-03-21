@@ -179,6 +179,7 @@ class _OpNamespace(types.ModuleType):
     def __init__(self, name):
         super(_OpNamespace, self).__init__('torch.ops.' + name)
         self.name = name
+        self._cached_dir = None
 
     def __getattr__(self, op_name):
         # It is not a valid op_name when __file__ is passed in
@@ -200,6 +201,17 @@ class _OpNamespace(types.ModuleType):
         # a unique OpOverloadPacket object
         setattr(self, op_name, opoverloadpacket)
         return opoverloadpacket
+
+    def __dir__(self):
+        if self._cached_dir is None:
+            self._cached_dir = []
+            seen = set()
+            for s in torch._C._jit_get_all_schemas():
+                namespace, name = s.name.split('::', 2)
+                if namespace == self.name and name not in seen:
+                    self._cached_dir.append(name)
+                    seen.add(name)
+        return self._cached_dir
 
 
 class _Ops(types.ModuleType):
