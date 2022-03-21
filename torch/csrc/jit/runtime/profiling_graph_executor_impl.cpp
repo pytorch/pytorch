@@ -1,7 +1,9 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/add_if_then_else.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
@@ -34,6 +36,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include <mutex>
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -44,6 +47,16 @@ C10_DEFINE_bool(
     torch_jit_disable_warning_prints,
     false,
     "Disables warning.warn prints in TorchScript graph");
+
+C10_DEFINE_bool(
+    torch_jit_static_then_dynamic,
+    false,
+    "fuse on two static compilations then 10 dynamic");
+
+C10_DEFINE_bool(
+    torch_jit_always_dynamic,
+    false,
+    "fuse on 12 dynamic compilations");
 
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
@@ -70,24 +83,39 @@ static std::atomic<bool> profiling_mode{true};
 
 static std::mutex fusion_strategy_lock;
 
+FusionStrategy getInitialStrategy() {
+  if (FLAGS_torch_jit_always_dynamic) {
+    return {{FusionBehavior::DYNAMIC, 12}};
+  }
+  FusionStrategy mixed = {
+      {FusionBehavior::STATIC, 2}, {FusionBehavior::DYNAMIC, 10}};
+  if (FLAGS_torch_jit_static_then_dynamic) {
+    return mixed;
+  }
 // TODO remove ifdef
 #ifdef FBCODE_CAFFE2
-static FusionStrategy fusion_strategy = {{FusionBehavior::STATIC, 20}};
-#else
-static FusionStrategy fusion_strategy = {
-    {FusionBehavior::STATIC, 2},
-    {FusionBehavior::DYNAMIC, 10}};
+  return {{FusionBehavior::STATIC, 20}};
 #endif
+  return mixed;
+}
+
+// defer initial value so that we can load in gflags
+static c10::optional<FusionStrategy> fusion_strategy = c10::nullopt;
 
 FusionStrategy getFusionStrategy() {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
-  FusionStrategy strategy = fusion_strategy;
-  return strategy;
+  if (fusion_strategy == c10::nullopt) {
+    fusion_strategy = getInitialStrategy();
+  }
+  return *fusion_strategy;
 }
 
 FusionStrategy setFusionStrategy(FusionStrategy& strategy) {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
-  auto old_strategy = fusion_strategy;
+  if (fusion_strategy == c10::nullopt) {
+    fusion_strategy = getInitialStrategy();
+  }
+  FusionStrategy old_strategy = *fusion_strategy;
   fusion_strategy = strategy;
   return old_strategy;
 }
@@ -374,13 +402,13 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
       "After CheckInplace (end of runPreAutodiffPassPipeline)\n", *graph);
 }
 
-FusionBehavior getCurrentBehavior(size_t remaining_depth) {
+FusionBehavior ProfilingGraphExecutorImpl::getCurrentBehavior(
+    size_t remaining_depth) {
   size_t curr_depth = 0;
-  auto curr_strategy = getFusionStrategy();
-  for (int i = static_cast<int>(curr_strategy.size()) - 1; i >= 0; i--) {
-    curr_depth += curr_strategy[i].second;
+  for (int i = static_cast<int>(fusion_strategy_.size()) - 1; i >= 0; i--) {
+    curr_depth += fusion_strategy_[i].second;
     if (remaining_depth <= curr_depth) {
-      return curr_strategy[i].first;
+      return fusion_strategy_[i].first;
     }
   }
   // should never get here
@@ -388,7 +416,7 @@ FusionBehavior getCurrentBehavior(size_t remaining_depth) {
   return FusionBehavior::STATIC;
 }
 
-void runNoGradOptimizations(
+void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     std::shared_ptr<Graph>& graph,
     size_t remaining_bailout_depth) {
   GRAPH_DEBUG(
@@ -576,7 +604,9 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph,
     std::string function_name)
-    : GraphExecutorImplBase(graph, std::move(function_name)) {}
+    : GraphExecutorImplBase(graph, std::move(function_name)) {
+  fusion_strategy_ = getFusionStrategy();
+}
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
@@ -650,6 +680,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
+  runFinalOptimizations(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
@@ -747,6 +778,11 @@ void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
       it++;
     }
   }
+}
+
+void ProfilingGraphExecutorImpl::runFinalOptimizations(
+    std::shared_ptr<Graph>& graph) {
+  AddIfThenElseOp(graph);
 }
 
 } // namespace jit

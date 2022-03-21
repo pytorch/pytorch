@@ -1,10 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_foreach_norm_native.h>
+
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/empty.h>
+#endif
+
 
 namespace at {
 namespace native {

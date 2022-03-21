@@ -44,6 +44,8 @@ CompilationOptions getOptionsFromGlobal() {
       BytecodeEmitMode::is_default_args_before_out_args_enabled();
   compilation_options.enable_default_value_for_unspecified_arg =
       BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled();
+  compilation_options.enable_emit_promoted_ops =
+      BytecodeEmitMode::is_emit_promoted_ops_enabled();
   compilation_options.incl_interface_call = getMobileInterfaceCallExport();
   compilation_options.model_version =
       caffe2::serialize::kProducedBytecodeVersion;
@@ -506,8 +508,12 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string tensor_name = tensor_names[i++];
+    if (td.is_meta()) {
+      writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
+      continue;
+    }
+    WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
@@ -862,6 +868,15 @@ bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
 }
 void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
   emitDefautlArgsWithOutArgs = enabled;
+}
+
+thread_local bool emitDefaultEmitPromotedOps =
+    caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
+bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
+  return emitDefaultEmitPromotedOps;
+}
+void BytecodeEmitMode::set_default_emit_promoted_ops_enabled(bool enabled) {
+  emitDefaultEmitPromotedOps = enabled;
 }
 
 } // namespace jit

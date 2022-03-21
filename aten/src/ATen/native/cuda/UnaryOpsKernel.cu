@@ -8,6 +8,8 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cuda/jit_utils.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
@@ -32,12 +34,37 @@ void bitwise_not_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
+const char exp_name[] = "exp_kernel";
 void exp_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "exp_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return std::exp(a);
+  auto common_dtype = iter.common_dtype();
+  if (at::isComplexType(common_dtype)) {
+    #if AT_USE_JITERATOR()
+      static const auto exp_string = jiterator_stringify(
+          template <typename T>
+          T exp_kernel(T x) {
+            return std::exp(x);
+      }); // exp_string
+      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "exp_cuda", [&]() {
+          jitted_gpu_kernel<
+              /*name=*/exp_name,
+              /*return_dtype=*/scalar_t,
+              /*common_dtype=*/scalar_t,
+              /*arity=*/1>(iter, exp_string);
+      });
+    #else
+      AT_DISPATCH_COMPLEX_TYPES(common_dtype, "exp_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return std::exp(a);
+        });
+      });
+    #endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, common_dtype, "exp_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return std::exp(a);
+      });
     });
-  });
+  }
 }
 
 void expm1_kernel_cuda(TensorIteratorBase& iter) {

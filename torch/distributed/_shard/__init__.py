@@ -1,1 +1,1 @@
-from .api import shard_parameter
+from .api import shard_parameter, _shard_tensor

@@ -4,15 +4,14 @@
 name: ios-12-5-1-arm64-coreml
 
 on:
+  schedule:
+    - cron: 45 4,10,16,22 * * *
   push:
-    branches:
-      - master
-      - release/*
     tags:
       - 'ciflow/all/*'
       - 'ciflow/ios/*'
       - 'ciflow/macos/*'
-      - 'ciflow/trunk/*'
+      - 'ciflow/scheduled/*'
   workflow_dispatch:
 
 env:
@@ -28,7 +27,7 @@ jobs:
   build:
     # NOTE: These builds will not run successfully without running on `pytorch/pytorch` due to the limitations
     #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
-    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
@@ -44,6 +43,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive

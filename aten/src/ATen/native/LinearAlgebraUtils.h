@@ -3,8 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
-#include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -14,25 +13,17 @@
 #include <cstring>
 #include <cctype>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
-
-// Used as an interface between the different BLAS-like libraries
-enum class TransposeType {
-  NoTranspose,
-  Transpose,
-  ConjTranspose,
-};
-
-// Transforms TransposeType into the BLAS / LAPACK format
-static char to_blas(TransposeType trans) {
-  switch (trans) {
-    case TransposeType::Transpose: return 'T';
-    case TransposeType::NoTranspose: return 'N';
-    case TransposeType::ConjTranspose: return 'C';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
 
 static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
@@ -205,7 +196,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   auto a_broadcasts_over_b = (a_batch_sizes != b_batch_sizes);
   Tensor a_buffer, a_was_accessed, a_buffer_3d;
   std::function<void(int64_t)> check_if_copy_needed_for_a
-    = [](int64_t a_curr_linear_batch_idx){};
+    = [](int64_t /*a_curr_linear_batch_idx*/){};
   if (a_broadcasts_over_b) {
     a_buffer = at::empty_strided(a.sizes(), a.strides(), a.options())
       .copy_(a);
@@ -306,6 +297,16 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
     batch_string = ": (Batch element " + std::to_string(batch_id) + ")";
   }
   if (info < 0) {
+    // Reference LAPACK 3.10+ changed `info` behavior for inputs with non-finite values
+    // Previously, it would return `info` > 0, but now it returns `info` = -4
+    // OpenBLAS 0.3.15+ uses the Reference LAPACK 3.10+.
+    // MKL 2022.0+ uses the Reference LAPACK 3.10+.
+    // Older version of MKL and OpenBLAS follow the old behavior (return `info` > 0).
+    // Here we check for the case where `info` is -4 and raise an error
+    if (name.find("svd") != name.npos) {
+      TORCH_CHECK_LINALG(info != -4, name, batch_string,
+          ": The algorithm failed to converge because the input matrix contained non-finite values.");
+    }
     TORCH_INTERNAL_ASSERT(false, name, batch_string,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
@@ -346,7 +347,7 @@ static inline void singleCheckErrors(int64_t info, const c10::string_view name, 
  * successful (info = 0) or not, and report in case of the latter.
  */
 static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10::string_view name) {
-  for (size_t i = 0; i < infos.size(); i++) {
+  for (const auto i : c10::irange(infos.size())) {
     auto info = infos[i];
     singleCheckErrors(info, name, i);
   }
@@ -358,7 +359,7 @@ static inline void batchCheckErrors(const std::vector<int64_t>& infos, const c10
 static inline void batchCheckErrors(const Tensor& infos, const c10::string_view name) {
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
-  for (int64_t i = 0; i < infos.numel(); i++) {
+  for (const auto i : c10::irange(infos.numel())) {
     auto info = infos_data[i];
     singleCheckErrors(info, name, i);
   }
@@ -604,6 +605,41 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   bool vector_case = other.dim() == 1 || (input.dim() - 1 == other.dim() && other.sizes().equals(expected_batched_rhs_shape));
   return vector_case;
 }
+
+/*
+  Computes linear indices for a tensor with original_shape to access its elements like it was a materialized broadcast tensor.
+*/
+static inline Tensor get_linear_indices(int64_t numel, IntArrayRef original_shape, IntArrayRef broadcast_shape) {
+  TensorOptions options = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  return at::arange(numel, options).view(original_shape).broadcast_to(broadcast_shape).contiguous();
+}
+
+class BroadcastLinearIndices {
+ private:
+  Tensor linear_indices_;
+  bool is_broadcasting_;
+
+ public:
+  BroadcastLinearIndices(
+      int64_t numel,
+      IntArrayRef original_shape,
+      IntArrayRef broadcast_shape) {
+    // The assumption is that the broadcast_shape is a materialized broadcast
+    // shape of the original_shape. We need to compute the linear indices
+    // compatible with the original_shape to access the elements in the original
+    // tensor corresponding to the broadcast tensor.
+    is_broadcasting_ = !original_shape.equals(broadcast_shape);
+    if (is_broadcasting_) {
+      linear_indices_ =
+          get_linear_indices(numel, original_shape, broadcast_shape);
+    }
+  }
+  int64_t operator()(int64_t broadcast_linear_index) {
+    return is_broadcasting_
+        ? linear_indices_.data_ptr<int64_t>()[broadcast_linear_index]
+        : broadcast_linear_index;
+  }
+};
 
 static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();

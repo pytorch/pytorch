@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import copy
 import math
 import torch
 import torch.nn as nn
@@ -10,6 +11,7 @@ from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
+import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
@@ -342,7 +344,10 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 # Dynamic QAT without memoryless observers should fail
-                with self.assertRaisesRegex(ValueError, "Dynamic QAT requires a memoryless observer"):
+                with self.assertRaisesRegex(ValueError,
+                                            "Dynamic QAT requires a memoryless observer." +
+                                            "This means a MovingAverage observer with averaging constant equal to 1"
+                                            ):
                     model = ManualLinearDynamicQATModel(default_qat_qconfig)
                     model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
 
@@ -983,6 +988,43 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
 
             qat_op_optim.step()
             qat_ref_op_optim.step()
+
+    @override_qengines
+    def test_linear_bn_numerics(self):
+        qengine = torch.backends.quantized.engine
+        m_ref = nn.Sequential(
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        m_ref_copy = copy.deepcopy(m_ref)
+        m_ref_copy = torch.ao.quantization.fuse_modules_qat(m_ref_copy, [['0', '1']])
+        qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+        m_ref_copy[0].qconfig = qconfig
+        m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
+
+        # without fake_quants, fused QAT module should match fp32 module
+        m.apply(torch.quantization.disable_fake_quant)
+        data = torch.randn(4, 4)
+        r1 = m_ref(data)
+        r2 = m(data)
+        self.assertTrue(torch.allclose(r1, r2))
+
+    @override_qengines
+    def test_linear_bn_workflow(self):
+        qengine = torch.backends.quantized.engine
+        m = nn.Sequential(
+            QuantStub(),
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        data = torch.randn(4, 4)
+        m.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+        m = torch.ao.quantization.fuse_modules_qat(m, [['1', '2']])
+        mp = prepare_qat(m)
+        mp(data)
+        mq = convert(mp)
+        self.assertTrue(type(mq[1]) == nnq.Linear)
+        self.assertTrue(type(mq[2]) == nn.Identity)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

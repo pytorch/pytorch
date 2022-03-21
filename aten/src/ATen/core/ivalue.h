@@ -1269,4 +1269,4 @@ struct TORCH_API WeakOrStrongTypePtr {
 
 } // namespace c10
 
-#include <ATen/core/ivalue_inl.h>
+#include <ATen/core/ivalue_inl.h>  // IWYU pragma: keep

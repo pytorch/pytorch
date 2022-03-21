@@ -2,33 +2,24 @@
 
 import copy
 import functools
-import torch
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-    ShardingSpec,
-)
-from torch.distributed._shard.sharding_spec._internals import (
-    get_chunked_dim_size,
-    get_split_size,
-)
 from typing import List
+
+import torch
+import torch.distributed._shard.sharding_spec as shard_spec
 
 from .api import (
     _register_sharded_op,
-    CreateOp,
     Shard,
-    ShardMetadata,
     ShardedTensor,
     ShardedTensorMetadata,
-    TensorInitParams,
     TensorProperties,
 )
+from .metadata import ShardMetadata  # noqa: F401
+from .partial_tensor import _PartialTensor
 from .utils import load_with_process_group
-import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 
-def empty(sharding_spec: ShardingSpec,
+def empty(sharding_spec: shard_spec.ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -68,19 +59,19 @@ def empty(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
-                                         requires_grad=requires_grad,
-                                         pin_memory=pin_memory, memory_format=memory_format, )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.EMPTY, tensor_properties=tensor_properties, )
     return ShardedTensor(
         sharding_spec,
         *size,
-        tensor_init_params=tensor_init_params,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
 
-def ones(sharding_spec: ShardingSpec,
+def ones(sharding_spec: shard_spec.ShardingSpec,
          *size,
          dtype=None,
          layout=torch.strided,
@@ -118,72 +109,20 @@ def ones(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_properties = TensorProperties(dtype=dtype, layout=layout,
-                                         requires_grad=requires_grad,
-                                         pin_memory=pin_memory, memory_format=memory_format, )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ONES, tensor_properties=tensor_properties)
-    return ShardedTensor(
+    return full(
         sharding_spec,
-        *size,
-        tensor_init_params=tensor_init_params,
+        size,
+        fill_value=1,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
         process_group=process_group,
-        init_rrefs=init_rrefs,
+        init_rrefs=init_rrefs
     )
 
-
-def rand(sharding_spec: ShardingSpec,
-         *size,
-         dtype=None,
-         layout=torch.strided,
-         requires_grad=False,
-         pin_memory=False,
-         memory_format=torch.contiguous_format,
-         process_group=None,
-         init_rrefs=False) -> ShardedTensor:
-    """
-    Returns a :class:`ShardedTensor` filled with random numbers from a uniform distribution on the
-        interval :math:`[0, 1)`. Needs to be called on all ranks in an SPMD fashion.
-
-    Args:
-        sharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`): The specification
-            describing how to shard the Tensor.
-        size (int...): a sequence of integers defining the shape of the output
-            tensor. Can be a variable number of arguments or a collection like a list or tuple.
-
-    Keyword args:
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
-        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
-            Default: ``torch.strided``.
-        requires_grad (bool, optional): If autograd should record operations on the
-            returned tensor. Default: ``False``.
-        pin_memory (bool, optional): If set, returned tensor would be allocated in
-            the pinned memory. Works only for CPU tensors. Default: ``False``.
-        process_group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
-        init_rrefs (bool, optional): Whether or not to initialize
-            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
-            Need to initialize the RPC Framework if specified as ``True``.
-            Default: ``False``.
-
-    Returns:
-        A :class:`ShardedTensor` object on each rank
-    """
-    tensor_properties = TensorProperties(
-        dtype=dtype, layout=layout, requires_grad=requires_grad,
-        pin_memory=pin_memory, memory_format=memory_format
-    )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.RAND, tensor_properties=tensor_properties, )
-    return ShardedTensor(
-        sharding_spec,
-        *size,
-        tensor_init_params=tensor_init_params,
-        process_group=process_group,
-        init_rrefs=init_rrefs,
-    )
-
-
-def zeros(sharding_spec: ShardingSpec,
+def zeros(sharding_spec: shard_spec.ShardingSpec,
           *size,
           dtype=None,
           layout=torch.strided,
@@ -221,23 +160,73 @@ def zeros(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_properties = TensorProperties(
-        dtype=dtype, layout=layout, requires_grad=requires_grad,
-        pin_memory=pin_memory, memory_format=memory_format,
+    return full(
+        sharding_spec,
+        size,
+        fill_value=0,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+        process_group=process_group,
+        init_rrefs=init_rrefs
     )
-    tensor_init_params = TensorInitParams(create_op=CreateOp.ZEROS, tensor_properties=tensor_properties, )
-    return ShardedTensor(
+
+def full(sharding_spec: shard_spec.ShardingSpec,
+         size,
+         fill_value=torch.types.Number,
+         dtype=None,
+         layout=torch.strided,
+         requires_grad=False,
+         pin_memory=False,
+         memory_format=torch.contiguous_format,
+         process_group=None,
+         init_rrefs=False) -> ShardedTensor:
+    """
+    Creates a :class:`ShardedTensor` filled with fill_value. The tensor’s dtype
+        is inferred from fill_value. If dtype is specified, it will override the
+        inferred type from fill_value. Needs to be called on all ranks in an SPMD fashion.
+    Args:
+        sharding_spec (:class:`torch.distributed._sharding_spec.ShardingSpec`): The specification
+            describing how to shard the Tensor.
+        size (int...):  a list, tuple, or `torch.Size` of integers defining the shape of the
+            output tensor.
+        fill_value (Scalar) – the value to fill the output tensor with.
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
+        layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
+            Default: ``torch.strided``.
+        requires_grad (bool, optional): If autograd should record operations on the
+            returned tensor. Default: ``False``.
+        pin_memory (bool, optional): If set, returned tensor would be allocated in
+            the pinned memory. Works only for CPU tensors. Default: ``False``.
+        process_group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
+    Returns:
+        A :class:`ShardedTensor` object on each rank
+    """
+    sharded_tensor = ShardedTensor(
         sharding_spec,
         *size,
-        tensor_init_params=tensor_init_params,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
+    torch.nn.init.constant_(sharded_tensor, fill_value)  # type: ignore[arg-type]
+    return sharded_tensor
 
-
-def full(sharding_spec: ShardingSpec,
-         size,
-         fill_value=torch.types.Number,
+def rand(sharding_spec: shard_spec.ShardingSpec,
+         *size,
          dtype=None,
          layout=torch.strided,
          requires_grad=False,
@@ -276,20 +265,19 @@ def full(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
-    tensor_properties = TensorProperties(
-        dtype=dtype, layout=layout, requires_grad=requires_grad,
-        pin_memory=pin_memory, memory_format=memory_format,
-    )
-    tensor_init_params = TensorInitParams(
-        create_op=CreateOp.FULL, fill_value=fill_value, tensor_properties=tensor_properties)
-    return ShardedTensor(
+    sharded_tensor = ShardedTensor(
         sharding_spec,
         *size,
-        tensor_init_params=tensor_init_params,
+        dtype=dtype,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
         process_group=process_group,
         init_rrefs=init_rrefs,
     )
-
+    torch.nn.init.uniform_(sharded_tensor, 0, 1)  # type: ignore[arg-type]
+    return sharded_tensor
 
 def init_from_local_shards(
         local_shards: List[Shard],
@@ -410,3 +398,55 @@ def sharded_op_impl(func):
 
 # Import all builtin sharded ops
 from ._ops import *  # noqa: F403
+
+def _reshard_output(
+        module: torch.nn.Module,
+        resharding_spec: shard_spec.ShardingSpec) -> torch.nn.Module:
+    """
+    Hook a module with local shards collection in the forward pass according
+    to the given ``resharding_spec``.
+
+    Args:
+        module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
+        resharding_spec (:class:`torch.distributed._shard.sharding_spec.ShardingSpec`):
+            The specification describing how the output of the module will be resharded.
+
+    Returns:
+        A :class:`torch.nn.Module` object with collection API hooked.
+    """
+    def hook_func(_module, _input, output):
+        if isinstance(output, ShardedTensor) or isinstance(output, _PartialTensor):
+            return output.reshard(resharding_spec)
+        return output
+    module.register_forward_hook(hook_func)
+    return module
+
+
+def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
+    """
+    Hook a module with local shards collection in the forward pass.
+
+    This API is typically used to convert a sharded representation back to data parallel
+    representation. In particular, it returns the local tensor for this Shard. If the
+    size along the sharding dimension for the local tensor is 1, this dimension is removed
+    from the final result. For example a [4, 16] ShardedTensor across 4 ranks is typically
+    a local Tensor of size [16] across each rank and not [1, 16] across each rank.
+
+    Args:
+        module (:class:`torch.nn.Module`): Module whose output needs to be resharded.
+
+    Returns:
+        A :class:`torch.nn.Module` object with collection API hooked.
+    """
+
+    def hook_func(_module, _input, output):
+        if isinstance(output, ShardedTensor):
+            local_tensor = output.local_tensor()
+            # Squeeze the # of dimensions manually.
+            if local_tensor.size(output._sharding_spec.dim) == 1:  # type: ignore[attr-defined]
+                local_tensor = local_tensor.squeeze(
+                    output._sharding_spec.dim  # type: ignore[attr-defined]
+                )
+            return local_tensor
+    module.register_forward_hook(hook_func)
+    return module

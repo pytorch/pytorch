@@ -7,6 +7,7 @@
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <c10/util/llvmMathExtras.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -18,8 +19,6 @@
 #include <mutex>
 #include <regex>
 #include <set>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace c10 {
@@ -94,7 +93,7 @@ namespace CUDACachingAllocator {
 
 namespace {
 
-using stream_set = std::unordered_set<cuda::CUDAStream>;
+using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
 constexpr size_t kMinBlockSize =
     512; // all sizes are rounded to at least 512 bytes
@@ -333,6 +332,14 @@ class CachingAllocatorConfig {
     return instance().m_max_split_size;
   }
 
+  // This is used to round-up allocation size to nearest power of 2 divisions.
+  // More description below in function roundup_power2_next_division
+  // As ane example, if we want 4 divisions between 2's power, this can be done
+  // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
+  static size_t roundup_power2_divisions() {
+    return instance().m_roundup_power2_divisions;
+  }
+
  private:
   static CachingAllocatorConfig& instance() {
     static CachingAllocatorConfig* s_instance = ([]() {
@@ -344,8 +351,10 @@ class CachingAllocatorConfig {
   }
 
   CachingAllocatorConfig()
-      : m_max_split_size(std::numeric_limits<size_t>::max()) {}
+      : m_max_split_size(std::numeric_limits<size_t>::max()),
+        m_roundup_power2_divisions(0) {}
   size_t m_max_split_size;
+  size_t m_roundup_power2_divisions;
 
   void parseArgs() {
     const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
@@ -375,6 +384,13 @@ class CachingAllocatorConfig {
             val2 = std::min(
                 val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
             m_max_split_size = val2 * 1024 * 1024;
+          } else if (kv[0].compare("roundup_power2_divisions") == 0) {
+            size_t val2 = stoi(kv[1]);
+            TORCH_CHECK(
+                llvm::isPowerOf2_64(val2),
+                "For roundups, the divisons has to be power of 2 ",
+                "");
+            m_roundup_power2_divisions = val2;
           } else {
             TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
           }
@@ -409,7 +425,10 @@ class DeviceCachingAllocator {
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
-  std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
+  ska::flat_hash_map<
+      cuda::CUDAStream,
+      std::deque<std::pair<cudaEvent_t, Block*>>>
+      cuda_events;
 
   // record used memory.
   size_t total_allocated_memory = 0;
@@ -421,18 +440,18 @@ class DeviceCachingAllocator {
   // Members specific to CUDA graphs
 
   // Private pools for CUDA graphs
-  std::unordered_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
+  ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
       graph_pools;
   // Pools no longer referenced by any graph. Their BlockPools are eligible for
   // free_blocks. Can't be a vector or deque because we might erase entries in
   // any order. Could be an std::list, but we don't care much, access and
   // insert/erase are rare.
-  std::unordered_map<MempoolId_t, PrivatePool*, MempoolIdHash>
+  ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
-  std::unordered_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
+  ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
 
  public:
   DeviceCachingAllocator()
@@ -807,11 +826,43 @@ class DeviceCachingAllocator {
     return result;
   }
 
+  // This function takes the size and number of divisions argument and rounds
+  // up the size argument for the nearest power-of-2 division.
+  // For example, if we need to round-up 1200 and number of divisions is 4,
+  // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  // them, the values are 1024, 1280, 1536, and 1792. So the function will
+  // return 1280 as the nearest ceiling of power-2 divison.
+  static size_t roundup_power2_next_division(size_t size, size_t divisions) {
+    if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
+      return size;
+    }
+    if (llvm::isPowerOf2_64(size)) {
+      return size;
+    }
+
+    // divide the space between these 2's power into equal divisions
+    // If division is zero, return the power-of-2 ceiling.
+    size_t power2_floor = llvm::PowerOf2Floor(size);
+    size_t power2_divison =
+        power2_floor >> (63 - llvm::countLeadingZeros(divisions));
+    if (C10_UNLIKELY(power2_divison == 0)) {
+      return (power2_floor << 1);
+    }
+    size_t round_size_floor = size & (~(power2_divison - 1));
+    return (round_size_floor == size) ? size
+                                      : round_size_floor + power2_divison;
+  }
+
   static size_t round_size(size_t size) {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      auto divisions = CachingAllocatorConfig::roundup_power2_divisions();
+      if (divisions > 0 && size > (kMinBlockSize * divisions)) {
+        return roundup_power2_next_division(size, divisions);
+      } else {
+        return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
+      }
     }
   }
 
@@ -1242,16 +1293,18 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(captures_underway == 0);
     insert_events_deferred_until_no_capture();
 
-    for (auto& e : cuda_events) {
-      cudaEvent_t event = e.first;
-      Block* block = e.second;
+    for (auto& st : cuda_events) {
+      for (auto& e : st.second) {
+        cudaEvent_t event = e.first;
+        Block* block = e.second;
 
-      C10_CUDA_CHECK(cudaEventSynchronize(event));
-      free_event_internal(event);
+        C10_CUDA_CHECK(cudaEventSynchronize(event));
+        free_event_internal(event);
 
-      block->event_count--;
-      if (block->event_count == 0) {
-        free_block(block);
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block);
+        }
       }
     }
 
@@ -1271,7 +1324,7 @@ class DeviceCachingAllocator {
       C10_CUDA_CHECK(cudaEventRecord(event, stream.stream()));
 
       block->event_count++;
-      cuda_events.emplace_back(event, block);
+      cuda_events[stream].emplace_back(event, block);
     }
 
     C10_CUDA_CHECK(cudaSetDevice(prev_device));
@@ -1290,32 +1343,40 @@ class DeviceCachingAllocator {
   void process_events() {
     insert_events_deferred_until_no_capture();
 
-    // Process outstanding cudaEvents. Events that are completed are removed
-    // from the queue, and the 'event_count' for the corresponding allocation
-    // is decremented. Stops at the first event which has not been completed.
-    // Since events on different devices or streams may occur out of order,
-    // the processing of some events may be delayed.
-    while (!cuda_events.empty()) {
-      auto& e = cuda_events.front();
-      cudaEvent_t event = e.first;
-      Block* block = e.second;
+    // Process outstanding cudaEvents. Events that are completed are
+    // removed from the queue, and the 'event_count' for the
+    // corresponding allocation is decremented. We maintain a separate
+    // list of events per stream to avoid head-of-line delays if one
+    // or more streams has long-running operations.
+    for (auto it = cuda_events.begin(); it != cuda_events.end();) {
+      while (!it->second.empty()) {
+        auto& e = it->second.front();
+        cudaEvent_t event = e.first;
+        Block* block = e.second;
 
-      cudaError_t err = cudaEventQuery(event);
-      if (err == cudaErrorNotReady) {
-        // ignore and clear the error if not ready
-        cudaGetLastError();
-        break;
-      } else if (err != cudaSuccess) {
-        C10_CUDA_CHECK(err);
+        cudaError_t err = cudaEventQuery(event);
+        if (err == cudaErrorNotReady) {
+          // ignore and clear the error if not ready
+          cudaGetLastError();
+          break;
+        } else if (err != cudaSuccess) {
+          C10_CUDA_CHECK(err);
+        }
+
+        free_event_internal(event);
+
+        block->event_count--;
+        if (block->event_count == 0) {
+          free_block(block);
+        }
+        it->second.pop_front();
       }
 
-      free_event_internal(event);
-
-      block->event_count--;
-      if (block->event_count == 0) {
-        free_block(block);
+      if (it->second.empty()) {
+        it = cuda_events.erase(it);
+      } else {
+        it++;
       }
-      cuda_events.pop_front();
     }
   }
 
@@ -1551,7 +1612,9 @@ static inline void assertValidDevice(int device) {
   const auto device_num = caching_allocator.device_allocator.size();
   TORCH_CHECK(
       0 <= device && device < static_cast<int64_t>(device_num),
-      "Invalid device argument.");
+      "Invalid device argument ",
+      device,
+      ": did you call init?");
 }
 
 DeviceStats getDeviceStats(int device) {
@@ -1611,7 +1674,7 @@ void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
 //
 namespace {
 std::mutex IpcMutex;
-std::unordered_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
+ska::flat_hash_map<std::string, std::weak_ptr<void>> ipcMemHandle_to_devptr;
 } // namespace
 
 std::shared_ptr<void> getIpcDevPtr(std::string handle) {

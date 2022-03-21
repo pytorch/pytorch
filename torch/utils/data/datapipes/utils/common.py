@@ -3,19 +3,9 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Tuple, Union, Optional
 
-try:
-    import dill
-
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
+from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 
 def check_lambda_fn(fn):
@@ -53,21 +43,32 @@ def get_file_pathnames_from_root(
         warnings.warn(err.filename + " : " + err.strerror)
         raise err
 
-    for path, dirs, files in os.walk(root, onerror=onerror):
+    if os.path.isfile(root):
+        path = root
         if abspath:
             path = os.path.abspath(path)
-        if not non_deterministic:
-            files.sort()
-        for f in files:
-            if match_masks(f, masks):
-                yield os.path.join(path, f)
-        if not recursive:
-            break
-        if not non_deterministic:
-            dirs.sort()
+        fname = os.path.basename(path)
+        if match_masks(fname, masks):
+            yield path
+    else:
+        for path, dirs, files in os.walk(root, onerror=onerror):
+            if abspath:
+                path = os.path.abspath(path)
+            if not non_deterministic:
+                files.sort()
+            for f in files:
+                if match_masks(f, masks):
+                    yield os.path.join(path, f)
+            if not recursive:
+                break
+            if not non_deterministic:
+                # Note that this is in-place modifying the internal list from `os.walk`
+                # This only works because `os.walk` doesn't shallow copy before turn
+                # https://github.com/python/cpython/blob/f4c03484da59049eb62a9bf7777b963e2267d187/Lib/os.py#L407
+                dirs.sort()
 
 
-def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: Optional[str] = None):
     if not isinstance(pathnames, Iterable):
         pathnames = [pathnames, ]
 
@@ -78,7 +79,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield pathname, StreamWrapper(open(pathname, mode))
+        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):

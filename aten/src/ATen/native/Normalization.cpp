@@ -692,7 +692,7 @@ TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,
                                   /*keepdim=*/true);
   }
 
-  auto factor = (acc_type == c10::toValueType(dtype)) ?
+  auto factor = (acc_type == c10::toRealValueType(dtype)) ?
       norm : at::empty(norm.sizes(), self.options());
   auto iter = TensorIteratorConfig()
       .add_output(factor)

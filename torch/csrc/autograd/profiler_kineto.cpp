@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/nvtx_observer.h>
 
@@ -117,11 +118,18 @@ namespace {
 using torch::profiler::impl::ProfilerThreadLocalStateBase;
 using torch::profiler::impl::ActiveProfilerType;
 
+// `reportBackendEventToActiveKinetoProfiler` reports times rather than counts,
+// so `OpEventData` has to be able to store both cases.
+union TimeStamp {
+  int64_t us_; // Backend event.
+  torch::profiler::impl::approx_time_t count_;
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct OpEventData {
     // POD members
-    int64_t start_us_;
-    int64_t end_us_;
+    TimeStamp start_time_;
+    TimeStamp end_time_;
     uint64_t correlation_id_;
     uint64_t start_thread_id_;
     uint64_t end_thread_id_;
@@ -154,6 +162,19 @@ struct OpEventData {
     torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
     torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
 };
+
+struct MemoryEventData {
+  torch::profiler::impl::approx_time_t start_time;
+  void* ptr;
+  int64_t alloc_size;
+  int64_t total_allocated;
+  int64_t total_reserved;
+  uint64_t threadID;
+  torch::profiler::impl::kineto::DeviceAndResource kineto_info;
+  c10::DeviceType device_type;
+  c10::DeviceIndex device_index;
+};
+static_assert(std::is_pod<MemoryEventData>::value, "Non-POD member of MemoryEventData.");
 
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
@@ -193,8 +214,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   std::unique_ptr<KinetoObserverContext> newOpEvent() {
     std::lock_guard<std::mutex> guard(state_mutex_);
-    op_events_.emplace_back();
-    return std::make_unique<KinetoObserverContext>(&op_events_.back());
+    return std::make_unique<KinetoObserverContext>(op_events_.emplace_back());
   }
 
   void reportMemoryUsage(
@@ -205,28 +225,16 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
       std::lock_guard<std::mutex> guard(state_mutex_);
-      auto start_time = getTimeUs();
-      if (cpu_trace_) {
-        torch::profiler::impl::kineto::recordThreadInfo();
-        cpu_trace_.addMemoryUsageActivity(
-            kMemoryEventName,
-            torch::profiler::impl::kineto::kineto_ids(),
-            start_time,
-            device,
-            ptr,
-            alloc_size,
-            total_allocated,
-            total_reserved);
-      }
-
-      kineto_events_.emplace_back();
-      auto& evt = kineto_events_.back();
-      evt.name(kMemoryEventName)
-          .startUs(start_time)
-          .deviceIndex(device.index())
-          .deviceType(device.type())
-          .nBytes(alloc_size)
-          .startThreadId(at::RecordFunction::currentThreadId());
+      memory_events_.emplace_back(
+          torch::profiler::impl::getApproximateTime(),
+          ptr,
+          alloc_size,
+          total_allocated,
+          total_reserved,
+          at::RecordFunction::currentThreadId(),
+          torch::profiler::impl::kineto::kineto_ids(),
+          device.type(),
+          device.index());
     }
   }
 
@@ -264,8 +272,41 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 
   void materializeOpEvents() {
     std::lock_guard<std::mutex> guard(state_mutex_);
+    auto converter = clock_converter_.makeConverter();
+
+    for (const auto& e : memory_events_) {
+      auto start_time_us = converter(e.start_time) / 1000;
+      cpu_trace_.addMemoryUsageActivity(
+          kMemoryEventName,
+          e.kineto_info,
+          start_time_us,
+          c10::Device(e.device_type, e.device_index),
+          e.ptr,
+          e.alloc_size,
+          e.total_allocated,
+          e.total_reserved);
+
+      kineto_events_.emplace_back();
+      auto& evt = kineto_events_.back();
+      evt.name(kMemoryEventName)
+          .startUs(start_time_us)
+          .deviceIndex(e.device_index)
+          .deviceType(e.device_type)
+          .nBytes(e.alloc_size)
+          .startThreadId(e.threadID);
+    }
+    memory_events_.clear();
+
     for (const auto& e : op_events_) {
-      if (e.end_us_ < e.start_us_) {
+      int64_t start_us = e.backend_.has_value()
+        ? e.start_time_.us_
+        : converter(e.start_time_.count_) / 1000;
+
+      int64_t end_us = e.backend_.has_value()
+        ? e.end_time_.us_
+        : converter(e.end_time_.count_) / 1000;
+
+      if (end_us < start_us) {
         // We initialize end_us_ to the smallest int64_t, so this means that
         // the op did not finish before we stopped profiling.
         continue;
@@ -275,14 +316,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
           e.name_,
           e.kineto_info_,
           e.correlation_id_,
-          e.start_us_,
-          e.end_us_);
+          start_us,
+          end_us);
 
       kineto_events_.emplace_back();
       kineto_events_.back()
           .name(e.name_)
-          .startUs(e.start_us_)
-          .durationUs(e.end_us_ - e.start_us_)
+          .startUs(start_us)
+          .durationUs(end_us - start_us)
           .correlationId(e.correlation_id_)
           .deviceType(c10::DeviceType::CPU)
           .startThreadId(e.start_thread_id_)
@@ -367,8 +408,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             "Fwd thread id", std::to_string(kineto_event.fwdThreadId()));
         activity.addMetadata(
             "Sequence number", std::to_string(kineto_event.sequenceNr()));
-        generateForwardBackwardLink(
-            kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
+
+        // From the time being, we need disable the forward/backward correlation feature to
+        // workaround the crash bug.
+        // TODO: by Mike Guo
+        // reenable the forward/backward correlation when kineto fix the following raw pointer
+        //    GenericTraceActivity.flow.linkedActivity
+        // generateForwardBackwardLink(
+        //     kineto_event, fwd_bwd_link_id, activity, tidSeq2activity);
       }
     }
 
@@ -406,7 +453,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         py_event_indices_{
             { nullptr,
               std::string("null") }};
-    for (size_t i = 0; i < py_events.size(); i++) {
+    for (const auto i : c10::irange(py_events.size())) {
       py_event_indices_.insert({py_events[i].get(), std::to_string(i)});
     }
 
@@ -450,7 +497,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       op_py_map.insert({t, py_stack.size() ? py_stack.back() : nullptr});
     }
 
-    auto activities = std::move(cpu_trace->activities);
+    std::vector<libkineto::GenericTraceActivity> py_activities;
     auto py_events_it = py_events.begin();
     auto py_device = libkineto::processId();
     auto main_thread = libkineto::systemThreadId();
@@ -471,13 +518,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         op.addMetadata("Python module id", module_id_map_.at(e->module_id_));
       }
 
-      cpu_trace->activities.push_back(op);
+      py_activities.push_back(op);
       py_events_it++;
     };
 
-    TORCH_INTERNAL_ASSERT(activities.size() == kineto_events_.size());
-    for (const auto idx : c10::irange(activities.size())) {
-      auto& activity = activities[idx];
+    TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
+    for (const auto idx : c10::irange(cpu_trace->activities.size())) {
+      auto& activity = cpu_trace->activities[idx];
 
       // Add any python events that occurred between this Kineto event and the
       // previous Kineto event.
@@ -498,14 +545,14 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         kineto_events_[idx].stack(py_names);
         activity.addMetadata("Call stack", torch::profiler::impl::stacksToStr(py_names, ";"));
       }
-
-      cpu_trace->activities.push_back(activity);
     }
 
     // Add any Python events which finish after the last Kineto event.
     while (py_events_it != py_events.end()) {
       push_py_event();
     }
+
+    cpu_trace->activities.insert(cpu_trace->activities.end(), py_activities.begin(), py_activities.end());
   }
 
   void generateForwardBackwardLink(
@@ -521,12 +568,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       auto iter = tidSeq2activity.find(key);
       if (iter != tidSeq2activity.end()) {
         libkineto::GenericTraceActivity* fwd = iter->second;
-#ifdef USE_KINETO_UPDATED
         fwd->flow.start = true;
-#else
-        activity.flow.linkedActivity = fwd; // Only destination side set this,
-                                            // to distinguish with start side.
-#endif
         activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
         activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
         ++fwd_bwd_link_id;
@@ -558,6 +600,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 #ifdef USE_KINETO
     const auto& events = *(trace.get()->activities());
     for (const auto& ev_ptr : events) {
+      if (ev_ptr == nullptr) {
+        continue;
+      }
       const auto& activity = *ev_ptr;
       // These events are already processed
       if (activity.type() != libkineto::ActivityType::CPU_OP &&
@@ -583,8 +628,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   }
 
   uint64_t start_time_;
+  torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
   std::set<torch::profiler::impl::ActivityType> activities_;
-  std::deque<OpEventData> op_events_;
+  torch::profiler::impl::AppendOnlyList<OpEventData, 1024> op_events_;
+  torch::profiler::impl::AppendOnlyList<MemoryEventData, 1024> memory_events_;
   torch::profiler::impl::kineto::TraceWrapper cpu_trace_;
   std::vector<KinetoEvent> kineto_events_;
   // Optional, if event post-processing is enabled.
@@ -609,7 +656,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             auto ctx_ptr = state_ptr->newOpEvent();
             auto data_ptr = ctx_ptr->data_;
 
-            data_ptr->end_us_ = std::numeric_limits<int64_t>::min();
+            data_ptr->end_time_.count_ = std::numeric_limits<torch::profiler::impl::approx_time_t>::min();
             data_ptr->correlation_id_ = corr_id;
             data_ptr->start_thread_id_ = fn.threadId();
             data_ptr->sequence_number_ = fn.seqNr();
@@ -639,7 +686,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             if (config.with_flops) {
               data_ptr->extra_args_ = torch::profiler::impl::saveExtraArgs(fn);
             }
-            data_ptr->start_us_ = getTimeUs();
+            data_ptr->start_time_.count_ = torch::profiler::impl::getApproximateTime();
 
             if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
               try {
@@ -661,7 +708,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
                 static_cast<KinetoObserverContext*>(ctx_ptr);
             TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
             auto data_ptr = kineto_ctx_ptr->data_;
-            data_ptr->end_us_ = getTimeUs();
+            data_ptr->end_time_.count_=torch::profiler::impl::getApproximateTime();
             data_ptr->end_thread_id_ = at::RecordFunction::currentThreadId();
 
             if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
@@ -697,8 +744,8 @@ void reportBackendEventToActiveKinetoProfiler(
 
   auto ctx_ptr = state_ptr->newOpEvent();
   auto data_ptr = ctx_ptr->data_;
-  data_ptr->start_us_ = start_time_us;
-  data_ptr->end_us_ = end_time_us;
+  data_ptr->start_time_.us_ = start_time_us;
+  data_ptr->end_time_.us_ = end_time_us;
   data_ptr->correlation_id_ = std::numeric_limits<uint64_t>::max();
   data_ptr->start_thread_id_ = at::RecordFunction::currentThreadId();
   data_ptr->end_thread_id_ = data_ptr->start_thread_id_;

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 // TODO: These functions should move to a common place.
 
@@ -46,9 +47,9 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   const float maxDiff = maxValue * tolerance;
   std::cout << "Max Diff allowed: " << maxDiff << std::endl;
   if (diff.sizes().size() == 2) {
-    for (int y = 0; y < diff.sizes()[0]; y++) {
+    for (const auto y : c10::irange(diff.sizes()[0])) {
       std::cout << y << ":";
-      for (int x = 0; x < diff.sizes()[1]; x++) {
+      for (const auto x : c10::irange(diff.sizes()[1])) {
         float diff_xy = diff[y][x].item<float>();
         if (diff_xy > maxDiff) {
           std::cout << std::setw(5) << x;
@@ -69,7 +70,7 @@ static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vec
     out.push_back(in);
   }
   else {
-    for (int j = i; j < in.size(); ++j) {
+    for (const auto j : c10::irange(i, in.size())) {
       std::swap(in[i], in[j]);
       gen_allpermutations(out, in, i + 1);
     }
@@ -1550,7 +1551,7 @@ TEST(VulkanAPITest, tanh) {
     return;
   }
 
-  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   const auto in_vulkan = in_cpu.vulkan();
 
   const auto out_cpu = at::tanh(in_cpu);
@@ -1569,7 +1570,7 @@ TEST(VulkanAPITest, tanh_) {
     return;
   }
 
-  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat)) * 30;
   auto vulkan = cpu.vulkan();
 
   at::tanh_(cpu);
@@ -2804,6 +2805,163 @@ TEST(VulkanAPITest, mobilenetv2) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, gru_mclareninputs_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int H_in = 384;  // input_size
+  const int H_out = 384; // hidden_size
+  const int num_layers = 2;
+  const double gru_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
+  for (int i = 0; i < num_layers; ++i) {
+    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
+    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::gru(in_cpu, h0_cpu,
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0], weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1] },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+
+  // weights/biases should be always on CPU.
+  const auto out_vulkan = at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto vulkan_output = std::get<0>(out_vulkan);
+  auto vulkan_hidden = std::get<1>(out_vulkan);
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+}
+
+TEST(VulkanAPITest, gru_invalidinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int H_in = 384;  // input_size
+  const int H_out = 384; // hidden_size
+  const int num_layers = 2;
+  const double gru_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
+  for (int i = 0; i < num_layers; ++i) {
+    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
+    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act: incorrect # of weights/biases
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: non-3D input tensor
+  EXPECT_THROW({
+    const auto in_cpu_2d = at::rand({1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+    at::gru(in_cpu_2d.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: non-3D hidden tensor
+  EXPECT_THROW({
+    const auto h0_cpu_2d = at::rand({num_layers, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+    at::gru(in_cpu.vulkan(), h0_cpu_2d.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: has_biases should be true
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      false, num_layers, gru_dropout, train, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: train should be false
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, true, bidirectional, batch_first);
+  }, ::c10::Error);
+
+  // Act: bidirectional should be false
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, true, batch_first);
+  }, ::c10::Error);
+
+  // Act: batch_first should be true
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, gru_dropout, train, bidirectional, false);
+  }, ::c10::Error);
+
+  // Act: dropout should be 0.0
+  EXPECT_THROW({
+    at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
+      has_biases, num_layers, 1.0, train, bidirectional, batch_first);
+  }, ::c10::Error);
+}
 } // namespace
 
 #endif /* USE_VULKAN_API */

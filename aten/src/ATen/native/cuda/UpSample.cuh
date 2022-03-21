@@ -1,6 +1,9 @@
-#include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
+#include <ATen/core/TensorAccessor.h>
 #include <ATen/cuda/Atomic.cuh>
+
+#include <c10/util/ArrayRef.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
 
 #include <math.h>
 

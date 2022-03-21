@@ -15,6 +15,9 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <c10/util/Flags.h>
+
+C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
 namespace torch {
 namespace lazy {
@@ -65,9 +68,12 @@ using OutputMap = std::unordered_map<Output, T, Output::Hasher>;
 // Represents an input/operand for a Node object.
 struct TORCH_API Value {
   Value() = default;
-  /* implicit */ Value(NodePtr node, size_t index = 0) : node(std::move(node)), index(index) {}
+  /* implicit */ Value(NodePtr&& node, size_t index = 0) : node(std::move(node)), index(index) {}
+  /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
 
   hash_t hash() const;
+  hash_t hash_with_sizes() const;
+  hash_t hash_without_sizes() const;
 
   operator bool() const {
     return node != nullptr;
@@ -121,7 +127,6 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
 
 using OpList = c10::ArrayRef<Value>;
 
-
 // A node in the graph. Nodes for operations which requires extra data to be
 // stored for lowering, should inherit from this class and add operation
 // specific member there. For example, a constant might create a new
@@ -130,13 +135,18 @@ using OpList = c10::ArrayRef<Value>;
 // client data handle in it.
 class TORCH_API Node {
  public:
+  static bool enableDynamicShape();
+
   // Creates a new node with the given op name. The op is a unique identifier
   // for the operation. The num_outputs tells how many outputs a given operation
   // generates.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash, hash_t dag_hash);
+  //
+  // None leaf node's node_hash does not contains shape information always.
+  // So we pass in the hash value rather than a function.
+  Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
 
   // Contructor used to create leaf nodes.
-  Node(OpKind op, size_t num_outputs, hash_t node_hash);
+  Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
 
   virtual ~Node();
 
@@ -157,7 +167,15 @@ class TORCH_API Node {
   }
 
   hash_t hash() const {
-    return dag_hash_;
+    return enableDynamicShape() ? dag_hash_without_sizes_ : dag_hash_with_sizes_;
+  }
+
+  hash_t hash_without_sizes() const {
+    return dag_hash_without_sizes_;
+  }
+
+  hash_t hash_with_sizes() const {
+    return dag_hash_with_sizes_;
   }
 
   const MetaData& metadata() const {
@@ -183,8 +201,17 @@ class TORCH_API Node {
 
   // The hash value of this node.
   hash_t node_hash_;
-  // The hash value of the graph rooted at this node.
-  hash_t dag_hash_;
+  // dag_hash represents the hash value of the graph rooted at this node. There are 2 variants, one
+  // with sizes info and one without. We need 2 such hashes to support dynamic
+  // shape. Here are the logic to pick the hash in the 2 major scenarios that a hash is needed:
+  // - shape cache: in this case, we always use the dag hash with size info. This way, looking up the
+  //   shape for one node does not get the shape for another node with the same rank but different sizes
+  // - lookup the compiled graph by a hash: in this case, we will use the dag hash
+  //   WITHOUT size info if dynamic shape is enabled and use the dag hash WITH size info otherwise.
+  // The different requirement for the hash in these 2 scenarios forces us to maintain 2
+  // different hashes.
+  hash_t dag_hash_without_sizes_;
+  hash_t dag_hash_with_sizes_;
   // The IR specific metadata attached to the IR node.
   MetaData metadata_;
   // The IR framework user can attach a user defined metadata object deriving

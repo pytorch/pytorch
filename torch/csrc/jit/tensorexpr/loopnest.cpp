@@ -37,11 +37,13 @@ namespace tensorexpr {
 LoopNest::LoopNest(const LoopNest& other)
     : root_stmt_(Stmt::clone(other.root_stmt_)),
       output_bufs_(other.output_bufs_) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 LoopNest::LoopNest(StmtPtr stmt, std::unordered_set<BufPtr> output_bufs)
     : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
@@ -50,12 +52,14 @@ LoopNest::LoopNest(
     const std::vector<Tensor>& output_tensors,
     const std::vector<Tensor>& tensors_to_compute) {
   initialize(output_tensors, tensors_to_compute);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   initialize(output_tensors, output_tensors);
+  GRAPH_DEBUG("Origin Stmt in LoopNest:\n", std::to_string(root_stmt_));
   verify(root_stmt_);
 }
 
@@ -886,7 +890,7 @@ StmtPtr computeInlineImpl(
   }
   for (auto& use : buf_load_store_uses.at(b)) {
     StmtPtr s = use.s;
-    if (to<ExternalCall>(s)) {
+    if (to<ExternalCall>(s) || to<ExternalCallWithAlloc>(s)) {
       return nullptr;
     }
   }
@@ -985,7 +989,8 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
         } else {
           // If S is not a store, it must be an ExternalCall.
           TORCH_INTERNAL_ASSERT(
-              to<ExternalCall>(stores[0].s),
+              to<ExternalCall>(stores[0].s) ||
+                  to<ExternalCallWithAlloc>(stores[0].s),
               buildErrorMessage(
                   "Expected stmt: " + std::to_string(stores[0].s) +
                   "\nto be either a Store or an ExternalCall in the fuser."));
@@ -1045,6 +1050,23 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
+  void visit(ExternalCallWithAllocPtr v) override {
+    for (const auto& out_buf : v->buf_out_args()) {
+      if (stores_[out_buf].insert(last_stmt_).second) {
+        uses_[out_buf].push_back({(StmtPtr)v, true});
+      }
+    }
+    last_stmt_ = (StmtPtr)v;
+
+    for (const auto& input_buf : v->buf_args()) {
+      if (loads_[input_buf].insert(last_stmt_).second) {
+        uses_[input_buf].push_back({last_stmt_, false});
+      }
+    }
+
+    IRVisitor::visit(v);
+  }
+
   void visit(LoadPtr v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
@@ -1081,6 +1103,10 @@ class ContainedStmtsFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
   void visit(ExternalCallPtr v) override {
+    contained_.insert((StmtPtr)v);
+    IRVisitor::visit(v);
+  }
+  void visit(ExternalCallWithAllocPtr v) override {
     contained_.insert((StmtPtr)v);
     IRVisitor::visit(v);
   }
@@ -2309,7 +2335,7 @@ bool LoopNest::areLoopsPerfectlyNested(const std::vector<ForPtr>& loops) {
   return true;
 }
 
-void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
+void LoopNest::fullUnroll(ForPtr f, StmtPtr* unrolled) {
   BlockPtr p = to<Block>(f->get_parent());
   if (!f) {
     throw malformed_input("unroll attempted on null loop");
@@ -2341,10 +2367,26 @@ void LoopNest::unroll(ForPtr f, StmtPtr* unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::unroll(ForPtr f) {
+void LoopNest::fullUnroll(ForPtr f) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   StmtPtr unrolled;
-  unroll(f, &unrolled);
+  fullUnroll(f, &unrolled);
+}
+
+void LoopNest::unroll(ForPtr f, int factor, ForPtr* tail) {
+  if (factor < 2) {
+    return;
+  }
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr inner;
+  splitWithTail(f, factor, &inner, tail);
+  fullUnroll(inner);
+}
+
+void LoopNest::unroll(ForPtr f, int factor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  ForPtr tail;
+  unroll(f, factor, &tail);
 }
 
 bool LoopNest::isNormalized(ForPtr f) {
@@ -2939,7 +2981,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
         tmp_params,
         reduceOp->reducer()(
             producer,
-            ExprHandle(alloc<Load>(tmp_buf, new_loop_vars_expr)),
+            alloc<Load>(tmp_buf, new_loop_vars_expr),
             tmp_params,
             {}));
 

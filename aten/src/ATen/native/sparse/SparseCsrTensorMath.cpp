@@ -1,13 +1,10 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Operators.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
@@ -15,6 +12,88 @@
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Operators.h>
+#else
+#include <ATen/ops/_conj_physical_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/abs.h>
+#include <ATen/ops/abs_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/angle.h>
+#include <ATen/ops/angle_native.h>
+#include <ATen/ops/asin.h>
+#include <ATen/ops/asin_native.h>
+#include <ATen/ops/asinh.h>
+#include <ATen/ops/asinh_native.h>
+#include <ATen/ops/atan.h>
+#include <ATen/ops/atan_native.h>
+#include <ATen/ops/atanh.h>
+#include <ATen/ops/atanh_native.h>
+#include <ATen/ops/ceil.h>
+#include <ATen/ops/ceil_native.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/conj_physical_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/erf.h>
+#include <ATen/ops/erf_native.h>
+#include <ATen/ops/erfinv.h>
+#include <ATen/ops/erfinv_native.h>
+#include <ATen/ops/expm1.h>
+#include <ATen/ops/expm1_native.h>
+#include <ATen/ops/floor.h>
+#include <ATen/ops/floor_native.h>
+#include <ATen/ops/isinf.h>
+#include <ATen/ops/isinf_native.h>
+#include <ATen/ops/isnan.h>
+#include <ATen/ops/isnan_native.h>
+#include <ATen/ops/isneginf.h>
+#include <ATen/ops/isneginf_native.h>
+#include <ATen/ops/isposinf.h>
+#include <ATen/ops/isposinf_native.h>
+#include <ATen/ops/log1p.h>
+#include <ATen/ops/log1p_native.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/neg_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/rad2deg.h>
+#include <ATen/ops/rad2deg_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/round.h>
+#include <ATen/ops/round_native.h>
+#include <ATen/ops/round_ops.h>
+#include <ATen/ops/sgn.h>
+#include <ATen/ops/sgn_native.h>
+#include <ATen/ops/sign.h>
+#include <ATen/ops/sign_native.h>
+#include <ATen/ops/signbit.h>
+#include <ATen/ops/signbit_native.h>
+#include <ATen/ops/sin.h>
+#include <ATen/ops/sin_native.h>
+#include <ATen/ops/sinh.h>
+#include <ATen/ops/sinh_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sqrt_native.h>
+#include <ATen/ops/tan.h>
+#include <ATen/ops/tan_native.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/tanh_native.h>
+#include <ATen/ops/trunc.h>
+#include <ATen/ops/trunc_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zero_native.h>
+#endif
 
 #include <algorithm>
 
@@ -120,7 +199,7 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
   output_t* data_out = row0.data_ptr<output_t>();
   row1.copy_(*col_indices.expect_contiguous());
   at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
     }
   });
@@ -231,14 +310,16 @@ CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
 
+CREATE_UNARY_UFUNC_INPLACE(zero);
+
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
 Tensor& round_sparse_csr_out(const Tensor& self, Tensor& result) {
-  return unary_op_out(&ATEN_FN2(round, out), self, result);
+  return unary_op_out(&at::_ops::round_out::call, self, result);
 }
 
 Tensor round_sparse_csr(const Tensor& self) {
-  return get_result_tensor_for_unary_op(&ATEN_FN(round), self);
+  return get_result_tensor_for_unary_op(&at::_ops::round::call, self);
 }
 
 Tensor& round_sparse_csr_(Tensor& self) {
@@ -268,7 +349,7 @@ void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, 
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  scalar_t cast_beta = beta.to<scalar_t>();
+  r.mul_(beta);
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
     auto csr_accessor = csr.accessor<index_t, 1>();
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
@@ -392,7 +473,7 @@ Tensor& addmm_out_sparse_csr_cpu(
           "Please use PyTorch built with MKL on Linux.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
-    AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
         addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, alpha, beta);
     });
 #else

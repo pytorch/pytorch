@@ -55,7 +55,7 @@ class TORCH_API TsNode : public lazy::Node {
 
   std::string ToString() const override;
 
-  static hash_t GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed);
+  static hash_t GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed, bool bakeInSizes);
 
   const std::vector<Output>& operands() const override {
     return operands_as_outputs_;

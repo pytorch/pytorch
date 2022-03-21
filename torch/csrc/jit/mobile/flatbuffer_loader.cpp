@@ -80,6 +80,31 @@ IValue parseEnum(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue);
 
+TypePtr resolveType(
+    const std::string& type_string,
+    std::shared_ptr<CompilationUnit> cu) {
+  TypePtr type;
+  c10::string_view type_str(type_string);
+  if (type_str.starts_with(kCustomClassPrefix)) {
+    type = getCustomClass(type_string);
+    TORCH_CHECK(
+        type, "The implementation of class ", type_string, " cannot be found.");
+  } else if (
+      type_str.starts_with(kTorchPrefix) || type_str.starts_with(kJitPrefix)) {
+    c10::QualifiedName qn(type_string);
+    if (cu->get_class(qn) == nullptr) {
+      auto classtype = ClassType::create(qn, cu, true);
+      cu->register_type(classtype);
+      type = classtype;
+    } else {
+      type = cu->get_class(qn);
+    }
+  } else {
+    type = c10::parseType(type_string);
+  }
+  return type;
+}
+
 FlatbufferLoader::FlatbufferLoader()
     : mcu_(std::make_shared<mobile::CompilationUnit>()),
       cu_(std::make_shared<CompilationUnit>()),
@@ -107,12 +132,28 @@ FlatbufferLoader::FlatbufferLoader()
   registerIValueParser(mobile::serialization::IValueUnion::Device, &parseBasic);
   registerIValueParser(
       mobile::serialization::IValueUnion::EnumValue, &parseEnum);
+  internal_registerTypeResolver(&resolveType);
 }
 
 void FlatbufferLoader::registerIValueParser(
     mobile::serialization::IValueUnion ivalue_type,
     IValueParser parser) {
   ivalue_parsers_[static_cast<uint8_t>(ivalue_type)] = parser;
+}
+
+void FlatbufferLoader::internal_registerTypeResolver(
+    TypeResolver type_resolver) {
+  type_resolver_ = type_resolver;
+}
+
+void parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files) {
+  auto extra_files_offsets = module->extra_files();
+  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
+    const auto* extra_file = extra_files_offsets->Get(i);
+    extra_files[extra_file->name()->str()] = extra_file->content()->str();
+  }
 }
 
 mobile::Module FlatbufferLoader::parseModule(
@@ -139,8 +180,16 @@ mobile::Module FlatbufferLoader::parseModule(
       all_ivalues_[i] = parseIValue(ival);
     }
   }
-
   IValue& module_ivalue = getIValue(module->state_obj());
+
+  // register functions
+  for (const auto& f : all_functions_) {
+    uint32_t class_index =
+        ivalues->Get(f.first)->val_as_Function()->class_type();
+    ClassTypePtr class_type = all_types_[class_index];
+    class_type->addMethod(f.second);
+  }
+
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
 
@@ -176,7 +225,10 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
   }
 
-  AT_ASSERT(unsupported_op_names.empty());
+  TORCH_CHECK(
+      unsupported_op_names.empty(),
+      "Unsupported ops: ",
+      c10::Join(", ", unsupported_op_names));
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
@@ -337,14 +389,14 @@ IValue parseIntList(
   return parseListNative<int64_t>(list);
 }
 
-IValue parseBoolList(
+IValue parseDoubleList(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_DoubleList();
   return parseListNative<double>(list);
 }
 
-IValue parseDoubleList(
+IValue parseBoolList(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   const auto& list = ivalue.val_as_BoolList();
@@ -496,28 +548,7 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
   if (iter != type_annotations_.end()) {
     return iter->second;
   }
-  TypePtr type;
-  c10::string_view qn_str(offset->c_str(), offset->size());
-  c10::QualifiedName qn(offset->str());
-  if (qn_str.starts_with(kCustomClassPrefix)) {
-    type = getCustomClass(qn.qualifiedName());
-    TORCH_CHECK(
-        type,
-        "The implementation of class ",
-        qn.qualifiedName(),
-        " cannot be found.");
-  } else if (
-      qn_str.starts_with(kTorchPrefix) || qn_str.starts_with(kJitPrefix)) {
-    if (cu_->get_class(qn) == nullptr) {
-      auto classtype = ClassType::create(qn, cu_, true);
-      cu_->register_type(classtype);
-      type = classtype;
-    } else {
-      type = cu_->get_class(qn);
-    }
-  } else {
-    type = c10::parseType(qn.qualifiedName());
-  }
+  TypePtr type = type_resolver_(offset->str(), cu_);
   type_annotations_[offset] = type;
   return type;
 }

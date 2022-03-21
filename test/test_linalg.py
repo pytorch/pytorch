@@ -1256,7 +1256,7 @@ class TestLinalg(TestCase):
             norm_dtypes = [None, torch.float, torch.double, torch.cfloat, torch.cdouble, torch.float16, torch.bfloat16]
 
         for input_size, ord, keepdim, norm_dtype in product(input_sizes, ord_vector, [True, False], norm_dtypes):
-            input = make_tensor(input_size, device, dtype, low=-9, high=9)
+            input = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
             for dim in [None, random.randint(0, len(input_size) - 1)]:
                 run_test_case(
                     input,
@@ -1662,10 +1662,10 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 2e-5})
     def test_matrix_norm(self, device, dtype):
         # Test only inputs for which torch.linalg.matrix_norm diverges from torch.linalg.norm
-        A = make_tensor((2, 2, 2), device, dtype)
+        A = make_tensor((2, 2, 2), dtype=dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm\(\):.*must be a matrix.*'):
-            torch.linalg.matrix_norm(make_tensor((2,), device, dtype))
+            torch.linalg.matrix_norm(make_tensor((2,), dtype=dtype, device=device))
         with self.assertRaisesRegex(RuntimeError, r'linalg.matrix_norm\(\):.*must be a 2-tuple.*'):
             torch.linalg.matrix_norm(A, dim=(0,))
         with self.assertRaisesRegex(RuntimeError, r'.*not supported.*'):
@@ -1685,11 +1685,10 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_norm_extreme_values(self, device):
-        if torch.device(device).type == 'cpu':
-            self.skipTest("Test broken on cpu (see gh-71645)")
-
         vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
-        matrix_ords = ['fro', 'nuc', 1, 2, inf, -1, -2, -inf]
+        # matrix_ords 'nuc', 2, -2 are skipped currently
+        # See issue https://github.com/pytorch/pytorch/issues/71911
+        matrix_ords = ['fro', 1, inf, -1, -inf]
         vectors = []
         matrices = []
         for pair in itertools.product([inf, -inf, 0.0, nan, 1.0], repeat=2):
@@ -1727,8 +1726,8 @@ class TestLinalg(TestCase):
                 if is_broken_matrix_norm_case(ord, x):
                     continue
                 else:
-                    result = torch.linalg.norm(x, ord=ord)
                     result_n = np.linalg.norm(x_n, ord=ord)
+                    result = torch.linalg.norm(x, ord=ord)
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
@@ -2382,7 +2381,7 @@ class TestLinalg(TestCase):
             (5, 3, 8, 1, 3, 5)]
 
         for input_size in input_sizes:
-            a = make_tensor(input_size, device, dtype, low=-9, high=9)
+            a = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
 
             # Try full reduction
             dim_settings = [None]
@@ -2650,6 +2649,28 @@ class TestLinalg(TestCase):
         S = torch.linalg.svdvals(a)
         result = torch.linalg.svd(a, full_matrices=False)
         self.assertEqual(result.S, S)
+
+    # This test doesn't work with MAGMA backend https://github.com/pytorch/pytorch/issues/72106
+    @skipMeta
+    @skipCUDAIfRocm
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_svd_nan_error(self, device, dtype):
+        for svd in [torch.svd, torch.linalg.svd]:
+            # if input contains NaN then an error is triggered for svd
+            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
+            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
+            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
+            a[0] = float('nan')
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
+                svd(a)
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
+            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
+            a[1, 0, 0] = float('nan')
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
+                svd(a)
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
@@ -3222,6 +3243,27 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
+    def test_solve_batched_broadcasting(self, device, dtype):
+        from numpy.linalg import solve
+
+        def run_test(A_dims, B_dims):
+            A_matrix_size = A_dims[-1]
+            A_batch_dims = A_dims[:-2]
+            B, A = self.solve_test_helper(A_batch_dims + (A_matrix_size, A_matrix_size), B_dims, device, dtype)
+            actual = torch.linalg.solve(A, B)
+            expected = solve(A.cpu().numpy(), B.cpu().numpy())
+            self.assertEqual(actual, expected)
+
+        # test against numpy.linalg.solve
+        run_test((5, 5), (2, 0, 5, 3))  # broadcasting with 0 batch dim
+        run_test((2, 0, 5, 5), (5, 3))  # broadcasting with 0 batch dim
+        run_test((2, 1, 3, 4, 4), (4, 6))  # broadcasting B
+        run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
+        run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & B
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
     def test_old_solve(self, device, dtype):
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
             b, A = self.solve_test_helper((n, n), (n, k), device, dtype)
@@ -3770,7 +3812,7 @@ class TestLinalg(TestCase):
     # This tests only the cases where torch.chain_matmul differs from torch.linalg.multi_dot which this is an "alias" for.
     def test_chain_matmul(self, device, dtype):
         # chain_matmul accepts a single input tensor while multi_dot does not
-        t = make_tensor((2, 2), device, dtype)
+        t = make_tensor((2, 2), dtype=dtype, device=device)
         self.assertEqual(t, torch.chain_matmul(t))
         with self.assertRaisesRegex(RuntimeError, r"chain_matmul\(\): Expected one or more matrices"):
             torch.chain_matmul()
@@ -3778,13 +3820,13 @@ class TestLinalg(TestCase):
         # chain_matmul expects all tensors to be 2D whereas multi_dot allows the first and last tensors to
         # be either 1D or 2D
         with self.assertRaisesRegex(RuntimeError, r"Tensor dimension is 1, expected 2 instead"):
-            torch.chain_matmul(make_tensor(1, device, dtype), make_tensor(1, device, dtype))
+            torch.chain_matmul(make_tensor(1, dtype=dtype, device=device), make_tensor(1, dtype=dtype, device=device))
 
     @onlyNativeDeviceTypes
     @dtypes(torch.double, torch.cdouble)
     def test_multi_dot(self, device, dtype):
         def check(*shapes):
-            tensors = [make_tensor(shape, device, dtype) for shape in shapes]
+            tensors = [make_tensor(shape, dtype=dtype, device=device) for shape in shapes]
             np_arrays = [tensor.cpu().numpy() for tensor in tensors]
             res = torch.linalg.multi_dot(tensors).cpu()
             ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
@@ -3822,7 +3864,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 torch.linalg.multi_dot(tensors, out=out)
 
-        a = make_tensor(2, device, dtype)
+        a = make_tensor(2, dtype=dtype, device=device)
 
         check([], None, "expected at least 2 tensors")
         check([a], None, "expected at least 2 tensors")
@@ -3831,17 +3873,17 @@ class TestLinalg(TestCase):
         check([a, torch.tensor(1, device=device, dtype=dtype)], None, "the last tensor must be 1D or 2D")
 
         check([a, a, a], None, "tensor 1 must be 2D")
-        check([a, make_tensor((2, 2, 2), device, dtype), a], None, "tensor 1 must be 2D")
+        check([a, make_tensor((2, 2, 2), dtype=dtype, device=device), a], None, "tensor 1 must be 2D")
 
-        check([a, make_tensor(2, device, torch.double)], None, "all tensors must have be the same dtype")
+        check([a, make_tensor(2, dtype=torch.double, device=device)], None, "all tensors must have be the same dtype")
         check([a, a], torch.empty(0, device=device, dtype=torch.double), "expected out tensor to have dtype")
 
         if self.device_type == 'cuda':
-            check([a, make_tensor(2, 'cpu', dtype)], None, "all tensors must be on the same device")
+            check([a, make_tensor(2, dtype=dtype, device="cpu")], None, "all tensors must be on the same device")
             check([a, a], torch.empty(0, dtype=dtype), "expected out tensor to be on device")
 
-        check([a, make_tensor(3, device, dtype)], None, "cannot be multiplied")
-        check([a, make_tensor((3, 2), device, dtype), a], None, "cannot be multiplied")
+        check([a, make_tensor(3, dtype=dtype, device=device)], None, "cannot be multiplied")
+        check([a, make_tensor((3, 2), dtype=dtype, device=device), a], None, "cannot be multiplied")
 
     @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
@@ -4033,17 +4075,17 @@ class TestLinalg(TestCase):
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
         # Test cases from https://gist.github.com/rockt/15ee013889d65342088e9260a377dc8f
-        x = make_tensor((5,), device, dtype)
-        y = make_tensor((7,), device, dtype)
-        A = make_tensor((3, 5), device, dtype)
-        B = make_tensor((2, 5), device, dtype)
-        C = make_tensor((2, 3, 5), device, dtype)
-        D = make_tensor((2, 5, 7), device, dtype)
-        E = make_tensor((7, 9), device, dtype)
-        F = make_tensor((2, 3, 3, 5), device, dtype)
-        G = make_tensor((5, 4, 6), device, dtype)
-        H = make_tensor((4, 4), device, dtype)
-        I = make_tensor((2, 3, 2), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
+        y = make_tensor((7,), dtype=dtype, device=device)
+        A = make_tensor((3, 5), dtype=dtype, device=device)
+        B = make_tensor((2, 5), dtype=dtype, device=device)
+        C = make_tensor((2, 3, 5), dtype=dtype, device=device)
+        D = make_tensor((2, 5, 7), dtype=dtype, device=device)
+        E = make_tensor((7, 9), dtype=dtype, device=device)
+        F = make_tensor((2, 3, 3, 5), dtype=dtype, device=device)
+        G = make_tensor((5, 4, 6), dtype=dtype, device=device)
+        H = make_tensor((4, 4), dtype=dtype, device=device)
+        I = make_tensor((2, 3, 2), dtype=dtype, device=device)
 
         # Vector operations
         self._check_einsum('i->', x)                     # sum
@@ -4074,20 +4116,20 @@ class TestLinalg(TestCase):
         self._check_einsum("ii", H)                      # trace
         self._check_einsum("ii->i", H)                   # diagonal
         self._check_einsum('iji->j', I)                  # non-contiguous trace
-        self._check_einsum('ngrg...->nrg...', make_tensor((2, 1, 3, 1, 4), device, dtype))
+        self._check_einsum('ngrg...->nrg...', make_tensor((2, 1, 3, 1, 4), dtype=dtype, device=device))
 
         # Test ellipsis
         self._check_einsum("i...->...", H)
         self._check_einsum("ki,...k->i...", A.t(), B)
         self._check_einsum("k...,jk->...", A.t(), B)
         self._check_einsum('...ik, ...j -> ...ij', C, x)
-        self._check_einsum('Bik,k...j->i...j', C, make_tensor((5, 3), device, dtype))
-        self._check_einsum('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), device, dtype))
+        self._check_einsum('Bik,k...j->i...j', C, make_tensor((5, 3), dtype=dtype, device=device))
+        self._check_einsum('i...j, ij... -> ...ij', C, make_tensor((2, 5, 2, 3), dtype=dtype, device=device))
 
         # torch.bilinear with noncontiguous tensors
-        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
-        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
-        w = make_tensor((15, 10, 20), device, dtype)
+        l = make_tensor((5, 10), dtype=dtype, device=device, noncontiguous=True)
+        r = make_tensor((5, 20), dtype=dtype, device=device, noncontiguous=True)
+        w = make_tensor((15, 10, 20), dtype=dtype, device=device)
         self._check_einsum("bn,anm,bm->ba", l, w, r)
 
         # with strided tensors
@@ -4095,11 +4137,11 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_sublist_format(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
-        y = make_tensor((7,), device, dtype)
-        A = make_tensor((3, 5), device, dtype)
-        B = make_tensor((2, 5), device, dtype)
-        C = make_tensor((2, 1, 3, 1, 4), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
+        y = make_tensor((7,), dtype=dtype, device=device)
+        A = make_tensor((3, 5), dtype=dtype, device=device)
+        B = make_tensor((2, 5), dtype=dtype, device=device)
+        C = make_tensor((2, 1, 3, 1, 4), dtype=dtype, device=device)
 
         self._check_einsum(x, [0])
         self._check_einsum(x, [0], [])
@@ -4114,9 +4156,9 @@ class TestLinalg(TestCase):
         self._check_einsum(A.t(), [0, Ellipsis], B, [1, 0], [Ellipsis])
 
         # torch.bilinear with noncontiguous tensors
-        l = make_tensor((5, 10), device, dtype, noncontiguous=True)
-        r = make_tensor((5, 20), device, dtype, noncontiguous=True)
-        w = make_tensor((15, 10, 20), device, dtype)
+        l = make_tensor((5, 10), dtype=dtype, device=device, noncontiguous=True)
+        r = make_tensor((5, 20), dtype=dtype, device=device, noncontiguous=True)
+        w = make_tensor((15, 10, 20), dtype=dtype, device=device)
         self._check_einsum(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
 
     @dtypes(torch.double, torch.cdouble)
@@ -4193,7 +4235,7 @@ class TestLinalg(TestCase):
                         shape[ell_index:ell_index] = ell_shape
                         labels.insert(ell_index, ...)
 
-                    operands.append(make_tensor(shape, device, dtype))
+                    operands.append(make_tensor(shape, dtype=dtype, device=device))
                     sublists.append(labels)
 
                 # NumPy has a bug with the sublist format so for now we compare PyTorch sublist
@@ -4230,7 +4272,7 @@ class TestLinalg(TestCase):
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
             tensors = [torch.tensor(operand, device=device, dtype=torch.float32) if not isinstance(operand, tuple)
-                       else make_tensor(operand, device, torch.float32) for operand in operands]
+                       else make_tensor(operand, dtype=torch.float32, device=device) for operand in operands]
             output = torch.einsum(equation, tensors)
             self.assertEqual(output, torch.tensor(expected_output, dtype=torch.float32, device=device))
 
@@ -4272,8 +4314,8 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
                 torch.einsum(*args)
 
-        x = make_tensor((2,), device, torch.float32)
-        y = make_tensor((2, 3), device, torch.float32)
+        x = make_tensor((2,), dtype=torch.float32, device=device)
+        y = make_tensor((2, 3), dtype=torch.float32, device=device)
 
         check('', [], regex=r'at least one operand', exception=ValueError)
         check('. ..', [x], regex=r'found \'.\' for operand 0 that is not part of any ellipsis')
@@ -6011,8 +6053,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-0.1, high=0.1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-0.1, high=0.1)
+                b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-0.1, high=0.1)
+                b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-0.1, high=0.1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
@@ -6020,8 +6062,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-0.1, high=0.1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-0.1, high=0.1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-0.1, high=0.1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-0.1, high=0.1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
@@ -6111,9 +6153,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
-            b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-            b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
-            t = make_tensor((M, O), device, dtype, low=-1, high=1)
+            b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
+            b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-1, high=1)
+            t = make_tensor((M, O), dtype=dtype, device=device, low=-1, high=1)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
                                    lambda: torch.addbmm(t, b1, b2))
             return
@@ -6127,8 +6169,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 for perm3 in itertools.permutations((0, 1)):
-                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1) * 0.1
-                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1) * 0.1
+                    b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1) * 0.1
+                    b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-1, high=1) * 0.1
                     b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                     b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                     ref = torch.from_numpy(
@@ -6140,8 +6182,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for s1, s2, s3, s4, s5, s6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N) * 0.1
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O) * 0.1
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, M, N) * 0.1
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, N, O) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6151,8 +6193,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1) * 0.1
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1) * 0.1
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-1, high=1) * 0.1
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-1, high=1) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6181,9 +6223,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
-            b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-            b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
-            t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
+            b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
+            b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-1, high=1)
+            t = make_tensor((num_batches, M, O), dtype=dtype, device=device, low=-1, high=1)
             self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
                                    lambda: torch.baddbmm(t, b1, b2))
             return
@@ -6196,8 +6238,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
             # transposed tensors
             for perm1, perm2, perm3 in itertools.product(itertools.permutations((0, 1, 2)), repeat=3):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
+                b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-1, high=1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 ref = torch.from_numpy(
@@ -6209,8 +6251,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for s1, s2, s3, s4, s5, s6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, N, O)
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
@@ -6219,8 +6261,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
-                b1 = make_tensor(shape1, device, dtype, low=-2, high=2)
-                b2 = make_tensor(shape2, device, dtype, low=-2, high=2)
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-2, high=2)
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-2, high=2)
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
                 out_tensor = torch.zeros_like(ref)
@@ -6303,7 +6345,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.double, torch.cdouble)
     def test_matrix_power_non_negative(self, device, dtype):
         def check(*size):
-            t = make_tensor(size, device, dtype)
+            t = make_tensor(size, dtype=dtype, device=device)
             for n in range(8):
                 res = torch.linalg.matrix_power(t, n)
                 ref = np.linalg.matrix_power(t.cpu().numpy(), n)

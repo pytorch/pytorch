@@ -14,6 +14,7 @@ on:
       - 'ciflow/vulkan/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -43,6 +44,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -65,6 +67,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -98,6 +108,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
@@ -159,8 +170,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -249,57 +261,20 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  generate-test-matrix:
+  test_default_1_1:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: test (default, 1, 1, linux.2xlarge)
     needs: build
-    runs-on: ubuntu-18.04
-    timeout-minutes: 240
+    runs-on: linux.2xlarge
+    timeout-minutes: 270
     env:
-      TEST_RUNNER_TYPE: linux.2xlarge
-      ENABLE_DISTRIBUTED_TEST: ''
-      ENABLE_JIT_LEGACY_TEST: ''
-      ENABLE_FX2TRT_TEST: ''
-      ENABLE_MULTIGPU_TEST: ''
-      ENABLE_NOGPU_NO_AVX_TEST: ''
-      ENABLE_NOGPU_NO_AVX2_TEST: ''
-      ENABLE_SLOW_TEST: ''
-      ENABLE_DOCS_TEST: ''
-      ENABLE_BACKWARDS_COMPAT_TEST: ''
-      ENABLE_XLA_TEST: ''
-      ENABLE_NOARCH_TEST: ''
-      NUM_TEST_SHARDS: 1
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-      PR_BODY: ${{ github.event.pull_request.body }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
-    env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-vulkan-bionic-py3.7-clang9-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      TEST_CONFIG: default
+      SHARD_NUMBER: 1
+      NUM_TEST_SHARDS: 1
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -314,6 +289,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -347,6 +330,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
@@ -360,11 +344,6 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -388,8 +367,9 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -434,7 +414,7 @@ jobs:
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PR_BODY \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
@@ -477,7 +457,7 @@ jobs:
       - name: Zip JSONs for upload
         if: always()
         env:
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+          FILE_SUFFIX: '${{ github.job }}-default-1-1-linux.2xlarge'
         run: |
           # Remove any previous test jsons if they exist
           rm -f test-jsons-*.zip
@@ -493,7 +473,7 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+          FILE_SUFFIX: '${{ github.job }}-default-1-1-linux.2xlarge'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
@@ -506,22 +486,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
-      - name: Display and upload test statistics (Click Me)
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
+      - name: Upload test statistics
         if: always()
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-vulkan-bionic-py3.7-clang9-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
