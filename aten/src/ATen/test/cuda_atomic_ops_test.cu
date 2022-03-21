@@ -29,7 +29,7 @@ template <typename T>
 __global__ void max_test_kernel(T * a, T * max) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int a_idx = (tid) % (arraysize * factor);
-  int idx = a_idx / 4;
+  int idx = a_idx / factor;
 
   gpuAtomicMax(&max[idx], a[a_idx]);
 }
@@ -38,7 +38,7 @@ template <typename T>
 __global__ void min_test_kernel(T * a, T * min) {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int a_idx = (tid) % (arraysize * factor);
-  int idx = a_idx / 4;
+  int idx = a_idx / factor;
 
   gpuAtomicMin(&min[idx], a[a_idx]);
 }
