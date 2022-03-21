@@ -10,7 +10,8 @@ from torch import distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     StateDictType,
-    CPUOffload
+    CPUOffload,
+    MixedPrecision,
 )
 from torch.nn import Linear, Module
 import torch.nn as nn
@@ -84,11 +85,11 @@ class TestFSDPStateDict(FSDPTest):
             *fsdp_args,
             **fsdp_kwargs,
         )
-        return model
+        return model.cuda()
 
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
         model = FSDP(nn.Linear(10, 10, bias=False), *fsdp_args, **fsdp_kwargs)
-        return model
+        return model.cuda()
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -145,14 +146,16 @@ class TestFSDPStateDict(FSDPTest):
         expected.
         """
         torch.cuda.set_device(self.rank)
-        model = self._get_wrapped_model(group=torch.distributed.distributed_c10d._get_default_group())
+        config = MixedPrecision()
+        model = self._get_simple_nested_model(mixed_precision=config)
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         initial_params = _get_full_detached_param(model)
         for _ in range(6):
-            inp = model.module.get_input(torch.device("cuda"))
+            inp = torch.randn(1, 10, device=torch.cuda.current_device())
+            # inp = model.module.get_input(torch.device("cuda"))
             output = model(*inp)
-            loss = model.module.get_loss(inp, output).cuda()
-            model.module.run_backward(loss)
+            loss = output.sum()
+            loss.backward()
             optim.step()
 
         trained_params = _get_full_detached_param(model)
