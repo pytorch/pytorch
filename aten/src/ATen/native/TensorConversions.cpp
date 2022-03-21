@@ -258,9 +258,9 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
 Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
   if (dtype) {
-    return tensor.to(*dtype).clone();
+    return tensor.to(*dtype);
   }
-  return tensor.clone();
+  return tensor;
 }
 
 // Computes the strides for view_dtype output when the view dtype is
