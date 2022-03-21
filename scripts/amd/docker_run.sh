@@ -13,9 +13,9 @@ VOLUMES="-v $HOME/dockerx:/dockerx -v /data:/data"
 WORK_DIR="/dockerx/$(basename $(pwd))"
 
 # IMAGE_NAME=nvcr.io/nvidia/pytorch:21.08-py3
-IMAGE_NAME=rocm/pytorch
+# IMAGE_NAME=rocm/pytorch
 # IMAGE_NAME=rocm/pytorch-nightly
-# IMAGE_NAME=rocm/pytorch-private:fft_test_fail_causes
+IMAGE_NAME=rocm/pytorch-private:fft_test_fail_causes
 CONTAINER_NAME=pytorch
 
 # start new container
