@@ -1267,6 +1267,9 @@
   self: grad * std::sqrt(2 * M_PI) * (result.square() / 2).exp()
   result: auto_element_wise
 
+# [Note: Sometimes view derivatives]
+# The following situation applies to other operations as well.
+#
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
@@ -1565,8 +1568,15 @@
   self: zeros_like(grad)
   result: auto_element_wise
 
-- name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-  self: to_dense_backward(grad, self)
+# DO NOT define a backward for to_dense
+# See [Note: Sometimes view derivatives]
+# - name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+#
+- name: _sparse_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+  self: grad.to_dense_backward(grad, self)
+
+- name: _mkldnn_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+  self: grad.to_dense_backward(grad, self)
 
 - name: to_sparse(Tensor self) -> Tensor
   self: grad.to_dense()

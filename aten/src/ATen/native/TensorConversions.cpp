@@ -256,6 +256,15 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
 }
 
 Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+  if (tensor.layout() == c10::kSparse) {
+    return tensor._sparse_to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kSparseCsr) {
+    return tensor._sparse_to_dense(dtype);
+  }
+  if (tensor.layout() == c10::kMkldnn) {
+    return tensor._mkldnn_to_dense(dtype);
+  }
   TORCH_CHECK(tensor.layout() == c10::kStrided, "to_dense does not support layout ", tensor.layout());
   if (dtype) {
     return tensor.to(*dtype);

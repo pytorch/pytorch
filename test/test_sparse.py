@@ -346,6 +346,7 @@ class TestSparse(TestCase):
             ], dtype=dtype, device=device)
 
             test_tensor(x, res)
+            test_tensor(res, res)
 
             i = self.index_tensor([
                 [0, 1, 2, 2],
