@@ -461,6 +461,8 @@ def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
+        if _try_get_scalar_type(k) != "Long":
+            k = g.op("Cast", k, to_i=torch.onnx.TensorProtoDataType.INT64)
     if _export_onnx_opset_version <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
@@ -827,16 +829,21 @@ def _index_fill_reshape_helper(g, self, dim, index):
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 
-# When using reshape helper (opset_version >= 14), if reshape has -1,
-# allowzero cannot be set to 1
+# By default, when any value in the 'shape' input is equal to zero
+# the corresponding dimension value is copied from the input tensor dynamically.
+# allowzero=1 indicates that if any value in the 'shape' input is set to zero,
+# the zero value is honored, similar to NumPy.
+# allowzero=1 is only supported for opset version >= 14.
 def _reshape_helper(g, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
     if _export_onnx_opset_version <= 13:
+        if allowzero == 1:
+            raise _onnx_opset_unsupported("Reshape with allowzero=1",
+                                          _export_onnx_opset_version, 14)
         return g.op("Reshape", input, shape)
     else:
-        warnings.warn("allowzero=0 by default. In order to honor zero value in shape use allowzero=1")
         return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
