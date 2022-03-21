@@ -411,7 +411,9 @@ jobs:
               torch/csrc/deploy \
               torch/csrc/tensor \
             --clang-tidy-exe "$(which clang-tidy)" \
-            --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --disable-progress-bar 2>&1 | tee -a "${GITHUB_WORKSPACE}"/clang-tidy-output-new.txt
+
+          sleep 15m
 
       - name: Annotate output
         if: ${{ github.event_name == 'pull_request' }}
