@@ -68,6 +68,13 @@ FUSED_MODULE_CLASSES = (
     torch.nn.intrinsic.ConvReLU3d,
 )
 
+FLOAT_WEIGHTED_MODULE_CLASSES = (
+    torch.nn.Linear,
+    torch.nn.Conv1d,
+    torch.nn.Conv2d,
+    torch.nn.Conv3d,
+)
+
 QAT_MODULE_CLASSES = (
     torch.nn.qat.Linear,
     torch.nn.qat.Conv2d,
@@ -136,6 +143,26 @@ def run_weight_observers(observed: GraphModule) -> None:
                     observed, weight_observer_nodes)
             # run the weight observer
             weight_observer_module()
+
+# this method is temporary will be removed soon
+def duplicate_quantize_dynamic_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    quantized_root = quantized
+    for node in quantized.graph.nodes:
+        if (node.op == "call_function" and node.target == torch.quantize_per_tensor_dynamic):
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node(
+                            "call_function",
+                            torch.quantize_per_tensor_dynamic,
+                            node.args,
+                            node.kwargs)
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
 
 def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     """
@@ -746,6 +773,11 @@ def convert(
                     node, modules, model, is_reference, backend_config_dict)
             elif type(modules[node.target]) in set(
                     weighted_module_classes).union(QAT_MODULE_CLASSES).union(FUSED_MODULE_CLASSES):
+                # extra check for fused module classes to make sure they are fused module classes
+                # of target modules
+                if type(modules[node.target]) in FUSED_MODULE_CLASSES and \
+                   type(modules[node.target][0]) not in FLOAT_WEIGHTED_MODULE_CLASSES:
+                    continue
                 convert_weighted_module(
                     node, modules, observed_node_names, quantized_reference_module_mapping, qconfig_map)
             elif type(modules[node.target]) in custom_module_classes:
@@ -763,6 +795,7 @@ def convert(
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
         model = duplicate_dequantize_node(model)
+        model = duplicate_quantize_dynamic_node(model)
         model = lower_to_fbgemm(model, qconfig_map, node_name_to_scope)
         model = remove_quant_dequant_pairs(model)
         model = remove_extra_dequantize(model)
