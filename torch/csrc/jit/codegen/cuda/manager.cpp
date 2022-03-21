@@ -222,7 +222,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   auto compare_callback = getCudaFuserComparisonCallback();
   if (compare_callback.run_fallback) {
     // make a copy of the stack
-    int64_t inputs_size = fusion_node->g(attr::Subgraph)->inputs().size();
+    int64_t inputs_size =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->inputs().size());
     TORCH_INTERNAL_ASSERT(stack.size() >= inputs_size);
     stack_copy = Stack();
     stack_copy->insert(
@@ -280,7 +281,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   if (compare_callback.callback != nullptr) {
     Stack fused_outputs;
     Stack fallback_outputs;
-    int64_t output_count = fusion_node->g(attr::Subgraph)->outputs().size();
+    int64_t output_count =
+        static_cast<int64_t>(fusion_node->g(attr::Subgraph)->outputs().size());
     TORCH_CHECK(
         output_count <= stack.size(),
         "Expected ",
