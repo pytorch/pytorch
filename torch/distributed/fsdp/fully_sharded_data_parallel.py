@@ -1927,6 +1927,11 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 if mixed_precision_cast_ran:
                     self._cast_param_shards_to_dtype()
+
+                if mixed_precision_cast_ran:
+                    for p in self.params:
+                        assert p.dtype == self.mixed_precision.param_dtype
+                        print(" -- assert passed --")
                 # We can skip moving params to GPU if mixed precision, as p.data
                 # would then be pointing to p._mp_shard which is already on
                 # self.compute_device.

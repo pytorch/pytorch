@@ -166,9 +166,10 @@ class TestFSDPStateDict(FSDPTest):
         state_dict = {k: v.clone() for k, v in model.state_dict().items()}
         _zero_model(model)
 
-        # Ensure checkpointed params have the correct type.
-        # for name, tensor in state_dict.items():
-        #     if name in model.named_buffers
+        # Ensure checkpointed params have the full param dtype
+        for _, tensor in state_dict.items():
+            self.assertEqual(tensor.dtype, torch.float32)
+
         # Load state_dict into zeroed model
         model.load_state_dict(state_dict)
         loaded_params = _get_full_detached_param(model)
