@@ -6,6 +6,8 @@ import threading
 import multiprocessing
 from multiprocessing.util import register_after_fork
 from multiprocessing.reduction import ForkingPickler
+from typing import Union
+
 try:
     # Early load resource_sharer to prevent a partially initialized instance
     # from being inherited in a forked child process. The reduce_storage method
@@ -304,23 +306,18 @@ def rebuild_storage_fd(cls, df, size):
         os.close(fd)
 
 
-def rebuild_storage_filename(cls, manager, handle, size):
-    storage: torch._UntypedStorage = storage_from_cache(cls, handle)
+def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
+    storage: Union[torch._TypedStorage, torch._UntypedStorage] = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
-    storage = torch._UntypedStorage._new_shared_filename(manager, handle, size)
-    shared_cache[handle] = StorageWeakRef(storage)
-    return storage._shared_decref()
-
-def rebuild_typed_storage_filename(cls, manager, handle, size, dtype):
-    storage: torch._TypedStorage = storage_from_cache(cls, handle)
-    if storage is not None:
-        return storage._shared_decref()
-    byte_size = size * torch._utils._element_size(dtype)
-    untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename(manager, handle, byte_size)
-    storage = torch._TypedStorage(
-        wrap_storage=untyped_storage,
-        dtype=dtype)
+    if dtype is None:
+        storage = torch._UntypedStorage._new_shared_filename(manager, handle, size)
+    else:
+        byte_size = size * torch._utils._element_size(dtype)
+        untyped_storage: torch._UntypedStorage = torch._UntypedStorage._new_shared_filename(manager, handle, byte_size)
+        storage = torch._TypedStorage(
+            wrap_storage=untyped_storage,
+            dtype=dtype)
     shared_cache[handle] = StorageWeakRef(storage)
     return storage._shared_decref()
 
@@ -349,10 +346,8 @@ def reduce_storage(storage):
     elif get_sharing_strategy() == 'file_system':
         metadata = storage._share_filename_()
         cache_key = metadata[1]
-        if isinstance(storage, torch._UntypedStorage):
-            rebuild = rebuild_storage_filename
-        else:
-            rebuild = rebuild_typed_storage_filename
+        rebuild = rebuild_storage_filename
+        if isinstance(storage, torch._TypedStorage):
             metadata += (storage.dtype,)
         storage._shared_incref()
     elif storage.size() == 0:
