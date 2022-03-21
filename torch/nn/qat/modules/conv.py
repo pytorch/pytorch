@@ -132,7 +132,7 @@ class Conv2d(_ConvNd):
 
     @classmethod
     def from_float(cls, mod):
-        return super(Conv3d, cls).from_float(mod)
+        return super(Conv2d, cls).from_float(mod)
 
 class Conv3d(_ConvNd):
     r"""
