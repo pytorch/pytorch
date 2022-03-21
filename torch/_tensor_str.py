@@ -298,14 +298,14 @@ def get_summarized_data(self):
         return torch.stack([get_summarized_data(x) for x in self])
 
 def _str_intern(inp):
-    prefix = 'tensor('
+    self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
+    prefix = "nested_tensor(" if self.is_nested else 'tensor('
     indent = len(prefix)
     suffixes = []
 
     # This is used to extract the primal value and thus disable the forward AD
     # within this function.
     # TODO(albanD) This needs to be updated when more than one level is supported
-    self, tangent = torch.autograd.forward_ad.unpack_dual(inp)
 
     # Note [Print tensor device]:
     # A general logic here is we only print device when it doesn't match
@@ -380,6 +380,11 @@ def _str_intern(inp):
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
             suffixes.append('axis=' + str(self.q_per_channel_axis()))
         tensor_str = _tensor_str(self.dequantize(), indent)
+    elif self.is_nested:
+        def indented_str(s, indent):
+            return "\n".join(f"  {line}" for line in s.split("\n"))
+        strs = ",\n".join(indented_str(str(t), indent + 1) for t in torch.ops.aten.unbind.int(self, 0))
+        tensor_str = f"[\n{strs}\n]"
     else:
         if self.is_meta:
             suffixes.append('size=' + str(tuple(self.shape)))
