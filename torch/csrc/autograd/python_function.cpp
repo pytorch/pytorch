@@ -657,6 +657,7 @@ static void _trace_post_record(
       const auto& tensor = THPVariable_Unpack(obj);
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
+        auto old_outputs = jit::tracer::getValueTrace(tensor);
         jit::tracer::setValueTrace(tensor, value);
 
         // create subgraph
@@ -676,19 +677,16 @@ static void _trace_post_record(
         }
         // fix controlflow
         auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
-        for (; it != graph->nodes().end(); ++it) {
+        for (it++; it != graph->nodes().end(); ++it) {
           torch::jit::Node* clonenode = *it;
           auto* new_node = subgraph->insertNode(subgraph->createClone(clonenode, value_map_func));
           for (size_t i = 0; i < clonenode->outputs().size(); ++i) {
             value_map[clonenode->outputs()[i]] = new_node->outputs()[i];
+            if (clonenode == old_outputs->node()) {
+              subgraph->registerOutput(new_node->outputs()[i]);
+            }
           }
         }
-        // add outputs
-        for (size_t i = 0; i < node->outputs().size(); ++i) {
-        }
-
-        // print subgraph
-        //subgraph->print(std::cout, 0);
       }
     }
   }
