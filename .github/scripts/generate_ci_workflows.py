@@ -723,6 +723,19 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="linux-bionic-py3.7-clang9-slow",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.7-clang9-slow",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        num_test_shards=2,
+        enable_default_test=False,
+        enable_distributed_test=False,
+        enable_slow_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_SLOW, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU},
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-vulkan-bionic-py3.7-clang9",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.7-clang9",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
