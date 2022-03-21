@@ -515,7 +515,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cuda(
   AT_ASSERT(weight.size(1) == embedding_features);
 
   const int threads_per_block = 512;
-  const int warps_per_block = threads_per_block / C10_WARP_SIZE;
+  const int warps_per_block = threads_per_block / at::cuda::warp_size();
 
   dim3 block(threads_per_block);
   dim3 grid((num_samples + warps_per_block - 1) / warps_per_block);
