@@ -87,13 +87,6 @@ Tensor new_with_storage(c10::TensorOptions options, at::ScalarType scalar_type, 
   return tensor;
 }
 
-Tensor new_with_tensor(c10::TensorOptions options, at::ScalarType scalar_type, const Tensor& other) {
-  options = options.dtype(scalar_type);
-  TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
-                   options, " (got ", other.options(), ")");
-  return other.alias();
-}
-
 std::vector<int64_t> compute_sizes(PyObject* seq, ScalarType scalar_type) {
   bool is_storage = isStorage(seq);
   std::vector<int64_t> sizes;
@@ -400,6 +393,7 @@ void check_legacy_ctor_device(c10::DispatchKey dispatch_key, c10::optional<Devic
 }
 
 enum class CtorOrNew {
+  BASE_CTOR,
   CTOR,
   NEW,
 };
@@ -483,6 +477,8 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     "new(*, Device? device=None)",
     "new(Storage storage)",
     "new(*, int64_t cdata)|hidden",
+    // This constructor is no longer legacy, it will also be usable for
+    // subclass initialization
     "new(Tensor other)",
     "new(Tensor other, *, Device? device=None)|hidden",  // prevent Tensor matching with IntArrayRef, PyObject*
     "new(IntArrayRef size, *, Device? device=None)",
@@ -518,9 +514,17 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
-    return new_with_tensor(options, scalar_type, r.tensor(0));
+    const auto& other = r.tensor(0);
+    // BASE_CTOR (aka torch.Tensor) is now relaxed to accept any
+    // dtype; previously it was "float" biased
+    if (ctor_or_new != CtorOrNew::BASE_CTOR) {
+      options = options.dtype(scalar_type);
+      TORCH_CHECK_TYPE(other.options().type_equal(options), "expected ",
+                       options, " (got ", other.options(), ")");
+    }
+    return other.alias();
   } else if (r.idx == 4) {
-    if (ctor_or_new == CtorOrNew::CTOR) {
+    if (ctor_or_new == CtorOrNew::CTOR || ctor_or_new == CtorOrNew::BASE_CTOR) {
       TORCH_CHECK(false, "Legacy tensor constructor of the form torch.Tensor(tensor, device=device) " \
                   "is not supported.  Use torch.tensor(...) or torch.as_tensor(...) instead.");
     } else {
@@ -545,10 +549,25 @@ Tensor legacy_tensor_generic_ctor_new(c10::DispatchKey dispatch_key, at::ScalarT
   throw std::runtime_error("new(): invalid arguments");
 }
 
+// Handles ONLY torch.Tensor
+// Unlike the legacy dtype/device specialized constructors, this one is
+// relaxed to accept any device/dtype input tensor (even if it doesn't
+// match the default)
+Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs) {
+  return legacy_tensor_generic_ctor_new(
+    torch::tensors::get_default_dispatch_key(),
+    torch::tensors::get_default_scalar_type(),
+    args, kwargs, CtorOrNew::BASE_CTOR
+  );
+}
+
+// Handles calls like torch.DoubleTensor, torch.cuda.FloatTensor,
+// torch.sparse.FloatTensor, etc.
 Tensor legacy_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   return legacy_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::CTOR);
 }
 
+// Handles tensor.new(...)
 Tensor legacy_tensor_new(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   return legacy_tensor_generic_ctor_new(dispatch_key, scalar_type, args, kwargs, CtorOrNew::NEW);
 }
