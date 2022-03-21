@@ -693,13 +693,6 @@ inline py::object toPyObject(IValue ivalue) {
     return py::none();
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
-    if (tensor.is_sparse()) {
-      TORCH_WARN_ONCE(
-          "Using sparse tensors in TorchScript is experimental. Many optimization "
-          "pathways have not been thoroughly tested with sparse tensors. Please "
-          "include the fact that the network is running sparse tensors in any bug "
-          "reports submitted.");
-    }
     guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isStorage()) {

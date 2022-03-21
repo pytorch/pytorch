@@ -522,6 +522,49 @@ class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
         input = torch.randn(4, 1, 4, 4)
         self._compare_script_and_mobile(model=model_int8, input=input)
 
+    def test_bundled_input_with_dynamic_type(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+
+            def forward(
+                self,
+                x: Dict[int, torch.Tensor],
+                y: Dict[int, torch.Tensor],
+                z: Dict[int, torch.Tensor],
+            ):
+                return x
+
+        model = Model()
+        script_module = torch.jit.script(model)
+
+        sample_input = {
+            script_module.forward: [
+                (
+                    {0: torch.ones(1)},
+                    {1: torch.ones(1)},
+                    {2: torch.ones(1)},
+                )
+            ]
+        }
+
+        bundled_model = torch.utils.bundled_inputs.bundle_inputs(
+            script_module, sample_input
+        )
+
+        buf = bundled_model._save_to_buffer_for_lite_interpreter()
+        mobile_module = _load_for_lite_interpreter(io.BytesIO(buf))
+
+        i = mobile_module.run_method("get_all_bundled_inputs")
+
+        self.assertEqual(
+            i[0],
+            (
+                {0: torch.ones(1)},
+                {1: torch.ones(1)},
+                {2: torch.ones(1)},
+            ),
+        )
 
 if __name__ == '__main__':
     run_tests()
