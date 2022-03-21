@@ -792,8 +792,8 @@ class TestQuantizedOps(TestCase):
             # NB: This is a strange size so that we exercise both the vectorized
             # implementation (64-element chunks at at time) as well as the scalar
             # implementation
-            A = torch.arange(-128, 130, dtype=torch.float)
-            B = torch.arange(-128, 130, dtype=torch.float)
+            A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+            B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
             scale = 2.0
             zero_point = 127
             qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,

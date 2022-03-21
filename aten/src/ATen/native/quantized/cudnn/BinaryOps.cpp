@@ -6,8 +6,13 @@
 #if HAS_CUDNN_V8()
 
 #include <ATen/core/TensorBase.h>
+#include <ATen/core/TensorBody.h>
+#include <ATen/cuda/Exceptions.h>
+#include <ATen/cudnn/Handle.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
+#include <c10/core/QScheme.h>
 
 #include <unordered_map>
 
@@ -25,26 +30,40 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native
 
 namespace at {
 namespace native {
+// TODO: this is also in qadd.cpp and some other cpp files in quantized/cpu/. I think we should
+// move everything into a utilities file in quantized/ directory later.
+inline void check_inputs(const Tensor& qa, const Tensor& qb) {
+  TORCH_CHECK(
+      qa.qscheme() == kPerTensorAffine,
+      "Only per tensor quantization is suported in Add.");
+  TORCH_CHECK(
+      qa.qscheme() == qb.qscheme(),
+      "Both inputs to Add must have the same quantization shceme.");
+  TORCH_CHECK(
+      qa.scalar_type() == qb.scalar_type(),
+      "Add operands should have same data type.");
+}
 
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized add
-template <bool ReLUFused = false>
+template <bool kReluFused = false>
 Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point) {
-  if (quantized_output.numel() == 0) {
-    return;
+  if (qa.numel() == 0) {
+    return Tensor{};
   }
+  // TODO: add shape checking? I think this is contingent on whether we support broadcasting, so maybe leave this out for now?
   check_inputs(qa, qb);
 
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  auto requantize_multiplier = qa.q_scale() * qb.qscale() / output_scale;
+  auto requantize_multiplier = qa.q_scale() * qb.q_scale() / output_scale;
   // TODO: When cudnn enables support for broadcasting, we can remove this tensor
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
-  requantize_multiplier_tensor.fill_(requantize_multiplier);
   at::Tensor quantized_output = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
       output_scale,
       output_zero_point,
       at::MemoryFormat::ChannelsLast);
+  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  requantize_multiplier_tensor.fill_(requantize_multiplier);
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
@@ -57,7 +76,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
-    auto workspace = at::empty({workspace_size}, input.options().dtype(at::kByte));
+    auto workspace = at::empty({workspace_size}, qa.options().dtype(at::kByte));
     std::vector<void *> data_ptrs;
     std::vector<int64_t> uids;
     data_ptrs.reserve(10);
@@ -84,14 +103,14 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   if (search != execution_plan_cache.end()) {
     cudnn_frontend::ManagedOpaqueDescriptor plan_desc = search->second;
     run(plan_desc);
-    return;
+    return quantized_output;
   }
 
   // add_op computes qa + qb  (both inputs are int8)
   // add_output is a fp32 tensor for accumulation purposes
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-      .setxDesc(cudnn_utils::getTensorDescriptor(qa.sizes(), qa.strides(), CUDNN_DATA_INT8, 'a', key.input_alignment))
-      .setbDesc(cudnn_utils::getTensorDescriptor(qb.sizes(), qb.strides(), CUDNN_DATA_INT8, 'b', key.input_alignment))
+      .setxDesc(cudnn_utils::getTensorDescriptor(qa.sizes(), qa.strides(), CUDNN_DATA_INT8, 'a', key.input_a_alignment))
+      .setbDesc(cudnn_utils::getTensorDescriptor(qb.sizes(), qb.strides(), CUDNN_DATA_INT8, 'b', key.input_b_alignment))
       .setyDesc(cudnn_utils::getTensorDescriptor(add_output, 'c', key.output_alignment))
       .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(add_output)
       .build());
