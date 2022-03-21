@@ -504,7 +504,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `nondet_tol=<tol>` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `gradcheck_nondet_tol=<tol>`.
 - is a Module test (e.g., in common_nn.py), then modify the corresponding
   module_test entry to have `gradcheck_nondet_tol=<tol>`
@@ -717,7 +717,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `check_batched_grad=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `check_batched_grad=False` and/or `check_batched_gradgrad=False`.
 
 If you're modifying an existing operator that supports batched grad computation,
@@ -743,7 +743,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `check_batched_forward_grad=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `check_batched_forward_grad=False`
 """
 
@@ -1196,7 +1196,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `fast_mode=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `gradcheck_fast_mode=False`
 - is a Module test (e.g., in common_nn.py), then modify the corresponding
   module_test entry to have `gradcheck_fast_mode=False`
