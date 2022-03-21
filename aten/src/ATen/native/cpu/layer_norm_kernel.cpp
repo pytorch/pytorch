@@ -43,10 +43,12 @@ struct LayerNormKernelImplInternal {
     const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
     const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
     T* Y_data = Y->data_ptr<T>();
-    T* mean_data = mean->data_ptr<T>();
-    T* rstd_data = rstd->data_ptr<T>();
+    T* mean_data = mean ? mean->data_ptr<T>() : nullptr;
+    T* rstd_data = rstd ? rstd->data_ptr<T>() : nullptr;
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
+    const bool mean_null = mean_data == nullptr;
+    const bool rstd_null = rstd_data == nullptr;
     at::parallel_for(0, M, 1, [&](int64_t start, int64_t end) {
       for (const auto i : c10::irange(start, end)) {
         const T* X_ptr = X_data + i * N;
@@ -74,8 +76,12 @@ struct LayerNormKernelImplInternal {
               beta_data,
               N);
         }
-        mean_data[i] = mean_val;
-        rstd_data[i] = rstd_val;
+        if (!mean_null) {
+          mean_data[i] = mean_val;
+        }
+        if (!rstd_null) {
+          rstd_data[i] = rstd_val;
+        }
       }
     });
   }
@@ -102,10 +108,12 @@ struct LayerNormKernelImplInternal<BFloat16, T_ACC> {
     const T_ACC* gamma_data = gamma.defined() ? gamma.data_ptr<T_ACC>() : nullptr;
     const T_ACC* beta_data = beta.defined() ? beta.data_ptr<T_ACC>() : nullptr;
     BFloat16* Y_data = Y->data_ptr<BFloat16>();
-    T_ACC* mean_data = mean->data_ptr<T_ACC>();
-    T_ACC* rstd_data = rstd->data_ptr<T_ACC>();
+    T_ACC* mean_data = mean ? mean->data_ptr<T_ACC>() : nullptr;
+    T_ACC* rstd_data = rstd ? rstd->data_ptr<T_ACC>() : nullptr;
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
+    const bool mean_null = mean_data == nullptr;
+    const bool rstd_null = rstd_data == nullptr;
 
     // pre convert `gamma` and `beta` to float when they are both defined
     const bool pre_convert_gamma_beta = !gamma_null && !beta_null;
@@ -166,8 +174,12 @@ struct LayerNormKernelImplInternal<BFloat16, T_ACC> {
             Y_ptr[d] = (input_buffer_ptr[d] * scale + bias) * gamma_data[d] + beta_data[d];
           }
         }
-        mean_data[i] = T_ACC(mean_val);
-        rstd_data[i] = T_ACC(rstd_val);
+        if (!mean_null) {
+          mean_data[i] = T_ACC(mean_val);
+        }
+        if (!rstd_null) {
+          rstd_data[i] = T_ACC(rstd_val);
+        }
       }
     });
   }
