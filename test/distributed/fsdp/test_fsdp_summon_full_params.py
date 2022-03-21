@@ -82,7 +82,8 @@ class TestSummonFullParamsNoShard(FSDPTest):
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
-            modify_outer,
+            cpu_offload=CPUOffload(offload_params=False),
+            modify_outer=modify_outer,
         )
 
 
