@@ -71,6 +71,12 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 #endif
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+enum GEMMAndBiasActivationEpilogue {
+  None,
+  RELU,
+  GELU,
+};
+
 template <typename Dtype>
 void gemm_and_bias(
     bool transpose_mat1,
@@ -85,7 +91,8 @@ void gemm_and_bias(
     int64_t mat2_ld,
     const Dtype* bias,
     Dtype* result_ptr,
-    int64_t result_ld);
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \

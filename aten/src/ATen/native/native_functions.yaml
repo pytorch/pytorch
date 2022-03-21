@@ -5175,6 +5175,15 @@
     SparseCPU: s_addmm_sparse_dense_cpu_
     SparseCUDA: s_addmm_sparse_dense_cuda_
 
+- func: _addmm_activation.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CUDA: addmm_activation_out_cuda
+
+- func: _addmm_activation(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False) -> Tensor
+  structured_delegate: _addmm_activation.out
+  variants: function, method
+
 # NOTE [ Sparse: autograd and API ]
 #
 #
