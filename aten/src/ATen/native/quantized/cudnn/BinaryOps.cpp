@@ -13,6 +13,7 @@
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/QScheme.h>
+#include <torch/library.h>
 
 #include <unordered_map>
 
@@ -30,6 +31,7 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native
 
 namespace at {
 namespace native {
+namespace {
 // TODO: this is also in qadd.cpp and some other cpp files in quantized/cpu/. I think we should
 // move everything into a utilities file in quantized/ directory later.
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
@@ -47,22 +49,30 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized add
 template <bool kReluFused = false>
 Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point) {
+  std::cout << "cuda add" << std::endl;
   if (qa.numel() == 0) {
     return Tensor{};
   }
   // TODO: add shape checking? I think this is contingent on whether we support broadcasting, so maybe leave this out for now?
   check_inputs(qa, qb);
 
-  at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+  // cudnn expects tensors to be at least 3D. So we will append dummy dimensions if the input tensors are not at least 3D
+  // TODO: I feel this is expensive. Ask cudnn to support 1D and 2D tensors?
+  while (qa.dim() < 3) {
+    // this assumes qa and qb have the same size
+    qa = qa.unsqueeze(-1);
+    qb = qb.unsqueeze(-1);
+  }
+
+  at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   auto requantize_multiplier = qa.q_scale() * qb.q_scale() / output_scale;
   // TODO: When cudnn enables support for broadcasting, we can remove this tensor
   at::Tensor quantized_output = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
       output_scale,
-      output_zero_point,
-      at::MemoryFormat::ChannelsLast);
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat), at::MemoryFormat::ChannelsLast);
+      output_zero_point);
+  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(requantize_multiplier);
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
@@ -87,7 +97,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     uids = {'a', 'b', 'c', 'r', 'q'};
     if (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
-        uids.emplace_back('d');
+        uids.emplace_back('f');
     }
 
     auto variantPack = cudnn_frontend::VariantPackBuilder()
@@ -112,8 +122,8 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       .setxDesc(cudnn_utils::getTensorDescriptor(qa.sizes(), qa.strides(), CUDNN_DATA_INT8, 'a', key.input_a_alignment))
       .setbDesc(cudnn_utils::getTensorDescriptor(qb.sizes(), qb.strides(), CUDNN_DATA_INT8, 'b', key.input_b_alignment))
       .setyDesc(cudnn_utils::getTensorDescriptor(add_output, 'c', key.output_alignment))
-      .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(add_output)
-      .build());
+      .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(add_output)))
+      .build();
 
   // relu_op computes
   // relu( (qa + qb) * (qa_scale * qb_scale) / out_scale )
@@ -133,8 +143,8 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   // where requantize_multiplier = (qa_scale * qb_scale) / out_scale
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : add_op.getOutputTensor())
-    .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 's', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', cudnn_utils::getAlignment(quantized_output)))
+    .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 'r', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
+    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'q', cudnn_utils::getAlignment(quantized_output)))
     .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
 
@@ -163,10 +173,11 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   auto& fallback_list = fallback.getFallbackList();
 
   cudnn_frontend::EngineConfigList filtered_configs;
-  cudnn_utils::filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
-  cudnn_utils::filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
-
+  cudnn_utils::filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
+  cudnn_utils::filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
+  std::cout << "before" << std::endl;
   for (auto &cfg : engine_configs) {
+    std::cout << "asdf" << std::endl;
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
         .setHandle(handle)
@@ -175,6 +186,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       auto plan_desc = plan.get_desc();
       run(plan_desc);
       execution_plan_cache[key] = plan_desc;
+      std::cout << "here" << std::endl;
       return quantized_output;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
@@ -187,6 +199,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::add_relu"), TORCH_FN(add</*ReLUFused=*/true>));
 }
 
+} // namespace
 } // namespace native
 } // namespace at
 
