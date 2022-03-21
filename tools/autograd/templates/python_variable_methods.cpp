@@ -37,6 +37,7 @@
 #include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
+#include <ATen/FuncTorchTLS.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
@@ -790,6 +791,12 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
 
+  // temporary hack to improve functorch UX.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsInplaceRequiresGrad();
+  }
+
   auto requires_grad = r.toBool(0);
   // should we throw if requires_grad is true?  var.requires_grad = True throws here
   // but it's nice to let this be a no-op.
@@ -1107,7 +1114,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -1123,7 +1130,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,

@@ -7755,6 +7755,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("nvtxMarkA", ("roctxMarkA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePushA", ("roctxRangePushA", CONV_OTHER, API_ROCTX)),
         ("nvtxRangePop", ("roctxRangePop", CONV_OTHER, API_ROCTX)),
+        ("nvtxRangeStartA", ("roctxRangeStartA", CONV_OTHER, API_ROCTX)),
+        ("nvtxRangeEnd", ("roctxRangeStop", CONV_OTHER, API_ROCTX)),
     ]
 )
 

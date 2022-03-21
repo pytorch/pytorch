@@ -5,7 +5,7 @@ import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
-from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml, NamespaceHelper
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -58,7 +58,7 @@ def parse_backend_yaml(
     assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
     supported_autograd = yaml_values.pop('autograd', [])
-    assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
+    assert isinstance(supported_autograd, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop('full_codegen', [])
@@ -223,10 +223,12 @@ def gen_dispatchkey_nativefunc_headers(
         dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
         grouped_native_functions))))
 
+    ns_helper = NamespaceHelper(cpp_namespace)
     fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.h', 'DispatchKeyNativeFunctions.h', lambda: {
         'generated_comment': generated_comment,
-        'cpp_namespace': cpp_namespace,
+        'namespace_prologue': ns_helper.prologue,
         'class_name': class_name,
+        'namespace_epilogue': ns_helper.epilogue,
         'dispatch_declarations': backend_declarations + autograd_declarations,
     })
 
@@ -247,18 +249,9 @@ def gen_dispatcher_registrations(
         'ops_headers': '#include <ATen/Functions.h>',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
-        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False),
+        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False, rocm=False),
         'dispatch_helpers': dest.gen_registration_helpers(backend_index),
-        'dispatch_namespaced_definitions': list(concatMap(
-            dest.RegisterDispatchKey(
-                backend_index,
-                Target.NAMESPACED_DEFINITION,
-                selector,
-                rocm=False,
-                cpp_namespace=cpp_namespace,
-                class_method_name=f'{backend_dispatch_key}NativeFunctions'),
-            grouped_native_functions
-        )),
+        'dispatch_namespaced_definitions': '',
         'dispatch_anonymous_definitions': list(concatMap(
             dest.RegisterDispatchKey(
                 backend_index,
@@ -293,7 +286,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/tags.yaml')
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
     parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)

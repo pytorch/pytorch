@@ -615,6 +615,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class;
  */
 struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   TensorImpl() = delete;
+  virtual ~TensorImpl() override;
   // Note [Enum ImplType]
   // This enum is temporary. In the followup refactor we should
   // think about how to specialize TensorImpl creation for view
@@ -698,16 +699,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
+   *
+   * NOTE: sizes() is only `TENSORIMPL_MAYBE_VIRTUAL` for backward
+   * compatibility. See `set_sizes_customization_policy` for the
+   * encouraged customization point.
+   *
+   * NOTE: Currently, CustomizableMethodPolicy::CustomBehavior is not
+   * supported due to a lack of use case, but it can easily be added.
    */
   TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   {
+    if (C10_UNLIKELY(
+            sizes_customization_policy_ !=
+            static_cast<uint8_t>(CustomizableMethodPolicy::Default))) {
+      return sizes_nondefault_policy_impl();
+    }
     return sizes_and_strides_.sizes_arrayref();
   }
 #else
       ;
 #endif
 
+ private:
+  IntArrayRef sizes_nondefault_policy_impl() const;
+
+ public:
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
@@ -934,6 +951,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_ort() const {
     return key_set_.has(DispatchKey::ORT);
+  }
+
+  bool is_nested() const {
+    return key_set_.has(DispatchKey::NestedTensor);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
@@ -1475,9 +1496,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   void set_python_dispatch(bool k) {
     if (k) {
-      key_set_ = key_set_.add(DispatchKey::Python);
+      key_set_ =
+          key_set_.add(DispatchKey::Python).add(DispatchKey::PythonTLSSnapshot);
     } else {
-      key_set_ = key_set_.remove(DispatchKey::Python);
+      key_set_ = key_set_.remove(DispatchKey::Python)
+                     .remove(DispatchKey::PythonTLSSnapshot);
     }
   }
 
@@ -2405,22 +2428,31 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  protected:
-  // Policy for adjusting the behavior of is_contiguous(). Allows
-  // subclass customization while still being able to inline
-  // is_contiguous() in the common case.
-  enum class HasContiguityPolicy : uint8_t {
-    // Default behavior: check is_contiguous_ and similar bitflags.
+  // Policy for adjusting the behavior of customizable methods like
+  // is_contiguous() and sizes(). Allows subclass customization while
+  // still being able to inline the methods in the common case.
+  enum class CustomizableMethodPolicy : uint8_t {
+    // Default behavior.
     Default,
     // Throw a generic error message that this tensor type does not
-    // support is_contiguous.
-    ContiguityNotSupported,
-    // Call virtual is_contiguous_custom method to implement custom
-    // is_contiguous behavior.
+    // support the method in question.
+    NotSupported,
+    // For backward compatibility.
+    ContiguityNotSupported = NotSupported,
+    // Call virtual foo_custom method to implement custom foo
+    // behavior.
     CustomBehavior,
   };
 
-  void set_has_contiguity_policy(HasContiguityPolicy p) {
+  // For backward compatibility.
+  using HasContiguityPolicy = CustomizableMethodPolicy;
+
+  void set_has_contiguity_policy(CustomizableMethodPolicy p) {
     has_contiguity_ = static_cast<uint8_t>(p);
+  }
+
+  void set_sizes_customization_policy(CustomizableMethodPolicy p) {
+    sizes_customization_policy_ = static_cast<uint8_t>(p);
   }
 
   Storage storage_;
@@ -2533,7 +2565,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-    has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
+    has_contiguity_ = static_cast<uint8_t>(CustomizableMethodPolicy::Default);
 
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
@@ -2544,6 +2576,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
     owns_pyobj_ = false;
+    sizes_customization_policy_ =
+        static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
   }
 
@@ -2603,6 +2637,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Python object's refcount goes to zero, we flip the ownership
   // direction (to make sure the pyobj stays live).
   bool owns_pyobj_ : 1;
+
+  // Customization policy for the sizes() virtual method.
+  /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but
@@ -2720,6 +2757,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 // We use a templatized class to both contain the logic of checking the sizes
 // as well as to provide compile-time information that might be useful in
 // figuring out why sizes may have changed.
+// All the compile time information is given by the template fields that are
+// always printed by the compiler when the static_assert fails.
 template <
     size_t cplusplus = __cplusplus,
     size_t clang_ver_major = C10_CLANG_MAJOR_VERSION,
@@ -2730,6 +2769,44 @@ template <
     size_t cuda_version_major = C10_CUDA_VERSION_MAJOR,
     size_t ptr_size = sizeof(void*)>
 class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
+  // Names of (non-bitfield) fields in TensorImpl; used to provide
+  // compile-time info about fields whose size changes unexpectedly.
+  enum class FieldNameEnum {
+    storage_,
+    autograd_meta_,
+    named_tensor_meta_,
+    version_counter_,
+    pyobj_interpreter_,
+    pyobj_,
+    sizes_and_strides_,
+    storage_offset_,
+    numel_,
+    data_type_,
+    device_opt_,
+    key_set_,
+    TOTAL_SIZE
+  };
+
+  // Provides compile-time equality check that reveals what numbers
+  // were used and on which quantity
+  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
+  constexpr static bool are_equal() {
+    static_assert(
+        Actual == Expected,
+        "Actual and Expected sizes of a field did not match!");
+    return true;
+  }
+
+  // Provides compile-time <= check that reveals what numbers
+  // were used and on which quantity
+  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
+  constexpr static bool is_le() {
+    static_assert(
+        Actual <= Expected,
+        "Actual and Expected sizes of a field did not match!");
+    return true;
+  }
+
  public:
   // Compile-time check that TensorImpl field sizes are as expected
   //
@@ -2752,19 +2829,19 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     constexpr size_t tsize = 20 * sizeof(int64_t);
 
     // clang-format off
-    static_assert(sizeof(storage_)            == 4, "Size of storage_ changed!");
-    static_assert(sizeof(autograd_meta_)      == 4, "Size of autograd_meta_ changed!");
-    static_assert(sizeof(named_tensor_meta_)  == 4, "Size of named_tensor_meta_ changed!");
-    static_assert(sizeof(version_counter_)    == 4, "Size of version_counter_ changed!");
-    static_assert(sizeof(pyobj_interpreter_)  == 4, "Size of pyobj_interpreter_ changed!");
-    static_assert(sizeof(pyobj_)              == 4, "Size of pyobj_ changed!");
-    static_assert(sizeof(sizes_and_strides_)  <= 88,"Size of sizes_and_strides_ changed!");
-    static_assert(sizeof(storage_offset_)     == 8, "Size of storage_offset_ changed!");
-    static_assert(sizeof(numel_)              == 8, "Size of numel_ changed!");
-    static_assert(sizeof(data_type_)          == 2, "Size of data_type_ changed!");
-    static_assert(sizeof(device_opt_)         == 3, "Size of device_opt_ changed!");
-    static_assert(sizeof(key_set_)            == 8, "Size of key_set_ changed!");
-    static_assert(sizeof(TensorImpl)          <= tsize, "Total size changed!");
+    are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();
+    are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(named_tensor_meta_),  4,  FieldNameEnum::named_tensor_meta_>();
+    are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_interpreter_),  4,  FieldNameEnum::pyobj_interpreter_>();
+    are_equal<sizeof(pyobj_),              4,  FieldNameEnum::pyobj_>();
+    is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
     return true;
@@ -2775,22 +2852,22 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     constexpr size_t tsize = 26 * sizeof(int64_t);
 
     // clang-format off
-    static_assert(sizeof(storage_)            == 8, "Size of storage_ changed!");
+    are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
     // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
     // figured out how to detect those via macro preprocessors yet, so we use <=
     // comparisons for the relevant fields.
-    static_assert(sizeof(autograd_meta_)      <= 16,"Size of autograd_meta_ changed!");
-    static_assert(sizeof(named_tensor_meta_)  <= 16,"Size of named_tensor_meta_ changed!");
-    static_assert(sizeof(version_counter_)    == 8, "Size of version_counter_ changed!");
-    static_assert(sizeof(pyobj_interpreter_)  == 8, "Size of pyobj_interpreter_ changed!");
-    static_assert(sizeof(pyobj_)              == 8, "Size of pyobj_ changed!");
-    static_assert(sizeof(sizes_and_strides_)  == 88,"Size of sizes_and_strides_ changed!");
-    static_assert(sizeof(storage_offset_)     == 8, "Size of storage_offset_ changed!");
-    static_assert(sizeof(numel_)              == 8, "Size of numel_ changed!");
-    static_assert(sizeof(data_type_)          == 2, "Size of data_type_ changed!");
-    static_assert(sizeof(device_opt_)         == 3, "Size of device_opt_ changed!");
-    static_assert(sizeof(key_set_)            == 8, "Size of key_set_ changed!");
-    static_assert(sizeof(TensorImpl)          <= tsize, "Total size changed!");
+    is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
+    is_le<sizeof(named_tensor_meta_),     16,  FieldNameEnum::named_tensor_meta_>();
+    are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_interpreter_),  8,  FieldNameEnum::pyobj_interpreter_>();
+    are_equal<sizeof(pyobj_),              8,  FieldNameEnum::pyobj_>();
+    are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
     return true;
@@ -2803,7 +2880,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 // a static assert to prove there is no run-time behaviour.
 // Since the methods we call return either true or fail their
 // own static_asserts, we should never see the error messages
-// below.
+// below. We have to provide it though for c++ <17.
 static_assert(
     C10_TensorImpl_Size_Check_Dummy_Class<>::check_sizes(),
     "You should not see this message.");

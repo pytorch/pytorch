@@ -12,8 +12,8 @@ def deindent(code: str) -> str:
     return '\n'.join(lines)
 
 
-def gen_external(native_functions_path, external_path):
-    native_functions = parse_native_yaml(native_functions_path)
+def gen_external(native_functions_path, tags_path, external_path):
+    native_functions = parse_native_yaml(native_functions_path, tags_path)
     func_decls = []
     func_registrations = []
     for func in native_functions:

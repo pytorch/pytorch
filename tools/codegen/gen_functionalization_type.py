@@ -107,7 +107,7 @@ def emit_view_functionalization_body(
     # view op case
     assert f.is_view_op
 
-    if 'is_inplace_view' in f.tags.keys() and f.tags['is_inplace_view']:
+    if 'is_inplace_view' in f.tags:
         # This op is both an inplace op AND a view op.
         # See Note [Functionalization Pass - Inplace View Ops] for details.
         # I currently have the view meta call into the out-of-place variant of the view, to avoid
@@ -142,7 +142,7 @@ def emit_view_functionalization_body(
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     meta_call_args = [e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)]
 
-    if 'is_inplace_view' in f.tags.keys() and f.tags['is_inplace_view']:
+    if 'is_inplace_view' in f.tags:
         # See Note [Functionalization Pass - Inplace View Ops] for more details
         return f"""
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(

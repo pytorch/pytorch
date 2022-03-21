@@ -362,6 +362,8 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       return val.toIntVector();
     } else if (val.isDoubleList()) {
       return val.toDoubleVector();
+    } else if (val.isString()) {
+      return val.toStringRef();
     } else {
       throw unsupported_dtype(val.type()->str());
     }
@@ -918,6 +920,17 @@ ExprHandle TensorExprKernel::getStrideArg(
   return it->second;
 }
 
+std::vector<torch::jit::StrideInput>& TensorExprKernel::
+    getSymbolicInputStrideDesc(const torch::jit::Value* value) {
+  for (size_t i : c10::irange(graph_->inputs().size())) {
+    if (value == graph_->inputs().at(i)) {
+      TORCH_INTERNAL_ASSERT(sym_stride_inputs_.count(i));
+      return sym_stride_inputs_[i];
+    }
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 std::vector<ExprHandle> TensorExprKernel::getInputStrides(
     const torch::jit::Value* input,
     const std::vector<ExprHandle>& inputTensorDims) {
@@ -933,8 +946,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
   }
 
   size_t rank = inputTensorDims.size();
-  TORCH_INTERNAL_ASSERT(symbolic_strides_.count(input));
-  std::vector<StrideInput>& stride_input = symbolic_strides_[input];
+  std::vector<StrideInput>& stride_input = getSymbolicInputStrideDesc(input);
   if (stride_input.size() == 1 &&
       (stride_input[0] == StrideInput::TENSOR_CONT_CHANNELS_LAST ||
        stride_input[0] == StrideInput::TENSOR_CONT)) {
@@ -999,14 +1011,17 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       auto tt = input->type()->cast<TensorType>();
       bool contiguous_concrete_tensor =
           (input->isCompleteTensor() && isContiguous(input));
-      bool contiguous_strided_tensor = symbolic_strides_.count(input) &&
-          symbolic_strides_[input].size() == 1 &&
-          symbolic_strides_[input][0] == torch::jit::StrideInput::TENSOR_CONT;
+      bool contiguous_sym_tensor = false;
+      if (has_symbolic_shapes_) {
+        auto desc = getSymbolicInputStrideDesc(input);
+        contiguous_sym_tensor =
+            desc.size() == 1 && desc[0] == torch::jit::StrideInput::TENSOR_CONT;
+      }
 
       // We don't need to copy the input if:
       //  1) it is not an output AND
       //  2) it is contiguous
-      bool contiguous = contiguous_concrete_tensor || contiguous_strided_tensor;
+      bool contiguous = contiguous_concrete_tensor || contiguous_sym_tensor;
       if (!outputs_set.count(input) && contiguous) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
@@ -1020,12 +1035,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       // if the input isn't contiguous or is an output,
       // write strided input into  contiguous buffer that is
       // then used in all further compute
-      std::vector<DimArg> inputTensorDims;
       auto size_handles = sizesFromSymbolicShape(tt->symbolic_sizes());
-      for (size_t i = 0; i < size_handles.size(); i++) {
-        auto size = size_handles[i];
-        inputTensorDims.emplace_back(DimArg(size, "i" + c10::to_string(i)));
-      }
       auto inputTensorStrides = getInputStrides(input, size_handles);
       ExprHandle flat_size = 1;
       for (size_t i = 0; i < size_handles.size(); ++i) {
@@ -1044,7 +1054,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
 
       result = Compute(
           "input" + c10::to_string(bufs_.size() + 1),
-          inputTensorDims,
+          size_handles,
           [&](const std::vector<VarHandle>& axes) {
             ExprHandle idx = 0;
             for (size_t i = 0; i < axes.size(); i++) {
@@ -1131,11 +1141,10 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
   // for stride in strides_from_largest_to_smallest:
   //     cur_idx = absolute // stride
   //     absolute = absolute % stride
-  auto dims = c10::fmap<DimArg>(sizes);
   std::vector<ExprPtr> default_strides = make_contiguous_strides(sizes);
   auto zero = LongImm::make(0);
   return Compute(
-      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+      "output_1", sizes, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
@@ -1178,7 +1187,6 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       tensorOutputStrideDesc_[v->offset()] ==
       torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
   auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
-  auto dims = c10::fmap<DimArg>(sizes);
   auto strides = make_channels_last_strides(sizes);
   // For a tensor with dimensions N C H W, channels last
   // format will is in format N H W C,
@@ -1230,7 +1238,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
     return Tensor(buf, nullptr);
   }
 
-  auto dims = c10::fmap<DimArg>(sizesForValue(v));
+  auto dims = sizesForValue(v);
   auto zero = LongImm::make(0);
   std::vector<size_t> sorted_stride_indices = reverse_sort_indices(strides);
 
@@ -1382,8 +1390,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
       if (!tt) {
         continue;
       }
-      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(input));
-      auto symbolic_stride = symbolic_strides_[input];
+      auto symbolic_stride = getSymbolicInputStrideDesc(input);
       for (size_t j = 0; j < symbolic_stride.size(); ++j) {
         if (symbolic_stride[j] == torch::jit::StrideInput::S_AS_ARG) {
           VarHandle v("v" + input_name_map_[input], kLong);
@@ -1492,7 +1499,8 @@ void TensorExprKernel::compile() {
   }
 
   // Move output operands from `bufs_` to `bufOutputs_`
-  for (auto& output : graph_->outputs()) {
+  for (auto i : c10::irange(graph_->outputs().size())) {
+    auto& output = graph_->outputs().at(i);
     if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }
@@ -1513,10 +1521,9 @@ void TensorExprKernel::compile() {
     if (has_symbolic_shapes_) {
       auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
       tensorOutputSymbolicSizes_.push_back(sizes);
-      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(output));
-      auto stride_desc = symbolic_strides_[output];
-      TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);
-      tensorOutputStrideDesc_.push_back(stride_desc[0]);
+      TORCH_INTERNAL_ASSERT(sym_stride_outputs_.count(i));
+      auto stride_desc = sym_stride_outputs_[i];
+      tensorOutputStrideDesc_.push_back(stride_desc);
       Tensor properly_strided_output =
           convertSymbolicOutputToCorrectStrides(output);
       if (properly_strided_output.stmt()) {
@@ -1595,8 +1602,22 @@ TensorExprKernel::TensorExprKernel(
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),
-      kernel_func_name_(kernel_func_name),
-      symbolic_strides_(std::move(symbolic_strides)) {
+      kernel_func_name_(kernel_func_name) {
+  // convert symbolic_stride to map by output and input index,
+  // since we may manipulate output pointers in graph manipulation
+  for (size_t i : c10::irange(graph_->inputs().size())) {
+    if (symbolic_strides.count(graph_->inputs().at(i))) {
+      sym_stride_inputs_[i] = symbolic_strides[graph_->inputs().at(i)];
+    }
+  }
+  for (size_t i : c10::irange(graph_->outputs().size())) {
+    if (symbolic_strides.count(graph_->outputs().at(i))) {
+      auto& desc = symbolic_strides[graph_->outputs().at(i)];
+      TORCH_INTERNAL_ASSERT(desc.size() == 1);
+      sym_stride_outputs_[i] = desc[0];
+    }
+  }
+
   allow_fallback_ = fallbackAllowed();
 
   if (!allow_fallback_) {
@@ -1616,7 +1637,7 @@ TensorExprKernel::TensorExprKernel(
   }
 }
 
-void TensorExprKernel::run(Stack& stack) {
+void TensorExprKernel::run(Stack& stack) const {
   if (!use_fallback_ && !allow_fallback_) {
     runKernel(stack);
   } else if (!use_fallback_ && allow_fallback_) {
@@ -1630,37 +1651,44 @@ void TensorExprKernel::run(Stack& stack) {
   }
 }
 
-void TensorExprKernel::updateOutputSizesAndStrides(
-    const at::ArrayRef<IValue>& inputs) {
+void TensorExprKernel::getStaticOutputSizesAndStrides(
+    const at::ArrayRef<IValue>& inputs,
+    std::vector<std::vector<int64_t>>* sizes,
+    std::vector<std::vector<int64_t>>* strides) const {
   TORCH_INTERNAL_ASSERT(has_symbolic_shapes_);
   // If there are symbolic shapes, then the output tensor size wouldn't have
   // been computed at compile time. That has to be done here by using the
   // symbolic shape input params passed in to this call.
   TORCH_INTERNAL_ASSERT(
       tensorOutputSymbolicSizes_.size() == bufOutputs_.size());
-  TORCH_INTERNAL_ASSERT(tensorOutputSizes_.size() == bufOutputs_.size());
-  TORCH_INTERNAL_ASSERT(tensorOutputStrides_.size() == bufOutputs_.size());
+
+  TORCH_INTERNAL_ASSERT(sizes);
+  TORCH_INTERNAL_ASSERT(strides);
+  *sizes = tensorOutputSizes_;
+  *strides = tensorOutputStrides_;
+  auto& static_sizes = *sizes;
+  auto& static_strides = *strides;
   for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
-    tensorOutputSizes_[i].clear();
+    static_sizes[i].clear();
     for (auto t : tensorOutputSymbolicSizes_[i]) {
       if (t.AsNode<LongImm>()) {
-        tensorOutputSizes_[i].emplace_back(immediateAs<int64_t>(t.node()));
+        static_sizes[i].emplace_back(immediateAs<int64_t>(t.node()));
       } else {
         auto input_pos = shapeSymbolInputPos_.at(t.node());
         TORCH_INTERNAL_ASSERT(input_pos < inputs.size());
         TORCH_INTERNAL_ASSERT(inputs[input_pos].isInt());
-        tensorOutputSizes_[i].emplace_back(inputs[input_pos].toInt());
+        static_sizes[i].emplace_back(inputs[input_pos].toInt());
       }
     }
 
     if (tensorOutputStrideDesc_[i] == torch::jit::StrideInput::TENSOR_CONT) {
-      tensorOutputStrides_[i] =
-          TensorType::contiguousStridesOf(tensorOutputSizes_[i]);
+      static_strides[i] = TensorType::contiguousStridesOf(static_sizes[i]);
+
     } else if (
         tensorOutputStrideDesc_[i] ==
         torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST) {
-      tensorOutputStrides_[i] =
-          at::get_channels_last_strides_2d(tensorOutputSizes_[i]);
+      static_strides[i] = at::get_channels_last_strides_2d(static_sizes[i]);
+
     } else {
       std::string output_desc = toString(tensorOutputStrideDesc_[i]);
       TORCH_INTERNAL_ASSERT(
@@ -1671,7 +1699,7 @@ void TensorExprKernel::updateOutputSizesAndStrides(
 
 std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     const at::ArrayRef<IValue>& inputs,
-    std::vector<at::Tensor>& outputs) {
+    std::vector<at::Tensor>& outputs) const {
   // TODO: preallocate `runArgs` during compilation and fill in values where
   // possible (e.g. for constant tensors)
   std::vector<CodeGen::CallArg> runArgs;
@@ -1691,7 +1719,9 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   }
 
   if (has_symbolic_shapes_) {
-    updateOutputSizesAndStrides(inputs);
+    std::vector<std::vector<int64_t>> static_sizes;
+    std::vector<std::vector<int64_t>> static_strides;
+    getStaticOutputSizesAndStrides(inputs, &static_sizes, &static_strides);
 
     // add stride args
     for (const auto& input_stride_arg : input_stride_args_) {
@@ -1699,18 +1729,30 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
           inputs[input_stride_arg.first].toTensor().strides().at(
               input_stride_arg.second));
     }
-  }
 
-  for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
-    auto const& opts = tensorOutputTensorOptions_[i];
-    outputs.emplace_back(codegen_->empty_strided(
-        tensorOutputSizes_[i],
-        tensorOutputStrides_[i],
-        opts.dtype,
-        opts.layout,
-        opts.device,
-        opts.pinned_memory));
-    runArgs.emplace_back(outputs.back().data_ptr());
+    for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
+      auto const& opts = tensorOutputTensorOptions_[i];
+      outputs.emplace_back(codegen_->empty_strided(
+          static_sizes[i],
+          static_strides[i],
+          opts.dtype,
+          opts.layout,
+          opts.device,
+          opts.pinned_memory));
+      runArgs.emplace_back(outputs.back().data_ptr());
+    }
+  } else {
+    for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
+      auto const& opts = tensorOutputTensorOptions_[i];
+      outputs.emplace_back(codegen_->empty_strided(
+          tensorOutputSizes_[i],
+          tensorOutputStrides_[i],
+          opts.dtype,
+          opts.layout,
+          opts.device,
+          opts.pinned_memory));
+      runArgs.emplace_back(outputs.back().data_ptr());
+    }
   }
 
   for (auto c : constants_) {
@@ -1724,7 +1766,7 @@ StmtPtr TensorExprKernel::getCodeGenStmt() {
   return codegen_->stmt();
 }
 
-void TensorExprKernel::runKernel(Stack& stack) {
+void TensorExprKernel::runKernel(Stack& stack) const {
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
   std::vector<at::Tensor> outputs;
@@ -1751,7 +1793,7 @@ void TensorExprKernel::runKernel(Stack& stack) {
 
 void TensorExprKernel::runFast(
     const std::vector<void*>& inputs,
-    const std::vector<void*>& outputs) {
+    const std::vector<void*>& outputs) const {
   std::vector<void*> args(inputs);
   args.reserve(inputs.size() + outputs.size() + constants_.size());
   args.insert(args.end(), outputs.begin(), outputs.end());
@@ -1765,7 +1807,7 @@ void TensorExprKernel::runFast(
   codegen_->call_raw(args);
 }
 
-void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
+void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
   TORCH_INTERNAL_ASSERT(
       device_ == at::kCPU,
       "Pre-allocated output tensors are supported only on CPUs.");
@@ -1791,14 +1833,28 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
     }
   }
 
+  std::vector<int64_t> stride_values(input_stride_args_.size());
   if (has_symbolic_shapes_) {
-    updateOutputSizesAndStrides(stack_inputs);
+    std::vector<std::vector<int64_t>> static_sizes;
+    std::vector<std::vector<int64_t>> static_strides;
+    getStaticOutputSizesAndStrides(
+        stack_inputs, &static_sizes, &static_strides);
+
+    // add stride args
+    for (auto idx : c10::irange(input_stride_args_.size())) {
+      const auto& input_stride_arg = input_stride_args_[idx];
+      stride_values[idx] =
+          stack_inputs[input_stride_arg.first].toTensor().strides().at(
+              input_stride_arg.second);
+      args.emplace_back(&stride_values[idx]);
+    }
+
     TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto& out = stack_outputs[i].toTensor();
       // This has only been tested on CPUs.
       // TODO: Test on GPUs.
-      out.resize_(tensorOutputSizes_[i]);
+      out.resize_(static_sizes[i]);
       args.emplace_back(out.data_ptr());
     }
   } else {

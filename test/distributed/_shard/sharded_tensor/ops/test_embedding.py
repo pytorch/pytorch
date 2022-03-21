@@ -21,6 +21,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
     with_comms,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
+    clone_module_parameter,
     generate_chunk_sharding_specs_for_test,
     generate_local_weight_sharding_params_for_test,
 )
@@ -64,8 +65,8 @@ class TestShardedEmbedding(ShardedTensorTestBase):
         )
 
         # Copy the weights from local embedding
-        sharded_embedding.weight = torch.nn.Parameter(
-            local_embedding.weight.detach().clone()
+        sharded_embedding.weight = clone_module_parameter(
+            local_embedding, "weight"
         )
 
         # Shard the parameter.

@@ -145,16 +145,16 @@ class TORCH_API TensorExprKernel {
             pre_alloc,
             symbolic_strides) {}
 
-  void run(Stack& stack);
+  void run(Stack& stack) const;
   void runFast(
       const std::vector<void*>& inputs,
-      const std::vector<void*>& outputs);
+      const std::vector<void*>& outputs) const;
   // Expected format of stack:
   //  ... <outputs> <inputs>
   // i.e., output IValues must be below the input IValues in the stack.
-  void runWithAllocatedOutputs(Stack& stack);
+  void runWithAllocatedOutputs(Stack& stack) const;
 
-  void fallback(Stack& stack) {
+  void fallback(Stack& stack) const {
     InterpreterState(code_).run(stack);
   }
   void recompile();
@@ -196,9 +196,8 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-  void runKernel(Stack& stack);
+  void runKernel(Stack& stack) const;
 
-  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
@@ -219,10 +218,14 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
-  void updateOutputSizesAndStrides(const at::ArrayRef<IValue>& inputs);
+  void getStaticOutputSizesAndStrides(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<std::vector<int64_t>>* static_sizes,
+      std::vector<std::vector<int64_t>>* static_strides) const;
+
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
-      std::vector<at::Tensor>& outputs);
+      std::vector<at::Tensor>& outputs) const;
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   Tensor bindInput(const torch::jit::Value* input);
@@ -271,6 +274,8 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
+  std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
+      const torch::jit::Value* value);
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -319,10 +324,9 @@ class TORCH_API TensorExprKernel {
   // map from <input index, tensor dimension> to stride as arg VarHandle
   std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
       strideArgToVar_;
-  std::unordered_map<
-      const torch::jit::Value*,
-      std::vector<torch::jit::StrideInput>>
-      symbolic_strides_;
+  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
+      sym_stride_inputs_;
+  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

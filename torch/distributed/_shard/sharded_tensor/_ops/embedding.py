@@ -104,7 +104,7 @@ def sharded_embedding(types, args, kwargs, pg):
     norm_type = kwargs.get("norm_type")
     padding_idx = kwargs.get("padding_idx")
 
-    local_shard = weight.local_shards()[0].tensor.contiguous()
+    local_shard = weight.local_tensor().contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
@@ -224,7 +224,6 @@ def _handle_col_wise_sharding(
 
     output = _handle_col_wise_sharding_base(
         torch.nn.functional.embedding,
-        weight.size(1),
         len(input.size()),
         input,
         world_size,

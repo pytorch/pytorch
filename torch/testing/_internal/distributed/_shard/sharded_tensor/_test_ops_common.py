@@ -1,3 +1,4 @@
+import torch
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
 )
@@ -70,3 +71,17 @@ def generate_local_weight_sharding_params_for_test(
             break
         current_offsets += chunk_size
     return start_pos, chunk_size
+
+
+def clone_module_parameter(module, param_name):
+    """
+    Clone a parameter from a given existing module.
+
+    Args:
+        module (:class:`torch.nn.Module`): Module whose parameter needs to be cloned.
+        param_name (str): Name of the parameter of ``module`` that needs to be cloned.
+
+    Returns: cloned tensor as :class:`torch.nn.Parameter`.
+    """
+    tensor = getattr(module, param_name)
+    return torch.nn.Parameter(tensor.detach().clone())

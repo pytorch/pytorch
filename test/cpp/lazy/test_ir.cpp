@@ -12,7 +12,7 @@ namespace lazy {
 class TestLeafNode : public Node {
  public:
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(param)),
+      : Node(OpKind(), /* num_outputs */ 1, /* hash_func */[&](bool /*bakeInSizes*/) -> hash_t { return Hash(param); }),
         param_(param) {}
   ~TestLeafNode() override = default;
 

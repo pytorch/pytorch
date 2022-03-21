@@ -777,14 +777,14 @@ TEST(ExternalCall, ComputeInterop) {
 
   Tensor Input = Compute(
       "Input",
-      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
+      {1, 16, 32, 32},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
           const VarHandle& w) { return FloatImm::make(5.0f); });
   Tensor Weight = Compute(
       "Weight",
-      {{16, "n"}, {16, "c"}, {1, "kh"}, {1, "kw"}},
+      {16, 16, 1, 1},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
@@ -806,7 +806,7 @@ TEST(ExternalCall, ComputeInterop) {
           {}));
   Tensor Result = Compute(
       "Result",
-      {{1, "n"}, {16, "c"}, {32, "h"}, {32, "w"}},
+      {1, 16, 32, 32},
       [&](const VarHandle& n,
           const VarHandle& c,
           const VarHandle& h,
@@ -866,14 +866,12 @@ TEST(ExternalCall, Inlining) {
 
   BufHandle MatmulResultBuf("MatmulResult", {8, 8}, kFloat);
 
-  Tensor A = Compute(
-      "A", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return FloatImm::make(5.0f);
-      });
-  Tensor B = Compute(
-      "B", {{8, "i"}, {8, "j"}}, [&](const VarHandle& i, const VarHandle& j) {
-        return FloatImm::make(4.0f);
-      });
+  Tensor A = Compute("A", {8, 8}, [&](const VarHandle& i, const VarHandle& j) {
+    return FloatImm::make(5.0f);
+  });
+  Tensor B = Compute("B", {8, 8}, [&](const VarHandle& i, const VarHandle& j) {
+    return FloatImm::make(4.0f);
+  });
   Tensor MatmulResult = Tensor(
       MatmulResultBuf.node(),
       ExternalCall::make(
@@ -881,10 +879,8 @@ TEST(ExternalCall, Inlining) {
           "nnc_aten_matmul",
           {BufHandle(A.buf()), BufHandle(B.buf())},
           {}));
-  Tensor Result = Compute(
-      "Result",
-      {{8, "i"}, {8, "j"}},
-      [&](const VarHandle& i, const VarHandle& j) {
+  Tensor Result =
+      Compute("Result", {8, 8}, [&](const VarHandle& i, const VarHandle& j) {
         return MatmulResult.load(i, j) + FloatImm::make(3.0f);
       });
 

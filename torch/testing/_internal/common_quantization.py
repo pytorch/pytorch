@@ -872,8 +872,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
-            qgraph = convert_fx(prepared)
-            qgraph_reference = convert_fx(prepared_copy, is_reference=True)
+            qgraph = convert_fx(copy.deepcopy(prepared))
+            qgraph_reference = convert_fx(copy.deepcopy(prepared), is_reference=True)
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)

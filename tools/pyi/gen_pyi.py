@@ -214,6 +214,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         'pixel_shuffle',
         'pixel_unshuffle',
         'channel_shuffle',
+        'native_channel_shuffle',
         'pdist',
         'cosine_similarity',
     ]
@@ -258,7 +259,7 @@ def gen_nn_functional(fm: FileManager) -> None:
     })
 
 
-def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -> None:
+def gen_pyi(native_yaml_path: str, tags_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -> None:
     """gen_pyi()
 
     This function generates a pyi file for torch.
@@ -387,7 +388,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
             ' other: Union[Tensor, Number],'
             ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     function_signatures = load_signatures(native_functions, deprecated_yaml_path, method=False, pyi=True)
@@ -467,6 +468,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         '_is_view': ['def _is_view(self) -> _bool: ...'],
         'is_cuda': ['is_cuda: _bool'],
         'is_leaf': ['is_leaf: _bool'],
+        'is_nested': ['is_nested: _bool'],
         'is_sparse': ['is_sparse: _bool'],
         'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],
@@ -482,8 +484,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
-        'set_': ['def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...',
-                 'def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...'],
+        'set_': ['def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...',
+                 'def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
         'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
@@ -623,6 +625,9 @@ def main() -> None:
     parser.add_argument('--native-functions-path', metavar='NATIVE',
                         default='aten/src/ATen/native/native_functions.yaml',
                         help='path to native_functions.yaml')
+    parser.add_argument('--tags-path', metavar='TAGS',
+                        default='aten/src/ATen/native/tags.yaml',
+                        help='path to tags.yaml')
     parser.add_argument('--deprecated-functions-path', metavar='DEPRECATED',
                         default='tools/autograd/deprecated.yaml',
                         help='path to deprecated.yaml')
@@ -631,7 +636,7 @@ def main() -> None:
                         help='path to output directory')
     args = parser.parse_args()
     fm = FileManager(install_dir=args.out, template_dir='.', dry_run=False)
-    gen_pyi(args.native_functions_path, args.deprecated_functions_path, fm)
+    gen_pyi(args.native_functions_path, args.tags_path, args.deprecated_functions_path, fm)
 
 
 if __name__ == '__main__':

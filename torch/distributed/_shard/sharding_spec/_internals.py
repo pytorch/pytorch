@@ -1,49 +1,6 @@
-from dataclasses import dataclass
-from typing import List, Union
+from typing import List
 
-import torch
-from torch.distributed.remote_device import _remote_device
-
-@dataclass
-class ShardMetadata(object):
-    """
-    Represents a shard of the overall Tensor including its
-    offsets, lengths and device placement.
-
-    Args:
-        shard_offsets(List[int]): Offsets in the original tensor indicating
-            the start offsets for this shard. Should have the same rank as
-            the original tensor.
-        shard_sizes(List[int]): Integers indicating the size of each
-            dimension for this shard. Should have the same rank as the
-            original tensor.
-        placement(:class:`torch.distributed._remote_device`):
-            Specifies the placement of this shard.
-    """
-
-    __slots__ = ['shard_offsets', 'shard_sizes', 'placement']
-
-    shard_offsets: List[int]
-    shard_sizes: List[int]
-    placement: Union[str, _remote_device]
-
-    def __post_init__(self):
-        if isinstance(self.placement, str):
-            self.placement = torch.distributed._remote_device(self.placement)
-
-        if len(self.shard_offsets) != len(self.shard_sizes):
-            raise ValueError(
-                f'shard_offsets and shard_sizes should have '
-                f'the same number of elements, found {len(self.shard_offsets)} '
-                f'and {self.shard_sizes} respectively')
-
-        for i in range(len(self.shard_offsets)):
-            if self.shard_offsets[i] < 0:
-                raise ValueError('shard_offsets should be >=0')
-            if self.shard_sizes[i] < 0:
-                raise ValueError('shard_sizes should be >= 0')
-
-
+from torch.distributed._shard.metadata import ShardMetadata
 
 def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetadata):
     """
@@ -150,3 +107,30 @@ def get_chunked_dim_size(dim_size, split_size, idx):
         An int indicating the dim size of the chunk.
     """
     return max(min(dim_size, split_size * (idx + 1)) - split_size * idx, 0)
+
+def get_chunk_sharding_params(sharding_dim_size, world_size, spec, rank):
+    """
+    Generate the start pos and offset length for the current rank for
+    chunk sharding.
+
+    Args:
+        sharding_dim_size(int): The dimension length which we shard on.
+        world_size(int): number of ranks.
+        spec (:class:`torch.distributed._shard.sharding_spec.ChunkShardingSpec`):
+            sharding spec.
+        rank(int): # of cuda process.
+
+    Returns:
+        start_pos(int): start position of sharded tensor on the given rank.
+        chunk_size(int): chunk size of sharded tensor on the given rank.
+    """
+    split_size = get_split_size(sharding_dim_size, world_size)
+    current_offsets = 0
+    start_pos = current_offsets
+    for idx, placement in enumerate(spec.placements):
+        chunk_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
+        if rank == placement.rank():
+            start_pos = current_offsets
+            break
+        current_offsets += chunk_size
+    return start_pos, chunk_size

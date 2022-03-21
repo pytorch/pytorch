@@ -8,7 +8,7 @@ void tupleIndex(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   auto norm_index = normalizeIndex(index, tuple->elements().size());
   if (norm_index < 0 ||
-      norm_index > static_cast<int64_t>(tuple->elements().size())) {
+      norm_index >= static_cast<int64_t>(tuple->elements().size())) {
     throw std::out_of_range("Tuple list index out of range");
   }
   stack.emplace_back(tuple->elements()[norm_index]);

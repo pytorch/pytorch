@@ -216,7 +216,7 @@ elseif(BLAS STREQUAL "MKL")
     set(CAFFE2_USE_MKL ON)
     set(BLAS_INFO "mkl")
     set(BLAS_FOUND 1)
-    set(BLAS_LIBRARIES caffe2::mkl)
+    set(BLAS_LIBRARIES ${MKL_LIBRARIES})
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
@@ -1070,11 +1070,24 @@ if(BUILD_PYTHON)
   endif()
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
-    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    add_library(python::python INTERFACE IMPORTED)
+    set_property(TARGET python::python PROPERTY
+        INTERFACE_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
+    set_property(TARGET python::python PROPERTY
+        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
+    if(WIN32)
+      set_property(TARGET python::python PROPERTY
+          INTERFACE_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+    endif()
+
     caffe2_update_option(USE_NUMPY OFF)
     if(NUMPY_FOUND)
       caffe2_update_option(USE_NUMPY ON)
-      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+      add_library(numpy::numpy INTERFACE IMPORTED)
+      set_property(TARGET numpy::numpy PROPERTY
+          INTERFACE_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
+      set_property(TARGET numpy::numpy PROPERTY
+          INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -1101,7 +1114,13 @@ else()
             FILES_MATCHING PATTERN "*.h")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
-include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+add_library(pybind::pybind11 INTERFACE IMPORTED)
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_SYSTEM_INCLUDE_DIRECTORIES ${pybind11_INCLUDE_DIRS})
+set_property(TARGET pybind::pybind11 PROPERTY
+    INTERFACE_LINK_LIBRARIES python::python)
 
 # ---[ MPI
 if(USE_MPI)
@@ -1890,10 +1909,11 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/lib64)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
         ${CUDA_INCLUDE_DIRS}
         ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_SOURCE_DIR}/include)
+        ${CUDA_SOURCE_DIR}/include
+        NO_DEFAULT_PATH)
 
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")

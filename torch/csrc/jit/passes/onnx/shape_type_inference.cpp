@@ -431,104 +431,6 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
   }
 }
 
-// When the Reshape node's two inputs are constant, compute the output shape.
-// The shape value 0 and -1 are converted to the real value explicitly.
-c10::optional<std::vector<int64_t>> ComputeShapeFromReshape(
-    Node* n,
-    const std::vector<int64_t>& input_shape,
-    const std::vector<int64_t>& shape,
-    int opset_version) {
-  TORCH_INTERNAL_ASSERT(
-      !input_shape.empty() || !shape.empty(),
-      "Reshape node should have at least one input size > 0 when constant folding.");
-  // Case: shape.empty()
-  // %22 : int[] = prim::Constant[value=annotate(List[int], [])]()
-  // %15 : Float(requires_grad=0, device=cpu) = aten::view(%1, %22)
-  if (shape.empty()) {
-    return input_shape;
-  }
-  // Case: input_shape.empty()
-  // (1) input_shape is not obtained,
-  // (2) input_shape is scalar (output is still a tensor, not a scalar),
-  // Both cases return shape
-  // TODO: for (1), multiple -1 may conflict each other. Consider use
-  // newSymbol() in shapeMap.
-  if (input_shape.empty()) {
-    return shape;
-  }
-  auto it_0 = std::find(shape.begin(), shape.end(), 0);
-  bool shape_has_zero = it_0 != shape.end();
-
-  // Allowzero is set to 0 by default
-  // When opset version > 14, assign appropriate allowzero value
-  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
-    int allowzero = n->i(attr::allowzero);
-    if (allowzero == 1 && shape_has_zero) {
-      // Return here, because the denominator in shape_ratio calculation cannot
-      // be 0.
-      // TODO: Shall we handle the case when shape has -1 here?
-      return shape;
-    }
-  }
-
-  int minus_one_pos = -1;
-  for (int i = 0; i < shape.size(); ++i) {
-    if (shape[i] == -1) {
-      minus_one_pos = i;
-      break;
-    }
-  }
-
-  if (!shape_has_zero && minus_one_pos == -1) {
-    return shape;
-  }
-  std::vector<int64_t> final_shape;
-  // shape_ratio is used to calculate the real value of -1.
-  // One example with shape 0 and -1:
-  // input_shape = 2 16 5 4
-  // shape = -1 0 4
-  // final_shape = 10 16 4
-  uint64_t shape_ratio = 1;
-  for (const auto& cur_input_shape : input_shape) {
-    if (shape_ratio >= std::numeric_limits<uint64_t>::max() / cur_input_shape) {
-      std::cerr
-          << "WARNING: ComputeShapeFromReshape(), shape_ratio overflows, skip shape inference."
-          << std::endl;
-      return c10::nullopt;
-    } else {
-      shape_ratio *= static_cast<uint64_t>(cur_input_shape);
-    }
-  }
-  int shape_size = static_cast<int>(shape.size());
-  for (const auto i : c10::irange(shape_size)) {
-    if (i == minus_one_pos) {
-      continue;
-    }
-    if (shape[i] != 0) {
-      shape_ratio /= static_cast<uint64_t>(shape[i]);
-    } else {
-      shape_ratio /= static_cast<uint64_t>(input_shape[i]);
-    }
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      minus_one_pos != -1,
-      "ComputeShapeFromReshape(): shape_has_zero && minus_one_pos == -1, but we assumed this could never happen. Please file a bug with repro instructions.");
-
-  for (const int i : c10::irange(minus_one_pos)) {
-    int64_t cur_shape = shape[i] == 0 ? input_shape[i] : shape[i];
-    final_shape.push_back(cur_shape);
-  }
-  if (minus_one_pos != -1) {
-    final_shape.push_back(static_cast<int64_t>(shape_ratio));
-  }
-  for (auto i = minus_one_pos + 1; i < shape_size; i++) {
-    int64_t cur_shape = shape[i] == 0 ? input_shape[i] : shape[i];
-    final_shape.push_back(cur_shape);
-  }
-  return final_shape;
-}
-
 // Similar to the function above, but for symbolic shapes.
 c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     Node* n,
@@ -552,16 +454,6 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
   auto it_0 = std::find_if(shape_vector.begin(), shape_vector.end(), is_zero);
   bool shape_has_zero = it_0 != shape_vector.end();
 
-  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
-    int allowzero = n->i(attr::allowzero);
-    if (allowzero == 1 && shape_has_zero) {
-      // Return here, because the denominator in shape_ratio calculation cannot
-      // be 0.
-      // TODO: Shall we handle the case when shape has -1 here?
-      return shape;
-    }
-  }
-
   int minus_one_pos = -1;
   for (int i = 0; i < shape_vector.size(); ++i) {
     if (shape_vector[i].value() == -1) {
@@ -570,7 +462,16 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromReshape(
     }
   }
 
-  if (!shape_has_zero && minus_one_pos == -1) {
+  int allowzero = 0;
+  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
+    allowzero = n->i(attr::allowzero);
+  }
+
+  TORCH_CHECK(
+      !(shape_has_zero && allowzero == 1 && minus_one_pos != -1),
+      "0 and -1 cannot both be present in `Shape` input of `Reshape` node, when `allowzero=1`.");
+
+  if (minus_one_pos == -1 && (!shape_has_zero || allowzero)) {
     return shape;
   }
   std::vector<c10::ShapeSymbol> final_shape;
@@ -800,54 +701,58 @@ void SetShapeValueFromListConstructNode(Node* lc_node) {
   }
 }
 
+std::vector<::c10::ShapeSymbol> Broadcast(
+    const std::vector<::c10::ShapeSymbol>& input_shape_value_0,
+    const std::vector<::c10::ShapeSymbol>& input_shape_value_1) {
+  size_t rank_0 = input_shape_value_0.size();
+  size_t rank_1 = input_shape_value_1.size();
+  size_t rank_max = std::max(rank_0, rank_1);
+  size_t rank_min = std::min(rank_0, rank_1);
+  std::vector<::c10::ShapeSymbol> final_shape;
+  final_shape.reserve(rank_max);
+  for (auto idx = 0; idx < rank_max; idx++) {
+    final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
+  }
+  for (auto idx = 0; idx < rank_min; idx++) {
+    const c10::ShapeSymbol& ss_shape_0 = input_shape_value_0[rank_0 - 1 - idx];
+    const c10::ShapeSymbol& ss_shape_1 = input_shape_value_1[rank_1 - 1 - idx];
+    bool is_static_0 = ss_shape_0.is_static();
+    bool is_static_1 = ss_shape_1.is_static();
+    if (is_static_0 && is_static_1) {
+      int64_t static_0_sz = ss_shape_0.static_size();
+      int64_t static_1_sz = ss_shape_1.static_size();
+      final_shape[rank_max - 1 - idx] = ::c10::ShapeSymbol::fromStaticSize(
+          std::max(static_0_sz, static_1_sz));
+    } else if (!is_static_0 && !is_static_1) {
+      if (ss_shape_0.value() == ss_shape_1.value()) {
+        final_shape[rank_max - 1 - idx] = ss_shape_0;
+      }
+    }
+  }
+
+  if (rank_0 < rank_1) {
+    for (size_t idx = rank_min; idx < rank_max; idx++) {
+      size_t shape_idx = rank_max - 1 - idx;
+      final_shape[shape_idx] = input_shape_value_1[shape_idx];
+    }
+  } else {
+    for (size_t idx = rank_min; idx < rank_max; idx++) {
+      size_t shape_idx = rank_max - 1 - idx;
+      final_shape[shape_idx] = input_shape_value_0[shape_idx];
+    }
+  }
+  return final_shape;
+}
+
 void ProcessBroadcastNode(Node* n) {
   TORCH_INTERNAL_ASSERT(n->inputs().size() == 2);
   if (ConstantValueMap::HasShape(n->input(0)->debugName()) &&
       ConstantValueMap::HasShape(n->input(1)->debugName())) {
     auto input_shape_0 = ConstantValueMap::GetShape(n->input(0)->debugName());
-    auto input_shape_value_0 = input_shape_0.value().sizes();
+    auto input_shape_value_0 = input_shape_0.value().sizes().value();
     auto input_shape_1 = ConstantValueMap::GetShape(n->input(1)->debugName());
-    auto input_shape_value_1 = input_shape_1.value().sizes();
-    size_t rank_0 = input_shape_value_0.value().size();
-    size_t rank_1 = input_shape_value_1.value().size();
-    size_t rank_max = std::max(rank_0, rank_1);
-    size_t rank_min = std::min(rank_0, rank_1);
-    std::vector<::c10::ShapeSymbol> final_shape;
-    final_shape.reserve(rank_max);
-    for (auto idx = 0; idx < rank_max; idx++) {
-      final_shape.emplace_back(::c10::ShapeSymbol::newSymbol());
-    }
-    for (auto idx = 0; idx < rank_min; idx++) {
-      const c10::ShapeSymbol& ss_shape_0 =
-          input_shape_value_0.value()[rank_0 - 1 - idx];
-      const c10::ShapeSymbol& ss_shape_1 =
-          input_shape_value_1.value()[rank_1 - 1 - idx];
-      bool is_static_0 = ss_shape_0.is_static();
-      bool is_static_1 = ss_shape_1.is_static();
-      if (is_static_0 && is_static_1) {
-        int64_t static_0_sz = ss_shape_0.static_size();
-        int64_t static_1_sz = ss_shape_1.static_size();
-        final_shape[rank_max - 1 - idx] = ::c10::ShapeSymbol::fromStaticSize(
-            std::max(static_0_sz, static_1_sz));
-      } else if (!is_static_0 && !is_static_1) {
-        if (ss_shape_0.value() == ss_shape_1.value()) {
-          final_shape[rank_max - 1 - idx] = ss_shape_0;
-        }
-      }
-    }
-
-    if (rank_0 < rank_1) {
-      for (auto idx = rank_min; idx < rank_max; idx++) {
-        auto shape_idx = rank_max - 1 - idx;
-        final_shape[shape_idx] = input_shape_value_1.value()[shape_idx];
-      }
-    } else {
-      for (auto idx = rank_min; idx < rank_max; idx++) {
-        auto shape_idx = rank_max - 1 - idx;
-        final_shape[shape_idx] = input_shape_value_0.value()[shape_idx];
-      }
-    }
-
+    auto input_shape_value_1 = input_shape_1.value().sizes().value();
+    auto final_shape = Broadcast(input_shape_value_0, input_shape_value_1);
     UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
   }
 }
@@ -955,6 +860,8 @@ void ProcessMatMulNode(Node* n) {
     auto input_shape_value_1 = input_shape_1.sizes().value();
     size_t rank_0 = input_shape_value_0.size();
     size_t rank_1 = input_shape_value_1.size();
+    // Handle inputs of rank 1 just like numpy.matmul:
+    // https://numpy.org/doc/stable/reference/generated/numpy.matmul.html
     auto is_rank_0_1 = false;
     if (rank_0 == 1) {
       input_shape_value_0.insert(
@@ -968,25 +875,23 @@ void ProcessMatMulNode(Node* n) {
       rank_1 = 2;
       is_rank_1_1 = true;
     }
-    size_t rank = std::max(rank_0, rank_1);
-    std::vector<::c10::ShapeSymbol> final_shape;
-    final_shape.reserve(rank);
-    if (rank_0 >= rank_1) {
-      for (auto idx = 0; idx < rank_0 - 2; idx++) {
-        final_shape.emplace_back(input_shape_value_0[idx]);
-      }
-    } else {
-      for (auto idx = 0; idx < rank_1 - 2; idx++) {
-        final_shape.emplace_back(input_shape_value_1[idx]);
-      }
+    // Per https://pytorch.org/docs/stable/generated/torch.matmul.html
+    // the broadcasting logic only applies to the batch dimensions, and not the
+    // matrix dimensions so we remove the matrix dimensions which are the last 2
+    // dimensions before broadcasting
+    auto final_shape = Broadcast(
+        std::vector<::c10::ShapeSymbol>(
+            input_shape_value_0.begin(), input_shape_value_0.end() - 2),
+        std::vector<::c10::ShapeSymbol>(
+            input_shape_value_1.begin(), input_shape_value_1.end() - 2));
+    // add the last 2 dimensions back, unless they do not exist in the first
+    // place and inserted by this function Then apply [n,k]X[k,m]=[n,m], where
+    // n=input_shape_value_0[rank_0 - 2], m=input_shape_value_1[rank_1 - 1]
+    if (!is_rank_0_1) {
+      final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
     }
-    final_shape.emplace_back(input_shape_value_0[rank_0 - 2]);
-    final_shape.emplace_back(input_shape_value_1[rank_1 - 1]);
-    if (is_rank_0_1) {
-      final_shape.erase(final_shape.begin());
-    }
-    if (is_rank_1_1) {
-      final_shape.pop_back();
+    if (!is_rank_1_1) {
+      final_shape.emplace_back(input_shape_value_1[rank_1 - 1]);
     }
     UpdateShape(n->output(0), c10::SymbolicShape(final_shape));
   }
@@ -1029,46 +934,47 @@ void ProcessReduceNode(Node* n) {
 }
 
 void ProcessReshapeNode(Node* n, int opset_version) {
-  if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
-    auto shape_temp =
-        ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
-    auto shape_vector_0 =
-        ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
-            n->input(0)->debugName());
-    std::vector<int64_t> shape_vector_0_value(0);
-    if (shape_vector_0.has_value()) {
-      shape_vector_0_value = shape_vector_0.value();
-    }
-    if (shape_vector_0.has_value() || shape_temp.size() > 0) {
+  const auto& input_name = n->input(0)->debugName();
+  const auto& shape_name = n->input(1)->debugName();
+
+  // When `shape` input value is statically known, compute output shape.
+  if (ConstantValueMap::HasValue(shape_name)) {
+    auto static_shape_value =
+        ConstantValueMap::GetValueInto1DInt64Vector(shape_name);
+    auto symbolic_input_shape = ConstantValueMap::GetShape(input_name);
+    if (symbolic_input_shape && static_shape_value.size() > 0) {
       auto final_shape = ComputeShapeFromReshape(
-          n, shape_vector_0_value, shape_temp, opset_version);
-      if (final_shape.has_value()) {
-        UpdateShapeFromVector(n->output(), final_shape.value());
+          n,
+          symbolic_input_shape.value(),
+          c10::SymbolicShape(static_shape_value),
+          opset_version);
+      if (final_shape) {
+        UpdateShape(n->output(), final_shape.value());
         return;
       }
     }
   }
 
-  if (ConstantValueMap::HasShapeValue(n->input(1)->debugName()) &&
-      ConstantValueMap::HasShape(n->input(0)->debugName())) {
-    auto shape_vector_0 =
-        ConstantValueMap::GetShape(n->input(0)->debugName()).value();
-    auto shape_vector_1 =
-        ConstantValueMap::GetShapeValue(n->input(1)->debugName()).value();
+  // When `shape` input value is symbolically known, compute output shape.
+  if (ConstantValueMap::HasShapeValue(shape_name) &&
+      ConstantValueMap::HasShape(input_name)) {
+    auto symbolic_input_shape = ConstantValueMap::GetShape(input_name).value();
+    auto symbolic_shape_value =
+        ConstantValueMap::GetShapeValue(shape_name).value();
     auto final_shape = ComputeShapeFromReshape(
-        n, shape_vector_0, shape_vector_1, opset_version);
+        n, symbolic_input_shape, symbolic_shape_value, opset_version);
     if (final_shape.has_value()) {
       UpdateShape(n->output(), final_shape.value());
       return;
     }
   }
 
-  if (ConstantValueMap::HasShape(n->input(1)->debugName())) {
-    auto shape_vector_1 =
-        ConstantValueMap::GetShapeInto1DInt64Vector(n->input(1)->debugName());
-    if (shape_vector_1.has_value()) {
-      TORCH_INTERNAL_ASSERT(shape_vector_1.value().size() == 1);
-      UpdateRank(n->output(), shape_vector_1.value()[0]);
+  // Only shape of new shape is known, assign output rank.
+  if (ConstantValueMap::HasShape(shape_name)) {
+    auto output_rank = ConstantValueMap::GetShapeInto1DInt64Vector(shape_name);
+    if (output_rank.has_value()) {
+      TORCH_INTERNAL_ASSERT(output_rank.value().size() == 1);
+      UpdateRank(n->output(), output_rank.value()[0]);
       return;
     }
   }
@@ -1368,17 +1274,11 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Gather: {
-      if (ConstantValueMap::HasRank(n->input(0)->debugName()) &&
-          ConstantValueMap::HasRank(n->input(1)->debugName())) {
-        auto rank_0 =
-            ConstantValueMap::GetRank(n->input(0)->debugName()).value();
-        auto rank_1 =
-            ConstantValueMap::GetRank(n->input(1)->debugName()).value();
-        only_rank_available = true;
-        rank = rank_0 + rank_1 - 1;
-      }
       if (ConstantValueMap::HasShapeValue(n->input(0)->debugName()) &&
           ConstantValueMap::HasValue(n->input(1)->debugName())) {
+        // Special case for pattern Shape -> Gather, to propagate shape value.
+        // Gather input 0 is 1d tensor, Gather input 1 is scalar.
+        // Gather output will be scalar.
         auto shape_value =
             ConstantValueMap::GetShapeValue(n->input(0)->debugName()).value();
         auto idx_value =
@@ -1471,12 +1371,31 @@ void ComputeConstant(Node* n, int opset_version) {
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+            // When value of `shape` is statically known,
+            // output shape can be computed.
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
             auto final_shape =
                 ComputeShapeFromExpand(input0_shape_value, shape_temp);
             if (final_shape.has_value()) {
               UpdateShape(n->output(), final_shape.value());
+            }
+          } else if (
+              auto expand_shape =
+                  ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
+                      n->input(1)->debugName())) {
+            // When shape of `shape` is statically known,
+            // output rank can be computed.
+            TORCH_INTERNAL_ASSERT(
+                expand_shape.value().size() == 1,
+                "`Shape` input to `Expand` should be a 1-D tensor. Instead got rank ",
+                expand_shape.value().size());
+            if (expand_shape.value()[0] > 0) {
+              std::vector<c10::ShapeSymbol> final_shape;
+              for (const auto i : c10::irange(expand_shape.value()[0])) {
+                final_shape.emplace_back(c10::ShapeSymbol::newSymbol());
+              }
+              UpdateShape(n->output(), c10::SymbolicShape(final_shape));
             }
           }
         }

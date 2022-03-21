@@ -383,7 +383,12 @@ class TestMultiprocessing(TestCase):
     def test_autograd_errors(self):
         ctx = mp.get_context('fork')
         simple_autograd_function()
-        with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+        # Autograd only uses thread when GPUs are involved
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+                with ctx.Pool(3) as pool:
+                    pool.map(simple_autograd_function, [1, 2, 3])
+        else:
             with ctx.Pool(3) as pool:
                 pool.map(simple_autograd_function, [1, 2, 3])
 

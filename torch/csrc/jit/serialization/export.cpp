@@ -23,6 +23,7 @@
 #include <onnx/checker.h>
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
+#include <onnx/shape_inference/implementation.h>
 
 #include <fstream>
 #include <memory>
@@ -102,6 +103,10 @@ void validateBlock(
             "\n\nDefined at:\n" + getNodeStackTraceString(node))
       }
     } else {
+#ifdef BUILD_CAFFE2
+      // Assuming this is a Caffe2 change as it only modifies an aten op
+      // for operator_export_type == ONNX_ATEN_FALLBACK, which is a common
+      // pattern for Caffe2-specific scenarios.
       if (node->kind() == aten::expand) {
         if (operator_export_type ==
             onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
@@ -117,6 +122,7 @@ void validateBlock(
           new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
         }
       }
+#endif
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         if (operator_export_type !=
             onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
@@ -538,7 +544,8 @@ void GraphEncoder::EncodeValueInfoType(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   auto tensorTypeToONNXType = [&dynamic_axes, n, this](
                                   const TensorTypePtr& t,
-                                  onnx::TypeProto_Tensor* onnx_tensor_type) {
+                                  onnx::TypeProto_Tensor* onnx_tensor_type,
+                                  bool assign_dim_param) {
     std::string name = n->debugName();
     if (t->dim()) {
       onnx::TensorShapeProto* shape = onnx_tensor_type->mutable_shape();
@@ -553,7 +560,7 @@ void GraphEncoder::EncodeValueInfoType(
           }
         } else if (sizes[i].is_static()) {
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
-        } else {
+        } else if (assign_dim_param) {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
             if (n->node()->kind() == prim::Param) {
               symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
@@ -578,7 +585,13 @@ void GraphEncoder::EncodeValueInfoType(
       // Encode type if either shape or dtype exists.
       onnx::TypeProto_Tensor* onnx_tensor_type =
           onnx_type->mutable_tensor_type();
-      tensorTypeToONNXType(tensor_type, onnx_tensor_type);
+      // Do not assign dim_param for sequence tensor type.
+      // Sequence of tensors could differ in dimension size.
+      // Use a dimension with neither dim_value nor dim_param set
+      // to denote an unknown dimension.
+      // Create and assign dim_param for normal tensor type.
+      auto is_sequence_tensor = static_cast<bool>(n->type()->cast<ListType>());
+      tensorTypeToONNXType(tensor_type, onnx_tensor_type, !is_sequence_tensor);
     }
   } else if (BoolTypePtr bool_type = node_type->cast<BoolType>()) {
     onnx::TypeProto_Tensor* onnx_tensor_type = onnx_type->mutable_tensor_type();
@@ -644,7 +657,7 @@ void GraphEncoder::EncodeBlock(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(graph_proto != nullptr);
-  std::string block_name = "torch-jit-export";
+  std::string block_name = "torch_jit";
   if (num_blocks_) {
     block_name += std::to_string(num_blocks_);
   }
@@ -1243,13 +1256,17 @@ std::string serialize_model_proto_to_string(
   return model_proto->SerializeAsString();
 }
 
-void check_onnx_proto(const std::string& proto_string) {
+void check_onnx_proto(const std::string& proto_string, bool full_check) {
   onnx::ModelProto model;
   if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
     throw std::runtime_error("Invalid ONNX proto string.");
     return;
   }
   onnx::checker::check_model(model);
+
+  if (full_check) {
+    onnx::shape_inference::InferShapes(model);
+  }
 }
 
 } // namespace jit
