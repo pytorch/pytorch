@@ -192,6 +192,38 @@ ExternalCallPtr ExternalCall::make(
       buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
+ExternalCallWithAllocPtr ExternalCallWithAlloc::make(
+    const std::string& func_name,
+    const std::vector<BufHandle>& buf_out_args,
+    const std::vector<BufHandle>& buf_args,
+    const std::vector<ExprHandle>& args) {
+  std::vector<BufPtr> buf_out_arg_nodes;
+  buf_out_arg_nodes.reserve(buf_out_args.size());
+  for (const BufHandle& buf_out_arg : buf_out_args) {
+    buf_out_arg_nodes.push_back(buf_out_arg.node());
+  }
+
+  std::vector<BufPtr> buf_arg_nodes;
+  buf_arg_nodes.reserve(buf_args.size());
+  for (const BufHandle& buf_arg : buf_args) {
+    buf_arg_nodes.push_back(buf_arg.node());
+  }
+  return alloc<ExternalCallWithAlloc>(
+      func_name,
+      buf_out_arg_nodes,
+      buf_arg_nodes,
+      ExprHandleVectorToExprVector(args));
+}
+
+FreeExtPtr FreeExt::make(const std::vector<BufHandle>& bufs) {
+  std::vector<BufPtr> buf_nodes;
+  buf_nodes.reserve(bufs.size());
+  for (const BufHandle& buf : bufs) {
+    buf_nodes.push_back(buf.node());
+  }
+  return alloc<FreeExt>(buf_nodes);
+}
+
 std::vector<ExprPtr> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<ExprPtr> result(v.size());

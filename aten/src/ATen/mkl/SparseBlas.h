@@ -157,6 +157,29 @@ void mm<c10::complex<float>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<float>));
 template <>
 void mm<c10::complex<double>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<double>));
 
+#define MKL_SPARSE_SPMMD_ARGTYPES(scalar_t)                               \
+  const sparse_operation_t operation, const sparse_matrix_t A,            \
+      const sparse_matrix_t B, const sparse_layout_t layout, scalar_t *C, \
+      const MKL_INT ldc
+
+template <typename scalar_t>
+inline void spmmd(MKL_SPARSE_SPMMD_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::mkl::sparse::spmmd: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void spmmd<float>(MKL_SPARSE_SPMMD_ARGTYPES(float));
+template <>
+void spmmd<double>(MKL_SPARSE_SPMMD_ARGTYPES(double));
+template <>
+void spmmd<c10::complex<float>>(MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<float>));
+template <>
+void spmmd<c10::complex<double>>(
+    MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<double>));
+
 #define MKL_SPARSE_TRSV_ARGTYPES(scalar_t)                      \
   const sparse_operation_t operation, const scalar_t alpha,     \
       const sparse_matrix_t A, const struct matrix_descr descr, \
