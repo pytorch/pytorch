@@ -652,6 +652,12 @@ def run_tests(argv=UNITTEST_ARGS):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
 
+            def addSkip(self, test, reason):
+                super().addSkip(test, reason)
+                for c in self.callback.__closure__:
+                    if isinstance(c.cell_contents, str) and c.cell_contents == 'skip':
+                        c.cell_contents = f"skip: {reason}"
+
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
