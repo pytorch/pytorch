@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -1711,6 +1712,17 @@ void guardFusionGroups(
   }
 }
 
+void dumpFusionGroups(std::shared_ptr<Graph>& g) {
+  DepthFirstGraphNodeIterator it(g);
+  Node* n = nullptr;
+  GRAPH_DEBUG("Exporting all NVFuser fusions:");
+  while ((n = it.next()) != nullptr) {
+    if (n->kind() == prim::FallbackGraph) {
+      GRAPH_EXPORT("", n->g(attr::Subgraph));
+    }
+  }
+}
+
 // rewire const integer index & empty byte-typed reserve space tensor outputs,
 // so `CudaFusionGroup` doesn't have to handle those
 void alterBatchNormImplIndex(Node* node) {
@@ -2296,6 +2308,8 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
 
   revertAliasCopyOps(graph, graph->block());
   GRAPH_DEBUG("revert alias_copy ops by nvfuser: ", *graph);
+
+  dumpFusionGroups(graph);
 
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);

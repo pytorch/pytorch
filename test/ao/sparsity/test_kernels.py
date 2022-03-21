@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantized import (
     override_qengines,
     qengine_is_qnnpack,
     qengine_is_fbgemm,
+    qengine_is_onednn,
 )
 
 # TODO: Once more test files are created, move the contents to a ao folder.
@@ -47,6 +48,9 @@ class TestQuantizedSparseKernels(TestCase):
         # special case like this. At the moment it is deprioritized due
         # to other higher priority works.
         if qengine_is_qnnpack() and not (row_block_size == 1 and col_block_size == 4):
+            return
+        # ONEDNN does not support this yet
+        if qengine_is_onednn():
             return
 
         dense_prepack = torch.ops.quantized.linear_prepack
@@ -214,6 +218,10 @@ class TestQuantizedSparseLayers(TestCase):
                 Y_ref = qmodel(X_fp32)
                 Y_hat = sqmodel(X_fp32)
                 self.assertEqual(Y_ref, Y_hat)
+
+            # ONEDNN does not support this yet
+            elif qengine_is_onednn():
+                return
 
             row_block_size, col_block_size = sqmodel.linear._packed_params._weight_bias()[2:]
             assert row_block_size == 1 and col_block_size == 4
