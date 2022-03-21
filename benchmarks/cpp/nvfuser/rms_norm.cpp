@@ -18,7 +18,9 @@ using namespace torch::jit::fuser::cuda;
 //------------------------------------------------------------------------------
 
 static void setupRMSNorm(Fusion* fusion, DataType dtype) {
-  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half || dtype == DataType::BFloat16);
+  TORCH_INTERNAL_ASSERT(
+      dtype == DataType::Float || dtype == DataType::Half ||
+      dtype == DataType::BFloat16);
 
   FusionGuard fg(fusion);
 
@@ -54,10 +56,11 @@ static void NvFuserScheduler_RMSNorm(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     DataType dtype) {
-  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half || dtype == DataType::BFloat16);
+  TORCH_INTERNAL_ASSERT(
+      dtype == DataType::Float || dtype == DataType::Half ||
+      dtype == DataType::BFloat16);
 
-  std::vector<int64_t> input_shape{
-      8, benchmark_state.range(0), 1024};
+  std::vector<int64_t> input_shape{8, benchmark_state.range(0), 1024};
   const float kEps = 1e-6;
 
   // inputs
@@ -73,8 +76,7 @@ static void NvFuserScheduler_RMSNorm(
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
-      (2 * input.numel() + weight.numel()) *
-      int64_t(dataTypeSize(dtype)));
+      (2 * input.numel() + weight.numel()) * int64_t(dataTypeSize(dtype)));
 }
 
 //------------------------------------------------------------------------------

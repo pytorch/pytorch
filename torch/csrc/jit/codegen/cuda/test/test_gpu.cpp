@@ -897,8 +897,8 @@ TEST_F(NVFuserTest, FusionTopoSort_CUDA) {
   // e1: v4     =   add(v3, v2)
   // e2: v5     =   add(v2, v4)
   // e3: v6     =   add(v5, v5)
-  Double* v0 = IrBuilder::create<Double>(1.f);
-  Double* v1 = IrBuilder::create<Double>(2.f);
+  Double* v0 = IrBuilder::create<Double>();
+  Double* v1 = IrBuilder::create<Double>();
   Double* v2 = IrBuilder::create<Double>();
   Double* v3 = IrBuilder::create<Double>();
   Double* v4 = IrBuilder::create<Double>();
@@ -8421,7 +8421,7 @@ TEST_F(NVFuserTest, FusionSmemReduce_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST_F(NVFuserTest, FusionSmemBlockGemm_CUDA) {
@@ -8441,9 +8441,9 @@ TEST_F(NVFuserTest, FusionSmemBlockGemm_CUDA) {
 
   // Schedule
   constexpr int BSX = 16;
-  tv5->split(2, BSX);
+  tv5->split(2, BSX - 1);
   tv5->split(1, BSX);
-  tv5->split(0, BSX);
+  tv5->split(0, BSX + 1);
   // M/BSX, BSX, K/BSX, BSX, N/BSX, BSX
   tv5->reorder({{0, 0}, {1, 3}, {2, 2}, {3, 5}, {4, 1}, {5, 4}});
   // M/BSX, N/BSX, K/BSX, MSX, NSX, KSX
@@ -9838,7 +9838,7 @@ TEST_F(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
       "",
       lparams);
 
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST_F(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
@@ -15558,9 +15558,9 @@ TEST_F(NVFuserTest, FusionValidateParallelize4_CUDA) {
 
   tv1->setMemoryType(MemoryType::Global);
 
-  // tv1 and tv2 do not have the same shape
+  // tv1 and tv2 do not have the same shape but global memory comm is supported.
   FusionExecutor fe;
-  ASSERT_ANY_THROW(fe.compileFusion(&fusion));
+  fe.compileFusion(&fusion);
 }
 
 TEST_F(NVFuserTest, FusionValidateParallelize5_CUDA) {
@@ -15592,8 +15592,10 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  auto tv0 = makeSymbolicTensor(3);
-  auto tv1 = makeSymbolicTensor(4);
+  int64_t W = 5, X = 6, Y = 7, Z = 8;
+
+  auto tv0 = makeConcreteTensor({X, Y, Z});
+  auto tv1 = makeConcreteTensor({W, X, Y, Z});
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
@@ -15605,9 +15607,9 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   tv4->merge(0);
   tv4->merge(0);
   tv4->merge(0);
-  tv4->split(0, 128);
-  tv4->split(0, 1);
-  tv4->split(0, 1);
+  tv4->split(0, 4);
+  tv4->split(0, 3);
+  tv4->split(0, 2);
 
   TransformPropagator::from(tv4);
 
@@ -15618,6 +15620,7 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   tv4->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
   // Validation should throw an exception saying the first axes of tv2
   // and tv3 have incompatible parallelization. See also issue #995.
@@ -18451,8 +18454,8 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   tv0->computeAt(tv3, 1);
 
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
-  tv2->axis(-1)->parallelize(ParallelType::TIDx);
-  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDy);
+  tv3->axis(-1)->parallelize(ParallelType::TIDz);
 
   // Make sure a WAR sync is inserted at the end of the outer loop
   GpuLower gpulw(&fusion);
@@ -18460,7 +18463,7 @@ TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
     if (auto loop = dynamic_cast<kir::ForLoop*>(kir_node)) {
       const auto& body = loop->body().exprs();
       TORCH_CHECK(!body.empty());
-      auto last_expr = dynamic_cast<kir::Sync*>(body.back());
+      auto last_expr = dynamic_cast<kir::BlockSync*>(body.back());
       TORCH_CHECK(last_expr != nullptr, "Invalid expr found");
       TORCH_CHECK(last_expr->isWarHazardSync(), "Not a sync for WAR hazard");
     }
@@ -18671,7 +18674,7 @@ TEST_F(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
 
   auto x_add_bias = add(x, bias);
   auto x_bcast = broadcast(x_add_bias, {false, false, true, false});
-  auto y = unaryOp(UnaryOpType::Gelu, x_bcast);
+  auto y = gelu(x_bcast);
   fusion.addOutput(y);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -21266,6 +21269,10 @@ TEST_F(NVFuserTest, FusionCodegenAllocatedScalars_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
+  if (disableIndexHoisting()) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -21315,6 +21322,11 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
       innermost_loop = first_expr_loop;
     }
     const auto& exprs = innermost_loop->body().exprs();
+    TORCH_CHECK(!exprs.empty(), "No expression found");
+    TORCH_CHECK(
+        exprs.at(0)->isA<kir::Allocate>(),
+        "Invalid expression: ",
+        exprs.at(0)->toString());
     auto hoisted_index = exprs.at(0)->as<kir::Allocate>()->buffer();
     kir::Predicate* pred = nullptr;
     for (auto expr : exprs) {
@@ -21431,6 +21443,10 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
 
 // Hoist indices for vectorized tensors
 TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
+  if (disableIndexHoisting()) {
+    GTEST_SKIP() << "Index hoisting disabled";
+  }
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -21470,6 +21486,102 @@ TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
+
+TEST_F(NVFuserTest, FusionTestGridComm_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  int X = 3, Y = 4, Z = 2;
+  auto tv0 = makeConcreteTensor({X, Y, Z});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({X, Y, Z});
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  auto tv3 = add(tv2, tv1);
+  auto tv4 = set(tv3);
+  auto tv5 = set(tv4);
+  fusion.addOutput(tv5);
+
+  tv2->setMemoryType(MemoryType::Global);
+  tv3->setMemoryType(MemoryType::Global);
+  tv4->setMemoryType(MemoryType::Global);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDy);
+  tv2->axis(1)->parallelize(ParallelType::BIDx);
+  tv2->axis(2)->parallelize(ParallelType::Vectorize);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+  tv3->axis(1)->parallelize(ParallelType::BIDy);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDy);
+  tv4->axis(1)->parallelize(ParallelType::BIDx);
+
+  tv5->axis(0)->parallelize(ParallelType::BIDy);
+  tv5->axis(1)->parallelize(ParallelType::BIDx);
+  tv5->axis(2)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({X, Y, Z}, options);
+  auto t1 = at::randn({X, Y, Z}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// See issue https://github.com/csarofeen/pytorch/issues/1497
+// TODO: Enable
+#if 0
+TEST_F(NVFuserTest, FusionTestGridComm2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int64_t W = 3, X = 4;
+
+  auto tv0 = makeConcreteTensor({X});
+  auto tv1 = makeConcreteTensor({W, X});
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv3, tv1);
+  fusion.addOutput(tv4);
+
+  tv4->merge(0);
+  tv4->split(0, 2);
+
+  TransformPropagator::from(tv4);
+
+  tv3->computeAt(tv4, 1);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDx);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+
+  tv2->setMemoryType(MemoryType::Global);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  auto t0 = at::randn({X}, options);
+  auto t1 = at::randn({W, X}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1 + 1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+#endif
 
 // Vectorized reset test for double buffered registers
 TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
@@ -21547,6 +21659,134 @@ TEST_F(NVFuserTest, FusionViewConcreteDomain_CUDA) {
   auto ref = (at::native::view(t0, {6}) + 1).unsqueeze(0) + t1;
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Repro of #1521
+TEST_F(NVFuserTest, FusionImmediateValueAsInput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto immediate_scalr = IrBuilder::create<Double>(0.1);
+  // Adding an immediate scalar value as an input is not allowed
+  ASSERT_ANY_THROW(fusion.addInput(immediate_scalr));
+
+  // Instead, use a symbolic value
+  auto symbolic_scalar = IrBuilder::create<Double>();
+  fusion.addInput(symbolic_scalar);
+
+  auto tv1 = add(tv0, symbolic_scalar);
+  fusion.addOutput(tv1);
+
+  // Make sure the kernel is compiled.
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+}
+
+// Repro of #1506
+TEST_F(NVFuserTest, FusionVectorizeContigIndex_CUDA) {
+  std::vector<int64_t> shape{14, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+
+  // Vectorize by 4 should be allowed
+  tv2->split(0, 4);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv2, 1);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+}
+
+// Make sure the same fusion as FusionVectorizeContigIndex fails if
+// not contig.
+TEST_F(NVFuserTest, FusionVectorizeContigIndexFail_CUDA) {
+  std::vector<int64_t> shape{14, 14};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(0);
+
+  tv2->split(0, 4);
+
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv0->computeAt(tv2, 1);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+  tv2->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+
+  // This should fail at the launch time as 14 is not divisible by the
+  // vector word size. The two domains are merged, but they are not
+  // contiguous, so contig indexing is not involved in this case.
+  ASSERT_ANY_THROW(fe.runFusion({t0}));
+}
+
+TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->split(0, 4);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  const int n = 12;
+  auto t0 = at::randn({n}, options);
+  // Shift by one to make it non-aligned
+  auto t0_misaligned = at::randn({n + 1}, options).index({Slice(1)});
+  auto t1_misaligned = at::empty({n + 1}, options).index({Slice(1)});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+  TORCH_CHECK(t0.equal(cg_outputs[0]));
+
+  // Pass misaligned input. This must fail.
+  ASSERT_ANY_THROW(fe.runFusion({t0_misaligned}));
+
+  // Pass misaligned output. This must fail too.
+  ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
 }
 
 } // namespace jit

@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
 namespace torch {
@@ -1381,6 +1382,97 @@ std::vector<BroadcastMultiple> getBroadcastMultiples(TensorView* reference_tv) {
 
   return multiples;
 }
+
+namespace matmul_utils {
+
+void scheduleWarpTileWithReduction(TensorView* tv, MatMulTileOptions tile) {
+  // Assumes
+  // [M, N, K]
+  auto cta_tile = tile.cta_tile;
+  auto warp_tile = tile.warp_tile;
+  auto instruction_tile = tile.instruction_tile;
+
+  TORCH_CHECK(
+      warp_tile.k == cta_tile.k,
+      "schedule warp tile: currently no support for splitting k dimension to different warps");
+
+  mma_util::checkDimSize(
+      tv, {-3, -2, -1}, {cta_tile.m, cta_tile.n, cta_tile.k});
+
+  //       -3   -2  -1
+  //[...    M,   N,  K]
+
+  // Distribute warp tile:
+  tv->split(-3, warp_tile.m);
+  tv->split(-2, warp_tile.n);
+
+  //  -5   -4   -3   -2   -1
+  // [Mwo  Mw  Nwo   Nw   K]
+  tv->split(-4, instruction_tile.m);
+  tv->split(-2, instruction_tile.n);
+  tv->split(-1, instruction_tile.k);
+
+  //   -8  -7 -6 -5 -4 -3 -2 -1
+  // [Mwo Mw Mi Nwo Nw Ni Ko Ki]
+
+  tv->reorder({{-7, -5}, {-6, -3}, {-5, -7}, {-3, -2}, {-2, -6}});
+
+  //   -8  -7  -6 -5 -4 -3 -2 -1
+  // [Mwo  Nwo Ko Mw Nw Mi Ni Ki]
+}
+
+void scheduleWarpTileWithNoReduction(TensorView* tv, MatMulTileOptions tile) {
+  // Assumes
+  // [M, N, K]
+  auto cta_tile = tile.cta_tile;
+  auto warp_tile = tile.warp_tile;
+  auto instruction_tile = tile.instruction_tile;
+
+  mma_util::checkDimSize(tv, {-2, -1}, {cta_tile.m, cta_tile.n});
+
+  //        -2  -1
+  //[...    M,   N]
+
+  // Distribute warp tile:
+  tv->split(-2, warp_tile.m);
+  tv->split(-1, warp_tile.n);
+
+  //  -4   -3   -2   -1
+  // [Mwo  Mw  Nwo   Nw ]
+  tv->split(-3, instruction_tile.m);
+  tv->split(-1, instruction_tile.n);
+
+  //  -6 -5  -4 -3 -2 -1
+  // [Mwo Mw Mi Nwo Nw Ni]
+
+  tv->reorder({{-5, -4}, {-4, -2}, {-3, -5}, {-2, -3}});
+
+  //  -6   -5  -4 -3 -2 -1
+  // [Mwo  Nwo Mw Nw Mi Ni]
+}
+
+//! Split the innermost dim to a vectorized load
+void scheduleContiguousVectorLoad(
+    TensorView* tv,
+    MatMulTileOptions tile,
+    int vector_word) {
+  auto warp_dims = tile.cta_tile / tile.warp_tile;
+  int num_of_thread = warp_dims.m * warp_dims.n * warp_dims.k * 32;
+
+  tv->split(-1, num_of_thread * vector_word);
+  tv->split(-1, vector_word);
+  // [..., thread, vec]
+  // distribute to warp:
+  tv->split(-2, 32);
+  tv->split(-3, warp_dims.n * warp_dims.k);
+
+  tv->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv->axis(-2)->parallelize(ParallelType::TIDx);
+  tv->axis(-3)->parallelize(ParallelType::TIDy);
+  tv->axis(-4)->parallelize(ParallelType::TIDz);
+}
+
+} // namespace matmul_utils
 
 } // namespace scheduler_utils
 } // namespace cuda

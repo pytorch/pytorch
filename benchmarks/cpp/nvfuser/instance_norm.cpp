@@ -14,7 +14,10 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void setupInstanceNorm(Fusion* fusion, DataType dtype, bool channels_last_3d = false) {
+static void setupInstanceNorm(
+    Fusion* fusion,
+    DataType dtype,
+    bool channels_last_3d = false) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   FusionGuard fg(fusion);
@@ -94,7 +97,8 @@ static void NvFuserScheduler_InstanceNorm(
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   auto fp32_options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor at_x = at::randn(channels_last_3d ? input_shape_3d : input_shape, options);
+  at::Tensor at_x =
+      at::randn(channels_last_3d ? input_shape_3d : input_shape, options);
   at::Tensor at_weight = at::ones({benchmark_state.range(2)}, options);
   at::Tensor at_bias = at::zeros({benchmark_state.range(2)}, options);
   at::Tensor at_mean = at::zeros({benchmark_state.range(2)}, fp32_options);
@@ -106,9 +110,10 @@ static void NvFuserScheduler_InstanceNorm(
 
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
 
-  const size_t kSize = channels_last_3d ?
-      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] * input_shape[4]:
-      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t kSize = channels_last_3d
+      ? input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] *
+          input_shape[4]
+      : input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t kChannels = benchmark_state.range(2);
 
   // Read: x, weight, bias, running_mean, running_var
@@ -149,7 +154,9 @@ static void Baseline_InstanceNorm(
 
   at::Tensor at_x = at::randn(input_shape, options);
   if (channels_last_3d) {
-    at_x = at::randn(input_shape_3d, options.memory_format(c10::MemoryFormat::ChannelsLast3d));
+    at_x = at::randn(
+        input_shape_3d,
+        options.memory_format(c10::MemoryFormat::ChannelsLast3d));
   }
   at::Tensor at_weight = at::ones({benchmark_state.range(2)}, options);
   at::Tensor at_bias = at::zeros({benchmark_state.range(2)}, options);
@@ -184,9 +191,10 @@ static void Baseline_InstanceNorm(
     cudaDeviceSynchronize();
   }
 
-  const size_t kSize = channels_last_3d ?
-      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] * input_shape[4]:
-      input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
+  const size_t kSize = channels_last_3d
+      ? input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3] *
+          input_shape[4]
+      : input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t kChannels = benchmark_state.range(2);
 
   // Read: x, weight, bias, running_mean, running_var
@@ -207,7 +215,8 @@ static void Baseline_InstanceNorm_fp16(benchmark::State& benchmark_state) {
   Baseline_InstanceNorm(benchmark_state, DataType::Half);
 }
 
-static void Baseline_InstanceNorm_fp32_channels_last_3d(benchmark::State& benchmark_state) {
+static void Baseline_InstanceNorm_fp32_channels_last_3d(
+    benchmark::State& benchmark_state) {
   Baseline_InstanceNorm(benchmark_state, DataType::Float, true);
 }
 
@@ -310,6 +319,5 @@ BENCHMARK(Baseline_InstanceNorm_fp32_channels_last_3d)
     ->Ranges({{2, 8}, {4, 8}, {320, 320}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
-
 
 //------------------------------------------------------------------------------

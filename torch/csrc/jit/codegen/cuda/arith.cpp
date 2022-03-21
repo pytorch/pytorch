@@ -265,7 +265,6 @@ NVFUSER_DEFINE_UNARY_OP(notOp, Not)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
-NVFUSER_DEFINE_UNARY_OP(gelu, Gelu)
 NVFUSER_DEFINE_UNARY_OP(neg, Neg)
 NVFUSER_DEFINE_UNARY_OP(relu, Relu)
 NVFUSER_DEFINE_UNARY_OP(round, Round)
@@ -1424,7 +1423,7 @@ TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides,
     bool trim_out_of_bounds) {
-  auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
+  auto inp_dom = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
   const auto ndims = inp_dom.size();
 
   TORCH_CHECK(
@@ -1526,6 +1525,135 @@ TensorView* gather(
 
   IrBuilder::create<GatherOp>(out_tv, inp, window_shape, pad_width);
   return out_tv;
+}
+
+namespace {
+
+//! Create new output for mma
+static TensorView* newForMma(
+    TensorView* tv_a,
+    TensorView* tv_b,
+    const std::vector<unsigned int>& axes,
+    DataType data_type = DataType::Float) {
+  auto orig_domain_a =
+      TensorDomain::noReductions(tv_a->getMaybeRFactorDomain());
+  auto orig_domain_b =
+      TensorDomain::noReductions(tv_b->getMaybeRFactorDomain());
+
+  TORCH_INTERNAL_ASSERT(
+      orig_domain_a.size() == orig_domain_b.size(),
+      "MMA op: need matching dim input");
+
+  std::set<unsigned int> axes_set(axes.begin(), axes.end());
+  std::vector<IterDomain*> new_domain;
+
+  TORCH_INTERNAL_ASSERT(
+      !axes_set.empty(),
+      "Asked for ouput of reduction, but no reduction axis provided.");
+
+  TORCH_INTERNAL_ASSERT(
+      (*(axes_set.rbegin())) < orig_domain_a.size(),
+      "Error setting up reduction, reduction axis (",
+      *(axes_set.rbegin()),
+      ") is outside nDims (",
+      orig_domain_a.size(),
+      "). Keep in mind reductions are relative to root domains, not modified views.");
+
+  auto axis_iter = axes_set.begin();
+  for (const auto dim : c10::irange(orig_domain_a.size())) {
+    bool isReduction = false;
+    if (axis_iter != axes_set.end() && *axis_iter == dim) {
+      isReduction = true;
+      axis_iter++;
+    }
+
+    const IterDomain* id = orig_domain_a[dim]->isBroadcast()
+        ? orig_domain_b[dim]
+        : orig_domain_a[dim];
+
+    TORCH_CHECK(
+        !(isReduction && id->isBroadcast() && !id->isImplicitBroadcast()),
+        "Cannot reduce an axis that is marked as broadcasted as it has an undetermined size. Tried to reduce ID = ",
+        id,
+        " of tensor ",
+        tv_a,
+        "and",
+        tv_b);
+
+    new_domain.push_back(IrBuilder::create<IterDomain>(
+        id->start(),
+        id->extent(),
+        id->stopOffset(),
+        ParallelType::Serial,
+        isReduction ? IterType::Reduction : id->getIterType()));
+  }
+
+  TensorDomain* td = IrBuilder::create<TensorDomain>(
+      new_domain, std::vector<bool>(new_domain.size(), true));
+
+  return IrBuilder::create<TensorView>(td, data_type);
+}
+
+} // namespace
+
+TensorView* fusedMultiplySum(
+    TensorView* tv_a,
+    TensorView* tv_b,
+    const std::vector<int>& axes,
+    Val* init) {
+  if (init == nullptr) {
+    init = IrBuilder::create<Double>(0);
+  }
+
+  // TODO:
+  //  We will want to support initialize and rfactor with
+  //  mma as well, for maybe fusing bias in prolog.
+  // TODO: check init type if given a tv,
+  //  not supported currently though.
+  TORCH_CHECK(
+      init->isConstScalar(),
+      "Cannot create a reduction operation where the initial value is not a const scalar.");
+
+  // TODO:
+  //  Validate axis relationships between a and b
+  TORCH_CHECK(tv_a->nDims() > 0, "Tried to reduce a 0-dim tensor");
+
+  // TODO:
+  //  Add tf32 and other mma data types
+  //  Add fallback path for non-mma data types.
+  TORCH_CHECK(tv_a->getDataType().value() == DataType::Half);
+  TORCH_CHECK(tv_b->getDataType().value() == DataType::Half);
+
+  TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // TODO:
+  //  will lift this in a follow up when we have a
+  //  more generic axes matching.
+  TORCH_CHECK(
+      axes.size() == 1, "Single axis reduction only for mma op instantiation.")
+
+  std::vector<unsigned int> uint_axes;
+  const int ndims = tv_a->domain()->noReductions().size();
+  for (int axis : axes) {
+    if (axis < 0) {
+      axis += ndims;
+    }
+
+    TORCH_CHECK(
+        axis >= 0 && axis < ndims,
+        "Reduction on invalid axis, recieved: ",
+        axis,
+        " however tensor view only has ",
+        ndims,
+        " non-reduction dims.");
+
+    uint_axes.push_back((unsigned int)axis);
+  }
+
+  TensorView* out = newForMma(tv_a, tv_b, uint_axes);
+  IrBuilder::create<MmaOp>(out, tv_a, tv_b, init);
+
+  return out;
 }
 
 } // namespace cuda

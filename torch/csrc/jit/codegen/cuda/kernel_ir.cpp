@@ -78,12 +78,20 @@ TensorIndex::TensorIndex(
   }
 }
 
-Sync::Sync(IrBuilderPasskey passkey, bool war_sync)
-    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {
+BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync)
+    : Expr(passkey, ExprType::BlockSync), war_sync_(war_sync) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
 }
+
+GridSync::GridSync(
+    IrBuilderPasskey passkey,
+    ParallelTypeBitmap sync_dims,
+    Val* sync_buffer)
+    : Expr(passkey, ExprType::GridSync),
+      sync_dims_(sync_dims),
+      sync_buffer_(sync_buffer) {}
 
 InitMagicZero::InitMagicZero(IrBuilderPasskey passkey)
     : Expr(passkey, ExprType::InitMagicZero) {
@@ -302,7 +310,7 @@ Val* ForLoop::step() const {
 bool ForLoop::isTrivial() const {
   // These loops are not materialized
   if (vectorize() || iter_domain()->isBroadcast() ||
-      iter_domain()->isStride()) {
+      iter_domain()->isStride() || iter_domain()->isMma()) {
     return true;
   }
 
@@ -463,6 +471,50 @@ GridWelford::GridWelford(
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridReduction* grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridWelford* grid_welford)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_welford) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+TensorIndex* AllocateFusedReduction::out() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->reduction_op()->out()->as<kir::TensorIndex>();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
+}
+
+const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->threadPredicate();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->threadPredicate();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
 }
 
 } // namespace kir

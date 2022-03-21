@@ -189,6 +189,12 @@ bool disableRNGUnrolling() {
   return disable_rng_unroll ? atoi(disable_rng_unroll) : false;
 }
 
+bool disableIndexHoisting() {
+  const static char* disable_index_hoist =
+      getenv("PYTORCH_NVFUSER_DISABLE_INDEX_HOIST");
+  return disable_index_hoist ? atoi(disable_index_hoist) : false;
+}
+
 std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
   TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
   auto optional_sizes = tensor_type->sizes().concrete_sizes();

@@ -13,12 +13,17 @@ namespace fuser {
 namespace cuda {
 
 inline bool deviceMajorMinorCheck(int major, int minor = 0) {
-  auto dev_prop = at::cuda::getDeviceProperties(0);
+  auto dev_prop = at::cuda::getCurrentDeviceProperties();
   if (dev_prop->major < major ||
       (dev_prop->major == major && dev_prop->minor < minor)) {
     return false;
   }
   return true;
+}
+
+inline int deviceSMCount() {
+  int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  return sm_count;
 }
 
 class NVFuserTest : public ::testing::Test {

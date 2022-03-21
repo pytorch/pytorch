@@ -131,14 +131,6 @@ __device__ float frac(float x) {
   return x - trunc(x);
 }
 
-__device__ double gelu(double x) {
-  return x * normcdf(x);
-}
-
-__device__ float gelu(float x) {
-  return x * normcdf(x);
-}
-
 __device__ double reciprocal(double x) {
   return 1 / x;
 }

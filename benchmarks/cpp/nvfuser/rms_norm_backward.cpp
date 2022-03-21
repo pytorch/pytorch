@@ -20,7 +20,9 @@ using namespace torch::jit::fuser::cuda;
 static void setupRMSNorm_BWD(Fusion* fusion, DataType dtype) {
   FusionGuard fg(fusion);
 
-  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half || dtype == DataType::BFloat16);
+  TORCH_INTERNAL_ASSERT(
+      dtype == DataType::Float || dtype == DataType::Half ||
+      dtype == DataType::BFloat16);
 
   const int kReductionAxis = 2;
   Double* eps_ptr = IrBuilder::create<Double>(1e-6);
@@ -47,14 +49,12 @@ static void setupRMSNorm_BWD(Fusion* fusion, DataType dtype) {
     rstd = castOp(DataType::Float, rstd);
   }
 
-  auto rms_norm_results = rms_norm_backward(
-      grad_out, input, {1}, rstd, weight, {true, true, true});
+  auto rms_norm_results =
+      rms_norm_backward(grad_out, input, {1}, rstd, weight, {true, true, true});
 
-  if (dtype != DataType::Float ) {
-    rms_norm_results.grad_input =
-        castOp(dtype, rms_norm_results.grad_input);
-    rms_norm_results.grad_weight =
-        castOp(dtype, rms_norm_results.grad_weight);
+  if (dtype != DataType::Float) {
+    rms_norm_results.grad_input = castOp(dtype, rms_norm_results.grad_input);
+    rms_norm_results.grad_weight = castOp(dtype, rms_norm_results.grad_weight);
   }
 
   fusion->addOutput(rms_norm_results.grad_input);
@@ -65,10 +65,11 @@ static void NvFuserScheduler_RMSNorm_BWD(
     benchmark::State& benchmark_state,
     FusionExecutorCache* fusion_executor_cache,
     DataType dtype) {
-  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half || dtype == DataType::BFloat16);
+  TORCH_INTERNAL_ASSERT(
+      dtype == DataType::Float || dtype == DataType::Half ||
+      dtype == DataType::BFloat16);
 
-  std::vector<int64_t> input_shape{
-      8, benchmark_state.range(0), 1024};
+  std::vector<int64_t> input_shape{8, benchmark_state.range(0), 1024};
 
   // inputs
   at::manual_seed(0);
@@ -79,15 +80,13 @@ static void NvFuserScheduler_RMSNorm_BWD(
   at::Tensor weight = at::randn({input_shape[2]}, options);
   at::Tensor rstd = at::randn({input_shape[0], input_shape[1], 1}, options);
 
-  std::vector<c10::IValue> aten_inputs(
-      {grad_out, input, weight, rstd});
+  std::vector<c10::IValue> aten_inputs({grad_out, input, weight, rstd});
 
   runBenchmarkIterations(benchmark_state, fusion_executor_cache, aten_inputs);
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
-      (3 * input.numel() + weight.numel() +
-       rstd.numel()) *
+      (3 * input.numel() + weight.numel() + rstd.numel()) *
       int64_t(dataTypeSize(dtype)));
 }
 

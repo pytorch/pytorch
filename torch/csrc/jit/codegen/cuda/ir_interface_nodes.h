@@ -440,6 +440,24 @@ class TORCH_CUDA_CU_API TensorView : public Val {
     return is_double_buffered_;
   }
 
+  //! Fill in mma options in scheduling time.
+  //!  Each mma op in Fusion IR must be configured once before lowering.
+  //!  Mma options are configuration parameters used in lowering to mma
+  //!  instrinsics, mainly the type of mma macro to use and input data layout
+  //!  etc.
+  //!
+  //! TODO: This step will very likely be removed in a follow up PR. All of
+  //!  the options configured here could actually be inferred from fusion IR
+  //!  once we are feature complete.
+  void configureMma(MmaOptions options);
+
+  //! Transforms the innermost iterdomains according to the given mma swizzle,
+  //!  this should be used on the tvs that are either inputs/outputs of an
+  //!  MmaOp, or any tv's that are involved in prolog/epilog fusions and need to
+  //!  have a matching thread swizzle with the mma operand/result.
+  //! More detail on usage see [WarpMmaSwizzler] in scheduler/mma_utils.h .
+  void applyMmaSwizzle(MmaOptions options);
+
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;

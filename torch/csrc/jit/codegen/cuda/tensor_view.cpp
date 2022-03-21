@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 
 // Cleanup
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
@@ -75,6 +76,27 @@ TensorView::TensorView(
           passkey.ir_container_->zeroVal(), IrBuilder::create<Int>()));
     }
   }
+  // [ Note -- stride_properties in tensor type ]
+  //
+  // `stride_properties()` returns a vector<optional<Stride>>, while
+  //     Stride {
+  //       optional<size_t> stride_index_;
+  //       optional<bool> contiguous_;
+  //       optional<size_t> stride_;
+  //     };
+  // To keep things simple, we ignore all the optional wrapper, as in reality,
+  // they would always be available unless we start doing multiple profiling
+  // runs.
+  //
+  //   `stride_properties()` returns the vector of Stride, where it is ordered
+  //   from the fastest to slowest dimensions. i.e. stride_properties()[i] would
+  //   give us the i-th fastest dimension. where:
+  //     1. `Stride::stride_index_` gives the index to the dimension;
+  //     2. `Stride::contiguous_` indicates whether this dimension is
+  //     memory-dense*;
+  //     3. `Stride::stride_` is the actual stride for the given dimension.
+  // * note that memory-dense means different things depending on the order of
+  // the dimension. checkout `TensorType::computeStrideProps` for details
 
   // default to non_contiguous;
   std::vector<bool> contig_info(tensor_type->dim().value(), false);
@@ -96,12 +118,19 @@ TensorView::TensorView(
         // dim;
         contig_info[index] = (index == tensor_type->dim().value() - 1);
       } else {
-        // check the neighboring faster dimension;
-        if (auto left_index_opt =
-                tensor_type->stride_properties()[static_cast<int>(i) - 1]
-                    ->stride_index_) {
-          // collapse if two axes are neighboring in both sizes & stride_index;
-          contig_info[index] = (left_index_opt.value() == (index + 1));
+        // check the neighboring faster dimension, collapse if it is considered
+        // as inner dimension per stride_index
+        auto inner_index_opt =
+            tensor_type->stride_properties()[static_cast<int>(i) - 1]
+                ->stride_index_;
+        if (inner_index_opt.has_value() &&
+            inner_index_opt.value() == (index + 1)) {
+          // collapse if inner dimension has non-broadcasted strides
+          auto inner_stride_opt =
+              tensor_type->stride_properties()[static_cast<int>(i) - 1]
+                  ->stride_;
+          contig_info[index] =
+              inner_stride_opt.has_value() && inner_stride_opt.value() != 0;
         }
       }
     }
@@ -1019,6 +1048,21 @@ bool TensorView::isEmptyTensor() const {
       });
 }
 
+void TensorView::applyMmaSwizzle(MmaOptions options) {
+  switch (options.operand) {
+    case MmaOptions::Operand::NotOperand:
+      mma_util::WarpMmaSwizzler::scheduleMmaWarpOutput(this, options);
+      break;
+    case MmaOptions::Operand::A:
+    case MmaOptions::Operand::B:
+      mma_util::WarpMmaSwizzler::scheduleOperandRead(this, options);
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown operand flag");
+      break;
+  }
+}
+
 TensorViewBuilder& TensorViewBuilder::ndims(size_t ndims) {
   TORCH_CHECK(shape_.empty() || shape_.size() == ndims);
   TORCH_CHECK(contiguity_.empty() || contiguity_.size() == ndims);
@@ -1081,6 +1125,13 @@ TensorView* TensorViewBuilder::build() const {
   // Create the final TensorView
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
+}
+
+void TensorView::configureMma(MmaOptions options) {
+  TORCH_CHECK(definition(), "configureMma: invalid for input tensor ", this);
+  auto mma = dynamic_cast<MmaOp*>(definition());
+  TORCH_CHECK(mma, "configureMma: invalid for non-mma output: ", this);
+  mma->configureOptions(options);
 }
 
 } // namespace cuda

@@ -208,6 +208,8 @@ static const char* expr_type2string(ExprType t) {
       return "BroadcastOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
+    case ExprType::MmaOp:
+      return "MmaOp";
     case ExprType::TransposeOp:
       return "TransposeOp";
     case ExprType::ShiftOp:
@@ -224,8 +226,10 @@ static const char* expr_type2string(ExprType t) {
       return "Merge";
     case ExprType::Allocate:
       return "Allocate";
-    case ExprType::Sync:
-      return "Sync";
+    case ExprType::BlockSync:
+      return "BlockSync";
+    case ExprType::GridSync:
+      return "GridSync";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:
@@ -296,8 +300,6 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "floor";
     case UnaryOpType::Frac:
       return "frac";
-    case UnaryOpType::Gelu:
-      return "gelu";
     case UnaryOpType::Silu:
       return "silu";
     case UnaryOpType::Lgamma:
@@ -551,6 +553,8 @@ static const char* parallel_type2string(ParallelType t) {
       return "UR";
     case ParallelType::Unswitch:
       return "US";
+    case ParallelType::Mma:
+      return "MMA";
     case ParallelType::Serial:
       return "S";
     default:

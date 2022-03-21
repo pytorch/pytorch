@@ -144,6 +144,7 @@ bool complyWith(
   // TODO: should we get symbolic_size instead and check for size
   // consistency across tensors as well?
   const auto& sizes = guard_tensor_type->sizes();
+  // see [ Note -- stirde_properties in tensor type ]
   const auto& stride_properties = guard_tensor_type->stride_properties();
 
   const auto& t_sizes = tensor.sizes();

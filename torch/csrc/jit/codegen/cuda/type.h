@@ -90,6 +90,7 @@ enum class ExprType {
   ReductionOp,
   BroadcastOp,
   WelfordOp,
+  MmaOp,
   TransposeOp,
   ShiftOp,
   GatherOp,
@@ -98,7 +99,8 @@ enum class ExprType {
   Split,
   Merge,
   Allocate,
-  Sync,
+  BlockSync,
+  GridSync,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -106,6 +108,7 @@ enum class ExprType {
   GridReduction,
   GridBroadcast,
   GridWelford,
+  AllocateFusedReduction
 };
 
 enum class UnaryOpType {
@@ -218,6 +221,7 @@ enum class ParallelType {
   MisalignedVectorize,
   Unroll,
   Unswitch,
+  Mma,
   Serial
 };
 

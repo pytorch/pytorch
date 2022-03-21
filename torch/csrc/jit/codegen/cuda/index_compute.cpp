@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -26,218 +27,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-
-// A merge is contiguous if:
-//   Inputs of outer are to the left in the root domain of the inputs of RHS.
-//   All inputs are contiguous in the root domain:
-//     - All marked as contiguous
-//     - Only gaps between inputs are broadcast or reductoin dims
-//   There are no split transformations performed on outer or inner
-//   All transformations on outer or inner are contiguous merges
-// If this criteria holds, then we can index the input root domains of this
-// merge with the indexing provided to the output of the merge in the backward
-// index pass
-
-class ContigIDs : public OptInDispatch {
- private:
-  using OptInDispatch::handle;
-
-  // Mark if ids are result of contigous merges
-  std::unordered_set<IterDomain*> contig_ids;
-  // Given contiguous domain, return all iter domains within its history.
-  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
-      within_contig_ids;
-  const std::vector<IterDomain*>& root_domain_;
-  const std::vector<bool>& root_contiguity_;
-  std::unordered_map<IterDomain*, bool> is_contig_root;
-
-  std::unordered_map<IterDomain*, IterDomain*> root_to_contig_id_;
-
-  bool inRoot(const std::vector<IterDomain*>& ids) {
-    return std::all_of(ids.begin(), ids.end(), [this](IterDomain* id) {
-      return is_contig_root.find(id) != is_contig_root.end();
-    });
-  }
-
-  bool isContig(IterDomain* id) {
-    return contig_ids.find(id) != contig_ids.end();
-  }
-
-  // Split outputs are not contiguous, don't need to do anything.
-  void handle(Split*) override {}
-
-  void handle(Merge* merge) override {
-    // If either input is non-contiguous so is output.
-    const auto inner = merge->inner();
-    const auto outer = merge->outer();
-
-    if (!isContig(inner) || !isContig(outer)) {
-      return;
-    }
-
-    // Grab inputs, make sure they're in root domain, check if they're
-    // contiguous.
-
-    auto lhs_inputs =
-        ir_utils::iterDomainInputsOfOrderedAs({outer}, root_domain_);
-    auto rhs_inputs =
-        ir_utils::iterDomainInputsOfOrderedAs({inner}, root_domain_);
-
-    TORCH_INTERNAL_ASSERT(
-        inRoot(lhs_inputs) && inRoot(rhs_inputs),
-        "Found an invalid merge operation, inputs of its arguments are not in the root domain.");
-
-    std::deque<IterDomain*> ordered_inputs(
-        lhs_inputs.begin(), lhs_inputs.end());
-    ordered_inputs.insert(
-        ordered_inputs.end(), rhs_inputs.begin(), rhs_inputs.end());
-
-    // If any root input is not contig, output is not contig
-    if (!(std::all_of(
-            ordered_inputs.begin(),
-            ordered_inputs.end(),
-            [this](IterDomain* id) {
-              return is_contig_root.at(id) && !id->isBroadcast() &&
-                  !id->isReduction();
-            }))) {
-      return;
-    }
-
-    std::deque<IterDomain*> root_copy(root_domain_.begin(), root_domain_.end());
-
-    // Forward to first matching argument
-    while (!root_copy.empty() && !ordered_inputs.empty()) {
-      if (root_copy.front() != ordered_inputs.front()) {
-        root_copy.pop_front();
-      } else {
-        break;
-      }
-    }
-
-    // Forward through all matching arguments
-    while (!root_copy.empty() && !ordered_inputs.empty()) {
-      if (root_copy.front() == ordered_inputs.front()) {
-        root_copy.pop_front();
-        ordered_inputs.pop_front();
-        // This is no longer causing an error in:
-        // ReductionSchedulerMultiDimNonFastest TODO: test reenablement to make
-        // sure it does what's expected
-        //  } else if (
-        //     root_copy.front()->isReduction() ||
-        //     root_copy.front()->isBroadcast()) {
-        //   root_copy.pop_front();
-      } else {
-        break;
-      }
-    }
-
-    // If we matched all inputs, the output is contiguous. Only want to keep the
-    // top contig ID, lower ids should be placed in the "within_contig_ids" map
-    // of top id.
-    auto out = merge->out()->as<IterDomain>();
-    if (ordered_inputs.empty()) {
-      if (contig_ids.find(inner) != contig_ids.end()) {
-        contig_ids.erase(inner);
-      }
-
-      if (contig_ids.find(outer) != contig_ids.end()) {
-        contig_ids.erase(outer);
-      }
-
-      contig_ids.emplace(out);
-
-      std::unordered_set<IterDomain*> within_out;
-      within_out.emplace(inner);
-      if (within_contig_ids.find(inner) != within_contig_ids.end()) {
-        auto in_inner = within_contig_ids.at(inner);
-        within_out.insert(in_inner.begin(), in_inner.end());
-        within_contig_ids.erase(inner);
-      }
-
-      within_out.emplace(outer);
-      if (within_contig_ids.find(outer) != within_contig_ids.end()) {
-        auto in_outer = within_contig_ids.at(outer);
-        within_out.insert(in_outer.begin(), in_outer.end());
-        within_contig_ids.erase(outer);
-      }
-
-      within_contig_ids[out] = within_out;
-
-      for (auto root : lhs_inputs) {
-        root_to_contig_id_[root] = out;
-      }
-      for (auto root : rhs_inputs) {
-        root_to_contig_id_[root] = out;
-      }
-    }
-  }
-
- public:
-  ContigIDs() = delete;
-
-  // Check through the history of ids whose inputs map to root_domain with
-  // contiguity root_contiguity. Return unordered_set of all merges that are
-  // contiguous. Ignore root order is primarily used for predicate generation.
-  // In this case we can linearize indexing of any ID that only consists of
-  // merge operations.
-  ContigIDs(
-      const std::vector<IterDomain*>& ids,
-      const std::vector<IterDomain*>& root_domain,
-      const std::vector<bool>& root_contiguity)
-      : root_domain_(root_domain), root_contiguity_(root_contiguity) {
-    if (ids.empty()) {
-      return;
-    }
-
-    TORCH_INTERNAL_ASSERT(
-        root_domain_.size() == root_contiguity_.size(),
-        "Arguments don't match ",
-        root_domain_.size(),
-        " != ",
-        root_contiguity_.size());
-
-    for (const auto i : c10::irange(root_domain_.size())) {
-      // If a root domain has halo, can't use merged domain even if
-      // both inputs are contiguous. HaloInfo is also initialized for
-      // rfactor root domains, which should just return "zero"
-      // RootAxisInfo. This should be safe as no rfactor tensor should
-      // need halo.
-      if (root_contiguity_[i] &&
-          !GpuLower::current()
-               ->haloInfo()
-               .getRootAxisInfo(root_domain_[i])
-               .hasHalo()) {
-        auto root_domain_i = root_domain_[i]->as<IterDomain>();
-        contig_ids.emplace(root_domain_i);
-        within_contig_ids[root_domain_i] = std::unordered_set<IterDomain*>();
-        is_contig_root[root_domain_[i]] = true;
-      } else {
-        is_contig_root[root_domain_[i]] = false;
-      }
-      root_to_contig_id_[root_domain_[i]->as<IterDomain>()] =
-          root_domain_[i]->as<IterDomain>();
-    }
-
-    auto exprs = StmtSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
-
-    for (auto expr : exprs) {
-      handle(expr);
-    }
-  }
-
-  const std::unordered_set<IterDomain*>& contigIDs() const {
-    return contig_ids;
-  }
-
-  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
-  withinContigIDs() const {
-    return within_contig_ids;
-  }
-
-  const std::unordered_map<IterDomain*, IterDomain*>& rootToContigID() const {
-    return root_to_contig_id_;
-  }
-};
 
 // Update the HaloInfo mappings for a reference tensor by propagating
 // the halo information from the consumer tensor.
@@ -740,8 +529,8 @@ IndexCompute::IndexCompute(
     ContigIDs contig_finder(
         td_->domain(), td_->getMaybeRFactorDomain(), root_contiguity);
     contig_ids = contig_finder.contigIDs();
-    root_to_contig_id_ = contig_finder.rootToContigID();
-    auto within_contig = contig_finder.withinContigIDs();
+    root_to_contig_id_ = contig_finder.rootToIndexedID();
+    const auto& within_contig = contig_finder.withinContigIDs();
     for (auto contig_id : contig_ids) {
       if (index_map_.find(contig_id) != index_map_.end()) {
         TORCH_INTERNAL_ASSERT(
@@ -1038,6 +827,13 @@ indexMapFromTV(
 
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
 
+  // Check if the current op has an implicit loop implemented
+  //  within an mma instruction.
+  bool within_mma_loops =
+      std::any_of(loops.begin(), loops.end(), [](kir::ForLoop* fl) {
+        return fl->iter_domain()->isMma();
+      });
+
   // When indexed as a producer, the parallel types of the the
   // producer domains may not be the same as those of the loops, but
   // that's still valid parallelization. However, in that case, using
@@ -1073,8 +869,15 @@ indexMapFromTV(
 
   for (auto loop : loops) {
     Val* idx = nullptr;
-    const auto same_parallel_type =
-        as_consumer || find_matching_parallel_domain(loop->iter_domain());
+    const auto same_parallel_type = as_consumer ||
+        find_matching_parallel_domain(loop->iter_domain()) ||
+        // Note && TODO:
+        //  mma swizzled lane_id does not map naturally from producer
+        //   to consumer but they should still be detected as same
+        //   parallel type. In a follow up may want to extent
+        //   find_matching_parallel_domain to cover this case.
+        (within_mma_loops &&
+         loop->iter_domain()->getParallelType() == ParallelType::TIDx);
     // See also LoopNestGenerator::pushAlloc.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
@@ -1231,7 +1034,7 @@ Val* hoistConsumerIndex(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   // If index has no defining expression, there's nothing to hoist
-  if (index->definition() == nullptr) {
+  if (disableIndexHoisting() || index->definition() == nullptr) {
     return index;
   }
 
@@ -1290,7 +1093,7 @@ Val* hoistProducerIndex(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   // If index has no defining expression, there's nothing to hoist
-  if (index->definition() == nullptr) {
+  if (disableIndexHoisting() || index->definition() == nullptr) {
     return index;
   }
 
@@ -3090,6 +2893,10 @@ std::pair<Val*, Val*> hoistPredicates(
     const std::unordered_map<IterDomain*, Val*>& ref_start_index_map,
     const std::unordered_map<IterDomain*, Val*>& ref_stop_index_map) {
   const std::pair<Val*, Val*> same_indices{start_index, stop_index};
+
+  if (disableIndexHoisting()) {
+    return same_indices;
+  }
 
   const auto start_is_same_as_stop = stop_index == start_index;
 

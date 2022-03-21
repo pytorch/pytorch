@@ -392,7 +392,8 @@ void IrPrinter::handle(const TernaryOp* top) {
 void IrPrinter::handle(const ReductionOp* rop) {
   indent() << rop->out() << " = reduction( " << rop->in()
            << ", op = " << rop->getReductionOpType()
-           << ", initial value = " << rop->init() << " )\n";
+           << ", initial value = " << rop->init()
+           << ", fused = " << rop->isFused() << " )\n";
 }
 
 void IrPrinter::handle(const WelfordOp* wop) {
@@ -410,6 +411,7 @@ void IrPrinter::handle(const WelfordOp* wop) {
     os_ << "\n  initial value = " << wop->initAvg() << "(Avg)\n  "
         << wop->initVar() << "(Var)\n  " << wop->initN() << "(N)";
   }
+  os_ << "\n  fused = " << wop->isFused();
   os_ << " )\n";
 }
 
@@ -452,6 +454,11 @@ void IrPrinter::handle(const TransposeOp* top) {
 void IrPrinter::handle(const ShiftOp* sop) {
   indent() << sop->out() << " = shift( " << sop->in() << ", {" << sop->offsets()
            << "}, {" << sop->padWidth() << "} )\n";
+}
+
+void IrPrinter::handle(const MmaOp* mma) {
+  indent() << mma->out() << " = mma(" << mma->inA() << "," << mma->inB();
+  os_ << ")\n";
 }
 
 void IrPrinter::handle(const GatherOp* op) {
@@ -560,9 +567,15 @@ void IrPrinter::handle(const kir::Allocate* node) {
   }
 }
 
-void IrPrinter::handle(const kir::Sync* node) {
-  indent() << "SYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
+void IrPrinter::handle(const kir::BlockSync* node) {
+  indent() << "BLOCKSYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
            << ")\n";
+}
+
+void IrPrinter::handle(const kir::GridSync* node) {
+  indent() << "GRIDSYNC(" << node->syncDims().toString() << ", ";
+  handle(node->syncBuffer());
+  os_ << ")\n";
 }
 
 void IrPrinter::handle(const kir::ForLoop* node) {
@@ -586,7 +599,19 @@ void IrPrinter::handle(const kir::IfThenElse* node) {
 }
 
 void IrPrinter::handle(const kir::GridBroadcast* node) {
-  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+  const auto* broadcast_op = node->broadcast_op();
+  indent();
+  handle(broadcast_op->out());
+  os_ << " = "
+      << "GRID_BROADCAST(in=";
+  handle(broadcast_op->in());
+  os_ << ")\n";
+  indent() << kTab << ".broadcast_buffer=";
+  handle(node->broadcast_buffer()->buffer());
+  os_ << "\n";
+  indent() << kTab << ".sync_buffer=";
+  handle(node->sync_buffer()->buffer());
+  os_ << "\n";
 }
 
 void IrPrinter::handle(const kir::GridReduction* node) {
@@ -599,9 +624,16 @@ void IrPrinter::handle(const kir::GridReduction* node) {
   handle(reduction_op->in());
   os_ << ", init=";
   handle(reduction_op->init());
-  os_ << ", pred=";
+  os_ << ", read_pred=";
   if (reduction_op->predicate() != nullptr) {
     handle(reduction_op->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ")\n";
+  os_ << ", write_pred=";
+  if (reduction_op->writePredicate() != nullptr) {
+    handle(reduction_op->writePredicate());
   } else {
     os_ << "nullptr";
   }
@@ -612,8 +644,19 @@ void IrPrinter::handle(const kir::GridReduction* node) {
   indent() << kTab << ".sync_buffer=";
   handle(node->sync_buffer()->buffer());
   os_ << "\n";
-  indent() << kTab << ".grid_pred=";
-  handle(node->predicate());
+  indent() << kTab << ".grid_read_pred=";
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  indent() << kTab << ".grid_write_pred=";
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
   os_ << "\n";
 }
 
@@ -643,8 +686,19 @@ void IrPrinter::handle(const kir::GridWelford* node) {
     os_ << " initN=";
     handle(welford_op->initN());
   }
-  indent() << ", pred=";
-  handle(welford_op->predicate());
+  indent() << ", read_pred=";
+  if (welford_op->predicate() != nullptr) {
+    handle(welford_op->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ")\n";
+  indent() << ", write_pred=";
+  if (welford_op->writePredicate() != nullptr) {
+    handle(welford_op->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
   os_ << ")\n";
   indent() << kTab << ".var_buffer=";
   handle(node->var_buffer()->buffer());
@@ -656,8 +710,19 @@ void IrPrinter::handle(const kir::GridWelford* node) {
   indent() << kTab << ".sync_buffer=";
   handle(node->sync_buffer()->buffer());
   os_ << "\n";
-  indent() << kTab << ".grid_pred=";
-  handle(node->predicate());
+  indent() << kTab << ".grid_read_pred=";
+  if (node->predicate() != nullptr) {
+    handle(node->predicate());
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << "\n";
+  indent() << kTab << ".grid_write_pred=";
+  if (node->writePredicate() != nullptr) {
+    handle(node->writePredicate());
+  } else {
+    os_ << "nullptr";
+  }
   os_ << "\n";
 }
 
@@ -667,6 +732,12 @@ void IrPrinter::handle(const kir::InitMagicZero* node) {
 
 void IrPrinter::handle(const kir::UpdateMagicZero* node) {
   indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
+}
+
+void IrPrinter::handle(const kir::AllocateFusedReduction* node) {
+  indent() << "AllocateFusedReduction(reduction buffer=";
+  handle(node->out());
+  os_ << ")\n";
 }
 
 void IrTransformPrinter::handle(Fusion* f) {

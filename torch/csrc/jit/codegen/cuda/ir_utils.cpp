@@ -324,7 +324,29 @@ struct SubstituteInExpr : public OptInDispatch {
         init_N,
         in_avg,
         in_var,
-        in_N);
+        in_N,
+        welford_expr->isFused());
+  }
+
+  void handle(MmaOp* mma_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to MmaOp must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in_a = reference_->sameAs(mma_expr->inA())
+        ? substitute_->as<TensorView>()
+        : mma_expr->inA();
+    auto in_b = reference_->sameAs(mma_expr->inB())
+        ? substitute_->as<TensorView>()
+        : mma_expr->inB();
+    auto out = reference_->sameAs(mma_expr->out())
+        ? substitute_->as<TensorView>()
+        : mma_expr->out();
+    auto init = reference_->sameAs(mma_expr->init())
+        ? substitute_->as<TensorView>()
+        : mma_expr->init();
+    expr_ = IrBuilder::create<MmaOp>(
+        mma_expr->container(), out, in_a, in_b, init, mma_expr->options());
   }
 
  private:

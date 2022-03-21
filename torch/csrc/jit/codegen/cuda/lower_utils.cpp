@@ -93,6 +93,7 @@ bool isTvOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::TernaryOp ||
        expr->getExprType().value() == ExprType::ReductionOp ||
        expr->getExprType().value() == ExprType::WelfordOp ||
+       expr->getExprType().value() == ExprType::MmaOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
@@ -423,7 +424,8 @@ class ReplaceExprInput : private kir::ExprMutator {
           node->getReductionOpType(),
           node->init(),
           node->out(),
-          replaced_inputs.value().at(node->in()));
+          replaced_inputs.value().at(node->in()),
+          node->isFused());
       registerReplaceWithPredicate(node, replacement);
     }
   }
@@ -456,6 +458,19 @@ class ReplaceExprInput : private kir::ExprMutator {
     }
   }
 
+  void handle(MmaOp* node) final {
+    auto replaced_inputs = getMaybeInputReplacementMap(node);
+    if (replaced_inputs.has_value()) {
+      auto replacement = IrBuilder::create<MmaOp>(
+          node->out(),
+          replaced_inputs.value().at(node->inA()),
+          replaced_inputs.value().at(node->inB()),
+          node->init(),
+          node->options());
+      registerReplaceWithPredicate(node, replacement);
+    }
+  }
+
  private:
   const std::unordered_map<Val*, Val*>& replacement_map_;
 };
@@ -466,6 +481,15 @@ std::vector<Expr*> replaceInputsInExpr(
     const std::vector<Expr*>& exprs,
     const std::unordered_map<Val*, Val*>& replacement_map) {
   return ReplaceExprInput::replace(exprs, replacement_map);
+}
+
+bool isTrivialIterDomain(IterDomain* id) {
+  auto pt = id->getParallelType();
+  return id->isReduction() || id->isBroadcast() || id->isStride() ||
+      (id->extent()->isOneInt() && id->start()->isZeroInt()) ||
+      pt == ParallelType::Vectorize ||
+      (isParallelTypeThread(pt) &&
+       !GpuLower::current()->haloInfo().hasHaloWidth(id));
 }
 
 } // namespace cuda

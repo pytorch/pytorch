@@ -8,9 +8,11 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <torch/csrc/jit/codegen/cuda/lower_fused_reduction.h>
 #include <torch/csrc/jit/codegen/cuda/lower_index_hoist.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
@@ -19,10 +21,12 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
 #include <ostream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -59,6 +63,12 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   }
 
   const ThreadPredicateMap& threadPredMap() const {
+    return thread_pred_map_;
+  }
+
+  // Returns non-const reference. Necessary to reset a predicate flag
+  // when a broadcast expression is fused into a reduction.
+  ThreadPredicateMap& threadPredMap() {
     return thread_pred_map_;
   }
 
@@ -138,6 +148,26 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return vectorized_accesses_;
   }
 
+  auto& vectorizedAccesses() {
+    return vectorized_accesses_;
+  }
+
+  const auto& vectorizedSetInfo() const {
+    return vectorized_set_info_;
+  }
+
+  auto& vectorizedSetInfo() {
+    return vectorized_set_info_;
+  }
+
+  FusedReductionInfo& fusedReductionInfo() {
+    return fused_reduction_info_;
+  }
+
+  const SyncMap& syncMap() const {
+    return sync_map_;
+  }
+
  private:
   void lower(Fusion* fusion, DataType index_type);
 
@@ -145,8 +175,6 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //  the parallel dimensions that need to be padded to a multiples of
   //  warp size.
   void collectPaddedParallelDims();
-
-  void fillVectorizeInfo();
 
  private:
   // Lowered Kernel IR
@@ -168,10 +196,15 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   NonDivisibleSplitInfo non_divisible_split_info_;
   DoubleBufferInfo double_buffer_info_;
   CommonIndexMap common_index_map_;
+  FusedReductionInfo fused_reduction_info_;
+  SyncMap sync_map_;
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size
+  // std::unordered_map<TensorView*, VectorizationInfo> vectorized_accesses_;
   std::unordered_map<TensorView*, int> vectorized_accesses_;
+  // Info on each vectorized set op
+  std::vector<VectorizedSetInfo> vectorized_set_info_;
 
   Fusion* fusion_ = nullptr;
 };
