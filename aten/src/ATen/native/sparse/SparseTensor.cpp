@@ -677,12 +677,12 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
         if (values.numel() >
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::axpy<scalar_t>(
-                                              blockSize,
-                                              1,
-                                              values_ptr + pos * blockSize,
-                                              1,
-                                              newValues_ptr + i * blockSize,
-                                              1);
+              blockSize,
+              1,
+              values_ptr + pos * blockSize,
+              1,
+              newValues_ptr + i * blockSize,
+              1);
         }
       } else {
         ++i;
@@ -692,11 +692,11 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
         if (values.numel() >
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::copy<scalar_t>(
-                                              blockSize,
-                                              values_ptr + pos * blockSize,
-                                              1,
-                                              newValues_ptr + i * blockSize,
-                                              1);
+              blockSize,
+              values_ptr + pos * blockSize,
+              1,
+              newValues_ptr + i * blockSize,
+              1);
         }
       }
       prev = curr;
