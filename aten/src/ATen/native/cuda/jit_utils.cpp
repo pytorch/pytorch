@@ -329,10 +329,7 @@ const std::string no_dynamic_cast_support_literal = R"ESCAPE(
 
 )ESCAPE";
 
-const std::string jit_code_template = R"ESCAPE(
-
-  ${dynamic_casting_string}
-
+const std::string offset_calc_template = R"ESCAPE(
   template <typename T>
   struct DivMod {
   T div;
@@ -415,6 +412,14 @@ const std::string jit_code_template = R"ESCAPE(
     // NOTE: this approach will not support nInputs == 0
     ${index_type} strides_[25][NARGS];
   };
+
+
+)ESCAPE";
+
+const std::string jit_code_template = R"ESCAPE(
+
+  ${dynamic_casting_string}
+
 
   ${functor}
 
@@ -776,7 +781,7 @@ std::string generate_code(
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
 
-    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = at::jit::CodeTemplate(jit_common_types + offset_calc_template + jit_code_template);
     const auto code = cuda_template.format(env);
     return code;
   }
@@ -927,7 +932,7 @@ std::string generate_reduction_code(
       env.s("functor", func);
       env.s("output_vec_size", std::to_string(vec_size));
       static auto cuda_template = at::jit::CodeTemplate(
-        jit_common_types + load_code_template("/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/reduction_template.cuh"));
+        jit_common_types + offset_calc_template + load_code_template("/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/reduction_template.cuh"));
       const auto code = cuda_template.format(env);
       return code;
 
