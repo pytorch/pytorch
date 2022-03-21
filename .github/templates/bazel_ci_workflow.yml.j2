@@ -7,20 +7,6 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default %}
-  pull_request:
-{%- endif -%}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-  push:
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
@@ -29,6 +15,7 @@ on:
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
@@ -96,6 +83,7 @@ on:
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
+            -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
             -e IN_CI \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \
