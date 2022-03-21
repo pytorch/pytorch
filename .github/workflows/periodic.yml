@@ -1,0 +1,157 @@
+name: periodic
+
+on:
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
+  push:
+    tags:
+      - ciflow/periodic/*
+      - ciflow/all/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}--${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  linux-bionic-cuda11_5-py3_7-gcc7-build:
+    name: linux-bionic-cuda11.5-py3.7-gcc7
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    with:
+      build-environment: linux-bionic-cuda11.5-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
+
+  linux-bionic-cuda11_5-py3_7-gcc7-test:
+    name: linux-bionic-cuda11.5-py3.7-gcc7
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    needs: linux-bionic-cuda11_5-py3_7-gcc7-build
+    with:
+      build-environment: linux-bionic-cuda11.5-py3.7-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_5-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  libtorch-linux-bionic-cuda11_5-py3_7-gcc7-build:
+    name: libtorch-linux-bionic-cuda11.5-py3.7-gcc7
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    with:
+      build-environment: libtorch-linux-bionic-cuda11.5-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
+      build-generates-artifacts: false
+
+  linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
+    name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    with:
+      build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
+      docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+
+  linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-test:
+    name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    needs: linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build
+    with:
+      build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
+      docker-image: ${{ needs.linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-xenial-cuda11_3-py3_7-gcc7-debug-build:
+    name: linux-xenial-cuda11.3-py3.7-gcc7-debug
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-debug
+      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-with-debug: true
+
+  linux-xenial-cuda11_3-py3_7-gcc7-debug-test:
+    name: linux-xenial-cuda11.3-py3.7-gcc7-debug
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    needs: linux-xenial-cuda11_3-py3_7-gcc7-debug-build
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-debug
+      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-debug-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  win-vs2019-cuda11_5-py3-build:
+    name: win-vs2019-cuda11.5-py3
+    uses: pytorch/pytorch/.github/workflows/_win-build.yml@master
+    with:
+      build-environment: win-vs2019-cuda11.5-py3
+      cuda-version: "11.5"
+
+  win-vs2019-cuda11_5-py3-test:
+    name: win-vs2019-cuda11.5-py3
+    uses: pytorch/pytorch/.github/workflows/_win-test.yml@master
+    needs: win-vs2019-cuda11_5-py3-build
+    with:
+      build-environment: win-vs2019-cuda11.5-py3
+      cuda-version: "11.5"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
+          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
+        ]}
+
+  ios-12-5-1-arm64:
+    name: ios-12-5-1-arm64
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    with:
+      build-environment: ios-12-5-1-arm64
+      ios-platform: OS
+      ios-arch: arm64
+    secrets:
+      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
+      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
+      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
+      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
+
+  ios-12-5-1-arm64-coreml:
+    name: ios-12-5-1-arm64-coreml
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    with:
+      build-environment: ios-12-5-1-arm64-coreml
+      ios-platform: OS
+      ios-arch: arm64
+    secrets:
+      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
+      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
+      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
+      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
+
+  ios-12-5-1-arm64-custom-ops:
+    name: ios-12-5-1-arm64-custom-ops
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    with:
+      build-environment: ios-12-5-1-arm64-custom-ops
+      ios-platform: OS
+      ios-arch: arm64
+    secrets:
+      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
+      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
+      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
+      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
+
+  ios-12-5-1-arm64-metal:
+    name: ios-12-5-1-arm64-metal
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    with:
+      build-environment: ios-12-5-1-arm64-metal
+      ios-platform: OS
+      ios-arch: arm64
+    secrets:
+      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
+      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
+      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
+      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
