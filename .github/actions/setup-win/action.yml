@@ -1,6 +1,6 @@
 name: Setup Windows
 
-description: Set up Docker workspace on linux
+description: Set up for windows jobs
 
 inputs:
   github-secret:
@@ -56,7 +56,7 @@ runs:
         .circleci/scripts/windows_cuda_install.sh
         .circleci/scripts/windows_cudnn_install.sh
 
-    - uses: actions/setup-python@v2
-      name: Setup Python3
+    - name: Setup Python3
+      uses: actions/setup-python@v2
       with:
         python-version: "3.x"
