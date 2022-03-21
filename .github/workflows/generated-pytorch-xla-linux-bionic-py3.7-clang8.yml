@@ -234,6 +234,7 @@ jobs:
     runs-on: linux.2xlarge
     timeout-minutes: 270
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-xla-linux-bionic-py3.7-clang8-test
       TEST_CONFIG: xla
@@ -465,6 +466,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: pytorch-xla-linux-bionic-py3.7-clang8-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
