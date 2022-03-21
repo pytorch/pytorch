@@ -419,6 +419,30 @@ class TestSummonFullParams(FSDPTest):
             with fsdp_model.summon_full_params(rank0_only=True, writeback=True):
                 pass
 
+    @skip_if_lt_x_gpu(2)
+    @parametrize("prefix", ["", "test_prefix"])
+    @parametrize("recurse", [False, True])
+    def test_named_parameters(self, prefix: str, recurse: bool):
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
+        )
+        model = NestedWrappedModule(
+            group=dist.distributed_c10d._get_default_group(),
+            wrap_fsdp=False,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+        )
+        with fsdp_model.summon_full_params():
+            for (n1, p1), (n2, p2) in itertools.zip_longest(
+                fsdp_model.named_parameters(prefix=prefix, recurse=recurse),
+                model.named_parameters(prefix=prefix, recurse=recurse),
+            ):
+                self.assertEqual(n1, n2)
+                self.assertEqual(p1, p2)
+
 
 instantiate_parametrized_tests(TestSummonFullParams)
 instantiate_parametrized_tests(TestSummonFullParamsNoShard)
