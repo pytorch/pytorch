@@ -1,7 +1,8 @@
 from io import BufferedIOBase
 from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
     Decoder,
@@ -14,7 +15,7 @@ from torch.utils.data.datapipes.utils.decoder import (
 @functional_datapipe('routed_decode')
 class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     r"""
-    Decode binary streams from input DataPipe, yield pathname and decoded data
+    Decodes binary streams from input DataPipe, yields pathname and decoded data
     in a tuple (functional name: ``routed_decode``).
 
     Args:

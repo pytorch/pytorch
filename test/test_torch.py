@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
-    skipIfNotRegistered, bytes_to_scalar)
+    skipIfNotRegistered, bytes_to_scalar, parametrize)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -116,19 +116,6 @@ class TestVitalSignsCuda(TestCase):
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
 
-    # FIXME: Port this to ErrorInputs on where
-    @onlyCUDA
-    @dtypes(torch.float32)
-    def test_where_invalid_device(self, device, dtype):
-        for devices in [('cpu', device, device), (device, 'cpu', 'cpu'),
-                        (device, 'cpu', device), ('cpu', device, 'cpu')]:
-            condition = make_tensor(16, device=devices[0], dtype=torch.float32)
-            x = make_tensor(16, device=devices[1], dtype=torch.float32)
-            y = make_tensor(16, device=devices[2], dtype=torch.float32)
-            with self.assertRaisesRegex(RuntimeError,
-                                        "Expected condition, x and y to be on the same device"):
-                torch.where(condition, x, y)
-
     # TODO: move all tensor creation to common ops
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
@@ -174,7 +161,7 @@ class TestTorchDeviceType(TestCase):
             torch.bool, torch.float32, torch.complex64, torch.float64,
             torch.complex128)
     def test_storage(self, device, dtype):
-        v = make_tensor((3, 5), device, dtype, low=-9, high=9)
+        v = make_tensor((3, 5), dtype=dtype, device=device, low=-9, high=9)
         self.assertEqual(v.storage()[0], v[0][0])
         self.assertEqual(v.storage()[14], v[2][4])
         v_s = v.storage()
@@ -235,7 +222,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_tensor_from_storage(self, device, dtype):
-        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
         b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
         self.assertEqual(a, b)
@@ -252,7 +239,7 @@ class TestTorchDeviceType(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_set_storage(self, device, dtype):
-        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a = make_tensor((4, 5, 3), dtype=dtype, device=device, low=-9, high=9)
         a_s = a.storage()
         b = torch.tensor([], device=device, dtype=dtype).set_(a_s).reshape(a.size())
         self.assertEqual(a, b)
@@ -793,158 +780,158 @@ class TestTorchDeviceType(TestCase):
         self.assertFalse(t1.is_set_to(t2))
         self.assertFalse(t2.is_set_to(t1))
 
-    def test_broadcast(self, device):
-
-        # all functions
-        fns = {
-            "dist", "atan2", "pow", "lerp", "add",
-            "sub", "mul", "div", "fmod", "remainder",
-            "eq", "ge", "gt", "le", "lt", "max", "min", "ne",
-            "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill",
-            "map", "map2", "copy"
-        }
+    # See https://github.com/pytorch/pytorch/issues/72650
+    @skipMeta
+    @parametrize(
+        "fn",
+        [
+            "dist", "atan2", "pow", "lerp", "add", "sub", "mul", "div", "fmod", "remainder", "eq", "ge", "gt", "le",
+            "lt", "max", "min", "ne", "addcdiv", "addcmul", "masked_scatter", "masked_select", "masked_fill", "map",
+            "map2", "copy",
+        ],
+    )
+    def test_broadcast(self, fn, device):
         # functions with three tensor arguments
         fns_3_args = {"map2"}
         fns_value_kwarg = {"addcdiv", "addcmul"}
 
-        for fn in fns:
-            (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
-            full1d = torch.randn(*dims_full, device=device).flatten().float()
-            small = torch.randn(*dims_small, device=device).float()
-            large = torch.randn(*dims_large, device=device).float()
-            small_expanded = small.expand(*dims_full)
-            large_expanded = large.expand(*dims_full)
-            small2 = None
-            small2_expanded = None
-            if fn in fns_3_args or fn in fns_value_kwarg:
-                # create another smaller tensor
-                (dims_small2, _, _) = self._select_broadcastable_dims(dims_full)
-                small2 = torch.randn(*dims_small2, device=device).float()
-                small2_expanded = small2.expand(*dims_full)
+        (dims_small, dims_large, dims_full) = self._select_broadcastable_dims()
+        full1d = torch.randn(*dims_full, device=device).flatten().float()
+        small = torch.randn(*dims_small, device=device).float()
+        large = torch.randn(*dims_large, device=device).float()
+        small_expanded = small.expand(*dims_full)
+        large_expanded = large.expand(*dims_full)
+        small2 = None
+        small2_expanded = None
+        if fn in fns_3_args or fn in fns_value_kwarg:
+            # create another smaller tensor
+            (dims_small2, _, _) = self._select_broadcastable_dims(dims_full)
+            small2 = torch.randn(*dims_small2, device=device).float()
+            small2_expanded = small2.expand(*dims_full)
 
-            if small.is_cuda and fn in ['map', 'map2']:
-                # map and map2 are not implementd on CUDA tensors
-                continue
+        if small.is_cuda and fn in ['map', 'map2']:
+            # map and map2 are not implementd on CUDA tensors
+            return
 
-            if hasattr(large_expanded, fn):
-                # run through tensor versions of functions
-                # and verify fully expanded inputs give same results
-                expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
+        if hasattr(large_expanded, fn):
+            # run through tensor versions of functions
+            # and verify fully expanded inputs give same results
+            expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
 
-                def tensorfn(myfn, t1, t2):
-                    if fn == "lerp":
-                        return myfn(t1, 0.5)
-                    elif fn == "masked_select":
-                        return myfn(t1 < 0)
-                    elif fn == "masked_scatter":
-                        return myfn(t1 < 0.5, full1d)
-                    elif fn == "masked_fill":
-                        return myfn(t1 < 0.5, 1.0)
-                    elif fn in fns_3_args:
-                        return myfn(1, t1, t2)
-                    elif fn in fns_value_kwarg:
-                        return myfn(t1, t2, value=1)
-                    else:
-                        return myfn(t1)
-
-                # test various orders
-                for first, second, third in [(large, small, small2), (small, large, small2),
-                                             (small2, small, large), (small2, large, small)]:
-                    if first is None:
-                        break  # ignore last iter when small2 is None
-                    method_expanded = getattr(expanded[first], fn)
-                    method = getattr(first, fn)
-                    r1 = tensorfn(method_expanded, expanded[second], expanded[third])
-                    r2 = tensorfn(method, second, third)
-                    self.assertEqual(r1, r2)
-
-            # now for torch. versions of functions
-            if hasattr(torch, fn):
-                fntorch = getattr(torch, fn)
-                expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
-
-                def torchfn(t1, t2, t3):
-                    if fn == "lerp":
-                        return fntorch(t1, t2, 0.5)
-                    elif fn == "masked_select":
-                        return fntorch(t1, t2 < 0)
-                    elif fn == "masked_scatter":
-                        return fntorch(t1, t2 < 0.5, full1d)
-                    elif fn == "masked_fill":
-                        return fntorch(t1, t2 < 0.5, 1.0)
-                    elif fn in fns_3_args:
-                        return fntorch(t1, 1.0, t2, t3)
-                    elif fn in fns_value_kwarg:
-                        return fntorch(t1, t2, t3, value=1.0)
-                    else:
-                        return fntorch(t1, t2)
-
-                # test various orders
-                for first, second, third in [(large, small, small2), (small, large, small2),
-                                             (small2, small, large), (small2, large, small)]:
-                    if first is None:
-                        break  # ignore last iter when small2 is None
-                    r1 = torchfn(expanded[first], expanded[second], expanded[third])
-                    r2 = torchfn(first, second, third)
-                    self.assertEqual(r1, r2)
-
-            # now for in place functions
-            # in-place tensor is not broadcastable; test only guaranteed
-            # to work by broadcasting other argument(s)
-            if not hasattr(large_expanded, fn + "_"):
-                continue
-
-            # need to clone largeExpanded so we can reuse, since functions are in-place
-            large_expanded_clone = large_expanded.clone()
-
-            def tensorfn_inplace(t0, t1, t2=None):
-                t0_fn = getattr(t0, fn + "_")
+            def tensorfn(myfn, t1, t2):
                 if fn == "lerp":
-                    return t0_fn(t1, 0.5)
+                    return myfn(t1, 0.5)
+                elif fn == "masked_select":
+                    return myfn(t1 < 0)
                 elif fn == "masked_scatter":
-                    return t0_fn(t1 < 0.5, full1d)
+                    return myfn(t1 < 0.5, full1d)
                 elif fn == "masked_fill":
-                    return t0_fn(t1 < 0.5, 1.0)
-                elif fn == "map":
-                    return t0_fn(t1, lambda x, y: x + y)
-                elif fn == "map2":
-                    return t0_fn(t1, t2, lambda x, y, z: x + y + z)
+                    return myfn(t1 < 0.5, 1.0)
                 elif fn in fns_3_args:
-                    return t0_fn(1.0, t1, t2)
+                    return myfn(1, t1, t2)
                 elif fn in fns_value_kwarg:
-                    return t0_fn(t1, t2, value=1.0)
+                    return myfn(t1, t2, value=1)
                 else:
-                    return t0_fn(t1)
-            # in-place pointwise operations don't actually work if the in-place
-            # tensor is 0-strided (numpy has the same issue)
-            if (0 not in large_expanded.stride() and 0 not in large_expanded_clone.stride()):
-                r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
-                r2 = tensorfn_inplace(large_expanded_clone, small, small2)
+                    return myfn(t1)
+
+            # test various orders
+            for first, second, third in [(large, small, small2), (small, large, small2),
+                                         (small2, small, large), (small2, large, small)]:
+                if first is None:
+                    break  # ignore last iter when small2 is None
+                method_expanded = getattr(expanded[first], fn)
+                method = getattr(first, fn)
+                r1 = tensorfn(method_expanded, expanded[second], expanded[third])
+                r2 = tensorfn(method, second, third)
                 self.assertEqual(r1, r2)
 
-            def broadcastable(t0, t1, t2=None):
-                try:
-                    t1.expand_as(t0)
-                    if t2 is not None:
-                        t2.expand_as(t0)
-                except RuntimeError:
-                    return False
-                return True
+        # now for torch. versions of functions
+        if hasattr(torch, fn):
+            fntorch = getattr(torch, fn)
+            expanded = {large: large_expanded, small: small_expanded, small2: small2_expanded}
 
-            def _test_in_place_broadcastable(t0, t1, t2=None):
-                if not broadcastable(t0, t1, t2):
-                    same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
-                    if not same_size:
-                        self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
+            def torchfn(t1, t2, t3):
+                if fn == "lerp":
+                    return fntorch(t1, t2, 0.5)
+                elif fn == "masked_select":
+                    return fntorch(t1, t2 < 0)
+                elif fn == "masked_scatter":
+                    return fntorch(t1, t2 < 0.5, full1d)
+                elif fn == "masked_fill":
+                    return fntorch(t1, t2 < 0.5, 1.0)
+                elif fn in fns_3_args:
+                    return fntorch(t1, 1.0, t2, t3)
+                elif fn in fns_value_kwarg:
+                    return fntorch(t1, t2, t3, value=1.0)
                 else:
-                    tensorfn_inplace(t0, t1, t2)
+                    return fntorch(t1, t2)
 
-            if fn not in fns_3_args and fn not in fns_value_kwarg:
-                _test_in_place_broadcastable(small, large_expanded)
-                _test_in_place_broadcastable(small, large)
+            # test various orders
+            for first, second, third in [(large, small, small2), (small, large, small2),
+                                         (small2, small, large), (small2, large, small)]:
+                if first is None:
+                    break  # ignore last iter when small2 is None
+                r1 = torchfn(expanded[first], expanded[second], expanded[third])
+                r2 = torchfn(first, second, third)
+                self.assertEqual(r1, r2)
+
+        # now for in place functions
+        # in-place tensor is not broadcastable; test only guaranteed
+        # to work by broadcasting other argument(s)
+        if not hasattr(large_expanded, fn + "_"):
+            return
+
+        # need to clone largeExpanded so we can reuse, since functions are in-place
+        large_expanded_clone = large_expanded.clone()
+
+        def tensorfn_inplace(t0, t1, t2=None):
+            t0_fn = getattr(t0, fn + "_")
+            if fn == "lerp":
+                return t0_fn(t1, 0.5)
+            elif fn == "masked_scatter":
+                return t0_fn(t1 < 0.5, full1d)
+            elif fn == "masked_fill":
+                return t0_fn(t1 < 0.5, 1.0)
+            elif fn == "map":
+                return t0_fn(t1, lambda x, y: x + y)
+            elif fn == "map2":
+                return t0_fn(t1, t2, lambda x, y, z: x + y + z)
+            elif fn in fns_3_args:
+                return t0_fn(1.0, t1, t2)
+            elif fn in fns_value_kwarg:
+                return t0_fn(t1, t2, value=1.0)
             else:
-                _test_in_place_broadcastable(small2, small_expanded, large_expanded)
-                _test_in_place_broadcastable(small2, small, large)
+                return t0_fn(t1)
+        # in-place pointwise operations don't actually work if the in-place
+        # tensor is 0-strided (numpy has the same issue)
+        if (0 not in large_expanded.stride() and 0 not in large_expanded_clone.stride()):
+            r1 = tensorfn_inplace(large_expanded, small_expanded, small2_expanded)
+            r2 = tensorfn_inplace(large_expanded_clone, small, small2)
+            self.assertEqual(r1, r2)
+
+        def broadcastable(t0, t1, t2=None):
+            try:
+                t1.expand_as(t0)
+                if t2 is not None:
+                    t2.expand_as(t0)
+            except RuntimeError:
+                return False
+            return True
+
+        def _test_in_place_broadcastable(t0, t1, t2=None):
+            if not broadcastable(t0, t1, t2):
+                same_size = t0.numel() == t1.numel() and (t0.numel() == t2.numel() if t2 is not None else True)
+                if not same_size:
+                    self.assertRaises(RuntimeError, lambda: tensorfn_inplace(t0, t1, t2))
+            else:
+                tensorfn_inplace(t0, t1, t2)
+
+        if fn not in fns_3_args and fn not in fns_value_kwarg:
+            _test_in_place_broadcastable(small, large_expanded)
+            _test_in_place_broadcastable(small, large)
+        else:
+            _test_in_place_broadcastable(small2, small_expanded, large_expanded)
+            _test_in_place_broadcastable(small2, small, large)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
@@ -1720,15 +1707,15 @@ else:
         self.assertTrue(x.min() > 0)
 
     def _generate_correlation_tensors(self, device, dtype):
-        yield make_tensor((0, 0), device, dtype)
-        yield make_tensor((1, 0), device, dtype)
-        yield make_tensor((0, 1), device, dtype)
-        yield make_tensor((2,), device, dtype)
-        yield make_tensor((2, 1), device, dtype)
-        yield make_tensor((2, 2), device, dtype)
-        yield make_tensor((2, 3), device, dtype)
-        yield make_tensor((5, 10), device, dtype)
-        yield make_tensor((5, 10), device, dtype, noncontiguous=True)
+        yield make_tensor((0, 0), dtype=dtype, device=device)
+        yield make_tensor((1, 0), dtype=dtype, device=device)
+        yield make_tensor((0, 1), dtype=dtype, device=device)
+        yield make_tensor((2,), dtype=dtype, device=device)
+        yield make_tensor((2, 1), dtype=dtype, device=device)
+        yield make_tensor((2, 2), dtype=dtype, device=device)
+        yield make_tensor((2, 3), dtype=dtype, device=device)
+        yield make_tensor((5, 10), dtype=dtype, device=device)
+        yield make_tensor((5, 10), dtype=dtype, device=device, noncontiguous=True)
         if dtype != torch.int:
             yield torch.tensor([0, -2, nan, 10.2, inf], dtype=dtype, device=device)
 
@@ -1755,26 +1742,9 @@ else:
             num_observations = x.numel() if x.ndim < 2 else x.size(1)
             if num_observations > 0:
                 fweights = torch.randint(1, 10, (num_observations,), device=device)
-                aweights = make_tensor((num_observations,), device, torch.float, low=1)
+                aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=1)
                 for correction, fw, aw in product([0, 1, 2], [None, fweights], [None, aweights]):
                     check(x, correction, fweights, aweights)
-
-    # FIXME: port to ErrorInputs
-    def test_cov_error(self, device):
-        def check(msg, *args, **kwargs):
-            with self.assertRaisesRegex(RuntimeError, r'cov\(\):.*' + msg + r'.*'):
-                torch.cov(*args, **kwargs)
-
-        a = torch.rand(2)
-        check(r'expected input to have two or fewer dimensions', torch.rand(2, 2, 2))
-        check(r'expected fweights to have one or fewer dimensions', a, fweights=torch.rand(2, 2))
-        check(r'expected aweights to have one or fewer dimensions', a, aweights=torch.rand(2, 2))
-        check(r'expected fweights to have integral dtype', a, fweights=torch.rand(2))
-        check(r'expected aweights to have floating point dtype', a, aweights=torch.tensor([1, 1]))
-        check(r'expected fweights to have the same numel', a, fweights=torch.tensor([1]))
-        check(r'expected aweights to have the same numel', a, aweights=torch.rand(1))
-        check(r'fweights cannot be negative', a, fweights=torch.tensor([-1, -2]))
-        check(r'aweights cannot be negative', a, aweights=torch.tensor([-1., -2.]))
 
     @skipIfNoSciPy
     @dtypes(*get_all_fp_dtypes())
@@ -2367,7 +2337,7 @@ else:
             (2, 3, 5))
 
         for shape in shapes:
-            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+            contig = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
 
             non_contig = torch.empty(shape + (2, 2), device=device, dtype=dtype)[..., 0]
             non_contig = non_contig.select(-1, -1)
@@ -2389,7 +2359,7 @@ else:
             (2, 3, 5))
 
         for shape in shapes:
-            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+            contig = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             self._test_diff_numpy(contig)
 
         t = torch.ones(2, 3)
@@ -2494,7 +2464,7 @@ else:
 
         # Test behaviour in very big tensors
         large_size = 100000
-        t = make_tensor((large_size,), device, dtype)
+        t = make_tensor((large_size,), dtype=dtype, device=device)
         t_np = t.cpu().numpy()
         coordinates_np = list(np.random.randn(large_size))
         coordinates = [torch.tensor(coordinates_np, device=device)]
@@ -2820,7 +2790,7 @@ else:
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_copy(tgt, dim, idx, src):
             for i in range(idx.size(0)):
@@ -2963,7 +2933,7 @@ else:
         index = torch.tensor([0], device=device)
         x.index_fill_(1, index, 0)
         self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
-        if not x.is_complex():
+        if not x.is_complex() and not device == "meta":
             with self.assertRaisesRegex(RuntimeError, r"Scalar"):
                 x.index_fill_(1, index, 1 + 1j)
         # Make sure that the result stays 0-dim while applied to
@@ -2981,7 +2951,7 @@ else:
 
         def make_arg(batch_sizes, n, dim, contig):
             size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
-            return make_tensor(size_arg, device, dtype, low=None, high=None, noncontiguous=not contig)
+            return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
             # bfloat16 is just used on GPU, so it's not supported on numpy
@@ -2996,7 +2966,9 @@ else:
             for other_sizes in ((), (4, 5)):
                 for dim in range(len(other_sizes)):
                     src = make_arg(other_sizes, num_src, dim, src_contig)
-                    idx = make_tensor((num_out,), device, dtype=torch.int64, low=0, high=num_src, noncontiguous=not idx_contig)
+                    idx = make_tensor(
+                        (num_out,), dtype=torch.int64, device=device, low=0, high=num_src, noncontiguous=not idx_contig
+                    )
                     out = torch.index_select(src, dim, idx)
                     out2 = ref_index_select(src, dim, idx)
                     self.assertEqual(out, out2)
@@ -3005,13 +2977,13 @@ else:
             other_sizes = (3, 2)
             dim = 1
             src = make_arg(other_sizes, num_src, dim, True)
-            idx = make_tensor((num_out,), device, dtype=idx_type, low=0, high=num_src, noncontiguous=False)
+            idx = make_tensor((num_out,), dtype=idx_type, device=device, low=0, high=num_src, noncontiguous=False)
             out = torch.index_select(src, dim, idx)
             out2 = ref_index_select(src, dim, idx)
             self.assertEqual(out, out2)
 
         # Create the 4 possible combinations of scalar sizes for index / source
-        scalars = ((make_tensor(size_s, device, dtype),
+        scalars = ((make_tensor(size_s, dtype=dtype, device=device),
                     torch.zeros(size_i, dtype=torch.int64, device=device))
                    for size_s, size_i in product([(), (1,)], repeat=2))
         for source, idx in scalars:
@@ -4565,7 +4537,7 @@ else:
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_capsule_conversion(self, device, dtype):
         # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
@@ -4573,14 +4545,14 @@ else:
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_protocol_conversion(self, device, dtype):
-        x = make_tensor((5,), device, dtype)
+        x = make_tensor((5,), dtype=dtype, device=device)
         z = from_dlpack(x)
         self.assertEqual(z, x)
 
     @skipMeta
     @onlyNativeDeviceTypes
     def test_dlpack_shared_storage(self, device):
-        x = make_tensor((5,), device, torch.float64)
+        x = make_tensor((5,), dtype=torch.float64, device=device)
         z = from_dlpack(to_dlpack(x))
         z[0] = z[0] + 20.0
         self.assertEqual(z, x)
@@ -4593,7 +4565,7 @@ else:
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
             # Do an operation in the actual stream
-            x = make_tensor((5,), device, dtype) + 1
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
         # DLPack protocol helps establish a correct stream order
         # (hence data dependency) at the exchange boundary.
         # DLPack manages this synchronization for us, so we don't need to
@@ -4605,10 +4577,43 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack(self, device, dtype):
+        x = make_tensor((5,), dtype=dtype, device=device)
+        y = torch.from_dlpack(x)
+        self.assertEqual(x, y)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_noncontinguous(self, device, dtype):
+        x = make_tensor((25,), dtype=dtype, device=device).reshape(5, 5)
+
+        y1 = x[0]
+        y1_dl = torch.from_dlpack(y1)
+        self.assertEqual(y1, y1_dl)
+
+        y2 = x[:, 0]
+        y2_dl = torch.from_dlpack(y2)
+        self.assertEqual(y2, y2_dl)
+
+        y3 = x[1, :]
+        y3_dl = torch.from_dlpack(y3)
+        self.assertEqual(y3, y3_dl)
+
+        y4 = x[1]
+        y4_dl = torch.from_dlpack(y4)
+        self.assertEqual(y4, y4_dl)
+
+        y5 = x.t()
+        y5_dl = torch.from_dlpack(y5)
+        self.assertEqual(y5, y5_dl)
+
+    @skipMeta
     @onlyCUDA
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        from torch._C import _from_dlpack
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
         # DLPack protocol helps establish a correct stream order
@@ -4616,11 +4621,19 @@ else:
         # the `tensor.__dlpack__` method will insert a synchronization event
         # in the current stream to make sure that it was correctly populated.
         with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), device, dtype) + 1
-            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            x = make_tensor((5,), dtype=dtype, device=device) + 1
+            z = torch.from_dlpack(x.__dlpack__(stream_b.cuda_stream))
             stream_a.synchronize()
         stream_b.synchronize()
         self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_bool=False))
+    def test_from_dlpack_dtype(self, device, dtype):
+        x = make_tensor((5,), dtype=dtype, device=device)
+        y = torch.from_dlpack(x)
+        assert x.dtype == y.dtype
 
     @skipMeta
     @onlyCUDA
@@ -4643,7 +4656,7 @@ else:
 
         # CUDA-based tests runs on non-default streams
         with torch.cuda.stream(torch.cuda.default_stream()):
-            x = DLPackTensor(make_tensor((5,), device, torch.float32))
+            x = DLPackTensor(make_tensor((5,), dtype=torch.float32, device=device))
             from_dlpack(x)
 
     @skipMeta
@@ -4651,7 +4664,7 @@ else:
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
         with self.assertRaises(TypeError):
-            x = make_tensor((5,), device, dtype)
+            x = make_tensor((5,), dtype=dtype, device=device)
             x.__dlpack__(stream=object())
 
     @skipMeta
@@ -7066,6 +7079,14 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         e1.fill_diagonal_(v, wrap=True)
         self.assertEqual(e1, e2)
 
+    def test_setting_real_imag_to_a_number(self):
+        x = torch.randn(4, dtype=torch.cfloat)
+        x.real = 0
+        x.imag = 0
+        zeros = torch.zeros(4)
+        self.assertEqual(x.real, zeros)
+        self.assertEqual(x.imag, zeros)
+
     def test_batch_norm_cpu_inference(self):
         # input nchw in (2,1,1,1), (2,2,2,2)
         inputs = [
@@ -7228,28 +7249,39 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertEqual(torch.normal(tensor2145, tensor2345).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors, but they have same number of elements
-            # TORCH_WARN_ONCE is used in torch.normal, only 1st assertEqual will show warn msg
-            if not warned:
-                self.assertWarnsRegex(UserWarning, "deprecated and the support will be removed",
-                                      lambda: self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,)))
-                warned = True
-            else:
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(120\) must match the size of "
+                    r"tensor b \(5\) at non-singleton dimension 3"):
                 self.assertEqual(torch.normal(tensor120, tensor2345).size(), (120,))
-            self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(120\) at non-singleton dimension 3"):
+                self.assertEqual(torch.normal(tensor2345, tensor120).size(), (2, 3, 4, 5))
 
             # inputs are non-expandable tensors and they don't have same number of elements
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(4\) at non-singleton dimension 3"):
                 torch.normal(tensor2345, tensor4)
 
             # output and inputs are size compatible
             self.assertEqual(torch.normal(tensor2345, tensor2345, out=output2345).size(), (2, 3, 4, 5))
 
             # output and inputs are not size compatible
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                # inputs are expandable but have different broadcasted size than output
-                torch.normal(tensor2345, tensor2145, out=output345)
-            with self.assertRaisesRegex(RuntimeError, "inconsistent tensor"):
-                # inputs are not expandable but reshapeable, output size is not the same as mean
+            with self.assertWarnsRegex(
+                    UserWarning,
+                    "This behavior is deprecated, and in a future PyTorch "
+                    "release outputs will not be resized unless they have "
+                    "zero elements"):
+                self.assertEqual(torch.normal(tensor2345, tensor2145, out=output345).size(), (2, 3, 4, 5))
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"The size of tensor a \(5\) must match the size of "
+                    r"tensor b \(120\) at non-singleton dimension 3"):
+                # inputs are not expandable, output size is not the same as mean
                 torch.normal(tensor2345, tensor120, out=output345)
 
     def test_tensoriterator_output_setup(self):
@@ -8153,8 +8185,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                b1 = make_tensor((num_batches, M, N), dtype=dtype, device=device, low=-1, high=1)
+                b2 = make_tensor((num_batches, N, O), dtype=dtype, device=device, low=-1, high=1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
@@ -8162,8 +8194,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, dtype=dtype, device=device, low=-1, high=1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):

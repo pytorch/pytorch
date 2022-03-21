@@ -64,7 +64,7 @@ def make_sparse_tensor(t, n, *sizes):
         torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
     v = tensor._values()
     v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes))
+    return t(i, v, torch.Size(sizes)).coalesce()
 
 _cycles_per_ms = None
 
@@ -568,8 +568,8 @@ class TestCuda(TestCase):
         self.assertTrue(isinstance(q_copy[0], torch.cuda.FloatTensor))
         self.assertTrue(isinstance(q_copy[1], torch.cuda.IntTensor))
         self.assertTrue(isinstance(q_copy[2], torch.cuda.FloatTensor))
-        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
-        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda.UntypedStorage))
+        self.assertTrue(isinstance(q_copy[3], torch.storage._TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._storage, torch.cuda._UntypedStorage))
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
@@ -1956,6 +1956,8 @@ t1.start()
 t2.start()
 """])
 
+    # ROCm doesn't support device side asserts
+    @skipIfRocm
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(RuntimeError, "Boolean value of Tensor with no values is ambiguous"):
             torch._assert_async(torch.tensor([], device="cuda"))
@@ -3007,7 +3009,6 @@ torch.cuda.synchronize()
                     x = torch.randn((B, T, F), device="cuda", dtype=input_dtype)
                 elif input_layout == "packed":
                     batch_first = False
-                    x = torch.randn((T, B, F), device="cuda", dtype=input_dtype)
                     x = torch.nn.utils.rnn.pack_padded_sequence(torch.randn((T, B, F),
                                                                             device="cuda", dtype=input_dtype),
                                                                 lengths=(3, 2, 1, 3),
@@ -3940,7 +3941,7 @@ class TestCudaComm(TestCase):
         r_tensors = [comm.reduce_add(t) for t in zip(*dup_tensors)]
         for r, t in zip(r_tensors, tensors):
             self.assertEqualTypeString(r, t)
-            self.assertEqual(r, t * 2)
+            self.assertEqual(r.coalesce() if r.is_sparse else r, t * 2)
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)

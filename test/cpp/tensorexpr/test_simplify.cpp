@@ -3858,26 +3858,25 @@ TEST(Simplify, SimplifyForCleansUp) {
     BufHandle a("a", {1, 12, 1}, kFloat);
     VarHandle x("x", kInt);
     Tensor b = Compute(
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         "x",
-        {{1, "i"}, {12, "m"}, {1, "n"}},
+        {1, 12, 1},
         [](const VarHandle& i, const VarHandle& m, const VarHandle& n) {
           return i + m + n;
         });
     LoopNest l({b});
     l.prepareForCodegen();
 
-    StmtPtr body = l.root_stmt();
+    StmtPtr body = LoopNest::sanitizeNames(l.root_stmt());
     StmtPtr simplified = IRSimplifier::simplify(body);
 
     BlockPtr block = to<Block>(simplified);
     IS_NODE_WITH_NAME(For, block->front(), for_);
     // for is over "m".
-    IS_VAR_WITH_NAME(for_->var(), "m");
+    IS_VAR_WITH_NAME(for_->var(), "j");
     // x[m] = m;
     IS_NODE_WITH_NAME(Store, for_->body()->front(), store);
-    IS_VAR_WITH_NAME(store->flat_index(), "m");
-    IS_VAR_WITH_NAME(store->value(), "m");
+    IS_VAR_WITH_NAME(store->flat_index(), "j");
+    IS_VAR_WITH_NAME(store->value(), "j");
   }
 }
 

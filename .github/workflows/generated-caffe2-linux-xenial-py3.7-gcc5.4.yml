@@ -12,6 +12,7 @@ on:
       - 'ciflow/trunk/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -41,6 +42,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -63,6 +65,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -96,6 +106,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive
@@ -157,8 +168,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}

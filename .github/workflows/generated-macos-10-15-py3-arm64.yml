@@ -5,13 +5,14 @@ name: macos-10-15-py3-arm64
 
 on:
   push:
-    branches:
-      - master
-      - release/*
     tags:
       - 'ciflow/all/*'
       - 'ciflow/macos/*'
       - 'ciflow/trunk/*'
+    branches:
+      - master
+      - main
+      - release/*
   workflow_dispatch:
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
@@ -29,6 +30,7 @@ env:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     env:
       JOB_BASE_NAME: macos-10-15-py3-arm64
@@ -42,6 +44,7 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
           submodules: recursive

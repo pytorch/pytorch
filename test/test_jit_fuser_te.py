@@ -82,6 +82,7 @@ def inline_fusion_groups():
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
         # note: `self.dynamic_shapes` instatiated in specialization of class
@@ -109,6 +110,7 @@ class TestTEFuser(JitTestCase):
     def tearDown(self):
         self.tensorexpr_options.restore()
         torch._C._jit_set_fusion_strategy(self.old_fusion_strategy)
+        super().tearDown()
 
     def assertAllFused(self, graph, except_for=None):
         except_for = except_for if except_for is not None else set()
@@ -1321,81 +1323,112 @@ class TestTEFuser(JitTestCase):
                     " ".join(["Failed:", str(dtype), 'isnan', device])
                 )
 
-    def test_unary_ops(self):
+    def test_gelu(self):
         def apply(fn):
-            return lambda x: fn(x)
+            return lambda x, approximate: fn(x, approximate)
 
         unary_ops = [
-            torch.lgamma,
-            torch.sigmoid,
-            torch.reciprocal,
-            torch.neg,
-            torch.relu,
-            F.relu6,
-            torch.log,
-            torch.log10,
-            torch.log1p,
-            torch.log2,
-            torch.exp,
-            torch.expm1,
-            torch.erf,
-            torch.erfc,
-            torch.cos,
-            torch.sin,
-            torch.tan,
-            torch.acos,
-            torch.asin,
-            torch.cosh,
-            torch.sinh,
-            torch.atan,
-            torch.tanh,
-            F.hardtanh,
-            F.hardsigmoid,
-            F.hardswish,
-            F.softplus,
-            torch.sqrt,
-            torch.rsqrt,
             F.gelu,
-            torch.abs,
-            torch.ceil,
-            torch.floor,
-            torch.round,
-            torch.trunc,
-            torch.frac,
-            # TODO: broken on ROCm?
-            # F.hardshrink,
-            F.leaky_relu,
-            lambda x: torch.threshold(x, 0, -10),
-            lambda x: torch.clamp(x, -10, 10),
         ]
-        gpu_only = {torch.erf, torch.erfc}
         sizes = [(1,), (2,), (4, 4)]
         for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
             # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
             if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
                 continue
-            # todo - re-enable. fails with .500
-            if dtype == torch.bfloat16 and op == torch.round:
-                continue
-            if op in gpu_only and device == "cpu":
-                continue
             try:
                 x = self.data_for(dtype, device, size=size)
+                cond = self.data_for(torch.bool, device)
                 fn = apply(op)
-                ref = fn(x)
+                ref = fn(x, cond)
             except Exception:
                 # If eager mode doesn't support a dtype/op/device combo,
                 # neither does the fuser.  Catch everything to avoid needing to
                 # guess what errors might be thrown by eager.
                 continue
             try:
-                t = torch.jit.trace(fn, (x,))
-                torch.testing.assert_close(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
+                t = torch.jit.trace(fn, (x, cond))
+                torch.testing.assert_close(ref, t(x, cond))
+                self.assertAllFused(t.graph_for(x, cond))
             except Exception as e:
                 raise RuntimeError(
                     " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
                 )
+
+    def test_unary_ops(self):
+        with torch._jit_internal._disable_emit_hooks():
+            def apply(fn):
+                return lambda x: fn(x)
+
+            unary_ops = [
+                torch.lgamma,
+                torch.sigmoid,
+                torch.reciprocal,
+                torch.neg,
+                torch.relu,
+                F.relu6,
+                torch.log,
+                torch.log10,
+                torch.log1p,
+                torch.log2,
+                torch.exp,
+                torch.expm1,
+                torch.erf,
+                torch.erfc,
+                torch.cos,
+                torch.sin,
+                torch.tan,
+                torch.acos,
+                torch.asin,
+                torch.cosh,
+                torch.sinh,
+                torch.atan,
+                torch.tanh,
+                F.hardtanh,
+                F.hardsigmoid,
+                F.hardswish,
+                F.softplus,
+                torch.sqrt,
+                torch.rsqrt,
+                torch.abs,
+                torch.ceil,
+                torch.floor,
+                torch.round,
+                torch.trunc,
+                torch.frac,
+                # TODO: broken on ROCm?
+                # F.hardshrink,
+                F.leaky_relu,
+                lambda x: torch.threshold(x, 0, -10),
+                lambda x: torch.clamp(x, -10, 10),
+            ]
+            gpu_only = {torch.erf, torch.erfc}
+            sizes = [(1,), (2,), (4, 4)]
+            for dtype, op, device, size in product(self.dtypes, unary_ops, self.devices, sizes):
+                # TODO: Add back when https://github.com/pytorch/pytorch/issues/55905 is closed
+                if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
+                    continue
+                # todo - re-enable. fails with .500
+                if dtype == torch.bfloat16 and op == torch.round:
+                    continue
+                if op in gpu_only and device == "cpu":
+                    continue
+                try:
+                    x = self.data_for(dtype, device, size=size)
+                    fn = apply(op)
+                    ref = fn(x)
+                except Exception:
+                    # If eager mode doesn't support a dtype/op/device combo,
+                    # neither does the fuser.  Catch everything to avoid needing to
+                    # guess what errors might be thrown by eager.
+                    continue
+                try:
+                    t = torch.jit.trace(fn, (x,))
+                    torch.testing.assert_close(ref, t(x))
+                    self.assertAllFused(t.graph_for(x))
+                except Exception as e:
+                    raise RuntimeError(
+                        " ".join(["Failed:", str(dtype), op.__name__, device, str(size)])
+                    )
 
     def test_binary_ops(self):
         def apply(fn):
@@ -1562,47 +1595,48 @@ class TestTEFuser(JitTestCase):
                 )
 
     def test_binary_tensor_scalar_ops(self):
-        def apply_with_scalar(fn, scalar):
-            return lambda x: fn(x, scalar)
+        with torch._jit_internal._disable_emit_hooks():
+            def apply_with_scalar(fn, scalar):
+                return lambda x: fn(x, scalar)
 
-        # FIXME: Fails in IR Eval: torch.int64 and_ cpu
-        binary_ops = [
-            operator.__and__,
-            operator.__or__,
-            operator.__xor__,
-            torch.add,
-            torch.sub,
-            torch.mul,
-            torch.eq,
-            torch.ne,
-            torch.ge,
-            torch.lt,
-            torch.gt,
-        ]
-        devices = self.devices
-        # Maybe we should split this into separate tests to speed it up by
-        # only using  scalar values relevant to particular ops
-        scalars = [1.5, 3, 0, -2.0, -1]
-        for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
-            if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
-                continue
-            try:
-                x = self.data_for(dtype, device)
-                fn = apply_with_scalar(op, scalar)
-                ref = fn(x)
-            except Exception:
-                # If eager mode doesn't support a dtype/op/device combo,
-                # neither does the fuser.  Catch everything to avoid needing to
-                # guess what errors might be thrown by eager.
-                continue
-            try:
-                t = torch.jit.trace(fn, (x))
-                self.assertEqual(ref, t(x))
-                self.assertAllFused(t.graph_for(x))
-            except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Failed:", str(dtype), op.__name__, device])
-                )
+            # FIXME: Fails in IR Eval: torch.int64 and_ cpu
+            binary_ops = [
+                operator.__and__,
+                operator.__or__,
+                operator.__xor__,
+                torch.add,
+                torch.sub,
+                torch.mul,
+                torch.eq,
+                torch.ne,
+                torch.ge,
+                torch.lt,
+                torch.gt,
+            ]
+            devices = self.devices
+            # Maybe we should split this into separate tests to speed it up by
+            # only using  scalar values relevant to particular ops
+            scalars = [1.5, 3, 0, -2.0, -1]
+            for dtype, op, device, scalar in product(self.dtypes, binary_ops, devices, scalars):
+                if dtype in [torch.float16, torch.bfloat16] and device == "cpu":
+                    continue
+                try:
+                    x = self.data_for(dtype, device)
+                    fn = apply_with_scalar(op, scalar)
+                    ref = fn(x)
+                except Exception:
+                    # If eager mode doesn't support a dtype/op/device combo,
+                    # neither does the fuser.  Catch everything to avoid needing to
+                    # guess what errors might be thrown by eager.
+                    continue
+                try:
+                    t = torch.jit.trace(fn, (x))
+                    self.assertEqual(ref, t(x))
+                    self.assertAllFused(t.graph_for(x))
+                except Exception as e:
+                    raise RuntimeError(
+                        " ".join(["Failed:", str(dtype), op.__name__, device])
+                    )
 
     def test_binary_div_ops(self):
         def apply_with_scalar(fn, scalar):
@@ -2281,6 +2315,32 @@ class TestTEFuser(JitTestCase):
                     torch._C._jit_pass_dce(g)
                     FileCheck().check_count("TensorExprDynamicGuard", len(gen_tensor), exactly=True).run(g)
 
+    @unittest.skipIf(not RUN_CUDA, "half-precision NNC fusion requires CUDA")
+    def test_autocast_up(self):
+        def f(x):
+            y = x._autocast_to_full_precision(True, True)
+            z = torch.exp(y)
+            return z
+
+        x = torch.rand((2, 2), dtype=torch.half, device="cuda")
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+
+    @unittest.skipIf(not RUN_CUDA, "half-precision NNC fusion requires CUDA")
+    def test_autocast_down(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.half)
+            return z
+
+        x = torch.rand((2, 2), dtype=torch.float, device="cuda")
+        scr = torch.jit.script(f)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
 
@@ -2341,7 +2401,6 @@ works_list = [
     'mul',
     'ne',
     'neg',
-    'nn.functional.gelu',
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
@@ -2418,12 +2477,21 @@ def get_name(op):
         l.append(op.variant_test_name)
     return '.'.join(l)
 
-class TestNNCOpInfo(JitCommonTestCase):
+# Purpose of this class is to allow super() calls.
+# super() [with no arguments] fails, presumably because of how instantiate_device_type_tests works.
+# super(TestNNCOpInfo, self) fails because TestNNCOpInfo gets deleted from global scope.
+# super(JitCommonTestCase, self).fn() would skip JitCommonTestCase.fn() implementation
+class TestNNCOpInfoParent(JitCommonTestCase):
+    pass
+
+class TestNNCOpInfo(TestNNCOpInfoParent):
     def setUp(self):
+        super(TestNNCOpInfoParent, self).setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
     def tearDown(self):
         self.tensorexpr_options.restore()
+        super(TestNNCOpInfoParent, self).tearDown()
 
     def te_compile(self, device, dtype, op):
         if op.name in skip_ops:
@@ -2523,9 +2591,13 @@ def f({', '.join(param_names)}):
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNCOpInfo, globals(), only_for=only_for)
 
+# Purpose of this class is to allow super() calls. (See TestNNCOpInfoParent)
+class TestLoopnestRandomizationParent(JitTestCase):
+    pass
 
-class TestLoopnestRandomization(JitTestCase):
+class TestLoopnestRandomization(TestLoopnestRandomizationParent):
     def setUp(self):
+        super(TestLoopnestRandomizationParent, self).setUp()
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_must_use_cpu_state = torch._C._jit_get_te_must_use_llvm_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
@@ -2565,6 +2637,7 @@ class TestLoopnestRandomization(JitTestCase):
 
         # Set it back to 0.
         os.environ["PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED"] = "0"
+        super(TestLoopnestRandomizationParent, self).tearDown()
 
     @onlyCPU
     @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
