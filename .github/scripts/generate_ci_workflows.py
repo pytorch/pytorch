@@ -26,6 +26,7 @@ WINDOWS_RUNNERS = {
 }
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
+LINUX_CPU_SLOW_TEST_RUNNER = "linux.4xlarge"
 # contains 1 gpu
 LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
 # contains at least 2 gpus
@@ -156,6 +157,7 @@ class CIWorkflow:
     test_runner_type: str = ''
     multigpu_runner_type: str = ''
     distributed_gpu_runner_type: str = ''
+    slow_runner_type: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     cuda_version: str = ''
     docker_image_base: str = ''
@@ -194,6 +196,9 @@ class CIWorkflow:
 
         self.multigpu_runner_type = LINUX_MULTIGPU_RUNNERS.get(self.test_runner_type, "linux.16xlarge.nvidia.gpu")
         self.distributed_gpu_runner_type = LINUX_DISTRIBUTED_GPU_RUNNERS.get(self.test_runner_type, "linux.8xlarge.nvidia.gpu")
+
+        if self.slow_runner_type == '':
+            self.slow_runner_type = self.test_runner_type
 
         if LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels:
             self.is_default = True
@@ -284,7 +289,7 @@ class CIWorkflow:
                 else self.test_runner_type,
             }
         if self.enable_slow_test:
-            configs["slow"] = {"num_shards": 1, "runner": self.test_runner_type}
+            configs["slow"] = {"num_shards": 1, "runner": self.slow_runner_type}
         if self.enable_docs_test:
             configs["docs_test"] = {"num_shards": 1, "runner": self.test_runner_type}
         if self.enable_backwards_compat_test:
@@ -715,6 +720,7 @@ LINUX_WORKFLOWS = [
         enable_distributed_test=False,
         enable_noarch_test=True,
         enable_slow_test=True,
+        slow_runner_type=LINUX_CPU_SLOW_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
         ),

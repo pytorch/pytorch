@@ -263,9 +263,9 @@ jobs:
 
   test_slow_1_1:
     if: ${{ github.repository_owner == 'pytorch' }}
-    name: test (slow, 1, 1, linux.2xlarge)
+    name: test (slow, 1, 1, linux.4xlarge)
     needs: build
-    runs-on: linux.2xlarge
+    runs-on: linux.4xlarge
     timeout-minutes: 270
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -457,7 +457,7 @@ jobs:
       - name: Zip JSONs for upload
         if: always()
         env:
-          FILE_SUFFIX: '${{ github.job }}-slow-1-1-linux.2xlarge'
+          FILE_SUFFIX: '${{ github.job }}-slow-1-1-linux.4xlarge'
         run: |
           # Remove any previous test jsons if they exist
           rm -f test-jsons-*.zip
@@ -473,7 +473,7 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          FILE_SUFFIX: '${{ github.job }}-slow-1-1-linux.2xlarge'
+          FILE_SUFFIX: '${{ github.job }}-slow-1-1-linux.4xlarge'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
