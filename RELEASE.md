@@ -42,7 +42,7 @@ Following Requirements needs to be met prior to final RC Cut:
 
 * Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
-* Validate that all new workflows have been created in the pytorch and domain libraries included in the release. Validate it using Release Matrix.
+* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
 * All the nighly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/main)
