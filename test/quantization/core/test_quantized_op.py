@@ -4274,9 +4274,9 @@ class TestQuantizedConv(TestCase):
         dilations = (dilation, dilation)
 
         if use_relu:
-            qconv = torch.ops.quantized.conv2d_relu_cudnn
+            qconv = torch.ops.quantized.conv2d_relu
         else:
-            qconv = torch.ops.quantized.conv2d_cudnn
+            qconv = torch.ops.quantized.conv2d
         conv_op = torch.nn.Conv2d(
             input_channels,
             output_channels,
@@ -4287,7 +4287,7 @@ class TestQuantizedConv(TestCase):
             groups,
         ).to(torch.device("cuda"))
         self._test_qconv_impl(
-            qconv, None, conv_op, batch_size,
+            qconv, torch.ops.quantized.conv2d_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),
             output_channels_per_group, groups, kernels, strides, pads, None,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
@@ -4363,13 +4363,14 @@ class TestQuantizedConv(TestCase):
         weight_int8 = torch.quantize_per_tensor(weight, 1, 0, torch.qint8).contiguous(memory_format=torch.channels_last)
         scale = 1.0
         zero_point = 0
-        conv_op = torch.ops.quantized.conv2d_cudnn
+        conv_op = torch.ops.quantized.conv2d
+        weight_prepacked = torch.ops.quantized.conv2d_prepack(weight_int8, None, stride, padding, dilation, groups)
         with profile(
                 activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
                 schedule=my_schedule,
                 on_trace_ready=trace_handler) as prof:
             for i in range(30):
-                conv_op(input_int8, weight_int8, None, stride, padding, dilation, groups, scale, zero_point)
+                conv_op(input_int8, weight_prepacked, scale, zero_point)
                 prof.step()
 
         print("int8 benchmark result:")
