@@ -60,5 +60,9 @@ class TestPerOverloadAPI(TestCase):
 
         self.assertRaises(RuntimeError, lambda: add_tensoroverload(a, a, out=b))
 
+    def test_dir(self):
+        for n in dir(torch.ops.aten):
+            self.assertTrue(hasattr(torch.ops.aten, n), n)
+
 if __name__ == '__main__':
     run_tests()
