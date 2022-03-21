@@ -12,10 +12,6 @@ from ..utils import (
     activation_dtype,
 )
 
-from torch.ao.quantization.quantize import (
-    is_activation_post_process,
-)
-
 from .pattern_utils import (
     register_quant_pattern,
     get_default_output_activation_post_process_map,
@@ -24,8 +20,6 @@ from .pattern_utils import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-
-from ..qconfig import QConfigAny
 
 from abc import ABC
 import operator

@@ -60,5 +60,5 @@ jobs:
           python3 torch/utils/collect_env.py
 
 concurrency:
-  group: test-tools-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
