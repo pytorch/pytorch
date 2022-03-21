@@ -453,7 +453,6 @@ class NativeFunction:
         assert isinstance(tags_s, str)
         tags: Set[str] = set()
         if len(tags_s) > 0:
-            print(valid_tags)
             assert len(valid_tags) > 0
             for t in tags_s.split(', '):
                 # TODO: verify that the tag is valid and has an entry in tags.yaml
