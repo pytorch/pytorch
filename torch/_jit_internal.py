@@ -1252,8 +1252,8 @@ class _TensorExtractor(pickle.Pickler):
             return ""
         if isinstance(obj, torch.cuda.Event):
             return ""
-        if isinstance(obj, threading.Thread):
-            return ""
+#         if isinstance(obj, threading.Thread):
+#             return ""
         return None
 
 
