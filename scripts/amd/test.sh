@@ -1,6 +1,13 @@
 # set -ex
 # clear
 
+ROOT_DIR=$(pwd)
+DEFAULT_LOG_DIR=$ROOT_DIR/$(git rev-parse --symbolic-full-name --abbrev-ref HEAD)
+LOG_DIR="${1:-$DEFAULT_LOG_DIR}"
+# rm -rf $LOG_DIR
+# mkdir -p $LOG_DIR
+# chmod -R 777 $LOG_DIR
+
 # export HIP_VISIBLE_DEVICES=0
 # export HIP_HIDDEN_FREE_MEM 500
 # export HIP_TRACE_API=1
