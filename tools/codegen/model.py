@@ -139,6 +139,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
+    DispatchKey.NestedTensor,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -166,12 +167,104 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
 
+def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
+    # For now, ufunc dispatch keys coincide with structured keys
+    return dk in STRUCTURED_DISPATCH_KEYS
+
+# This is oddly named ScalarType and not DType for symmetry with C++
+class ScalarType(Enum):
+    Byte = auto()
+    Char = auto()
+    Short = auto()
+    Int = auto()
+    Long = auto()
+    Half = auto()
+    Float = auto()
+    Double = auto()
+    ComplexHalf = auto()
+    ComplexFloat = auto()
+    ComplexDouble = auto()
+    Bool = auto()
+    BFloat16 = auto()
+
+    def __str__(self) -> str:
+        return self.name
+
+    @staticmethod
+    def maybe_parse(value: str) -> Optional['ScalarType']:
+        for k, v in ScalarType.__members__.items():
+            if k == value:
+                return v
+        return None
+
+    @staticmethod
+    def parse(value: str) -> 'ScalarType':
+        mb_r = ScalarType.maybe_parse(value)
+        assert mb_r is not None, f'unknown dtype {value}'
+        return mb_r
+
+    @staticmethod
+    def parse_set(values: str) -> Set['ScalarType']:
+        dtypes: Set[ScalarType] = set()
+        for value in values.split(', '):
+            if value in DTYPE_CLASSES:
+                dtypes.update(DTYPE_CLASSES[value])
+            else:
+                dtypes.add(ScalarType.parse(value))
+        return dtypes
+
+
+DTYPE_CLASSES: Dict[str, Set[ScalarType]] = {}
+# NB: Integral doesn't include boolean
+DTYPE_CLASSES["Integral"] = {
+    ScalarType.Byte, ScalarType.Char, ScalarType.Int, ScalarType.Long,
+    ScalarType.Short
+}
+# NB: Floating doesn't include low precision types
+DTYPE_CLASSES["Floating"] = {ScalarType.Float, ScalarType.Double}
+DTYPE_CLASSES["Complex"] = {ScalarType.ComplexFloat, ScalarType.ComplexDouble}
+DTYPE_CLASSES["All"] = DTYPE_CLASSES["Integral"] | DTYPE_CLASSES["Floating"]
+DTYPE_CLASSES["AllAndComplex"] = DTYPE_CLASSES["All"] | DTYPE_CLASSES["Complex"]
+DTYPE_CLASSES["FloatingAndComplex"] = DTYPE_CLASSES["Floating"] | DTYPE_CLASSES["Complex"]
+
+
+# Represents the valid entries for ufunc_inner_loop in native_functions.yaml.
+# NB: if you add a new UfuncKey, you will teach tools.codegen.dest.ufunc how
+# to process it.  Most logic will ignore keys they don't understand, so your
+# new key will get silently ignored until you hook in logic to deal with it.
+class UfuncKey(Enum):
+    # These are low level keys that represent exactly one particular
+    # instantiation of the kernel produced by codegen
+    CUDAFunctor = auto()
+    CUDAFunctorOnOther = auto()
+    CUDAFunctorOnSelf = auto()
+
+    CPUScalar = auto()
+    CPUVector = auto()
+
+    # These are the ones users will usually specify, and
+    # implicitly "fill in" the low level keys
+    ScalarOnly = auto()  # CUDA*, CPUScalar
+    Generic = auto()  # CUDA*, CPU*
+
+    def __str__(self) -> str:
+        return self.name
+
+    @staticmethod
+    def parse(value: str) -> 'UfuncKey':
+        for k, v in UfuncKey.__members__.items():
+            if k == value:
+                return v
+        raise AssertionError(f'unknown ufunc key {value}')
+
+
 class DeviceCheckType(Enum):
     NoCheck = 0
     ExactSame = 1
 
 class Tag(Enum):
     inplace_view = 0
+    view_copy = 1
 
     def __str__(self) -> str:
         return self.name
@@ -240,6 +333,10 @@ class NativeFunction:
     # The location in the YAML file were this native function entry was
     # defined.  This is for conveniently reporting error messages!
     loc: 'Location'
+
+    # If non-empty, this kernel is subject to ufunc codegen.
+    # Sorted by ufunc_key
+    ufunc_inner_loop: Dict[UfuncKey, 'UfuncInnerLoop']
 
     # Whether or not this out functions is a "structured kernel".  Structured
     # kernels are defined a little differently from normal kernels; in
@@ -415,6 +512,31 @@ class NativeFunction:
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
 
+        raw_ufunc_inner_loop = e.pop('ufunc_inner_loop', {})
+        ufunc_inner_loop = {}
+        if isinstance(raw_ufunc_inner_loop, str):
+            ufunc_inner_loop[UfuncKey.Generic] = UfuncInnerLoop.parse(raw_ufunc_inner_loop, UfuncKey.Generic)
+        elif isinstance(raw_ufunc_inner_loop, dict):
+            for k, vo in raw_ufunc_inner_loop.items():
+                if k == '__line__':
+                    continue
+                assert isinstance(k, str), f'ufunc_inner_loop key is not a str: {k}'
+                assert isinstance(vo, str), f'ufunc_inner_loop value is not a str: {v}'
+                ufunc_key = UfuncKey.parse(k)
+                ufunc_inner_loop[ufunc_key] = UfuncInnerLoop.parse(vo, ufunc_key)
+        else:
+            raise AssertionError(f'ufunc_inner_loop not str or dict: {raw_ufunc_inner_loop}')
+        # Program the BackendIndex for the implicit dispatch entry from ufunc
+        if ufunc_inner_loop:
+            assert structured, "ufunc must be structured"
+            for dispatch_key in STRUCTURED_DISPATCH_KEYS:
+                assert dispatch_key not in dispatch, \
+                    f"ufunc should not have explicit dispatch entry for {dispatch_key}"
+                dispatch[dispatch_key] = BackendMetadata(
+                    kernel=ufunc.schema_kernel_name(func, dispatch_key),
+                    structured=True
+                )
+
         if structured_delegate:
             # Structured functions MUST have a dispatch table
             is_abstract = True
@@ -450,6 +572,7 @@ class NativeFunction:
             structured_delegate=structured_delegate,
             structured_inherits=structured_inherits,
             precomputed=precomputed,
+            ufunc_inner_loop=ufunc_inner_loop,
             manual_kernel_registration=manual_kernel_registration,
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
@@ -680,7 +803,24 @@ class BackendMetadata:
     # in native_functions.yaml.
     # However, external backends like XLA can indendently toggle which ops are structured.
     structured: bool
-    #
+
+@dataclass(frozen=True)
+class UfuncInnerLoop:
+    name: str
+    supported_dtypes: Set[ScalarType]
+    # key is stored here because it affects the semantics of name,
+    # so its helpful to have them together for further processing
+    ufunc_key: UfuncKey
+
+    @staticmethod
+    def parse(value: str, ufunc_key: UfuncKey) -> 'UfuncInnerLoop':
+        name, supported_dtypes_str = value.split(' ', 1)
+        assert supported_dtypes_str[0] == '('
+        assert supported_dtypes_str[-1] == ')'
+        supported_dtypes = set()
+        for k in supported_dtypes_str[1:-1].split(', '):
+            supported_dtypes |= ScalarType.parse_set(k)
+        return UfuncInnerLoop(name=name, supported_dtypes=supported_dtypes, ufunc_key=ufunc_key)
 
 
 # BackendIndex represents a backend.
@@ -1685,10 +1825,18 @@ class NativeFunctionsViewGroup:
     def __post_init__(self) -> None:
         assert self.view.is_view_op
         if self.view_copy is None:
-            assert not gets_generated_view_copy(self.view)
+            assert not gets_generated_view_copy(self.view), \
+                f"{str(self.view.func.name)} appears to be a new operator that aliases its inputs." \
+                " The codegen expects you to add a corresponding operator to native_functions.yaml:" \
+                " {str(get_view_copy_name(self.view)}." \
+                " See Note [view_copy NativeFunction Tags] for details."
         else:
             assert self.view_copy.func.name.name.base.endswith('_copy')
             assert self.view.func.signature() == self.view_copy.func.signature(strip_view_copy_name=True)
+            assert self.view_copy.tag is Tag.view_copy, \
+                f"{str(self.view_copy.func.name)} appears to be a view_copy operator. The codegen expects" \
+                " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml." \
+                " See Note [view_copy NativeFunction Tags] for details."
         if self.view_inplace is not None:
             assert self.view.func.signature() == self.view_inplace.func.signature()
 
@@ -1746,23 +1894,28 @@ def gen_copy_variant_of_view_op(f: NativeFunction) -> Optional[Tuple[
     NativeFunction,
     Dict[DispatchKey, Dict[OperatorName, BackendMetadata]]
 ]]:
-    # Note [Codegen'd {view}_copy Operators]
-    # For every non-composite, non-mutating aliasing op, we also want to generate
-    # a non-aliasing variant of it.
-    # Programatically generating them here in the codegen saves us
-    # from having to manually add them to native_functions.yaml
+    # See Note [view_copy NativeFunctions]
+    # For every non-composite, non-mutating aliasing op, we expect a non-aliasing
+    # {op}_copy() variant of it to exist in native_functions.yaml, that has:
+    # - a "view_copy" tag
+    # - a CompositeExplicitAutograd entry
     #
-    # Given a NativeFunction object corresponding to an aliasing operation,
-    # We want to generate a new NativeFunction object that:
-    # (1) Has the same schema, but with no aliasing annotations.
-    # (2) If old NativeFunction name == {view}, new NativeFunction name == {view}_copy.
-    # (3) Uses the same derivative formula as the original operator.
+    # However, the codegen will generate everything required for this NativeFunction *automatically*.
+    # The only reason we ask you to add it explicitly in native_functions.yaml
+    # is for readability, so every aten operator is explicitly listed.
+    #
+    # Given a non-composite, non-mutating aliasing op, we want to generate
+    # the following for it's corresponding view_copy() operator:
+    # (1) A derivative formula.
+    #     It will use the same derivative formula as the original aliasing operator.
     #     The original operator's derivative formula might involve aliasing,
     #     But this is okay because the autograd engine doesn't ever mutate gradients.
-    # (4) Gets a default "CompositeExplicitAutograd" implementation.
+    # (2) A default "CompositeExplicitAutograd" implementation.
     #     This kernel should just make a clone and call the underlying view operator.
     #     It can then be overridden by backends that can't handle aliasing, like XLA/Vulkan.
-    # (5) Doesn't get exposed to python (since these aren't very useful functions for users).
+    # (3) Python docs
+    # (4) A corresponding Python API, C++ API, and dispatcher registration.
+    #     (This is all done automatically for all codegen'd operators already).
 
     if not gets_generated_view_copy(f):
         return None
@@ -1883,4 +2036,5 @@ class Precompute:
 
         return replace_list
 
+import tools.codegen.api.ufunc as ufunc
 import tools.codegen.api.native as native

@@ -14,12 +14,11 @@ from tools.codegen.model import (
     NativeFunctionsViewGroup,
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import mapMaybe
 from typing import List, Optional, Union, Tuple
 
 
 # Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
-# See Note [Codegen'd {view}_copy Operators]
+# See Note [view_copy NativeFunctions]
 @with_native_function
 def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]:
     if g.view_copy is None:
