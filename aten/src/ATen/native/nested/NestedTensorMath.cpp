@@ -15,20 +15,6 @@ at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_size_tensor) {
       std::move(buffer), std::move(nested_size_tensor));
 }
 
-bool is_nested_tensor_impl(const at::Tensor& tensor) {
-  return tensor.unsafeGetTensorImpl()->key_set().has(
-      c10::DispatchKey::NestedTensor);
-}
-
-inline at::native::NestedTensorImpl* get_nested_tensor_impl(
-    const at::Tensor& tensor) {
-  TORCH_CHECK(
-      is_nested_tensor_impl(tensor),
-      "get_nested_tensor_impl requires a NestedTensor.");
-  return static_cast<at::native::NestedTensorImpl*>(
-      tensor.unsafeGetTensorImpl());
-}
-
 inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
