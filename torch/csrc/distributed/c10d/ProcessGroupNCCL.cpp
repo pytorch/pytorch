@@ -373,11 +373,20 @@ bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
 }
 
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
-  for (const auto i : c10::irange(devices_.size())) {
-    // Checking the work's corresponding CUDA events' status
-    if (!(*ncclEndEvents_)[i].query()) {
-      return false;
+  try {
+    for (const auto i : c10::irange(devices_.size())) {
+      // Checking the work's corresponding CUDA events' status
+      if (!(*ncclEndEvents_)[i].query()) {
+        return false;
+      }
     }
+  } catch (const std::exception& e) {
+    if (std::string(e.what()).find("driver shutting down") == std::string::npos) {
+      throw;
+    }
+    LOG(INFO) << "[Rank " << rank_
+              << "] Event query failed with exception: "
+              << e.what();
   }
   return true;
 }
@@ -578,12 +587,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
   }
 
-  const char* ncclDebugLevel = std::getenv("NCCL_DEBUG");
-
-  if (!ncclDebugLevel) {
-    ncclDebugLevel = "UNSET";
-  }
-
   init();
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
@@ -591,8 +594,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << "\nNCCL_DEBUG: " << ncclDebugLevel;
+            << options_->is_high_priority_stream;
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -1166,6 +1168,12 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // [Note 2 ]
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+
+  // At this point NCCL should have been initialized, hence we can accurately get
+  // the env value even if NCCL sets it by reading from nccl.conf file
+  if (getRank() == 0) {
+    LOG(INFO) << "NCCL_DEBUG: " << parse_env("NCCL_DEBUG");
+  }
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
