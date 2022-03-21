@@ -1,4 +1,4 @@
-load("//caffe2/tools:bazel.bzl", "rules")
+load("//:tools/bazel.bzl", "rules")
 load(":build.bzl", "define_targets")
 
 define_targets(rules = rules)
