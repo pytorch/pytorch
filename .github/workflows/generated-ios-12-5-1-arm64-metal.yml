@@ -27,7 +27,7 @@ jobs:
   build:
     # NOTE: These builds will not run successfully without running on `pytorch/pytorch` due to the limitations
     #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
-    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
