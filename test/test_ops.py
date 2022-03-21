@@ -201,6 +201,7 @@ class TestCommon(TestCase):
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
@@ -209,8 +210,8 @@ class TestCommon(TestCase):
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
             torch.set_default_dtype(torch.double)
-            sample_inputs = op.sample_inputs(device, dtype)
-            for sample_input in sample_inputs:
+            reference_inputs = op.reference_inputs(device, dtype)
+            for sample_input in reference_inputs:
                 self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
         finally:
             torch.set_default_dtype(cur_default)
