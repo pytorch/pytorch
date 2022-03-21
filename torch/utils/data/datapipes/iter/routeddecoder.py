@@ -1,7 +1,8 @@
 from io import BufferedIOBase
 from typing import Any, Callable, Iterable, Iterator, Sized, Tuple
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import deprecation_warning
 from torch.utils.data.datapipes.utils.decoder import (
     Decoder,

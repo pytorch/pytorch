@@ -9,7 +9,7 @@ namespace lazy {
 namespace {
 
 Shape NodeOutputShape(const Value& input, c10::ScalarType type) {
-  Shape shape = GetShapeFromTsValue(input);
+  Shape shape = input.shape();
   shape.set_scalar_type(type);
   return shape;
 }
