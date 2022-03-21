@@ -550,7 +550,14 @@ mobile::Module _load_for_mobile(
     }
 #if defined(ENABLE_FLATBUFFER)
     case FileFormat::FlatbufferFileFormat: {
-      return load_mobile_module(in, device, extra_files);
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_stream_content(in);
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
     }
 #else
     case FileFormat::FlatbufferFileFormat: {
@@ -579,7 +586,14 @@ mobile::Module _load_for_mobile(
     }
 #if defined(ENABLE_FLATBUFFER)
     case FileFormat::FlatbufferFileFormat: {
-      return load_mobile_module(filename, device, extra_files);
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_file_content(filename.c_str());
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
     }
 #else
     case FileFormat::FlatbufferFileFormat: {
@@ -610,7 +624,14 @@ mobile::Module _load_for_mobile(
     }
 #if defined(ENABLE_FLATBUFFER)
     case FileFormat::FlatbufferFileFormat: {
-      return load_mobile_module(filename, device, extra_files);
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_file_content(filename.c_str());
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
     }
 #else
     case FileFormat::FlatbufferFileFormat: {

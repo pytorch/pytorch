@@ -52,25 +52,17 @@ TORCH_API mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<at::Device> device = c10::nullopt);
 
-TORCH_API mobile::Module load_mobile_module_from_stream(
-    std::istream& in,
-    c10::optional<c10::Device> device = c10::nullopt);
-
 TORCH_API void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files);
 
-TORCH_API mobile::Module load_mobile_module(
-    const std::string& filename,
-    const c10::optional<at::Device>,
-    ExtraFilesMap& extra_files);
+TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_file_content(
+    const char* filename);
 
-TORCH_API mobile::Module load_mobile_module(
-    std::istream& in,
-    const c10::optional<at::Device>,
-    ExtraFilesMap& extra_files);
+TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
+    std::istream& in);
 
-class FlatbufferLoader {
+class TORCH_API FlatbufferLoader {
  public:
   FlatbufferLoader();
 
@@ -80,6 +72,10 @@ class FlatbufferLoader {
       mobile::serialization::IValueUnion ivalue_type,
       IValueParser parser);
   mobile::Module parseModule(mobile::serialization::Module* module);
+
+  void extractJitSourceAndConstants(
+      ExtraFilesMap* jit_sources,
+      std::vector<IValue>* constants);
 
   typedef TypePtr (*TypeResolver)(
       const std::string& type_str,
@@ -131,6 +127,7 @@ class FlatbufferLoader {
       ivalue_parsers_;
   TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;
+  bool module_parsed_ = false;
 };
 
 } // namespace jit
