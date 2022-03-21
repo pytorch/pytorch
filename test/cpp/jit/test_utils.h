@@ -38,18 +38,16 @@ static inline void trim(std::string& s) {
 }
 } // namespace
 
-#define ASSERT_THROWS_WITH_MESSAGE(statement, substring)             \
-  try {                                                              \
-    (void)statement;                                                 \
-    FAIL();                                                          \
-  } catch (const std::exception& e) {                                \
-    std::string substring_s(substring);                              \
-    trim(substring_s);                                               \
-    auto exception_string = std::string(e.what());                   \
-    trim(exception_string);                                          \
-    ASSERT_NE(exception_string.find(substring_s), std::string::npos) \
-        << " Error was: \n"                                          \
-        << exception_string;                                         \
+#define ASSERT_THROWS_WITH_MESSAGE(statement, substring)              \
+  try {                                                               \
+    (void)statement;                                                  \
+    FAIL();                                                           \
+  } catch (const std::exception& e) {                                 \
+    std::string substring_s(substring);                               \
+    trim(substring_s);                                                \
+    auto exception_string = std::string(e.what());                    \
+    trim(exception_string);                                           \
+    ASSERT_NE(exception_string.find(substring_s), std::string::npos); \
   }
 
 namespace torch {

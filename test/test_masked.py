@@ -10,7 +10,7 @@ from functools import wraps
 import unittest
 
 from torch.testing._internal.common_utils import \
-    (TestCase, suppress_warnings, _TestParametrizer)
+    (TestCase, parametrize, suppress_warnings, _TestParametrizer)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
@@ -303,6 +303,67 @@ class TestMasked(TestCase):
             outmask = torch._masked._output_mask(op.op, r_inp, *r_args, **r_kwargs)
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
+
+    @parametrize("sparse_dims,fill_value", [(2, 0), (1, 0), (2, 123), (1, 123)],
+                 name_fn=lambda sparse_dims, fill_value: {1: 'hybrid_', 2: ''}[sparse_dims] + f'fill_value_{fill_value}')
+    def test_sparse_coo_where(self, sparse_dims, fill_value):
+
+        mask = torch.tensor([[1, 0, 1, 0, 0],
+                             [1, 1, 1, 1, 0],
+                             [0, 1, 0, 1, 0],
+                             [0, 0, 0, 0, 0],
+                             [0, 0, 1, 1, 0],
+                             [1, 1, 0, 0, 0]]).to(dtype=bool).to_sparse(sparse_dims)
+        # make some specified mask elements as explicit masked-out masks:
+        if sparse_dims == 2:
+            mask._values()[3] = False
+            mask._values()[-3] = False
+        else:
+            mask._values()[1, 1] = False
+            mask._values()[-2, -2] = False
+
+        input = torch.tensor([[1, 0, 0, 0, -1],
+                              [2, 3, 0, 0, -2],
+                              [0, 4, 5, 0, -3],
+                              [0, 0, 6, 7, 0],
+                              [0, 8, 9, 0, -3],
+                              [10, 11, 0, 0, -5]]).to_sparse(sparse_dims)
+        # make specified input elements have zero values:
+        if sparse_dims == 2:
+            input._values()[3] = 0
+            input._values()[-3] = 0
+            F = 0
+        else:
+            input._values()[1, 1] = 0
+            input._values()[-1, 0] = 0
+            F = fill_value
+
+        # expected where result:
+        Z = 99
+        # Z value corresponds to masked-in elements that are not
+        # specified in the input and it will be replaced with a zero
+        tmp = torch.tensor([[1, F, Z, F, F],
+                            [2, F, Z, Z, F],
+                            [F, 4, F, Z, F],
+                            [0, 0, 0, 0, 0],
+                            [F, F, 9, F, F],
+                            [Z, 11, F, F, F]]).to_sparse(sparse_dims)
+        expected_sparse = torch.sparse_coo_tensor(
+            tmp.indices(),
+            torch.where(tmp.values() != Z, tmp.values(), tmp.values().new_full([], 0)),
+            input.shape)
+
+        # _sparse_coo_where result:
+        sparse = torch._masked._sparse_coo_where(mask, input, fill_value)
+        self.assertEqual(sparse, expected_sparse)
+
+        # check invariance:
+        #  torch.where(mask.to_dense(), input.to_dense(), fill_value)
+        #    == where(mask, input, fill_value).to_dense(fill_value)
+        expected = torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, F))
+        outmask = torch.sparse_coo_tensor(sparse.indices(), sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool), sparse.shape)._coalesced_(True)
+        dense = torch.where(outmask.to_dense(), sparse.to_dense(), torch.full(sparse.shape, F))
+        self.assertEqual(dense, expected)
 
 
 instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
