@@ -13,15 +13,17 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_tensor import LoggingTensor
 
 # Utilities for parametrizing the tensor constructors used in autograd tests
+#
+# TODO: maybe move somewhere so other tests can also use
+#
+# NB: Not all factory functions included. A complete(?) list can be found here:
+#     https://pytorch.org/cppdocs/notes/tensor_creation.html
 base_ctors_dict = {
     "ones": torch.ones,
     "zeros": torch.zeros,
     "randn": torch.randn,
     "rand": torch.rand,
     "tensor": torch.tensor,
-    # TODO: maybe move somewhere so other tests can also use
-    # TODO: according to https://pytorch.org/cppdocs/notes/tensor_creation.html
-    #       there are more factory functions: logspace, linspace, full, eye, empty, arange, randint and randperm
 }
 base_ctors = types.SimpleNamespace(**base_ctors_dict)
 
@@ -169,16 +171,17 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1], v)
 
-    def test_vjp_no_grad(self):
+    @base_and_logging_tensor
+    def test_vjp_no_grad(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4)
         with torch.no_grad():
             res = autogradF.vjp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
         inputs.requires_grad_()
         v.requires_grad_()
@@ -186,13 +189,14 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.vjp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
-    def test_vjp_output(self):
+    @base_and_logging_tensor
+    def test_vjp_output(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4)
         res = autogradF.vjp(reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
         self.assertIsNone(res[0].grad_fn)
@@ -201,8 +205,8 @@ class TestAutogradFunctional(TestCase):
         def adder(x, y):
             return 2 * x + 3 * y
 
-        inputs = (torch.rand(2), torch.rand(2))
-        v = torch.ones(2)
+        inputs = (ctors.rand(2), ctors.rand(2))
+        v = ctors.ones(2)
         out, vjp_val = autogradF.vjp(adder, inputs, v)
         self._assert_same_struct(vjp_val, inputs)
         self.assertIsNone(out.grad_fn)
@@ -212,8 +216,8 @@ class TestAutogradFunctional(TestCase):
         def adder(x, y):
             return 2 * x + 3 * y, x + y
 
-        inputs = (torch.rand(2), torch.rand(2))
-        v = (torch.tensor([1., 0.]), torch.tensor([1., 0.]))
+        inputs = (ctors.rand(2), ctors.rand(2))
+        v = (ctors.tensor([1., 0.]), ctors.tensor([1., 0.]))
         out, vjp_val = autogradF.vjp(adder, inputs, v)
         self._assert_same_struct(vjp_val, inputs)
         self.assertIsNone(out[0].grad_fn)
@@ -221,11 +225,12 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(vjp_val[0].grad_fn)
         self.assertIsNone(vjp_val[1].grad_fn)
 
-    def test_vjp_scalar(self):
+    @base_and_logging_tensor
+    def test_vjp_scalar(self, ctors):
         def reducer(x):
             return x.sum()
-        inputs = torch.rand(4, 4)
-        v = torch.ones([])
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones([])
         res = autogradF.vjp(reducer, inputs, v)
         self._assert_same_struct(res[0], v)
         self._assert_same_struct(res[1], inputs)
@@ -236,17 +241,18 @@ class TestAutogradFunctional(TestCase):
 
         def expander(x):
             return x.unsqueeze(0).repeat(4)
-        inputs = torch.rand([])
-        v = torch.ones(4)
+        inputs = ctors.rand([])
+        v = ctors.ones(4)
         res = autogradF.vjp(expander, inputs, v)
         self._assert_same_struct(res[0], v)
         self._assert_same_struct(res[1], inputs)
 
-    def test_vjp_create_graph(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_vjp_create_graph(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
-        inputs = torch.rand(2, 2, dtype=torch.double)
-        v = torch.ones(2, dtype=torch.double)
+        inputs = ctors.rand(2, 2, dtype=torch.double)
+        v = ctors.ones(2, dtype=torch.double)
 
         inputs.requires_grad_()
         v.requires_grad_()
@@ -261,10 +267,10 @@ class TestAutogradFunctional(TestCase):
         def adder(x, y):
             return 2 * x + 3 * y, x * y
 
-        inputs = (torch.rand(2, dtype=torch.double, requires_grad=True),
-                  torch.rand(2, dtype=torch.double, requires_grad=True))
-        v = (torch.tensor([1., 0.], dtype=torch.double, requires_grad=True),
-             torch.tensor([1., 0.], dtype=torch.double, requires_grad=True))
+        inputs = (ctors.rand(2, dtype=torch.double, requires_grad=True),
+                  ctors.rand(2, dtype=torch.double, requires_grad=True))
+        v = (ctors.tensor([1., 0.], dtype=torch.double, requires_grad=True),
+             ctors.tensor([1., 0.], dtype=torch.double, requires_grad=True))
 
         gradcheck(lambda *args: autogradF.vjp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
         gradgradcheck(lambda *args: autogradF.vjp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
@@ -281,15 +287,16 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def test_jvp_err_check(self):
+    @base_and_logging_tensor
+    def test_jvp_err_check(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
 
         def bar(a):
             return 3 * a.narrow(0, 0, 3), "bar"
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         with self.assertRaisesRegex(TypeError, "The inputs given to jvp must be either a Tensor"):
             res = autogradF.jvp(foo, (inp, 2), v)
 
@@ -308,7 +315,8 @@ class TestAutogradFunctional(TestCase):
         res = autogradF.jvp(foo, inp, v)[1]
         self._assert_same_struct(res, foo(inp))
 
-    def test_jvp_err_check_strict(self):
+    @base_and_logging_tensor
+    def test_jvp_err_check_strict(self, ctors):
         def foo(a):
             return a.detach()
 
@@ -316,8 +324,8 @@ class TestAutogradFunctional(TestCase):
             # Make a non-leaf Tensor that requires_grad but that is not connected to the input
             return a.long().float().requires_grad_().clone()
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.jvp(foo, inp, v, strict=True)
         res = autogradF.jvp(foo, inp, v, strict=False)
@@ -341,16 +349,17 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1], v)
 
-    def test_jvp_no_grad(self):
+    @base_and_logging_tensor
+    def test_jvp_no_grad(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         with torch.no_grad():
             res = autogradF.jvp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
         inputs.requires_grad_()
         v.requires_grad_()
@@ -358,13 +367,14 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.jvp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
-    def test_jvp_output(self):
+    @base_and_logging_tensor
+    def test_jvp_output(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         res = autogradF.jvp(reducer, inputs, v)
         self._assert_same_struct(res[1], res[0])
         self.assertIsNone(res[0].grad_fn)
@@ -373,8 +383,8 @@ class TestAutogradFunctional(TestCase):
         def adder(x, y):
             return 2 * x + 3 * y
 
-        inputs = (torch.rand(2), torch.rand(2))
-        v = (torch.ones(2), torch.ones(2))
+        inputs = (ctors.rand(2), ctors.rand(2))
+        v = (ctors.ones(2), ctors.ones(2))
         out, jvp_val = autogradF.jvp(adder, inputs, v)
         self._assert_same_struct(jvp_val, out)
         self.assertIsNone(out.grad_fn)
@@ -384,8 +394,8 @@ class TestAutogradFunctional(TestCase):
         def adder(x, y):
             return 2 * x + 3 * y, x + y
 
-        inputs = (torch.rand(2), torch.rand(2))
-        v = (torch.tensor([1., 0.]), torch.tensor([1., 0.]))
+        inputs = (ctors.rand(2), ctors.rand(2))
+        v = (ctors.tensor([1., 0.]), ctors.tensor([1., 0.]))
         out, jvp_val = autogradF.jvp(adder, inputs, v)
         self._assert_same_struct(jvp_val, out)
         self.assertIsNone(out[0].grad_fn)
@@ -393,32 +403,34 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(jvp_val[0].grad_fn)
         self.assertIsNone(jvp_val[1].grad_fn)
 
-    def test_jvp_scalar(self):
+    @base_and_logging_tensor
+    def test_jvp_scalar(self, ctors):
         def reducer(x):
             return x.sum()
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         res = autogradF.jvp(reducer, inputs, v)
-        self._assert_same_struct(res[0], torch.zeros([]))
+        self._assert_same_struct(res[0], ctors.zeros([]))
         self._assert_same_struct(res[1], res[0])
 
         def expander(x):
             return x.unsqueeze(0).repeat(4)
-        inputs = torch.rand([])
-        v = torch.ones([])
+        inputs = ctors.rand([])
+        v = ctors.ones([])
         res = autogradF.jvp(expander, inputs, v)
-        self._assert_same_struct(res[0], torch.zeros(4))
+        self._assert_same_struct(res[0], ctors.zeros(4))
         self._assert_same_struct(res[1], res[0])
 
         res = autogradF.jvp(expander, inputs)
-        self._assert_same_struct(res[0], torch.zeros(4))
+        self._assert_same_struct(res[0], ctors.zeros(4))
         self._assert_same_struct(res[1], res[0])
 
-    def test_jvp_create_graph(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jvp_create_graph(self, ctors):
         def reducer(x):
             return x.sum(dim=1)
-        inputs = torch.rand(2, 2, dtype=torch.double)
-        v = torch.ones(2, 2, dtype=torch.double)
+        inputs = ctors.rand(2, 2, dtype=torch.double)
+        v = ctors.ones(2, 2, dtype=torch.double)
 
         inputs.requires_grad_()
         v.requires_grad_()
@@ -433,10 +445,10 @@ class TestAutogradFunctional(TestCase):
         def adder(x, y):
             return 2 * x + 3 * y, x * y
 
-        inputs = (torch.rand(2, dtype=torch.double, requires_grad=True),
-                  torch.rand(2, dtype=torch.double, requires_grad=True))
-        v = (torch.tensor([1., 0.], dtype=torch.double, requires_grad=True),
-             torch.tensor([1., 0.], dtype=torch.double, requires_grad=True))
+        inputs = (ctors.rand(2, dtype=torch.double, requires_grad=True),
+                  ctors.rand(2, dtype=torch.double, requires_grad=True))
+        v = (ctors.tensor([1., 0.], dtype=torch.double, requires_grad=True),
+             ctors.tensor([1., 0.], dtype=torch.double, requires_grad=True))
 
         gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
         gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v)
@@ -464,32 +476,34 @@ class TestAutogradFunctional(TestCase):
         expected = torch.eye(results[0].shape[0], dtype=torch.float)
         self.assertEqual(results, expected)
 
-    def test_construct_standard_basis_for(self):
+    @base_and_logging_tensor
+    def test_construct_standard_basis_for(self, ctors):
         test_cases = [
-            (torch.randn(2, 3),),
-            (torch.randn(1),),
-            (torch.randn([]),),
-            (torch.randn(1), torch.randn([]), torch.randn([])),
-            (torch.randn(2), torch.randn(3), torch.randn([])),
-            (torch.randn(2), torch.randn([]), torch.randn(3)),
-            (torch.randn(2, 3), torch.randn(3), torch.randn(3, 4, 2)),
-            (torch.randn(2, dtype=torch.float64), torch.randn(3, dtype=torch.float32)),
+            (ctors.randn(2, 3),),
+            (ctors.randn(1),),
+            (ctors.randn([]),),
+            (ctors.randn(1), ctors.randn([]), ctors.randn([])),
+            (ctors.randn(2), ctors.randn(3), ctors.randn([])),
+            (ctors.randn(2), ctors.randn([]), ctors.randn(3)),
+            (ctors.randn(2, 3), ctors.randn(3), ctors.randn(3, 4, 2)),
+            (ctors.randn(2, dtype=torch.float64), ctors.randn(3, dtype=torch.float32)),
         ]
 
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_construct_standard_basis_for_cuda(self):
+    @base_and_logging_tensor
+    def test_construct_standard_basis_for_cuda(self, ctors):
         test_cases = [
-            (torch.randn(2), torch.randn(3, device='cuda')),
-            (torch.randn(3, device='cuda'), torch.randn(2)),
+            (ctors.randn(2), ctors.randn(3, device='cuda')),
+            (ctors.randn(3, device='cuda'), ctors.randn(2)),
         ]
 
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
-    def _test_vectorize_raises_no_warnings(self, api):
+    def _test_vectorize_raises_no_warnings(self, api, ctors):
         # vmap is an experimental prototype. When someone calls torch.vmap,
         # it raises a python warning. This test checks that
         # autogradF.{jacobian, hessian} don't raise that experimental prototype
@@ -498,26 +512,28 @@ class TestAutogradFunctional(TestCase):
         def foo(a):
             return (a ** 2).sum()
 
-        x = torch.randn(3)
+        x = ctors.randn(3)
         with warnings.catch_warnings(record=True) as wa:
             result = api(foo, x, vectorize=True)
         self.assertEqual(len(wa), 0)
 
-    def test_jacobian_vectorize_raises_no_warnings(self):
-        return self._test_vectorize_raises_no_warnings(autogradF.jacobian)
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_raises_no_warnings(self, ctors):
+        return self._test_vectorize_raises_no_warnings(autogradF.jacobian, ctors)
 
-    def test_hessian_vectorize_raises_no_warnings(self):
-        return self._test_vectorize_raises_no_warnings(autogradF.hessian)
+    @FIXME_base_and_xfail_logging_tensor
+    def test_hessian_vectorize_raises_no_warnings(self, ctors):
+        return self._test_vectorize_raises_no_warnings(autogradF.hessian, ctors)
 
-    @parametrize("vectorize", [True, False])
-    def test_jacobian_err_check(self, vectorize):
+    @FIXME_xfail_vectorized_logging_tensor
+    def test_jacobian_err_check(self, vectorize, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
 
         def bar(a):
             return 3 * a.narrow(0, 0, 3), "bar"
 
-        inp = torch.rand(4)
+        inp = ctors.rand(4)
         with self.assertRaisesRegex(TypeError, "The inputs given to jacobian must be either a Tensor"):
             res = autogradF.jacobian(foo, (inp, 2), vectorize=vectorize)
 
@@ -530,12 +546,13 @@ class TestAutogradFunctional(TestCase):
         def foo(a, b):
             return b, 3 * a.narrow(0, 0, 3)
 
-        inp = (torch.rand(4), torch.rand(5))
+        inp = (ctors.rand(4), ctors.rand(5))
 
         res = autogradF.jacobian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, foo(*inp), inp)
 
-    def test_jacobian_err_check_strict(self):
+    @base_and_logging_tensor
+    def test_jacobian_err_check_strict(self, ctors):
         def foo(a):
             return a.detach()
 
@@ -543,7 +560,7 @@ class TestAutogradFunctional(TestCase):
             # Make a non-leaf Tensor that requires_grad but that is not connected to the input
             return a.long().float().requires_grad_().clone()
 
-        inp = torch.rand(4)
+        inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.jacobian(foo, inp, strict=True)
         res = autogradF.jacobian(foo, inp, strict=False)
@@ -567,35 +584,37 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, inp, inp)
         self.assertEqual(res, torch.eye(4))
 
-    def test_jacobian_err_check_strict_vectorize(self):
+    @base_and_logging_tensor
+    def test_jacobian_err_check_strict_vectorize(self, ctors):
         def foo(x):
             return x
 
-        inp = torch.rand(4)
+        inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
             res = autogradF.jacobian(foo, inp, strict=True, vectorize=True)
 
-    def test_jacobian_no_grad(self):
+    @base_and_logging_tensor
+    def test_jacobian_no_grad(self, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
-        inputs = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
         with torch.no_grad():
             res = autogradF.jacobian(exp_reducer, inputs)
         self.assertIsNone(res.grad_fn)
-        self.assertNotEqual(res, torch.zeros(4, 4))
+        self.assertNotEqual(res, ctors.zeros(4, 4))
 
         with torch.no_grad():
             res = autogradF.jacobian(exp_reducer, inputs, create_graph=True)
         self.assertIsNotNone(res.grad_fn)
-        self.assertNotEqual(res, torch.zeros(4, 4))
+        self.assertNotEqual(res, ctors.zeros(4, 4))
 
-    @parametrize("vectorize", [True, False])
-    def test_jacobian_output(self, vectorize):
+    @FIXME_xfail_vectorized_logging_tensor
+    def test_jacobian_output(self, vectorize, ctors):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
-        inputs = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
         res = autogradF.jacobian(exp_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, exp_reducer(inputs), inputs)
         self.assertIsNone(res.grad_fn)
@@ -603,7 +622,7 @@ class TestAutogradFunctional(TestCase):
         def identity(x):
             return x.clone()
 
-        inputs = torch.rand(4)
+        inputs = ctors.rand(4)
         res = autogradF.jacobian(identity, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, identity(inputs), inputs)
         self.assertIsNone(res.grad_fn)
@@ -612,7 +631,7 @@ class TestAutogradFunctional(TestCase):
         def add_exp_reducer(x, y):
             return (x + y.exp()).sum(dim=1)
 
-        inputs = (torch.rand(4, 4), torch.rand(4, 4))
+        inputs = (ctors.rand(4, 4), ctors.rand(4, 4))
         res = autogradF.jacobian(add_exp_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
         self.assertIsNone(res[0].grad_fn)
@@ -630,7 +649,7 @@ class TestAutogradFunctional(TestCase):
             return x.unsqueeze(0).repeat(4)
         inputs = ctors.rand([])
         res = autogradF.jacobian(expander, inputs, vectorize=vectorize)
-        self._assert_same_struct(res, torch.zeros(4))
+        self._assert_same_struct(res, ctors.zeros(4))
 
     @parametrize("vectorize", [True, False])
     @FIXME_base_and_xfail_logging_tensor
@@ -679,76 +698,83 @@ class TestAutogradFunctional(TestCase):
             result_forward_mode = autogradF.jacobian(f, inputs, strategy="forward-mode", vectorize=True)
             self.assertEqual(result_forward_mode, expected)
 
-    def test_jacobian_vectorize_correctness_simple(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_simple(self, ctors):
         def f(x):
             return 3 * x ** 2
 
-        x = torch.randn(2, 3, 5)
+        x = ctors.randn(2, 3, 5)
         self._check_jacobian_vectorize_correctness(f, x)
 
-    def test_jacobian_vectorize_correctness_multi_input(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_multi_input(self, ctors):
         def f(x, y):
             return (x.cos() * x) @ y.sin()
 
-        x = torch.randn(2, 3)
-        y = torch.randn(3, 5)
+        x = ctors.randn(2, 3)
+        y = ctors.randn(3, 5)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    def test_jacobian_vectorize_correctness_multi_input_multi_output(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_multi_input_multi_output(self, ctors):
         def f(x, y):
             return (x * x) @ y, x @ (x.sum(1) * y), y.sum()
 
-        x = torch.randn(5, 3)
-        y = torch.randn(3, 5)
+        x = ctors.randn(5, 3)
+        y = ctors.randn(3, 5)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    def test_jacobian_vectorize_correctness_unrelated_outputs(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_unrelated_outputs(self, ctors):
         def f(x, y):
             return x, y, x, y
 
-        x = torch.randn(2)
-        y = torch.randn(3)
+        x = ctors.randn(2)
+        y = ctors.randn(3)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    def test_jacobian_vectorize_correctness_zero_dim(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_zero_dim(self, ctors):
         # zero-dim output
         def f(x, y):
             return x.sum(), y.sum(), x * y
 
-        x = torch.randn(3)
-        y = torch.randn(3)
+        x = ctors.randn(3)
+        y = ctors.randn(3)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
         # zero-dim input
         def g(x):
             return torch.stack([x, x, x])
 
-        x = torch.randn([])
+        x = ctors.randn([])
         self._check_jacobian_vectorize_correctness(g, x)
 
         # Mixed zero-dim input / zero-dim output
         def h(x, y):
             return y.sum(), x * y
 
-        x = torch.randn([])
-        y = torch.randn(1)
+        x = ctors.randn([])
+        y = ctors.randn(1)
         self._check_jacobian_vectorize_correctness(h, (x, y))
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_jacobian_vectorize_correctness_different_devices(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_different_devices(self, ctors):
         def f(x, y):
             return x * y, (x * y).cuda()
 
-        x = torch.randn(3)
-        y = torch.randn(3)
+        x = ctors.randn(3)
+        y = ctors.randn(3)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    def test_jacobian_vectorize_correctness_different_dtype(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_jacobian_vectorize_correctness_different_dtype(self, ctors):
         def f(x, y):
             return (x * y).float(), (x * y).double()
 
-        x = torch.randn(3)
-        y = torch.randn(3)
+        x = ctors.randn(3)
+        y = ctors.randn(3)
         # The Jacobian computed using forward AD has the dtype of the output
         # but the Jacobian computed with reverse AD has dtype of input
         self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
@@ -761,41 +787,44 @@ class TestAutogradFunctional(TestCase):
         result_forward_mode = autogradF.hessian(f, inputs, outer_jacobian_strategy="forward-mode", vectorize=True)
         self.assertEqual(result_forward_mode, expected)
 
-    def test_hessian_vectorize_correctness_simple(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_hessian_vectorize_correctness_simple(self, ctors):
         def f(x):
             return (3 * x ** 2).sum()
 
-        x = torch.randn(2, 3, 5)
+        x = ctors.randn(2, 3, 5)
         self._check_hessian_vectorize_correctness(f, x)
 
-    def test_hessian_vectorize_correctness_multi_input(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_hessian_vectorize_correctness_multi_input(self, ctors):
         def f(x, y, z):
             return ((x.relu() * x) @ y.sin() @ z).sum()
 
-        x = torch.randn(2, 3)
-        y = torch.randn(3, 5)
-        z = torch.randn(5, 5)
+        x = ctors.randn(2, 3)
+        y = ctors.randn(3, 5)
+        z = ctors.randn(5, 5)
         self._check_hessian_vectorize_correctness(f, (x, y, z))
 
-    def test_hessian_vectorize_correctness_unrelated_outputs(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_hessian_vectorize_correctness_unrelated_outputs(self, ctors):
         # output unrelated to one input
         def f(x, y):
             return (x ** 2).sum()
 
-        x = torch.randn(2)
-        y = torch.randn(3)
+        x = ctors.randn(2)
+        y = ctors.randn(3)
         self._check_hessian_vectorize_correctness(f, (x, y))
 
         # output unrelated to all inputs
         def f(x, y):
-            return torch.ones([])
+            return ctors.ones([])
 
-        x = torch.randn(2)
-        y = torch.randn(3)
+        x = ctors.randn(2)
+        y = ctors.randn(3)
         self._check_hessian_vectorize_correctness(f, (x, y))
 
-    @parametrize("vectorize", [True, False])
-    def test_hessian_err_check(self, vectorize):
+    @FIXME_xfail_vectorized_logging_tensor
+    def test_hessian_err_check(self, vectorize, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
@@ -808,7 +837,7 @@ class TestAutogradFunctional(TestCase):
         def bar3(a):
             return 3 * a.narrow(0, 0, 3), 3 * a.narrow(0, 0, 3)
 
-        inp = torch.rand(4)
+        inp = ctors.rand(4)
         with self.assertRaisesRegex(TypeError, "The inputs given to hessian must be either a Tensor"):
             res = autogradF.hessian(foo, (inp, 2), vectorize=vectorize)
 
@@ -828,12 +857,13 @@ class TestAutogradFunctional(TestCase):
         def foo(a, b):
             return (3 * b.narrow(0, 0, 3) * a.narrow(0, 0, 3)).sum()
 
-        inp = (torch.rand(4), torch.rand(5))
+        inp = (ctors.rand(4), ctors.rand(5))
 
         res = autogradF.hessian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, inp, inp)
 
-    def test_hessian_err_check_strict(self):
+    @base_and_logging_tensor
+    def test_hessian_err_check_strict(self, ctors):
         def foo(a):
             return a.detach().sum()
 
@@ -845,7 +875,7 @@ class TestAutogradFunctional(TestCase):
             # A Linear function for which the jacobian is independent of the input
             return (3 * a).sum()
 
-        inp = torch.rand(4)
+        inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.hessian(foo, inp, strict=True)
         res = autogradF.hessian(foo, inp, strict=False)
@@ -864,26 +894,28 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, inp, inp)
         self.assertEqual(res.abs().sum(), 0.)
 
-    def test_hessian_err_check_strict_vectorize(self):
+    @base_and_logging_tensor
+    def test_hessian_err_check_strict_vectorize(self, ctors):
         def foo(x):
             return (x ** 3).sum()
 
-        inp = torch.rand(4)
+        inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
             res = autogradF.hessian(foo, inp, strict=True, vectorize=True)
 
-    def test_hessian_no_grad(self):
+    @base_and_logging_tensor
+    def test_hessian_no_grad(self, ctors):
         def pow_reducer(x):
             return x.pow(3).sum()
 
-        inputs = torch.rand(2, 2)
+        inputs = ctors.rand(2, 2)
         with torch.no_grad():
             res = autogradF.hessian(pow_reducer, inputs)
         self.assertIsNone(res[0][0].grad_fn)
         self.assertIsNone(res[0][1].grad_fn)
         self.assertIsNone(res[1][0].grad_fn)
         self.assertIsNone(res[1][1].grad_fn)
-        self.assertNotEqual(res, torch.zeros(2, 2, 2))
+        self.assertNotEqual(res, ctors.zeros(2, 2, 2))
 
         with torch.no_grad():
             res = autogradF.hessian(pow_reducer, inputs, create_graph=True)
@@ -891,14 +923,14 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[0][1].grad_fn)
         self.assertIsNotNone(res[1][0].grad_fn)
         self.assertIsNotNone(res[1][1].grad_fn)
-        self.assertNotEqual(res, torch.zeros(2, 2, 2))
+        self.assertNotEqual(res, ctors.zeros(2, 2, 2))
 
-    @parametrize("vectorize", [True, False])
-    def test_hessian_output(self, vectorize):
+    @FIXME_xfail_vectorized_logging_tensor
+    def test_hessian_output(self, vectorize, ctors):
         def pow_reducer(x):
             return x.pow(3).sum()
 
-        inputs = torch.rand(2, 2)
+        inputs = ctors.rand(2, 2)
         res = autogradF.hessian(pow_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNone(res.grad_fn)
@@ -906,7 +938,7 @@ class TestAutogradFunctional(TestCase):
         def add_pow_reducer(x, y):
             return (x + y).pow(3).sum()
 
-        inputs = (torch.rand(2, 2), torch.rand(2, 2))
+        inputs = (ctors.rand(2, 2), ctors.rand(2, 2))
         res = autogradF.hessian(add_pow_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNone(res[0][0].grad_fn)
@@ -915,29 +947,31 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNone(res[1][1].grad_fn)
 
     @parametrize("vectorize", [True, False])
-    def test_hessian_scalar(self, vectorize):
+    @base_and_logging_tensor
+    def test_hessian_scalar(self, vectorize, ctors):
         def reducer(x):
             return x.sum()
-        inputs = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
         res = autogradF.hessian(reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
 
-        inputs = torch.rand([])
+        inputs = ctors.rand([])
         res = autogradF.hessian(reducer, inputs, vectorize=vectorize)
         self._assert_same_struct(res, inputs)
 
         def bad_reducer(x):
             return x.sum().view(1, 1, 1)
-        inputs = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
         res = autogradF.hessian(bad_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
 
     @parametrize("vectorize", [True, False])
-    def test_hessian_create_graph(self, vectorize):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_hessian_create_graph(self, vectorize, ctors):
         def pow_reducer(x):
             return x.pow(3).sum()
 
-        inputs = torch.rand(2, 2, dtype=torch.double, requires_grad=True)
+        inputs = ctors.rand(2, 2, dtype=torch.double, requires_grad=True)
         res = autogradF.hessian(pow_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNotNone(res.grad_fn)
@@ -948,8 +982,8 @@ class TestAutogradFunctional(TestCase):
         def add_pow_reducer(x, y):
             return (x + y).pow(3).sum()
 
-        inputs = (torch.rand(2, 2, dtype=torch.double, requires_grad=True),
-                  torch.rand(2, 2, dtype=torch.double, requires_grad=True))
+        inputs = (ctors.rand(2, 2, dtype=torch.double, requires_grad=True),
+                  ctors.rand(2, 2, dtype=torch.double, requires_grad=True))
         res = autogradF.hessian(add_pow_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNotNone(res[0][0].grad_fn)
@@ -974,7 +1008,8 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
 
-    def test_vhp_err_check(self):
+    @base_and_logging_tensor
+    def test_vhp_err_check(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
@@ -984,8 +1019,8 @@ class TestAutogradFunctional(TestCase):
         def bar2(a):
             return 3 * a.narrow(0, 0, 3)
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         with self.assertRaisesRegex(TypeError, "The inputs given to vhp must be either a Tensor"):
             res = autogradF.vhp(foo, (inp, 2), v)
 
@@ -997,7 +1032,7 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.vhp(bar2, inp, v)
 
         with self.assertRaisesRegex(RuntimeError, "v has invalid size:"):
-            res = autogradF.vhp(foo, inp, torch.rand(5))
+            res = autogradF.vhp(foo, inp, ctors.rand(5))
 
         with self.assertRaisesRegex(TypeError, "The v given to vhp must be either a Tensor or a tuple of Tensors"):
             res = autogradF.vhp(foo, inp, (v, 2))
@@ -1008,13 +1043,14 @@ class TestAutogradFunctional(TestCase):
         def foo(a, b):
             return (3 * b.narrow(0, 0, 3) * a.narrow(0, 0, 3)).sum()
 
-        inp = (torch.rand(4), torch.rand(5))
-        v = (torch.rand(4), torch.rand(5))
+        inp = (ctors.rand(4), ctors.rand(5))
+        v = (ctors.rand(4), ctors.rand(5))
 
         res = autogradF.vhp(foo, inp, v)
         self._assert_same_struct(res[1], inp)
 
-    def test_vhp_err_check_strict(self):
+    @base_and_logging_tensor
+    def test_vhp_err_check_strict(self, ctors):
         def foo(a):
             return a.detach().sum()
 
@@ -1026,8 +1062,8 @@ class TestAutogradFunctional(TestCase):
             # A Linear function for which the jacobian is independent of the input
             return (3 * a).sum()
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.vhp(foo, inp, v, strict=True)
         res = autogradF.vhp(foo, inp, v, strict=False)
@@ -1046,29 +1082,31 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1].abs().sum(), 0.)
 
-    def test_vhp_no_grad(self):
+    @base_and_logging_tensor
+    def test_vhp_no_grad(self, ctors):
         def reducer(x):
             return x.exp().sum()
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         with torch.no_grad():
             res = autogradF.vhp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
         with torch.no_grad():
             res = autogradF.vhp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
-    def test_vhp_output(self):
+    @base_and_logging_tensor
+    def test_vhp_output(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         res = autogradF.vhp(foo, inputs, v)
         self._assert_same_struct(res[1], inputs)
         self.assertIsNone(res[0].grad_fn)
@@ -1077,24 +1115,25 @@ class TestAutogradFunctional(TestCase):
         def bar(a, b):
             return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
 
-        inputs = (torch.rand(3), torch.rand(4))
-        v = (torch.ones(3), torch.ones(4))
+        inputs = (ctors.rand(3), ctors.rand(4))
+        v = (ctors.ones(3), ctors.ones(4))
         out, vhp_val = autogradF.vhp(bar, inputs, v)
         self._assert_same_struct(vhp_val, inputs)
         self.assertIsNone(out.grad_fn)
         self.assertIsNone(vhp_val[0].grad_fn)
         self.assertIsNone(vhp_val[1].grad_fn)
 
-    def test_vhp_scalar(self):
+    @base_and_logging_tensor
+    def test_vhp_scalar(self, ctors):
         def reducer(x):
             return x.sum()
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         res = autogradF.vhp(reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
-        inputs = torch.rand([])
-        v = torch.rand([])
+        inputs = ctors.rand([])
+        v = ctors.rand([])
         res = autogradF.vhp(reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
@@ -1103,17 +1142,18 @@ class TestAutogradFunctional(TestCase):
 
         def bad_reducer(x):
             return x.sum().view(1, 1, 1)
-        inputs = torch.rand(4, 4)
-        v = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.rand(4, 4)
         res = autogradF.vhp(bad_reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
-    def test_vhp_create_graph(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_vhp_create_graph(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
-        inputs = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
-        v = torch.ones(4, 4, dtype=torch.double, requires_grad=True)
+        inputs = ctors.rand(4, 4, dtype=torch.double, requires_grad=True)
+        v = ctors.ones(4, 4, dtype=torch.double, requires_grad=True)
         res = autogradF.vhp(foo, inputs, v, create_graph=True)
         self._assert_same_struct(res[1], inputs)
         self.assertIsNotNone(res[0].grad_fn)
@@ -1125,10 +1165,10 @@ class TestAutogradFunctional(TestCase):
         def bar(a, b):
             return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
 
-        inputs = (torch.rand(3, dtype=torch.double, requires_grad=True),
-                  torch.rand(4, dtype=torch.double, requires_grad=True))
-        v = (torch.ones(3, dtype=torch.double, requires_grad=True),
-             torch.ones(4, dtype=torch.double, requires_grad=True))
+        inputs = (ctors.rand(3, dtype=torch.double, requires_grad=True),
+                  ctors.rand(4, dtype=torch.double, requires_grad=True))
+        v = (ctors.ones(3, dtype=torch.double, requires_grad=True),
+             ctors.ones(4, dtype=torch.double, requires_grad=True))
         out, vhp_val = autogradF.vhp(bar, inputs, v, create_graph=True)
         self._assert_same_struct(vhp_val, inputs)
         self.assertIsNotNone(out.grad_fn)
@@ -1150,7 +1190,8 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def test_hvp_err_check(self):
+    @base_and_logging_tensor
+    def test_hvp_err_check(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
@@ -1160,8 +1201,8 @@ class TestAutogradFunctional(TestCase):
         def bar2(a):
             return 3 * a.narrow(0, 0, 3)
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         res = autogradF.hvp(foo, inp, v)
         with self.assertRaisesRegex(TypeError, "The inputs given to hvp must be either a Tensor"):
             res = autogradF.hvp(foo, (inp, 2), v)
@@ -1174,7 +1215,7 @@ class TestAutogradFunctional(TestCase):
             res = autogradF.hvp(bar2, inp, v)
 
         with self.assertRaisesRegex(RuntimeError, "v has invalid size:"):
-            res = autogradF.hvp(foo, inp, torch.rand(5))
+            res = autogradF.hvp(foo, inp, ctors.rand(5))
 
         with self.assertRaisesRegex(TypeError, "The v given to hvp must be either a Tensor or a tuple of Tensors"):
             res = autogradF.hvp(foo, inp, (v, 2))
@@ -1185,13 +1226,14 @@ class TestAutogradFunctional(TestCase):
         def foo(a, b):
             return (3 * b.narrow(0, 0, 3) * a.narrow(0, 0, 3)).sum()
 
-        inp = (torch.rand(4), torch.rand(5))
-        v = (torch.rand(4), torch.rand(5))
+        inp = (ctors.rand(4), ctors.rand(5))
+        v = (ctors.rand(4), ctors.rand(5))
 
         res = autogradF.hvp(foo, inp, v)
         self._assert_same_struct(res[1], inp)
 
-    def test_hvp_err_check_strict(self):
+    @base_and_logging_tensor
+    def test_hvp_err_check_strict(self, ctors):
         def foo(a):
             return a.detach().sum()
 
@@ -1203,8 +1245,8 @@ class TestAutogradFunctional(TestCase):
             # A Linear function for which the jacobian is independent of the input
             return (3 * a).sum()
 
-        inp = torch.rand(4)
-        v = torch.rand(4)
+        inp = ctors.rand(4)
+        v = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "Output 0 of the user-provided function does not require gradients."):
             res = autogradF.hvp(foo, inp, v, strict=True)
         res = autogradF.hvp(foo, inp, v, strict=False)
@@ -1223,29 +1265,31 @@ class TestAutogradFunctional(TestCase):
         self._assert_same_struct(res[1], inp)
         self.assertEqual(res[1].abs().sum(), 0.)
 
-    def test_hvp_no_grad(self):
+    @base_and_logging_tensor
+    def test_hvp_no_grad(self, ctors):
         def reducer(x):
             return x.exp().sum()
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         with torch.no_grad():
             res = autogradF.hvp(reducer, inputs, v)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
         with torch.no_grad():
             res = autogradF.hvp(reducer, inputs, v, create_graph=True)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
-        self.assertNotEqual(res[1], torch.zeros(4, 4))
+        self.assertNotEqual(res[1], ctors.zeros(4, 4))
 
-    def test_hvp_output(self):
+    @base_and_logging_tensor
+    def test_hvp_output(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         res = autogradF.hvp(foo, inputs, v)
         self._assert_same_struct(res[1], inputs)
         self.assertIsNone(res[0].grad_fn)
@@ -1254,24 +1298,25 @@ class TestAutogradFunctional(TestCase):
         def bar(a, b):
             return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
 
-        inputs = (torch.rand(3), torch.rand(4))
-        v = (torch.ones(3), torch.ones(4))
+        inputs = (ctors.rand(3), ctors.rand(4))
+        v = (ctors.ones(3), ctors.ones(4))
         out, hvp_val = autogradF.hvp(bar, inputs, v)
         self._assert_same_struct(hvp_val, inputs)
         self.assertIsNone(out.grad_fn)
         self.assertIsNone(hvp_val[0].grad_fn)
         self.assertIsNone(hvp_val[1].grad_fn)
 
-    def test_hvp_scalar(self):
+    @base_and_logging_tensor
+    def test_hvp_scalar(self, ctors):
         def reducer(x):
             return x.exp().sum()
-        inputs = torch.rand(4, 4)
-        v = torch.ones(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.ones(4, 4)
         res = autogradF.hvp(reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
-        inputs = torch.rand([])
-        v = torch.rand([])
+        inputs = ctors.rand([])
+        v = ctors.rand([])
         res = autogradF.hvp(reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
@@ -1280,17 +1325,18 @@ class TestAutogradFunctional(TestCase):
 
         def bad_reducer(x):
             return x.exp().sum().view(1, 1, 1)
-        inputs = torch.rand(4, 4)
-        v = torch.rand(4, 4)
+        inputs = ctors.rand(4, 4)
+        v = ctors.rand(4, 4)
         res = autogradF.hvp(bad_reducer, inputs, v)
         self._assert_same_struct(res[1], inputs)
 
-    def test_hvp_create_graph(self):
+    @FIXME_base_and_xfail_logging_tensor
+    def test_hvp_create_graph(self, ctors):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
-        inputs = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
-        v = torch.ones(4, 4, dtype=torch.double, requires_grad=True)
+        inputs = ctors.rand(4, 4, dtype=torch.double, requires_grad=True)
+        v = ctors.ones(4, 4, dtype=torch.double, requires_grad=True)
         res = autogradF.hvp(foo, inputs, v, create_graph=True)
         self._assert_same_struct(res[1], inputs)
         self.assertIsNotNone(res[0].grad_fn)
@@ -1302,10 +1348,10 @@ class TestAutogradFunctional(TestCase):
         def bar(a, b):
             return (a + 3 * b.narrow(0, 0, 3)).exp().sum()
 
-        inputs = (torch.rand(3, dtype=torch.double, requires_grad=True),
-                  torch.rand(4, dtype=torch.double, requires_grad=True))
-        v = (torch.ones(3, dtype=torch.double, requires_grad=True),
-             torch.ones(4, dtype=torch.double, requires_grad=True))
+        inputs = (ctors.rand(3, dtype=torch.double, requires_grad=True),
+                  ctors.rand(4, dtype=torch.double, requires_grad=True))
+        v = (ctors.ones(3, dtype=torch.double, requires_grad=True),
+             ctors.ones(4, dtype=torch.double, requires_grad=True))
         out, hvp_val = autogradF.hvp(bar, inputs, v, create_graph=True)
         self._assert_same_struct(hvp_val, inputs)
         self.assertIsNotNone(out.grad_fn)
@@ -1327,12 +1373,13 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def test_jacobian_match_vjp_jvp(self):
+    @base_and_logging_tensor
+    def test_jacobian_match_vjp_jvp(self, ctors):
         def foo(x):
             return x ** 3 + x.sum()
 
-        inputs = torch.rand(4)
-        v = torch.rand(4)
+        inputs = ctors.rand(4)
+        v = ctors.rand(4)
 
         jac = autogradF.jacobian(foo, inputs)
         jvp = autogradF.jvp(foo, inputs, v)[1]
