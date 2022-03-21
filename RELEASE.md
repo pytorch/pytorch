@@ -45,7 +45,7 @@ Following Requirements needs to be met prior to final RC Cut:
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
 * All the nighly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
-  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/main)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/main)
   * [TorchText](https://hud.pytorch.org/hud/pytorch/text/main)
 
