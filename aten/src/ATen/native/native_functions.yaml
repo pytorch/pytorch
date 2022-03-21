@@ -5333,11 +5333,8 @@
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
 
-
 - func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
-  dispatch:
-    CompositeImplicitAutograd: to_dense
 
 # Special case of to_dense with custom derivative
 - func: _sparse_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor

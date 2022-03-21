@@ -1269,6 +1269,8 @@
 
 # [Note: Sometimes view derivatives]
 # The following situation applies to other operations as well.
+# TODO: This note is only referenced once by to_dense. Make this
+# more generic if it's been referenced more than once.
 #
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1573,10 +1575,10 @@
 # - name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
 #
 - name: _sparse_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-  self: grad.to_dense_backward(grad, self)
+  self: to_dense_backward(grad, self)
 
 - name: _mkldnn_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-  self: grad.to_dense_backward(grad, self)
+  self: to_dense_backward(grad, self)
 
 - name: to_sparse(Tensor self) -> Tensor
   self: grad.to_dense()

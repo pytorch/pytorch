@@ -2022,6 +2022,9 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
+        # coalesce is not implemented for strided
+        if t.layout == torch.strided:
+            return t.to_dense()
         return t.coalesce().to_dense()
 
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
