@@ -32,7 +32,8 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
             .qualifiedName(), /* name of torchscript function being run */
         RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
         dstWorkerName);
-    record = torch::autograd::profiler::record_function_enter_new(rpcAsyncJitKey);
+    record =
+        torch::autograd::profiler::record_function_enter_new(rpcAsyncJitKey);
     auto& remoteProfilerManager =
         torch::distributed::rpc::RemoteProfilerManager::getInstance();
     remoteProfilerManager.setCurrentKey(rpcAsyncJitKey);
@@ -72,7 +73,8 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
   }));
   if (shouldProfile) {
     auto profiledFutPtr =
-        torch::autograd::profiler::_call_end_callbacks_on_fut_new(record, futPtr);
+        torch::autograd::profiler::_call_end_callbacks_on_fut_new(
+            record, futPtr);
     return profiledFutPtr;
   }
   return futPtr;

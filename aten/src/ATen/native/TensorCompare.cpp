@@ -323,7 +323,7 @@ static void isin_sorting(
   }
 }
 
-Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
   TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
 
   if (condition.scalar_type() == ScalarType::Byte) {
@@ -332,17 +332,21 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
   }
   Tensor cond_bool = condition.scalar_type() == ScalarType::Byte ? condition.to(ScalarType::Bool) : condition;
-  Tensor ret = at::empty({0}, self.options());
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .add_output(ret)
+    .add_output(out)
     .add_input(cond_bool)
     .add_input(self)
     .add_input(other)
     .build();
   where_kernel(iter.device_type(), iter);
-  return ret;
+  return out;
+}
 
+Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
+  Tensor ret = at::empty({0}, self.options());
+  at::native::where_self_out(condition, self, other, ret);
+  return ret;
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
