@@ -198,7 +198,7 @@ class TestFlattenParams(TestCase):
                     expected,
                     msg=f"{flat_p.shard_metadata()}, {expected}",
                 )
-                self.assertEqual(flat_p._num_padded, kwargs["num_padded"])
+                self.assertEqual(flat_p.num_padded, kwargs["num_padded"])
 
         _test(
             kwargs={"start": -1, "end": -1, "num_padded": 0},

@@ -196,13 +196,6 @@ class PythonCode:
     globals: Dict[str, Any]
 
 
-def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
-    args_s = ', '.join(repr(a) for a in args)
-    kwargs_s = ', '.join(f'{k} = {repr(v)}' for k, v in kwargs.items())
-    if args_s and kwargs_s:
-        return f'{args_s}, {kwargs_s}'
-    return args_s or kwargs_s
-
 def _format_target(base: str, target: str) -> str:
     elems = target.split('.')
     r = base
@@ -344,18 +337,42 @@ class CodeGen(object):
 
             typename = _type_repr(o)
 
-            # This is a generic type, e.g. typing.List[torch.Tensor]
             if hasattr(o, '__origin__'):
+                # This is a generic type, e.g. typing.List[torch.Tensor]
                 origin_type = _origin_type_map.get(o.__origin__, o.__origin__)
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                # Assign global names for each of the inner type variables.
-                args = [type_repr(arg) for arg in o.__args__]
+                if hasattr(o, '__args__'):
+                    # Assign global names for each of the inner type variables.
+                    args = [type_repr(arg) for arg in o.__args__]
 
-                return f'{origin_typename}[{",".join(args)}]'
+                    if len(args) == 0:
+                        # Bare type, such as `typing.Tuple` with no subscript
+                        # This code-path used in Python < 3.9
+                        return origin_typename
+
+                    return f'{origin_typename}[{",".join(args)}]'
+                else:
+                    # Bare type, such as `typing.Tuple` with no subscript
+                    # This code-path used in Python 3.9+
+                    return origin_typename
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
+
+        def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
+            def _get_repr(arg):
+                # Handle NamedTuples (if it has `_fields`) via add_global.
+                if isinstance(arg, tuple) and hasattr(arg, '_fields'):
+                    qualified_name = _get_qualified_name(type(arg))
+                    global_name = add_global(qualified_name, type(arg))
+                    return f"{global_name}{repr(tuple(arg))}"
+                return repr(arg)
+            args_s = ', '.join(_get_repr(a) for a in args)
+            kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
+            if args_s and kwargs_s:
+                return f'{args_s}, {kwargs_s}'
+            return args_s or kwargs_s
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
