@@ -3581,7 +3581,7 @@ class TestSparseMaskedReductions(TestCase):
             self.assertEqual(actual.layout, torch.sparse_coo)
 
             expected = op(t, *sample_input.args, **sample_input_kwargs).to_sparse()
-            self.assertEqual(actual, expected, equal_nan=True)
+            self.assertEqual(actual, expected)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

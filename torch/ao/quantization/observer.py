@@ -346,8 +346,6 @@ class MinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
-        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
-                    This is most useful for simulating dynamic quantization, especially during QAT.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -406,7 +404,6 @@ class MinMaxObserver(_ObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        memoryless=False,
     ) -> None:
 
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
@@ -423,7 +420,6 @@ class MinMaxObserver(_ObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
         )
-        self.memoryless = memoryless
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
         self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs))
@@ -441,8 +437,6 @@ class MinMaxObserver(_ObserverBase):
         r"""Records the running minimum and maximum of ``x``."""
         if x_orig.numel() == 0:
             return x_orig
-        elif self.memoryless:
-            self.reset_min_max_vals()
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
         min_val_cur, max_val_cur = torch.aminmax(x)
@@ -565,8 +559,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
-        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
-                    This is most useful for simulating dynamic quantization, especially during QAT.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
@@ -588,7 +580,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
         quant_min=None,
         quant_max=None,
         factory_kwargs=None,
-        memoryless=False,
     ) -> None:
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -598,7 +589,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
             quant_max=quant_max,
             factory_kwargs=factory_kwargs,
         )
-        self.memoryless = memoryless
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
         self.register_buffer("min_val", torch.tensor([], **factory_kwargs))
@@ -631,7 +621,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
         # are done in place and types need to match for comparisons
         y = y.to(self.min_val.dtype)
         y = torch.flatten(y, start_dim=1)
-        if min_val.numel() == 0 or max_val.numel() == 0 or self.memoryless:
+        if min_val.numel() == 0 or max_val.numel() == 0:
             min_val, max_val = torch.aminmax(y, dim=1)
         else:
             min_val_cur, max_val_cur = torch.aminmax(y, dim=1)

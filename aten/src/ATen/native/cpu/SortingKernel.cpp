@@ -4,10 +4,11 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
 #include <ATen/native/TopKImpl.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
@@ -45,6 +46,10 @@ void _dim_apply(
       auto loop = [&](char** data, const int64_t* strides, int64_t n) {
         auto* values_data_bytes = data[0];
         auto* indices_data_bytes = data[1];
+
+        if(values_data_bytes==nullptr || indices_data_bytes==nullptr){
+          return;
+        }
 
         for (const auto i : c10::irange(n)) {
           (void)i; //Suppress unused variable warning
