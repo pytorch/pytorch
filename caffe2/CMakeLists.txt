@@ -355,6 +355,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(GENERATED_H_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
+    "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+    "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -407,8 +409,15 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
+      --gen_lazy_ts_backend
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
+    "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
@@ -901,6 +910,30 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
+  if(BUILD_LAZY_CUDA_LINALG)
+    add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
+    target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
+    # Library order is important during static linking
+    # `torch::magma` should be mentioned before other CUDA
+    # to transitively include all symbols present in torch_cuda/torch_cpu
+    if(USE_MAGMA)
+      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+      # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
+    endif()
+    target_link_libraries(torch_cuda_linalg PRIVATE
+        torch_cpu
+        torch_cuda
+        ${CUDA_cusolver_LIBRARY}
+    )
+    # NS: TODO, is this really necessary?
+    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    endif()
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
+    install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+  endif()
 
   if(USE_PRECOMPILED_HEADERS)
     if(BUILD_SPLIT_CUDA)
@@ -1094,7 +1127,7 @@ endif()
     FILES_MATCHING PATTERN "*.h")
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
-    FILES_MATCHING PATTERN "*.hpp")
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   install(FILES
     "${TORCH_SRC_DIR}/script.h"
     "${TORCH_SRC_DIR}/extension.h"
@@ -1108,12 +1141,15 @@ endif()
       DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
   endif()
 
-
   if(BUILD_TEST)
     if(BUILD_LITE_INTERPRETER)
       add_subdirectory(
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
+      )
+      add_subdirectory(
+        ${TORCH_ROOT}/test/mobile/lightweight_dispatch
+        ${CMAKE_BINARY_DIR}/test_codegen_unboxing
       )
     else()
       add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
