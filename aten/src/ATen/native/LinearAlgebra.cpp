@@ -99,6 +99,9 @@ void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& b
 }
 
 TORCH_META_FUNC(bmm)(const Tensor& self, const Tensor& mat2) {
+    std::cout << "bmm" << std::endl;
+    std::cout << "self is quantized: " << self.is_quantized() << std::endl;
+    std::cout << "mat2 is quantized: " << mat2.is_quantized() << std::endl;
     common_checks_baddbmm_bmm(*this, self, mat2, Scalar(0.0), Scalar(1.0), true);
 }
 
