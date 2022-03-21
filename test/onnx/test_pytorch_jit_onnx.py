@@ -1,9 +1,10 @@
+# Owner(s): ["module: onnx"]
 import torch
-from torch._C import parse_ir
 import io
 import onnxruntime
 import unittest
 from test_pytorch_onnx_onnxruntime import run_ort, ort_compare_with_pytorch
+from torch._C import parse_ir
 
 class _TestJITIRToONNX:
     """Abstract base class for test cases.
