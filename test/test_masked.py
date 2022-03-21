@@ -349,14 +349,17 @@ class TestMasked(TestCase):
             input.shape)
 
         # _sparse_coo_where result:
-        sparse = torch._masked._sparse_coo_where(mask, input, fill_value)
+        sparse = torch._masked._sparse_coo_where(mask, input,
+                                                 torch.tensor(fill_value, dtype=input.dtype, device=input.device))
         self.assertEqual(sparse, expected_sparse)
 
         # check invariance:
         #  torch.where(mask.to_dense(), input.to_dense(), fill_value)
         #    == where(mask, input, fill_value).to_dense(fill_value)
         expected = torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, F))
-        outmask = torch.sparse_coo_tensor(sparse.indices(), sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool), sparse.shape)._coalesced_(True)
+        outmask = torch.sparse_coo_tensor(sparse.indices(),
+                                          sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool),
+                                          sparse.shape)._coalesced_(True)
         dense = torch.where(outmask.to_dense(), sparse.to_dense(), torch.full(sparse.shape, F))
         self.assertEqual(dense, expected)
 
