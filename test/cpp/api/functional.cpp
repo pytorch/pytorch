@@ -2174,7 +2174,7 @@ TEST_F(FunctionalTest, Interpolate) {
   }
 }
 
-TEST_F(FunctionalTest, Pad) {
+TEST_F(FunctionalTest, Pad1) {
   {
     auto input = torch::arange(6, torch::kDouble).reshape({1, 2, 3});
     auto output = F::pad(input, F::PadFuncOptions({1, 2}).mode(torch::kCircular));
@@ -2183,6 +2183,8 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 2, 6}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
+}
+TEST_F(FunctionalTest, Pad2) {
   {
     auto input = torch::arange(9, torch::kDouble).reshape({1, 1, 3, 3});
     auto output = F::pad(input, F::PadFuncOptions({3, 3, 3, 1}).mode(torch::kCircular));
@@ -2197,6 +2199,8 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 7, 9}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
+}
+TEST_F(FunctionalTest, Pad3) {
   {
     auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
     auto output = F::pad(input, F::PadFuncOptions({3, 3, 2, 1, 2, 2}).mode(torch::kCircular));
@@ -2239,6 +2243,8 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 6, 5, 9}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
+}
+TEST_F(FunctionalTest, Pad4) {
   {
     auto input = torch::arange(16, torch::kDouble).reshape({2, 2, 2, 2});
     auto output = F::pad(input, F::PadFuncOptions({1, 1, 1, 1}).mode(torch::kReflect));
@@ -2265,6 +2271,8 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({2, 2, 4, 4}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
+}
+TEST_F(FunctionalTest, Pad5) {
   {
     auto input = torch::arange(12, torch::kDouble).reshape({1, 1, 2, 2, 3});
     auto output = F::pad(input, F::PadFuncOptions({1, 2, 2, 1, 1, 2}).mode(torch::kReplicate));
@@ -2301,6 +2309,8 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 5, 5, 6}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
+}
+TEST_F(FunctionalTest, Pad6) {
   {
     auto input = torch::arange(18, torch::kDouble).reshape({1, 1, 3, 2, 3});
     auto output = F::pad(input, F::PadFuncOptions({0, 2, 1, 0, 1, 2}).mode(torch::kReflect));
@@ -2331,12 +2341,16 @@ TEST_F(FunctionalTest, Pad) {
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 6, 3, 5}));
     ASSERT_TRUE(output.allclose(expected, 1e-04));
   }
+}
+TEST_F(FunctionalTest, Pad7) {
   {
     auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
     auto output = F::pad(input, F::PadFuncOptions({1, 1}).mode(torch::kConstant).value(0));
     ASSERT_EQ(output.sizes(), std::vector<int64_t>({1, 1, 1, 3}));
     auto expected = torch::tensor({{{{0., 1., 0.}}}}, torch::kDouble);
   }
+}
+TEST_F(FunctionalTest, Pad8) {
   {
     auto input = torch::ones({1, 1, 1, 1}, torch::kDouble);
     auto output = F::pad(input, F::PadFuncOptions({1, 1}));
