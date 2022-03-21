@@ -6,36 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if on_pull_request %}
-  pull_request:
-{%- endif %}
-  push:
-{%- if enable_doc_jobs and is_scheduled %}
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-{%- endif %}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-{%- if not is_scheduled %}
-    branches:
-      - master
-      - main
-      - release/*
-{%- endif %}
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, branches, enable_doc_jobs) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
@@ -69,6 +40,7 @@ env:
 jobs:
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -179,11 +151,13 @@ jobs:
 {% block test +%}
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ timeout_after + 30 }}
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: !{{ test_job.config }}
@@ -352,6 +326,7 @@ jobs:
 {%- endif -%}
 {%- if enable_doc_jobs %}
   build-docs:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
