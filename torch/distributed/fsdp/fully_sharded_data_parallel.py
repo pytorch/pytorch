@@ -1323,6 +1323,8 @@ class FullyShardedDataParallel(nn.Module):
         for p, (full_param, _) in zip(self.params, full_params):
             if not p._is_sharded:  # type: ignore[attr-defined]
                 continue  # Already copied because no sharding.
+
+            # TODO: Might be able to refactor to use _get_shard.
             chunks = full_param.chunk(self.world_size)  # type: ignore[attr-defined]
             assert len(chunks) > self.rank
             chunk = chunks[self.rank]
@@ -1386,6 +1388,7 @@ class FullyShardedDataParallel(nn.Module):
                 parameters being offloaded to the same CPU memory.
         """
 
+        print(f" --- MP enabled: {self.mixed_precision is not None} --")
         if writeback and rank0_only:
             raise ValueError(
                 "writeback=True and rank0_only=True is not supported, as model "
@@ -1452,14 +1455,15 @@ class FullyShardedDataParallel(nn.Module):
                 for p in self.params:
                     if p._is_sharded:
                         with torch.no_grad():
-                            # Note that we offload the full param padded because
-                            # we have rebuilt full params.
-                            p._full_param_padded = (  # type: ignore[attr-defined]
-                                p._full_param_padded.to(torch.device("cpu"))  # type: ignore[attr-defined]
-                            )
-                            self._update_p_data(
-                                p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
-                            )
+                            # Note that we avoid using p._full_param_padded
+                            # directly here as we may not be using that param
+                            # as the full_param from _rebuild_full_params (i.e.)
+                            # in mixed precision.
+                            for p, (full_param, _) in zip(
+                                self.params, currently_local_params
+                            ):
+                                full_param = full_param.to(torch.device("cpu"))
+                                self._update_p_data(p, output_tensor=full_param)
 
             if rank0_only and my_rank != 0:
                 _free_full_params_and_use_local_shard(currently_local_params)
@@ -1480,12 +1484,19 @@ class FullyShardedDataParallel(nn.Module):
                             for p in self.params:
                                 if p._is_sharded:
                                     with torch.no_grad():
-                                        p._full_param_padded = (  # type: ignore[attr-defined]
-                                            p._full_param_padded.to(self.compute_device)  # type: ignore[attr-defined]
-                                        )
-                                        self._update_p_data(
-                                            p, output_tensor=p._full_param_padded,  # type: ignore[attr-defined]
-                                        )
+                                        # Note that we avoid using
+                                        # p._full_param_padded directly here as
+                                        # we may not be using that param
+                                        # as the full_param from
+                                        # _rebuild_full_params (i.e. in mixed
+                                        # precision.
+                                        for p, (full_param, _) in zip(
+                                            self.params, currently_local_params
+                                        ):
+                                            full_param = full_param.to(self.compute_device)
+                                            self._update_p_data(
+                                                p, output_tensor=full_param,
+                                            )
 
                         if writeback:
                             self._write_back_current_shard(currently_local_params)
@@ -1896,13 +1907,14 @@ class FullyShardedDataParallel(nn.Module):
         Helper function to update p.data pointer.
         Args:
             output_tensor (torch.Tensor): this tensor contains the data we just gathered.
+
         """
         p.data = output_tensor
         # Trim any padding and reshape to match original size.
         p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
 
     @torch.no_grad()
-    def _rebuild_full_params(self) -> None:
+    def _rebuild_full_params(self) -> List[Tuple[torch.Tensor, bool]]:
         """
         Gather all shards of params.
         """
@@ -1953,9 +1965,11 @@ class FullyShardedDataParallel(nn.Module):
                                 f"of type {self.mixed_precision.param_dtype}, "
                                 f"but got {p._full_param_padded.dtype}!"
                             )
+                    # output is full_param_padded which can be freed depending
+                    # on reshard_after_forward.
+                    output_tensors.append((p._full_param_padded, self.reshard_after_forward))
+
                     self._update_p_data(p, output_tensor=p._full_param_padded)  # type: ignore[attr-defined]
-                    # output is full_param_padded which can be freed.
-                    output_tensors.append((p.data, True))
                     continue
                 else:
                     # If full param has not been rebuilt or has been freed, call all gather
@@ -1981,10 +1995,13 @@ class FullyShardedDataParallel(nn.Module):
                         output_tensor, p_data, group=self.process_group
                     )
 
+                    # The full parameter, which can be freed. Note that we
+                    # append here before updating so as to not saved the
+                    # tensor with padding trimmed, which causes issues with
+                    # writeback in summon_full_params.
+                    output_tensors.append((output_tensor, True))
                     # Set p.data = output_tensor (with padding trimmed)
                     self._update_p_data(p, output_tensor=output_tensor)
-                    # output can be freed
-                    output_tensors.append((p.data, True))
                     # We can free the reduced precision shard as we have the
                     # full precision parameter.
                     if self.mixed_precision is not None:

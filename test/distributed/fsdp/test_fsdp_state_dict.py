@@ -140,21 +140,22 @@ class TestFSDPStateDict(FSDPTest):
                             self.assertEqual(tensor.dtype, torch.float16)
 
     @skip_if_lt_x_gpu(2)
-    def test_save_and_load_after_forward_state_dict(self):
+    @parametrize("mixed_precision", [MixedPrecision(), None])
+    def test_save_and_load_after_forward_state_dict(self, mixed_precision):
         """
         Test that saving after some training results in params being updated as
         expected.
         """
         torch.cuda.set_device(self.rank)
-        config = MixedPrecision()
-        model = self._get_simple_nested_model(mixed_precision=config)
+        model = self._get_simple_nested_model(mixed_precision=mixed_precision)
         optim = torch.optim.SGD(model.parameters(), lr=0.1)
         initial_params = _get_full_detached_param(model)
         for _ in range(6):
             inp = torch.randn(1, 10, device=torch.cuda.current_device())
-            # inp = model.module.get_input(torch.device("cuda"))
             output = model(*inp)
             loss = output.sum()
+            expected_dtype = torch.float32 if mixed_precision is None else torch.float16
+            self.assertEqual(expected_dtype, loss.dtype)
             loss.backward()
             optim.step()
 
@@ -165,6 +166,9 @@ class TestFSDPStateDict(FSDPTest):
         state_dict = {k: v.clone() for k, v in model.state_dict().items()}
         _zero_model(model)
 
+        # Ensure checkpointed params have the correct type.
+        # for name, tensor in state_dict.items():
+        #     if name in model.named_buffers
         # Load state_dict into zeroed model
         model.load_state_dict(state_dict)
         loaded_params = _get_full_detached_param(model)
