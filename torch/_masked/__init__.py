@@ -604,14 +604,8 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
             mask = torch._sparse_broadcast_to(mask.to_sparse(), input.shape).to_sparse_csr()
 
     # mask layout must match with input layout
-    #
-    # TODO: This restriction can be relaxed when elementwise
-    # multiplication of tensors with different layouts are supported.
     if mask.layout != input.layout:
         if input.layout == torch.strided:
-            if mask.layout == torch.sparse_coo and mask.dtype == torch.bool and not mask.is_coalesced():
-                # to_dense calls coalesce but coalesce not implemented for Bool
-                mask = mask.to(torch.uint8).coalesce().to(torch.bool)
             mask = mask.to_dense()
         elif input.layout == torch.sparse_coo:
             if mask.layout == torch.strided:
@@ -624,11 +618,7 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
 
     # sparse mask must be coalesced
     if mask.layout == torch.sparse_coo:
-        if not mask.is_coalesced():
-            if mask.dtype == torch.bool:
-                # coalesce not implemented for Bool
-                mask = mask.to(torch.uint8)
-            mask = mask.coalesce()
+        mask = mask.coalesce()
 
     # mask is a boolean tensor
     mask = mask.to(dtype=torch.bool)
