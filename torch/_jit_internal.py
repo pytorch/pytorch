@@ -18,6 +18,7 @@ import builtins
 import typing
 import io
 import pickle
+import threading
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -1250,6 +1251,8 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, CFuture) or is_rref_instance(obj):
             return ""
         if isinstance(obj, torch.cuda.Event):
+            return ""
+        if isinstance(obj, threading.Thread):
             return ""
         return None
 
