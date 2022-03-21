@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.nn.modules.utils import _pair, _triple
+from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.intrinsic import _FusedModule
 from typing import Tuple, Any
 
@@ -84,6 +84,54 @@ class _ConvNd(nn.modules.conv._ConvNd):
         else:
             return conv
 
+class Conv1d(_ConvNd):
+    r"""
+    A Conv1d module attached with FakeQuantize modules for weight,
+    used for quantization aware training.
+
+    We adopt the same interface as :class:`~torch.nn.Conv1d`
+
+    Similar to :class:`~torch.nn.Conv2d`, with FakeQuantize modules initialized to
+    default.
+
+    Attributes:
+        weight_fake_quant: fake quant module for weight
+    """
+    _FLOAT_MODULE = nn.Conv1d
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int,
+                 kernel_size: Tuple[int, ...],
+                 stride: Tuple[int, ...]=1,
+                 padding: Tuple[int, ...]=0,
+                 dilation: Tuple[int, ...]=1,
+                 groups: int=1,
+                 bias: bool=True,
+                 padding_mode: str='zeros',
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
+        super().__init__(
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            transposed=False,
+            output_padding=_single(0),
+            groups=groups,
+            bias=bias,
+            padding_mode=padding_mode,
+            qconfig=qconfig,
+            device=device,
+            dtype=dtype)
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(Conv1d, cls).from_float(mod)
+
 class Conv2d(_ConvNd):
     r"""
     A Conv2d module attached with FakeQuantize modules for weight,
@@ -132,7 +180,7 @@ class Conv2d(_ConvNd):
 
     @classmethod
     def from_float(cls, mod):
-        return super(Conv3d, cls).from_float(mod)
+        return super(Conv2d, cls).from_float(mod)
 
 class Conv3d(_ConvNd):
     r"""
