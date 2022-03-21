@@ -75,7 +75,9 @@ class TestSummonFullParamsNoShard(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("writeback", [True, False])
     @parametrize("modify_outer", [True, False])
-    # TODO: CPUOffload does not work with NoShard case.
+    # TODO: CPUOffload summon + writeback does not
+    # work when param is not sharded
+    # (currently when world_size == 1)
     def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
         return _run_test_summon_full_param_writeback(
             self,
