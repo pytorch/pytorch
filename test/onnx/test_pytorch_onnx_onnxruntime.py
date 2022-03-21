@@ -23,8 +23,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithState,
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion)
+                                 skipIfNoLapack, disableScriptTest, skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -1436,7 +1435,6 @@ class _TestONNXRuntime:
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
-    @skipIfONNXShapeInference(False)
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.jit.ScriptModule):
             def __init__(self):
@@ -1664,7 +1662,6 @@ class _TestONNXRuntime:
 
     # Operator rank mismatch between outputs of two branches for opsets below 11.
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
         class FloatingPoint(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1811,7 +1808,6 @@ class _TestONNXRuntime:
 
     # In scripting the first transpose node do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
-    @skipIfONNXShapeInference(False)
     def test_arithmetic_infer_dtype(self):
         class ArithmeticModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -1894,7 +1890,6 @@ class _TestONNXRuntime:
 
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
-    @skipIfONNXShapeInference(False)
     def test_div_promotion_script(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -5287,7 +5282,6 @@ class _TestONNXRuntime:
         inputs = torch.randn(16)
         self.run_test(model, inputs)
 
-    @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_loop_transpose(self):
         class LoopModel(torch.nn.Module):
@@ -5629,19 +5623,15 @@ class _TestONNXRuntime:
         self.run_test(OnesModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(OnesModel(), x, remained_onnx_input_idx=[])
 
-    @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, input):
-                cur_shape = torch._shape_as_tensor(input)
-                final_shape: List[int] = cur_shape.tolist()
-                pad_tensor = torch.zeros([1, 2] + final_shape)
-                return pad_tensor
+                res: List[int] = input.tolist()
+                return res
 
-        x = torch.randn(2, 3)
-        self.run_test(List(), (x,))
+        self.run_test(List(), (torch.randint(100, (1,)),))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
@@ -6134,7 +6124,6 @@ class _TestONNXRuntime:
                       input_names=["x"],
                       test_with_inputs=[y])
 
-    @skipIfONNXShapeInference(False)
     def test_unfold_infer_shape(self):
         class UnfoldModule(torch.jit.ScriptModule):
             def __init__(self):
@@ -6885,7 +6874,6 @@ class _TestONNXRuntime:
         self.run_test(IfFoldModel(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
@@ -6900,7 +6888,6 @@ class _TestONNXRuntime:
         self.run_test(UninitializedModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_dynamic(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
@@ -6919,7 +6906,6 @@ class _TestONNXRuntime:
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList(self):
         class UninitializedTensorListModel(torch.nn.Module):
             def forward(self, x):
@@ -6935,7 +6921,6 @@ class _TestONNXRuntime:
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList_dynamic(self):
         class UninitializedTensorListModel(torch.nn.Module):
             def forward(self, x):
@@ -6952,7 +6937,6 @@ class _TestONNXRuntime:
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_intList(self):
         class UninitializedListModel(torch.nn.Module):
             def forward(self, x):
@@ -6971,7 +6955,6 @@ class _TestONNXRuntime:
 
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
-    @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList_shape(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, x):
@@ -8146,7 +8129,6 @@ class _TestONNXRuntime:
 
         self.run_test(MyModule(), x)
 
-    @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_if_transpose(self):
         class IfModel(torch.nn.Module):
@@ -8162,7 +8144,6 @@ class _TestONNXRuntime:
                       output_names=["output_1"],
                       dynamic_axes={"output_1": [0, 1]})
 
-    @skipIfONNXShapeInference(False)
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_if_list(self):
         class IfModel(torch.nn.Module):
