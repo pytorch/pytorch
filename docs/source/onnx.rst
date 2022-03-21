@@ -598,6 +598,11 @@ Functions
 .. autofunction:: register_custom_op_symbolic
 .. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
+.. autofunction:: is_onnx_log_enabled
+.. autofunction:: enable_log
+.. autofunction:: disable_log
+.. autofunction:: set_log_stream
+.. autofunction:: log
 
 Classes
 -------

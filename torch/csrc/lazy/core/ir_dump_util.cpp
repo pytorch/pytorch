@@ -251,6 +251,7 @@ std::string DumpUtil::PostOrderToText(
     if (opt_root_id) {
       ss << ", ROOT=" << *opt_root_id;
     }
+    ss << ", NodeType=" << typeid(*node).name();
     ss << "\n";
   }
   ss << "}\n";
