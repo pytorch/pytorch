@@ -1,0 +1,129 @@
+name: build docs
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
+      push:
+        required: false
+        type: boolean
+        default: false
+        description: If set, push the docs to the docs website.
+
+    secrets:
+      GH_PYTORCHBOT_TOKEN:
+        required: false
+        description: Permissions for pushing to the docs site.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+
+jobs:
+  build-docs:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: [self-hosted, linux.2xlarge]
+    strategy:
+      matrix:
+        docs_type: [cpp, python]
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull docker image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
+        with:
+          docker-image: ${{ inputs.docker-image }}
+
+      - name: Download build artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@master
+        with:
+          name: ${{ inputs.build-environment }}
+
+      - name: Generate netrc (only for docs-push)
+        if: inputs.push
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          # set credentials for https pushing
+          echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
+          echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
+
+      - name: Build ${{ matrix.docs_type }} docs
+        env:
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+          WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          DOCS_TYPE: ${{ matrix.docs_type }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+        run: |
+          set -ex
+          # Convert refs/tags/v1.12.0rc3 into 1.12
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
+            target="${BASH_REMATCH[1]}"
+          else
+            target="master"
+          fi
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
+            -e BUILD_ENVIRONMENT \
+            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+            -e IN_CI \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e SHA1="$GITHUB_SHA" \
+            -e DOCS_VERSION="${target}" \
+            -e DOCS_TYPE \
+            -e PR_LABELS \
+            -e WITH_PUSH \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
+
+      - name: Chown workspace
+        uses: pytorch/pytorch/.github/actions/chown-workspace@master
+        if: always()
+
+      - name: Upload Python Docs Preview
+        uses: seemethere/upload-artifact-s3@v3
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
+        with:
+          retention-days: 14
+          s3-bucket: doc-previews
+          if-no-files-found: error
+          path: pytorch.github.io/docs/master/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}
+
+      - name: Upload C++ Docs Preview
+        uses: seemethere/upload-artifact-s3@v3
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          s3-bucket: doc-previews
+          path: cppdocs/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
