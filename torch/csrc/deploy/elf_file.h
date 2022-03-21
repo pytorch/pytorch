@@ -1,8 +1,8 @@
 #pragma once
 
-#include <c10/util/Optional.h>
 #include <elf.h>
 #include <torch/csrc/deploy/Exception.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 #include <torch/csrc/deploy/mem_file.h>
 #include <vector>
 
@@ -31,7 +31,7 @@ struct Section {
 class ElfFile {
  public:
   explicit ElfFile(const char* filename);
-  at::optional<Section> findSection(const char* name) const;
+  multipy::optional<Section> findSection(const char* name) const;
 
  private:
   Section toSection(Elf64_Shdr* shdr) {
@@ -41,7 +41,7 @@ class ElfFile {
     const char* name = "";
 
     if (strtabSection_) {
-      MULTIPY_CHECK(nameOff >= 0 && nameOff < strtabSection_.len, "");
+      MULTIPY_CHECK(nameOff >= 0 && nameOff < strtabSection_.len);
       name = strtabSection_.start + nameOff;
     }
     const char* start = memFile_.data() + shOff;

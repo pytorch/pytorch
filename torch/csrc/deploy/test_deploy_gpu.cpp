@@ -67,6 +67,7 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
   }
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(TorchDeployGPUTest, TensorRT) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP();
@@ -78,20 +79,21 @@ TEST(TorchDeployGPUTest, TensorRT) {
   auto makeModel = p.loadPickle("make_trt_module", "model.pkl");
   {
     auto I = makeModel.acquireSession();
-    auto model = I.self(c10::ArrayRef<at::IValue>{});
+    auto model = I.self(at::ArrayRef<at::IValue>{});
     auto input = at::ones({1, 2, 3}).cuda();
     auto output = input * 2;
     ASSERT_TRUE(
         output.allclose(model(at::IValue{input}).toIValue().toTensor()));
   }
 }
+#endif
 
 // OSS build does not have bultin numpy support yet. Use this flag to guard the
 // test case.
 #if HAS_NUMPY
 TEST(TorchpyTest, TestNumpy) {
   torch::deploy::InterpreterManager m(2);
-  auto noArgs = c10::ArrayRef<torch::deploy::Obj>();
+  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
   auto I = m.acquireOne();
   auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
   auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});
