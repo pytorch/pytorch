@@ -5338,6 +5338,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
+    CPU, CUDA: to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
 
