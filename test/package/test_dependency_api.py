@@ -182,7 +182,7 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(PackagingError):
             with PackageExporter(buffer) as he:
                 he.mock(include="package_a.subpackage")
                 he.intern("**")
