@@ -601,20 +601,13 @@ def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     # mask layout must match with input layout
     if mask.layout != input.layout:
         if input.layout == torch.strided:
-            if mask.dtype == torch.bool and not mask.is_coalesced():
-                # to_dense calls coalesce but coalesce not implemented for Bool
-                mask = mask.to(torch.uint8).coalesce().to(torch.bool)
             mask = mask.to_dense()
         else:
             mask = mask.to_sparse(input.sparse_dim())
 
     # sparse mask must be coalesced
     if mask.layout == torch.sparse_coo:
-        if not mask.is_coalesced():
-            if mask.dtype == torch.bool:
-                # coalesce not implemented for Bool
-                mask = mask.to(torch.uint8)
-            mask = mask.coalesce()
+        mask = mask.coalesce()
 
     # mask is a boolean tensor
     mask = mask.to(dtype=torch.bool)

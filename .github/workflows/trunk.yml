@@ -114,6 +114,7 @@ jobs:
         ]}
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
+    if: ${{ false }}
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
     uses: pytorch/pytorch/.github/workflows/_android-full-build-test.yml@master
     with:
