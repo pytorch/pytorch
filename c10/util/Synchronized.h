@@ -42,9 +42,9 @@ class Synchronized final {
    * provided callback safely.
    */
   template <typename CB>
-  void withLock(CB cb) {
+  typename std::result_of<CB(T&)>::type withLock(CB cb) {
     std::lock_guard<std::mutex> guard(this->mutex_);
-    cb(this->data_);
+    return cb(this->data_);
   }
 
   /**
@@ -53,9 +53,9 @@ class Synchronized final {
    * the provided callback safely.
    */
   template <typename CB>
-  void withLock(CB cb) const {
+  typename std::result_of<CB(T const&)>::type withLock(CB cb) const {
     std::lock_guard<std::mutex> guard(this->mutex_);
-    cb(this->data_);
+    return cb(this->data_);
   }
 };
 } // end namespace c10
