@@ -6,6 +6,9 @@ from typing import Dict, Set, List, Iterable, Any
 
 import jinja2
 import json
+import yaml
+from yaml import Loader
+
 import os
 import sys
 from typing_extensions import Literal, TypedDict
@@ -26,7 +29,6 @@ WINDOWS_RUNNERS = {
 }
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
-LINUX_CPU_SLOW_TEST_RUNNER = "linux.4xlarge"
 # contains 1 gpu
 LINUX_CUDA_TEST_RUNNER = "linux.4xlarge.nvidia.gpu"
 # contains at least 2 gpus
@@ -157,7 +159,6 @@ class CIWorkflow:
     test_runner_type: str = ''
     multigpu_runner_type: str = ''
     distributed_gpu_runner_type: str = ''
-    slow_runner_type: str = ''
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     cuda_version: str = ''
     docker_image_base: str = ''
@@ -196,9 +197,6 @@ class CIWorkflow:
 
         self.multigpu_runner_type = LINUX_MULTIGPU_RUNNERS.get(self.test_runner_type, "linux.16xlarge.nvidia.gpu")
         self.distributed_gpu_runner_type = LINUX_DISTRIBUTED_GPU_RUNNERS.get(self.test_runner_type, "linux.8xlarge.nvidia.gpu")
-
-        if self.slow_runner_type == '':
-            self.slow_runner_type = self.test_runner_type
 
         if LABEL_CIFLOW_DEFAULT in self.ciflow_config.labels:
             self.is_default = True
@@ -289,7 +287,7 @@ class CIWorkflow:
                 else self.test_runner_type,
             }
         if self.enable_slow_test:
-            configs["slow"] = {"num_shards": 1, "runner": self.slow_runner_type}
+            configs["slow"] = {"num_shards": 1, "runner": self.test_runner_type}
         if self.enable_docs_test:
             configs["docs_test"] = {"num_shards": 1, "runner": self.test_runner_type}
         if self.enable_backwards_compat_test:
@@ -719,8 +717,6 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         enable_distributed_test=False,
         enable_noarch_test=True,
-        enable_slow_test=True,
-        slow_runner_type=LINUX_CPU_SLOW_TEST_RUNNER,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_NOARCH},
         ),
@@ -763,7 +759,7 @@ XLA_WORKFLOWS = [
         enable_default_test=False,
         on_pull_request=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
 
@@ -1180,16 +1176,9 @@ def main() -> None:
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
+
+    # not ported yet
     template_and_workflows = [
-        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
-        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
-        (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
-        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
-        (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
-        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
@@ -1213,6 +1202,57 @@ def main() -> None:
             workflow.generate_workflow_file(workflow_template=template)
             ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+    # check ported workflows for correctness
+    ported_workflows = LINUX_WORKFLOWS + \
+        XLA_WORKFLOWS + \
+        WINDOWS_WORKFLOWS + \
+        BAZEL_WORKFLOWS + \
+        IOS_WORKFLOWS + \
+        MACOS_WORKFLOWS + \
+        ANDROID_WORKFLOWS + \
+        ANDROID_SHORT_WORKFLOWS
+
+    ciflow_ruleset = CIFlowRuleset()
+    for workflow in ported_workflows:  # type: ignore[assignment]
+        ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+
+
+    # check new pull workflow matches ciflow/default
+    with open(".github/workflows/pull.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_pull = set([i["name"] for i in y["jobs"].values()])
+
+    # binary builds are erroneously marked as ciflow/default
+    old_pull_ex_binary = set([i for i in ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT] if "binary" not in i])
+    print(new_pull - old_pull_ex_binary)
+    print(old_pull_ex_binary - new_pull)
+    assert new_pull == old_pull_ex_binary
+
+    # check new trunk workflow matches ciflow/trunk
+    with open(".github/workflows/trunk.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_trunk = set([i["name"] for i in y["jobs"].values()])
+    old_trunk = ciflow_ruleset.label_rules[LABEL_CIFLOW_TRUNK] - ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT]
+
+    # docker builds are erroneously marked ciflow/trunk
+    old_trunk = old_trunk - {"docker-builds"}
+    assert new_trunk == old_trunk
+
+    with open(".github/workflows/periodic.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_periodic = set([i["name"] for i in y["jobs"].values()])
+    old_periodic_l = list(ciflow_ruleset.label_rules[LABEL_CIFLOW_SCHEDULED])
+
+    # strip "periodic-" from beginning, since we removed those as part of migration.
+    for i, job in enumerate(old_periodic_l):
+        if job.startswith("periodic-"):
+            old_periodic_l[i] = job[len("periodic-"):]
+    old_periodic = set(old_periodic_l)
+    # this is moved to nightly
+    old_periodic = old_periodic - {"linux-docs-push"}
+
+    assert new_periodic == old_periodic
 
 
 if __name__ == "__main__":
