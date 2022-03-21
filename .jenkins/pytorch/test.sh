@@ -77,6 +77,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
+  rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
 
   # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
