@@ -18,7 +18,7 @@ TEST(UnityTest, TestUnitySimpleModel) {
 
   auto I = m.acquireOne();
 
-  auto noArgs = c10::ArrayRef<Obj>();
+  auto noArgs = at::ArrayRef<Obj>();
   auto input = I.global("torch", "randn")({32, 256});
   auto model = I.global("simple_model", "SimpleModel")(noArgs);
 
