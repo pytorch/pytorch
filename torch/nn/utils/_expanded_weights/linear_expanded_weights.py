@@ -8,7 +8,7 @@ from typing import List, Optional
 @implements_per_sample_grads(F.linear)
 class LinearPerSampleGrad(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, _, *expanded_args_and_kwargs):
+    def forward(ctx, _, __, *expanded_args_and_kwargs):
         if len(expanded_args_and_kwargs[0].shape) <= 1:
             raise RuntimeError("Input does not have a batch dimension. Expanded Weights expected input "
                                f"of at least rank 2, got of rank {len(expanded_args_and_kwargs[0].shape)}")
@@ -25,6 +25,7 @@ class LinearPerSampleGrad(torch.autograd.Function):
         bias = ctx.kwargs['bias']
         results: List[Optional[torch.Tensor]] = []
         results.append(None)  # for kwarg_names
+        results.append(None)  # for op reference
 
         if input.requires_grad:
             results.append(grad_output.matmul(unpack_expanded_weight_or_tensor(weight)))
