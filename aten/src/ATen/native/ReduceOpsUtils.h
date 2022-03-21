@@ -1,12 +1,19 @@
 #pragma once
 
 #include <limits>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/NonEmptyUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 
@@ -250,7 +257,11 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
 }
 
-static C10_UNUSED void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
+  TORCH_CHECK(
+    !dim.empty(),
+      fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
+        "Specify the reduction dim with the 'dim' argument.");
   for (const int64_t d : dim) {
     zero_numel_check_dims(self, d, fn_name);
   }

@@ -143,38 +143,6 @@ TEST(BackendTest, TestCompiler) {
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
 }
 
-TEST(BackendTest, TestCompilerWithStringTable) {
-  setShouldUseFormatWithStringTable(true);
-  Module m("m");
-  m.define(R"(
-    def forward(self, x, h):
-        return x + h
-  )");
-
-  std::vector<IValue> inputs;
-  inputs.emplace_back(2.0 * torch::ones({}));
-  inputs.emplace_back(1.0 * torch::ones({}));
-  auto ref = m.forward(inputs);
-
-  c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
-  c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
-  fake_dict.insert("", "");
-  compile_spec.insert("forward", fake_dict);
-  auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
-  // lowered module
-  auto lm = torch::jit::detail::codegen_backend_module(
-      "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
-  auto res = lm.forward(inputs);
-  AT_ASSERT(res.toTensor().equal(ref.toTensor()));
-
-  std::stringstream ss;
-  lm._save_for_mobile(ss);
-  auto mlm = _load_for_mobile(ss);
-  auto mres = mlm.forward(inputs);
-  setShouldUseFormatWithStringTable(false);
-  AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
-}
-
 TEST(BackendTest, TestComposite) {
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
@@ -412,56 +380,6 @@ Traceback of TorchScript (most recent call last):
         return x + h
                ~~~~~ <--- HERE
   )";
-  ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
-}
-
-TEST(BackendTestDebugInfo, TestCompilerWithStringTable) {
-  setShouldUseFormatWithStringTable(true);
-  Module m("m");
-  m.define(R"(
-    def forward(self, x, h):
-        return x + h
-  )");
-
-  std::vector<IValue> inputs;
-  inputs.emplace_back(torch::rand({2, 4}));
-  inputs.emplace_back(torch::rand({13, 9}));
-
-  c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
-  c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
-  fake_dict.insert("", "");
-  compile_spec.insert("forward", fake_dict);
-  auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
-  // lowered module
-  auto lm = torch::jit::detail::codegen_backend_module(
-      "backend_with_compiler_demo", m, compile_spec, any_dict_ty);
-
-  std::stringstream ss;
-  lm._save_for_mobile(ss, ExtraFilesMap(), true);
-  auto mlm = _load_for_mobile(ss);
-  std::string error_pattern = R"(
-  Module hierarchy:top(m)::<unknown>.__loweredModule__(m)::forward.aten::add
-Traceback of TorchScript (most recent call last):
-  File "<string>", line 3, in <unknown>
-
-            def forward(self, x: Tensor, h: Tensor):
-                return self.__loweredModule__.forward(x, h)
-                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-
-  File "<string>", line 5, in forward
-                typed_inputs: List[Any] = [x, h, ]
-                if self.__backend.is_available() :
-                  _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
-                        ~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-                  assert isinstance(_0, Tensor)
-                  return _0
-  File "<string>", line 3, in <unknown>
-
-    def forward(self, x, h):
-        return x + h
-               ~~~~~ <--- HERE
-  )";
-  setShouldUseFormatWithStringTable(false);
   ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
 
