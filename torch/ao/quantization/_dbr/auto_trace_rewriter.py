@@ -8,7 +8,10 @@ import torch
 import torch.fx
 from .mappings import conv_ops
 from .quantization_state import AutoQuantizationState
-from .utils import get_packable_arg_idxs
+from .utils import (
+    get_packable_arg_idxs,
+    AutoQuantizationStateModuleDict,
+)
 
 class AllModuleTracer(torch.fx.Tracer):
     """
@@ -40,10 +43,10 @@ class AllModuleTracer(torch.fx.Tracer):
                         new_first_arg.append(args[0][idx])
                     else:
                         # create a quant node
-                        scale, zp = input_arg_quant_info
+                        scale, zp, dtype = input_arg_quant_info
                         quant = super().create_node(
                             'call_function', torch.quantize_per_tensor,
-                            (args[0][idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
+                            (args[0][idx], scale.item(), zp.item(), dtype), {}, None, None)
                         new_first_arg.append(quant)
                 new_args = [new_first_arg, *args[1:]]
             elif target == torch.cat:
@@ -58,10 +61,10 @@ class AllModuleTracer(torch.fx.Tracer):
                         new_args.append(args[idx])
                     else:
                         # create a quant node
-                        scale, zp = input_arg_quant_info
+                        scale, zp, dtype = input_arg_quant_info
                         quant = super().create_node(
                             'call_function', torch.quantize_per_tensor,
-                            (args[idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
+                            (args[idx], scale.item(), zp.item(), dtype), {}, None, None)
                         new_args.append(quant)
             args = tuple(new_args)
         return args
@@ -207,7 +210,7 @@ class AllModuleTracer(torch.fx.Tracer):
     # class.
     # TODO(future): remove the hack
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
-        if isinstance(m, AutoQuantizationState):
+        if isinstance(m, AutoQuantizationStateModuleDict):
             return args[0]
         return super().call_module(m, forward, args, kwargs)
 

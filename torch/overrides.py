@@ -218,6 +218,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__delattr__,
         Tensor.__setattr__,
         Tensor.__torch_function__,
+        Tensor.__torch_dispatch__,
         Tensor.__new__,
         Tensor.__class__,
         Tensor.__subclasshook__,
@@ -896,7 +897,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.saddmm: lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
-        torch._scatter_reduce: lambda input, dim, index, reduce, output_size=None: -1,
+        torch.scatter_reduce: lambda input, dim, index, reduce, output_size=None: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
         torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
@@ -1071,6 +1072,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
         Tensor.is_mlc.__get__: lambda self: -1,
+        Tensor.is_nested.__get__: lambda self: -1,
         Tensor.is_ort.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
@@ -1369,7 +1371,7 @@ def handle_torch_function(
     Example
     -------
     >>> def func(a):
-    ...     if type(a) is not torch.Tensor:  # This will make func dispatchable by __torch_function__
+    ...     if has_torch_function_unary(a):
     ...         return handle_torch_function(func, (a,), a)
     ...     return a + 0
     """
