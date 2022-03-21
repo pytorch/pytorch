@@ -6,6 +6,10 @@
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 {%- set timeout_minutes = 240 -%}
 
+# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
+#       the binary builds will check out
+{%- set builder_branch = "main" -%}
+
 {%- macro concurrency(build_environment) -%}
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -16,6 +20,39 @@ concurrency:
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
+{%- endmacro -%}
+
+{%- macro gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_labels, enable_doc_jobs = True) -%}
+on:
+{%- if on_pull_request %}
+  pull_request:
+{%- endif %}
+  push:
+{%- if enable_doc_jobs and is_scheduled %}
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+{%- endif %}
+{%- for label in ciflow_labels | sort %}
+  {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+{%- if not is_scheduled %}
+    branches:
+      - master
+      - main
+      - release/*
+{%- endif %}
+{%- if is_scheduled %}
+  schedule:
+    - cron: !{{ is_scheduled }}
+{%- endif %}
+  workflow_dispatch:
 {%- endmacro -%}
 
 {%- macro display_ec2_information() -%}
@@ -32,37 +69,46 @@ concurrency:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
 {%- endmacro -%}
 
 {%- macro parse_ref(pytorch_directory="") -%}
       - name: Parse ref
+        shell: bash
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
 {%- endif %}
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="") -%}
-      - name: Display and upload test statistics (Click Me)
+{%- macro upload_test_statistics(build_environment, when="always()", pytorch_directory="", needs_credentials=False) -%}
+      - name: Upload test statistics
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
 {%- endif %}
         if: !{{ when }}
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: !{{ build_environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+{%- if needs_credentials %}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+{%- endif %}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
@@ -80,10 +126,22 @@ concurrency:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}
       !{{ display_ec2_information() }}
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -185,10 +243,15 @@ concurrency:
           docker system prune -af
 {%- endmacro -%}
 
-{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch") -%}
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
       {%- if deep_clone %}
           # deep clone, to allow use of git merge-base
           fetch-depth: 0
@@ -209,13 +272,12 @@ concurrency:
       {%- endif %}
 {%- endmacro -%}
 
-{%- macro upload_downloaded_files(name, artifact_name="", use_s3=True, when="always()") -%}
+{%- macro upload_downloaded_files(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True, when="always()") -%}
       - name: Zip JSONs for upload
         if: !{{ when }}
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
-{%- else %}
+          FILE_SUFFIX: '${{ github.job }}-!{{ config }}-!{{ shard }}-!{{ num_shards }}-!{{ runner }}'{%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
 {%- endif %}
 {%- if name == 'windows' %}
@@ -247,12 +309,12 @@ concurrency:
             test-jsons-*.zip
 {%- endmacro -%}
 
-{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
+{%- macro upload_test_reports(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+          FILE_SUFFIX: '${{ github.job }}-!{{ config }}-!{{ shard }}-!{{ num_shards }}-!{{ runner }}'
 {%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
 {%- endif %}
@@ -283,6 +345,25 @@ concurrency:
           if-no-files-found: error
           path:
             test-reports-*.zip
+{%- endmacro -%}
+
+{%- macro upload_cores(artifact_name="coredumps", config=None, shard=None, use_s3=True) -%}
+{%- if use_s3 %}- uses: !{{ upload_artifact_s3_action }}
+        name: Store Core dumps on S3
+{%- else %}- uses: actions/upload-artifact@v2
+        name: Store Core dumps on Github
+{%- endif %}
+        if: failure()
+        with:
+{%- if config != "" and shard != "" %}
+          name: !{{ artifact_name }}-!{{ config }}-!{{ shard }}
+{%- else %}
+          name: !{{ artifact_name }}
+{%- endif %}
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
 {%- endmacro -%}
 
 {%- macro render_test_results() -%}
@@ -353,13 +434,15 @@ concurrency:
           ./build_docker.sh
 {%- endmacro -%}
 
-{%- macro setup_miniconda(python_version) -%}
+{%- macro setup_miniconda(python_version, activate_environment=True) -%}
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
         with:
           auto-update-conda: true
           python-version: !{{ python_version }}
+{%- if activate_environment %}
           activate-environment: build
+{%- endif %}
 {%- endmacro -%}
 
 {%- macro set_xcode_version(xcode_version) -%}

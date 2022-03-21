@@ -352,7 +352,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
             param_size /= elem_size;
 
             if(linear_id == 0 || linear_id == num_linear_layers / 2) {
-                const auto size = { static_cast<int64_t>(param_size * num_linear_layers / 2), 1L};
+                std::initializer_list<int64_t> size = { static_cast<int64_t>(param_size * num_linear_layers / 2), 1L};
                 Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
                 params.emplace_back(std::move(param));
                 layer_params_count++;
@@ -386,7 +386,7 @@ std::pair<std::vector<Tensor>, size_t> get_parameters(miopenHandle_t handle, con
                 bias_size /= elem_size;
 
                 if(linear_id == 0 || linear_id == num_linear_layers / 2) {
-                    const auto size = { static_cast<int64_t>(bias_size * num_linear_layers / 2), 1L};
+                    std::initializer_list<int64_t> size = { static_cast<int64_t>(bias_size * num_linear_layers / 2), 1L};
                     Tensor param = at::empty({0}, weight_buf.options()).set_(weight_buf.storage(), offset, size);
                     params.emplace_back(std::move(param));
                     layer_params_count++;

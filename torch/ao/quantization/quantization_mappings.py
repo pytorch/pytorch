@@ -26,10 +26,21 @@ from torch.ao.quantization.utils import get_combined_dict
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
     nn.Linear: nnqr.Linear,
     nn.Conv1d: nnqr.Conv1d,
     nn.Conv2d: nnqr.Conv2d,
     nn.Conv3d: nnqr.Conv3d,
+    nn.ConvTranspose1d: nnqr.ConvTranspose1d,
+    nn.ConvTranspose2d: nnqr.ConvTranspose2d,
+    nn.ConvTranspose3d: nnqr.ConvTranspose3d,
+    nn.Embedding: nnqr.Embedding,
+    nn.EmbeddingBag: nnqr.EmbeddingBag,
+    nn.GRUCell: nnqr.GRUCell,
+    nn.LSTMCell: nnqr.LSTMCell,
+    nn.RNNCell: nnqr.RNNCell,
+    nn.LSTM: nnqr.LSTM,
 }
 
 # Default map for swapping float module to quantized ones
@@ -77,6 +88,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.ConvReLU3d: nniq.ConvReLU3d,
     nniqat.LinearReLU: nniq.LinearReLU,
+    nniqat.LinearBn1d: nnq.Linear,
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
@@ -99,6 +111,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.ConvReLU2d: nniqat.ConvReLU2d,
     nni.ConvReLU3d: nniqat.ConvReLU3d,
     nni.LinearReLU: nniqat.LinearReLU,
+    nni.LinearBn1d: nniqat.LinearBn1d,
 }
 
 # Default map for swapping dynamic modules
@@ -169,6 +182,11 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
     return copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+
+def get_default_static_quant_reference_module_mappings() -> Dict[Callable, Any]:
+    ''' Get reference module mapping for post training static quantization
+    '''
+    return copy.deepcopy(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS)
 
 def get_embedding_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping, including mapping for embedding QAT

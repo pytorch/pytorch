@@ -1,7 +1,6 @@
 #include <torch/library.h>
 
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <torch/custom_class.h>
 
@@ -193,6 +192,7 @@ TORCH_LIBRARY(quantized, m) {
   // quantized ops implemented in cudnn, with QuantizedCUDA dispatch
   // TODO: use the same signature as quantized::conv2d
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_cudnn(Tensor act, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv2d_relu_cudnn(Tensor act, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
 }
 
 // According to #33294: The "_" prefix registration will be

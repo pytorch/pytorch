@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/create_autodiff_subgraphs.h>
 #include <torch/csrc/jit/passes/create_functional_graphs.h>
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
+#include <torch/csrc/jit/passes/dbr_quantization/remove_redundant_aliases.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
 #include <torch/csrc/jit/passes/device_type_analysis.h>
@@ -45,24 +46,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/metal_rewrite.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
-#include <torch/csrc/jit/passes/onnx.h>
-#include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
-#include <torch/csrc/jit/passes/onnx/constant_fold.h>
-#include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
-#include <torch/csrc/jit/passes/onnx/eval_peephole.h>
-#include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
-#include <torch/csrc/jit/passes/onnx/function_extraction.h>
-#include <torch/csrc/jit/passes/onnx/function_substitution.h>
-#include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
-#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
-#include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
-#include <torch/csrc/jit/passes/onnx/peephole.h>
-#include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
-#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
-#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
-#include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
@@ -165,17 +148,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
-      .def("_jit_pass_onnx_remove_print", RemovePrintOps)
-      .def("_jit_pass_onnx_preprocess_caffe2", PreprocessCaffe2Ops)
-      .def("_jit_pass_onnx", ToONNX)
-      .def(
-          "_jit_pass_onnx_assign_output_shape",
-          [](std::shared_ptr<Graph>& graph,
-             const std::vector<at::Tensor>& tensors,
-             const python::IODescriptor& desc,
-             bool onnx_shape_inference = false) {
-            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
-          })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def(
           "_new_symbolic_shape_symbol",
@@ -204,7 +176,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_propagate_shapes_on_graph_and_build_compute",
           PropagateShapesAndBuildLargeShapeComputeGraph)
-      .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
           "_jit_set_symbolic_shapes_test_mode",
@@ -212,79 +183,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_symbolic_shapes_test_mode_enabled",
           &symbolicShapeAnalysisTestModeEnabled)
-      .def(
-          "_jit_pass_onnx_peephole",
-          [](std::shared_ptr<Graph>& graph,
-             int opset_version,
-             bool fixed_batch_size) {
-            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
-          })
-      .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
-      .def(
-          "_jit_pass_onnx_eval_peephole",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph, paramsDict);
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "_jit_pass_onnx_cast_all_constant_to_floating",
-          CastAllConstantToFloating)
-      .def(
-          "_jit_pass_onnx_constant_fold",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             int opset_version) {
-            ConstantFoldONNX(
-                graph,
-                paramsDict,
-                opset_version); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "_jit_pass_onnx_eliminate_unused_items",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            EliminateUnusedItemsONNX(
-                graph->block(),
-                paramsDict); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "_jit_pass_onnx_scalar_type_analysis",
-          [](std::shared_ptr<Graph>& graph,
-             bool lowprecision_cast,
-             int opset_version) {
-            return ScalarTypeAnalysisForONNX(
-                graph, lowprecision_cast, opset_version);
-          },
-          py::arg("graph"),
-          py::arg("lowprecision_cast") = true,
-          py::arg("opset_version"))
-      .def(
-          "_jit_pass_onnx_remove_inplace_ops_for_onnx", RemoveInplaceOpsForONNX)
-      .def(
-          "_jit_pass_onnx_node_shape_type_inference",
-          [](Node* n,
-             std::map<std::string, IValue>& params_dict,
-             int opset_version) {
-            ONNXShapeTypeInference(n, params_dict, opset_version);
-          })
-      .def(
-          "_jit_pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& params_dict,
-             int opset_version) {
-            ONNXShapeTypeInference(graph, params_dict, opset_version);
-          })
-      .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_autocast", Autocast)
       .def("_jit_set_autocast_mode", &setAutocastMode)
-      .def("_jit_pass_onnx_lint", ONNXLintGraph)
-      .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_replace_old_ops_with_upgraders",
@@ -369,8 +269,8 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
       .def(
-          "_jit_onnx_list_model_parameters",
-          [](Module& module) { return list_module_parameters(module); })
+          "_jit_pass_dbr_quant_remove_redundant_aliases",
+          [](Module& module) { return DBRQuantRemoveRedundantAliases(module); })
       .def(
           "_freeze_module",
           [](Module& module,
@@ -502,7 +402,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return FuseAddMM(g); })
       .def(
           "_jit_pass_canonicalize",
-          [](const std::shared_ptr<Graph>& g) { return Canonicalize(g); })
+          [](const std::shared_ptr<Graph>& g, bool keep_unique_names = true) {
+            return Canonicalize(g, keep_unique_names);
+          },
+          py::arg("graph"),
+          py::arg("keep_unique_names") = true)
       .def("_jit_pass_lint", LintGraph)
       .def(
           "_jit_pass_complete_shape_analysis",
@@ -588,7 +492,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
       .def("_jit_pass_inline", Inline)
-      .def("_jit_pass_prepare_division_for_onnx", PrepareDivisionForONNX)
       .def(
           "_jit_pass_lower_graph",
           [](std::shared_ptr<Graph>& graph, const Module& self) {
@@ -671,10 +574,6 @@ void initJITBindings(PyObject* module) {
             return py::reinterpret_steal<py::object>(
                 python::unflatten(vars, desc));
           })
-      .def("_jit_pass_onnx_block", BlockToONNX)
-      .def(
-          "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
-      .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -773,6 +672,7 @@ void initJITBindings(PyObject* module) {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
                 TORCH_INTERNAL_ASSERT(
+                    false,
                     "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
@@ -1020,22 +920,6 @@ void initJITBindings(PyObject* module) {
              std::vector<std::string>& preserved_methods) {
             return metalOptimizeForMobile(module, preserved_methods);
           })
-      .def(
-          "_jit_pass_onnx_unpack_quantized_weights",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            UnpackQuantizedWeights(graph, paramsDict);
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
-      .def(
-          "_jit_pass_onnx_quantization_insert_permutes",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict) {
-            insertPermutes(graph, paramsDict);
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
       .def(
           "_jit_pass_filter_non_tensor_arguments",
           [](std::map<std::string, IValue> params) {
@@ -1353,9 +1237,10 @@ void initJITBindings(PyObject* module) {
           auto operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func =
-                  py::cpp_function([op](py::args args, py::kwargs kwargs) {
-                    return invokeOperatorFromPython({op}, args, kwargs);
+              auto func = py::cpp_function(
+                  [op, symbol](py::args args, py::kwargs kwargs) {
+                    return _get_operation_for_overload_or_packet(
+                        {op}, symbol, args, kwargs, true);
                   });
               return func;
             }
@@ -1386,60 +1271,8 @@ void initJITBindings(PyObject* module) {
 
           auto func = py::cpp_function(
               [operations, symbol](py::args args, py::kwargs kwargs) {
-                std::vector<py::handle> overloaded_args;
-                size_t total_arg_num = args.size() + kwargs.size();
-                for (const auto i : c10::irange(args.size())) {
-                  is_tensor_and_append_overloaded(
-                      args[i].ptr(), &overloaded_args);
-                  is_tensor_list_and_append_overloaded(
-                      args[i].ptr(),
-                      &overloaded_args,
-                      static_cast<int>(total_arg_num),
-                      false /* throw_error */);
-                }
-                // NB: for kwargs, we cannot guarantee the order of appending
-                // is the same as the argument order in operator's schema.
-                // This is suboptimal, but should be fine. Later when we have
-                // better schema matching and argument parsing, we could
-                // match the operator in `operations` first, then the order will
-                // be guaranteed.
-                for (auto item : kwargs) {
-                  is_tensor_and_append_overloaded(
-                      item.second.ptr(), &overloaded_args);
-                  is_tensor_list_and_append_overloaded(
-                      item.second.ptr(),
-                      &overloaded_args,
-                      total_arg_num,
-                      false /* throw_error */);
-                }
-                if (overloaded_args.size() > 0) {
-                  std::vector<py::object> overloaded_types;
-                  overloaded_types.reserve(overloaded_args.size());
-                  for (auto& oarg : overloaded_args) {
-                    overloaded_types.push_back(
-                        py::reinterpret_borrow<py::object>(
-                            (PyObject*)Py_TYPE(oarg.ptr())));
-                  }
-                  py::tuple py_types = py::cast(overloaded_types);
-                  py::object ret;
-                  std::string ns = symbol.ns().toUnqualString();
-                  std::string method_name = symbol.toUnqualString();
-                  auto self_func = py::module::import("torch")
-                                       .attr("ops")
-                                       .attr(ns.c_str())
-                                       .attr(method_name.c_str());
-                  std::string module_name("torch.ops");
-                  module_name.append(ns);
-                  return pybind11::reinterpret_steal<py::object>(
-                      handle_torch_function_no_python_arg_parser(
-                          overloaded_args,
-                          args.ptr(),
-                          kwargs.ptr(),
-                          method_name.c_str(),
-                          self_func.ptr(),
-                          module_name.c_str()));
-                }
-                return invokeOperatorFromPython(operations, args, kwargs);
+                return _get_operation_for_overload_or_packet(
+                    operations, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));

@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -22,7 +23,7 @@ static void setupLayerNorm_BWD(Fusion* fusion, DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
   const int kReductionAxis = 1;
-  Double* eps_ptr = new Double(1e-5);
+  Double* eps_ptr = IrBuilder::create<Double>(1e-5);
 
   // setup fusion
   auto grad_out = makeContigTensor(2, dtype);
