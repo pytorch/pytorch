@@ -1030,6 +1030,8 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
+        """ Tests fusion and quantization for "Conv - Bn" and "Conv - Bn - ReLU"
+        """
         convs = {
             1: nn.Conv1d,
             2: nn.Conv2d,

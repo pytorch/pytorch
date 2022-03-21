@@ -83,8 +83,7 @@ QAT_MODULE_CLASSES = (
     torch.nn.intrinsic.qat.LinearBn1d,
     torch.nn.intrinsic.qat.ConvBn1d,
     torch.nn.intrinsic.qat.ConvBnReLU1d,
-    # not supported yet, TODO: enable
-    # torch.nn.intrinsic.qat.ConvReLU1d,
+    torch.nn.intrinsic.qat.ConvReLU1d,
     torch.nn.intrinsic.qat.ConvBn2d,
     torch.nn.intrinsic.qat.ConvBnReLU2d,
     torch.nn.intrinsic.qat.ConvReLU2d,
