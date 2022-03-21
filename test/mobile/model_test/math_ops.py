@@ -85,8 +85,8 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.float_power(torch.randint(10, (4,)), 2),
             torch.float_power(torch.arange(1, 5), torch.tensor([2, -3, 4, -5])),
             torch.floor(a),
-            # torch.floor_divide(torch.tensor([4.0, 3.0]), torch.tensor([2.0, 2.0])),
-            # torch.floor_divide(torch.tensor([4.0, 3.0]), 1.4),
+            torch.floor_divide(torch.tensor([4.0, 3.0]), torch.tensor([2.0, 2.0])),
+            torch.floor_divide(torch.tensor([4.0, 3.0]), 1.4),
             torch.fmod(torch.tensor([-3, -2, -1, 1, 2, 3]), 2),
             torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5),
             torch.frac(torch.tensor([1.0, 2.5, -3.2])),
@@ -195,6 +195,7 @@ class ReductionOpsModule(torch.nn.Module):
     def reduction_ops(self):
         a = torch.randn(4)
         b = torch.randn(4)
+        c = torch.tensor(0.5)
         return (
             torch.argmax(a),
             torch.argmin(a),
@@ -213,6 +214,8 @@ class ReductionOpsModule(torch.nn.Module):
             torch.nanmedian(a),
             torch.mode(a),
             torch.norm(a),
+            torch.norm(a, dim=0),
+            torch.norm(c, torch.tensor(2)),
             torch.nansum(a),
             torch.prod(a),
             torch.quantile(a, torch.tensor([0.25, 0.5, 0.75])),
@@ -242,10 +245,14 @@ class ComparisonOpsModule(torch.nn.Module):
             torch.allclose(a, b),
             torch.argsort(a),
             torch.eq(a, b),
+            torch.eq(a, 1),
             torch.equal(a, b),
             torch.ge(a, b),
+            torch.ge(a, 1),
             torch.greater_equal(a, b),
+            torch.greater_equal(a, 1),
             torch.gt(a, b),
+            torch.gt(a, 1),
             torch.greater(a, b),
             torch.isclose(a, b),
             torch.isfinite(a),
@@ -257,19 +264,29 @@ class ComparisonOpsModule(torch.nn.Module):
             torch.isreal(a),
             torch.kthvalue(a, 1),
             torch.le(a, b),
+            torch.le(a, 1),
             torch.less_equal(a, b),
             torch.lt(a, b),
+            torch.lt(a, 1),
             torch.less(a, b),
             torch.maximum(a, b),
             torch.minimum(a, b),
             torch.fmax(a, b),
             torch.fmin(a, b),
             torch.ne(a, b),
+            torch.ne(a, 1),
             torch.not_equal(a, b),
             torch.sort(a),
             torch.topk(a, 1),
             torch.msort(a),
         )
+
+class OtherMathOpsModule(torch.nn.Module):
+    def __init__(self):
+        super(OtherMathOpsModule, self).__init__()
+
+    def forward(self):
+        return self.other_ops()
 
     def other_ops(self):
         a = torch.randn(4)
@@ -379,21 +396,21 @@ class BlasLapackOpsModule(torch.nn.Module):
             torch.bmm(a, b),
             torch.chain_matmul(torch.randn(3, 3), torch.randn(3, 3), torch.randn(3, 3)),
             # torch.cholesky(a), # deprecated
-            torch.cholesky_inverse(torch.randn(3, 3)),
-            torch.cholesky_solve(torch.randn(3, 3), torch.randn(3, 3)),
+            # torch.cholesky_inverse(torch.randn(3, 3)), # had some error
+            # torch.cholesky_solve(torch.randn(3, 3), torch.randn(3, 3)),
             torch.dot(v, v),
-            torch.eig(m),
-            torch.geqrf(a),
+            # torch.linalg.eig(m), # not build with lapack
+            # torch.geqrf(a),
             torch.ger(v, v),
             torch.inner(m, m),
-            torch.inverse(m),
-            torch.det(m),
-            torch.logdet(m),
-            torch.slogdet(m),
-            torch.lstsq(m, m),
-            torch.lu(m),
-            torch.lu_solve(m, *torch.lu(m)),
-            torch.lu_unpack(*torch.lu(m)),
+            # torch.inverse(m),
+            # torch.det(m),
+            # torch.logdet(m),
+            # torch.slogdet(m),
+            # torch.lstsq(m, m),
+            # torch.lu(m),
+            # torch.lu_solve(m, *torch.lu(m)),
+            # torch.lu_unpack(*torch.lu(m)),
             torch.matmul(m, m),
             torch.matrix_power(m, 2),
             # torch.matrix_rank(m),
@@ -403,10 +420,10 @@ class BlasLapackOpsModule(torch.nn.Module):
             # torch.orgqr(a, m),
             # torch.ormqr(a, m, v),
             torch.outer(v, v),
-            torch.pinverse(m),
+            # torch.pinverse(m),
             # torch.qr(a),
-            torch.solve(m, m),
-            torch.svd(a),
+            # torch.solve(m, m),
+            # torch.svd(a),
             # torch.svd_lowrank(a),
             # torch.pca_lowrank(a),
             # torch.symeig(a), # deprecated

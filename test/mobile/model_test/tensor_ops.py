@@ -77,6 +77,21 @@ class TensorOpsModule(torch.nn.Module):
             # w.pin_memory(),
             # w.put_(0, torch.tensor([0, 1], w)),
             x.repeat(4, 2),
+
+            a.clamp_(0),
+            a.clamp(0),
+            a.clamp_min(0),
+            a.hardsigmoid_(),
+            a.hardsigmoid(),
+            a.hardswish_(),
+            a.hardswish(),
+            a.hardtanh_(),
+            a.hardtanh(),
+            a.leaky_relu_(),
+            a.leaky_relu(),
+            a.relu_(),
+            a.relu(),
+            a.requires_grad_(),
         )
 
 
@@ -148,7 +163,7 @@ class TensorIndexingOpsModule(torch.nn.Module):
 
     def tensor_indexing_ops(self):
         x = torch.randn(2, 4)
-        y = torch.randn(2, 4, 2)
+        y = torch.randn(4, 4)
         t = torch.tensor([[0, 0], [1, 0]])
         mask = x.ge(0.5)
         i = [0, 1]
@@ -157,7 +172,7 @@ class TensorIndexingOpsModule(torch.nn.Module):
             torch.concat((x, x, x), 0),
             torch.conj(x),
             torch.chunk(x, 2),
-            torch.dsplit(y, i),
+            torch.dsplit(torch.randn(2, 2, 4), i),
             torch.column_stack((x, x)),
             torch.dstack((x, x)),
             torch.gather(x, 0, t),
@@ -171,6 +186,32 @@ class TensorIndexingOpsModule(torch.nn.Module):
             torch.nonzero(x),
             torch.permute(x, (0, 1)),
             torch.reshape(x, (-1,)),
+            torch.row_stack((x, x)),
+            torch.select(x, 0, 0),
+            torch.scatter(x, 0, t, x),
+            torch.diagonal_scatter(y, torch.ones(4)),
+            torch.select_scatter(y, torch.ones(4), 0, 0),
+            torch.slice_scatter(x, x),
+            torch.scatter_add(x, 0, t, x),
+            # torch.scatter_reduce(x, 0, t, reduce="sum"),
+            torch.split(x, 1),
+            torch.squeeze(x, 0),
+            torch.stack([x, x]),
+            torch.swapaxes(x, 0, 1),
+            torch.swapdims(x, 0, 1),
+            torch.t(x),
+            torch.take(x, t),
+            torch.take_along_dim(x, torch.argmax(x)),
+            torch.tensor_split(x, 1),
+            torch.tile(x, (2, 2)),
+            torch.transpose(x, 0, 1),
+            torch.unbind(x),
+            torch.unsqueeze(x, -1),
+            torch.vsplit(x, i),
+            torch.vstack((x, x)),
+            torch.where(x),
+
+
         )
 
 
@@ -182,7 +223,7 @@ class TensorTypingOpsModule(torch.nn.Module):
         return self.tensor_typing_ops()
 
     def tensor_typing_ops(self):
-        x = torch.randn(2, 2)
+        x = torch.randn(1, 3, 4, 4)
         return (
             x.to(torch.float),
             x.to(torch.double),
@@ -196,6 +237,8 @@ class TensorTypingOpsModule(torch.nn.Module):
             x.to(torch.int),
             x.to(torch.long),
             x.to(torch.bool),
+            x.to(torch.device('cpu')),
+            x.to(memory_format=torch.channels_last),
         )
 
 

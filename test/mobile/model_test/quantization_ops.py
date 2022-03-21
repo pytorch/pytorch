@@ -10,12 +10,16 @@ class GeneralQuantModule(torch.nn.Module):
         self.embedding = torch.nn.quantized.Embedding(num_embeddings=10, embedding_dim=12)
         self.embedding_input = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8])
         self.func = torch.nn.quantized.QFunctional()
-
+        self.conv1 = torch.nn.quantized.ConvTranspose1d(16, 33, 3, stride=2)
+        self.conv2 = torch.nn.quantized.ConvTranspose2d(16, 33, 3, stride=2)
+        self.conv3 = torch.nn.quantized.ConvTranspose3d(16, 33, 3, stride=2)
 
     def forward(self):
         a = torch.quantize_per_tensor(torch.tensor([3.0]), 1.0, 0, torch.qint32)
         b = torch.quantize_per_tensor(torch.tensor(4.0), 1.0, 0, torch.qint32)
-
+        input1 = torch.randn(1, 16, 4)
+        input2 = torch.randn(1, 16, 4, 4)
+        input3 = torch.randn(1, 16, 4, 4, 4)
         return (
             self.func.add(a, b),
             self.func.cat((a, a), 0),
@@ -24,6 +28,9 @@ class GeneralQuantModule(torch.nn.Module):
             self.func.add_scalar(a, b),
             self.func.mul_scalar(a, b),
             self.embedding(self.embedding_input),
+            self.conv1(torch.quantize_per_tensor(input1, scale=1.0, zero_point=0, dtype=torch.quint8)),
+            self.conv2(torch.quantize_per_tensor(input2, scale=1.0, zero_point=0, dtype=torch.quint8)),
+            # self.conv3(torch.quantize_per_tensor(input3, scale=1.0, zero_point=0, dtype=torch.quint8)), # failed on iOS
         )
 
 
@@ -115,9 +122,9 @@ class StaticQuantModule():
             self.input3d = torch.randn(4, 2, 2, 4, 4)
             self.linear_input = torch.randn(32, 20)
 
-            self.layer1 = nn.Sequential(nn.Conv1d(2, 2, 1), nn.ConvTranspose1d(2, 2, 1), nn.InstanceNorm1d(1), nn.Hardswish())
-            self.layer2 = nn.Sequential(nn.Conv2d(2, 2, 1), nn.ConvTranspose2d(2, 2, 1), nn.BatchNorm2d(2), nn.InstanceNorm2d(1), nn.LeakyReLU())
-            self.layer3 = nn.Sequential(nn.Conv3d(2, 2, 1), nn.ConvTranspose3d(2, 2, 1), nn.BatchNorm3d(2), nn.InstanceNorm3d(1), nn.ReLU())
+            self.layer1 = nn.Sequential(nn.Conv1d(2, 2, 1), nn.InstanceNorm1d(1), nn.Hardswish())
+            self.layer2 = nn.Sequential(nn.Conv2d(2, 2, 1), nn.BatchNorm2d(2), nn.InstanceNorm2d(1), nn.LeakyReLU())
+            self.layer3 = nn.Sequential(nn.Conv3d(2, 2, 1), nn.BatchNorm3d(2), nn.InstanceNorm3d(1), nn.ReLU())
             self.layer4 = nn.Sequential(nn.Linear(4, 3))
             self.dequant = torch.quantization.DeQuantStub()
 

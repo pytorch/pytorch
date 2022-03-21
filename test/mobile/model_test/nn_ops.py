@@ -391,10 +391,12 @@ class NNVisionModule(torch.nn.Module):
         self.trilinear_sample = nn.Upsample(scale_factor=2, mode="trilinear")
 
     def forward(self):
+        input = torch.randn(1, 3, 16, 16)
         return (
             [module(self.input) for i, module in enumerate(self.vision_modules)],
             self.linear_sample(torch.randn(4, 9, 9)),
             self.trilinear_sample(torch.randn(1, 3, 4, 9, 9)),
+            F.grid_sample(input, torch.ones(1, 4, 4, 2)),
         )
 
 

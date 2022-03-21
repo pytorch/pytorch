@@ -4,6 +4,7 @@ from math_ops import (
     PointwiseOpsModule,
     ReductionOpsModule,
     ComparisonOpsModule,
+    OtherMathOpsModule,
     SpectralOpsModule,
     BlasLapackOpsModule,
 )
@@ -63,6 +64,7 @@ ops = [
     scriptAndSave(PointwiseOpsModule(), "pointwise_ops.ptl"),
     scriptAndSave(ReductionOpsModule(), "reduction_ops.ptl"),
     scriptAndSave(ComparisonOpsModule(), "comparison_ops.ptl"),
+    scriptAndSave(OtherMathOpsModule(), "other_math_ops.ptl"),
     scriptAndSave(SpectralOpsModule(), "spectral_ops.ptl"),
     scriptAndSave(BlasLapackOpsModule(), "blas_lapack_ops.ptl"),
     # sampling
