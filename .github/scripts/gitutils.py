@@ -30,9 +30,9 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
 
 
 def _check_output(items: List[str], encoding: str = "utf-8") -> str:
-    from subprocess import check_output, CalledProcessError
+    from subprocess import check_output, CalledProcessError, STDOUT
     try:
-        return check_output(items).decode(encoding)
+        return check_output(items, stderr=STDOUT).decode(encoding)
     except CalledProcessError as e:
         msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
         stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
@@ -129,8 +129,13 @@ class GitRepo:
     def checkout(self, branch: str) -> None:
         self._run_git("checkout", branch)
 
-    def fetch(self, ref: str, branch: str) -> None:
-        self._run_git("fetch", self.remote, f"{ref}:{branch}")
+    def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
+        if branch is None and ref is None:
+            self._run_git("fetch", self.remote)
+        elif branch is None:
+            self._run_git("fetch", self.remote, ref)
+        else:
+            self._run_git("fetch", self.remote, f"{ref}:{branch}")
 
     def show_ref(self, name: str) -> str:
         refs = self._run_git('show-ref', '-s', name).strip().split('\n')
@@ -212,11 +217,19 @@ class GitRepo:
             self.cherry_pick(commit)
         self.checkout(orig_branch)
 
-    def push(self, branch: str, dry_run: bool) -> None:
-        if dry_run:
-            self._run_git("push", "--dry-run", self.remote, branch)
-        else:
-            self._run_git("push", self.remote, branch)
+    def push(self, branch: str, dry_run: bool, retry: int = 3) -> None:
+        for cnt in range(retry):
+            try:
+                if dry_run:
+                    self._run_git("push", "--dry-run", self.remote, branch)
+                else:
+                    self._run_git("push", self.remote, branch)
+            except RuntimeError as e:
+                # Check if push were rejected because branch is stale
+                if len(e.args) == 0 or re.search(r"\[rejected\].+\(fetch first\)\n", e.args[0]) is None:
+                    raise
+                self.fetch()
+                self._run_git("rebase", f"{self.remote}/{branch}")
 
     def head_hash(self) -> str:
         return self._run_git("show-ref", "--hash", "HEAD").strip()

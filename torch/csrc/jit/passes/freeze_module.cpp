@@ -102,7 +102,9 @@ class AttributePropagator {
       ClearProfilingInformation(subgraph);
     };
     auto applyOptimizations = [](std::shared_ptr<Graph>& subgraph) {
+#ifndef C10_MOBILE
       Autocast(subgraph);
+#endif
       runOptimization(
           subgraph,
           /* unroll_non_constant_loops? */ false,
