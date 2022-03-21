@@ -664,25 +664,20 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, values.scalar_type(),
-                                        "coalesce", [&] {
+  if (values.scalar_type() == at::kBool) {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
+    bool* values_ptr = values.data_ptr<bool>();
+    bool* newValues_ptr = newValues.data_ptr<bool>();
     for (const auto j : c10::irange(nnz)) {
       int64_t pos = indicesPermutationAccessor[j];
       int64_t curr = indicesBufferAccessor[j];
       if (curr == prev) {
         if (values.numel() >
             0) { // if values is an empty tensor, there are no elements to copy
-          at::native::cpublas::axpy<scalar_t>(
-              blockSize,
-              1,
-              values_ptr + pos * blockSize,
-              1,
-              newValues_ptr + i * blockSize,
-              1);
+          for (int j=0; j < blockSize; j++) {
+            newValues_ptr[i * blockSize + j] |= values_ptr[pos * blockSize + j];
+          }
         }
       } else {
         ++i;
@@ -691,7 +686,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
         }
         if (values.numel() >
             0) { // if values is an empty tensor, there are no elements to copy
-          at::native::cpublas::copy<scalar_t>(
+          at::native::cpublas::copy<bool>(
               blockSize,
               values_ptr + pos * blockSize,
               1,
@@ -701,7 +696,46 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
       }
       prev = curr;
     }
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, values.scalar_type(),
+                                           "coalesce", [&] {
+      int64_t prev = -1;
+      int64_t blockSize = values.stride(0);
+      scalar_t* values_ptr = values.data_ptr<scalar_t>();
+      scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
+      for (const auto j : c10::irange(nnz)) {
+        int64_t pos = indicesPermutationAccessor[j];
+        int64_t curr = indicesBufferAccessor[j];
+        if (curr == prev) {
+          if (values.numel() >
+              0) { // if values is an empty tensor, there are no elements to copy
+            at::native::cpublas::axpy<scalar_t>(
+                                                blockSize,
+                                                1,
+                                                values_ptr + pos * blockSize,
+                                                1,
+                                                newValues_ptr + i * blockSize,
+                                                1);
+          }
+        } else {
+          ++i;
+          for (const auto d : c10::irange(sparse_dim)) {
+            newIndicesAccessor[d][i] = indicesAccessor[d][pos];
+          }
+          if (values.numel() >
+              0) { // if values is an empty tensor, there are no elements to copy
+            at::native::cpublas::copy<scalar_t>(
+                                                blockSize,
+                                                values_ptr + pos * blockSize,
+                                                1,
+                                                newValues_ptr + i * blockSize,
+                                                1);
+          }
+        }
+        prev = curr;
+      }
+    });
+  }
 
   dst._coalesced_(true);
   get_sparse_impl(dst)->set_nnz_and_narrow(i + 1);
