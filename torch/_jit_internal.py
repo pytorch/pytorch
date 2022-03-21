@@ -18,7 +18,7 @@ import builtins
 import typing
 import io
 import pickle
-import threading
+# import threading
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
