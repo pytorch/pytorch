@@ -24,6 +24,12 @@ from nn_ops import (
     NNVisionModule,
     NNShuffleModule,
 )
+from quantization_ops import (
+    GeneralQuantModule,
+    DynamicQuantModule,
+    StaticQuantModule,
+    FusedQuantModule,
+)
 from sampling_ops import SamplingOpsModule
 from tensor_ops import (
     TensorOpsModule,
@@ -31,12 +37,6 @@ from tensor_ops import (
     TensorIndexingOpsModule,
     TensorTypingOpsModule,
     TensorViewOpsModule,
-)
-from quantization_ops import (
-    GeneralQuantModule,
-    DynamicQuantModule,
-    StaticQuantModule,
-    FusedQuantModule,
 )
 
 output_path = "ios/TestApp/models/"
@@ -47,8 +47,10 @@ coverage_out_path = "test/mobile/model_test/coverage.yaml"
 def scriptAndSave(module, name):
     return save(torch.jit.script(module), name)
 
-def traceAndSave(module, name, input=[]):
-    return save(torch.jit.trace(module, input), name)
+
+def traceAndSave(module, name):
+    return save(torch.jit.trace(module, []), name)
+
 
 def save(module, name):
     module._save_for_lite_interpreter(output_path + name)

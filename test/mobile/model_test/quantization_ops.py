@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class GeneralQuantModule(torch.nn.Module):
-
     def __init__(self):
         super(GeneralQuantModule, self).__init__()
-        self.embedding = torch.nn.quantized.Embedding(num_embeddings=10, embedding_dim=12)
+        self.embedding = torch.nn.quantized.Embedding(
+            num_embeddings=10, embedding_dim=12
+        )
         self.embedding_input = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8])
         self.func = torch.nn.quantized.QFunctional()
         self.conv1 = torch.nn.quantized.ConvTranspose1d(16, 33, 3, stride=2)
@@ -28,21 +28,27 @@ class GeneralQuantModule(torch.nn.Module):
             self.func.add_scalar(a, b),
             self.func.mul_scalar(a, b),
             self.embedding(self.embedding_input),
-            self.conv1(torch.quantize_per_tensor(input1, scale=1.0, zero_point=0, dtype=torch.quint8)),
-            self.conv2(torch.quantize_per_tensor(input2, scale=1.0, zero_point=0, dtype=torch.quint8)),
+            self.conv1(
+                torch.quantize_per_tensor(
+                    input1, scale=1.0, zero_point=0, dtype=torch.quint8
+                )
+            ),
+            self.conv2(
+                torch.quantize_per_tensor(
+                    input2, scale=1.0, zero_point=0, dtype=torch.quint8
+                )
+            ),
             # self.conv3(torch.quantize_per_tensor(input3, scale=1.0, zero_point=0, dtype=torch.quint8)), # failed on iOS
         )
 
 
-class DynamicQuantModule():
+class DynamicQuantModule:
     def __init__(self):
         super(DynamicQuantModule, self).__init__()
         self.module = self.M()
 
     def getModule(self):
-        return torch.quantization.quantize_dynamic(
-            self.module,
-            dtype=torch.qint8)
+        return torch.quantization.quantize_dynamic(self.module, dtype=torch.qint8)
 
     class M(torch.nn.Module):
         def __init__(self):
@@ -89,26 +95,23 @@ class DynamicQuantModule():
                 self.grucell(input[0], h[0]),
                 self.lstm(input, (h, c)),
                 self.lstmcell(input[0], (h[0], c[0])),
-
                 self.transformers[0](trans_input, tgt),
                 self.transformers[1](trans_input),
                 self.transformers[2](trans_input, tgt),
-
                 self.linears[0](linear_input),
                 self.linears[1](linear_input),
                 self.linears[2](linear_input, linear_input),
             )
 
 
-
-class StaticQuantModule():
+class StaticQuantModule:
     def __init__(self):
         super(StaticQuantModule, self).__init__()
 
     def getModule(self):
         model_fp32 = self.M()
         model_fp32.eval()
-        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        model_fp32.qconfig = torch.quantization.get_default_qconfig("qnnpack")
         model_fp32_prepared = torch.quantization.prepare(model_fp32)
         model_int8 = torch.quantization.convert(model_fp32_prepared)
         return model_int8
@@ -122,9 +125,18 @@ class StaticQuantModule():
             self.input3d = torch.randn(4, 2, 2, 4, 4)
             self.linear_input = torch.randn(32, 20)
 
-            self.layer1 = nn.Sequential(nn.Conv1d(2, 2, 1), nn.InstanceNorm1d(1), nn.Hardswish())
-            self.layer2 = nn.Sequential(nn.Conv2d(2, 2, 1), nn.BatchNorm2d(2), nn.InstanceNorm2d(1), nn.LeakyReLU())
-            self.layer3 = nn.Sequential(nn.Conv3d(2, 2, 1), nn.BatchNorm3d(2), nn.InstanceNorm3d(1), nn.ReLU())
+            self.layer1 = nn.Sequential(
+                nn.Conv1d(2, 2, 1), nn.InstanceNorm1d(1), nn.Hardswish()
+            )
+            self.layer2 = nn.Sequential(
+                nn.Conv2d(2, 2, 1),
+                nn.BatchNorm2d(2),
+                nn.InstanceNorm2d(1),
+                nn.LeakyReLU(),
+            )
+            self.layer3 = nn.Sequential(
+                nn.Conv3d(2, 2, 1), nn.BatchNorm3d(2), nn.InstanceNorm3d(1), nn.ReLU()
+            )
             self.layer4 = nn.Sequential(nn.Linear(4, 3))
             self.dequant = torch.quantization.DeQuantStub()
 
@@ -146,22 +158,23 @@ class StaticQuantModule():
             return (x, y, z)
 
 
-
-class FusedQuantModule():
+class FusedQuantModule:
     def __init__(self):
         super(FusedQuantModule, self).__init__()
 
     def getModule(self):
         model_fp32 = self.M()
         model_fp32.eval()
-        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-        model_fp32_fused = torch.quantization.fuse_modules(model_fp32,
+        model_fp32.qconfig = torch.quantization.get_default_qconfig("qnnpack")
+        model_fp32_fused = torch.quantization.fuse_modules(
+            model_fp32,
             [
-                ['conv1d', 'relu1'],
-                ['conv2d', 'relu2'],
-                ['conv3d', 'relu3'],
-                ['linear', 'relu4'],
-            ])
+                ["conv1d", "relu1"],
+                ["conv2d", "relu2"],
+                ["conv3d", "relu3"],
+                ["linear", "relu4"],
+            ],
+        )
         model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
         model_int8 = torch.quantization.convert(model_fp32_prepared)
         return model_int8
