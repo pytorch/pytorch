@@ -10,7 +10,7 @@ import torch.onnx.utils
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
-from torch.onnx.symbolic_opset9 import linear
+from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu
 
 from sys import maxsize
 
@@ -322,39 +322,115 @@ def isfinite(g, input):
     return __not_(g, __or_(g, inf_node, nan_node))
 
 
+def quantize_per_tensor(g, input, scale, zero_point, dtype):
+    dtype = sym_help._get_const(dtype, "i", "dtype")
+    zero_point = g.op("Cast", zero_point, to_i=sym_help.scalar_type_to_onnx[dtype])
+    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    return sym_help.quantize_helper(g, input, scale, zero_point)
+
+
+def dequantize(g, input):
+    return sym_help.dequantize_helper(g, input)[0]
+
+
+@parse_args("v", "f", "f", "f")
+def nan_to_num(g, input, nan, posinf, neginf):
+    from torch.onnx.symbolic_opset9 import isnan, lt, gt, logical_and
+
+    # Cannot create a int type tensor with inf/nan values, so we simply
+    # return the original tensor
+    if not sym_help._is_fp(input):
+        return input
+    input_dtype = sym_help.pytorch_name_to_type[input.type().scalarType()]
+    if nan is None:
+        nan = 0.0
+    nan_cond = isnan(g, input)
+    nan_result = g.op("Where", nan_cond,
+                      g.op("Constant", value_t=torch.tensor([nan], dtype=input_dtype)), input)
+
+    # For None values of posinf, neginf we use the greatest/lowest finite
+    # value representable by input’s dtype.
+    finfo = torch.finfo(input_dtype)
+    if posinf is None:
+        posinf = finfo.max
+    posinf_cond = logical_and(g, isinf(g, nan_result),
+                              gt(g, nan_result, g.op("Constant", value_t=torch.LongTensor([0]))))
+    nan_posinf_result = g.op("Where", posinf_cond,
+                             g.op("Constant", value_t=torch.tensor([posinf], dtype=input_dtype)), nan_result)
+
+    if neginf is None:
+        neginf = finfo.min
+    neginf_cond = logical_and(g, isinf(g, nan_posinf_result),
+                              lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))))
+    return g.op("Where", neginf_cond,
+                g.op("Constant", value_t=torch.tensor([neginf], dtype=input_dtype)), nan_posinf_result)
+
+
 # https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
 class Quantized:
+    """
+    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+
+    Support starts from opset 10 because `DequantizeLinear` and `QuantizeLinear` were introduced in opset version 10.
+    """
     domain = "quantized"
 
-    # DequantizeLinear was added in opset version 10.
     @staticmethod
-    def linear(g, input_original, weight, weight_scale, weight_zero_point, bias, op_scale, op_zero_point):
-        input_value, input_scale, input_zero_point = sym_help._unpack_tuple(input_original)
-        # From https://pytorch.org/docs/master/generated/torch.nn.quantized.functional.linear.html
-        # input (Tensor) – Quantized input of type torch.quint8
-        input_type_dq = torch.onnx.TensorProtoDataType.UINT8
-        input_value = g.op("Cast", input_value, to_i=input_type_dq)
-        input_scale = g.op("Cast", input_scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
-        input_zero_point = g.op("Cast", input_zero_point, to_i=input_type_dq)
-        input = g.op("DequantizeLinear", input_value, input_scale, input_zero_point)
-        # weight (Tensor) – Quantized weight of type torch.qint8
-        weight_type_dq = torch.onnx.TensorProtoDataType.INT8
-        weight = g.op("Cast", weight, to_i=weight_type_dq)
-        weight_scale = g.op("Cast", weight_scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
-        weight_zero_point = g.op("Cast", weight_zero_point, to_i=weight_type_dq)
-        weight = g.op("DequantizeLinear", weight, weight_scale, weight_zero_point)
-        # bias (Tensor) – None or fp32 bias of type torch.float
-        bias = g.op("Cast", bias, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
+        bias, _, _ = sym_help.dequantize_helper(g, q_bias)
+
         output = linear(g, input, weight, bias)
 
-        if op_scale is None:
-            op_scale = input_scale
-        elif op_scale.type().scalarType() != "Float":
-            op_scale = g.op("Cast", op_scale, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
 
-        if op_zero_point is None:
-            op_zero_point = input_zero_point
-        elif op_zero_point.type().scalarType() != "Byte":
-            op_zero_point = g.op("Cast", op_zero_point, to_i=sym_help.cast_pytorch_to_onnx["Byte"])
-        output = g.op("QuantizeLinear", output, op_scale, op_zero_point)
-        return g.op("prim::TupleConstruct", output, op_scale, op_zero_point)
+    @staticmethod
+    def add(g, x, y, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+        y, _, _ = sym_help.dequantize_helper(g, y)
+
+        output = add(g, x, y)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def mul(g, x, y, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+        y, _, _ = sym_help.dequantize_helper(g, y)
+
+        output = mul(g, x, y)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def hardswish(g, x, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+
+        output = hardswish(g, x)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
+        bias, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+        output = relu(g, output)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
+        bias, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)

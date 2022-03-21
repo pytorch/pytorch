@@ -504,7 +504,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `nondet_tol=<tol>` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `gradcheck_nondet_tol=<tol>`.
 - is a Module test (e.g., in common_nn.py), then modify the corresponding
   module_test entry to have `gradcheck_nondet_tol=<tol>`
@@ -717,7 +717,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `check_batched_grad=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `check_batched_grad=False` and/or `check_batched_gradgrad=False`.
 
 If you're modifying an existing operator that supports batched grad computation,
@@ -743,7 +743,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `check_batched_forward_grad=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `check_batched_forward_grad=False`
 """
 
@@ -1196,7 +1196,7 @@ workarounds. The workaround depends on how your test invokes gradcheck/gradgradc
 If the test
 - manually invokes gradcheck/gradgradcheck, then call gradcheck/gradgradcheck
   with `fast_mode=False` as a keyword argument.
-- is OpInfo-based (e.g., in test_ops.py), then modify the OpInfo for the test
+- is OpInfo-based (e.g., in test_ops_gradients.py), then modify the OpInfo for the test
   to have `gradcheck_fast_mode=False`
 - is a Module test (e.g., in common_nn.py), then modify the corresponding
   module_test entry to have `gradcheck_fast_mode=False`
@@ -1526,16 +1526,21 @@ def gradgradcheck(
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
-        # If grad_outputs is not specified, create random Tensors of the same
-        # shape, type, and device as the outputs
-        def randn_like(x):
-            y = torch.randn_like(
-                x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
-            if gen_non_contig_grad_outputs:
-                y = torch.testing.make_non_contiguous(y)
-            return y.requires_grad_()
+        # If grad_outputs is not specified, create random Tensors of the same shape, type, and device as the outputs
+
         outputs = _as_tuple(func(*tupled_inputs))
-        tupled_grad_outputs = tuple(randn_like(x) for x in outputs)
+        tupled_grad_outputs = tuple(
+            torch.testing.make_tensor(
+                x.shape,
+                dtype=x.dtype if x.is_floating_point() or x.is_complex() else torch.double,
+                device=x.device,
+                low=-1,
+                high=1,
+                requires_grad=True,
+                noncontiguous=gen_non_contig_grad_outputs,
+            )
+            for x in outputs
+        )
     else:
         tupled_grad_outputs = _as_tuple(grad_outputs)
 
