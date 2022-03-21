@@ -78,11 +78,10 @@ class TestSummonFullParamsNoShard(FSDPTest):
     # TODO: CPUOffload summon + writeback does not
     # work when param is not sharded
     # (currently when world_size == 1)
-    def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
+    def test_summon_full_param_writeback(self, writeback, modify_outer):
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
-            cpu_offload,
             modify_outer,
         )
 
