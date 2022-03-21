@@ -312,10 +312,11 @@ class TestMasked(TestCase):
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
 
-    @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0), ('coo', 123), ('hybrid_coo', 123),
+    @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
+                                            ('coo', 123), ('hybrid_coo', 123),
                                             ('csr', 0), ('csr', 123)],
                  name_fn=lambda sparse_kind, fill_value: f'{sparse_kind}_fill_value_{fill_value}')
-    def test_sparse_where(self, sparse_kind, fill_value):
+    def test_where(self, sparse_kind, fill_value):
 
         is_hybrid = False
         if sparse_kind == 'coo':
@@ -390,14 +391,15 @@ class TestMasked(TestCase):
                             [Z, 11, F, F, F]])
         tmp = to_sparse(tmp)
 
+
+        sparse = torch._masked._where(mask, input,
+                                      torch.tensor(fill_value, dtype=input.dtype, device=input.device))
+
         if tmp.layout == torch.sparse_coo:
             expected_sparse = torch.sparse_coo_tensor(
                 tmp.indices(),
                 torch.where(tmp.values() != Z, tmp.values(), tmp.values().new_full([], 0)),
                 input.shape)
-            # _sparse_coo_where result:
-            sparse = torch._masked._sparse_coo_where(mask, input,
-                                                     torch.tensor(fill_value, dtype=input.dtype, device=input.device))
             outmask = torch.sparse_coo_tensor(sparse.indices(),
                                               sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool),
                                               sparse.shape)._coalesced_(True)
@@ -407,8 +409,6 @@ class TestMasked(TestCase):
                 tmp.col_indices(),
                 torch.where(tmp.values() != Z, tmp.values(), tmp.values().new_full([], 0)),
                 input.shape)
-            sparse = torch._masked._sparse_csr_where(mask, input,
-                                                     torch.tensor(fill_value, dtype=input.dtype, device=input.device))
             outmask = torch.sparse_csr_tensor(sparse.crow_indices(), sparse.col_indices(),
                                               sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool),
                                               sparse.shape)
