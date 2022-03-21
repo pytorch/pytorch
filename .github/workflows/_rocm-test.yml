@@ -36,20 +36,20 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master@${{ github.sha }}
         with:
           no-sudo: true
 
       - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
+        uses: pytorch/pytorch/.github/actions/setup-rocm@${{ github.sha }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@${{ github.sha }}
         with:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Download build artifacts
-        uses: ./.github/actions/download-build-artifacts
+        uses: pytorch/pytorch/.github/actions/download-build-artifacts@${{ github.sha }}
         with:
           name: ${{ inputs.build-environment }}
 
@@ -131,12 +131,12 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
+        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@${{ github.sha }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
-        uses: ./.github/actions/upload-test-artifacts-github
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts-github@${{ github.sha }}
         if: always()
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -164,7 +164,7 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/pytorch/.github/actions/teardown-linux@${{ github.sha }}
         if: always()
         with:
           wait-ssh: false
