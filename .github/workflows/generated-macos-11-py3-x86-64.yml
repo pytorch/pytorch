@@ -94,6 +94,7 @@ jobs:
     runs-on: macos-11
     timeout-minutes: 240
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       JOB_BASE_NAME: macos-11-py3-x86-64-test
       TEST_CONFIG: default
       SHARD_NUMBER: 1
@@ -188,6 +189,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: macos-11-py3-x86-64-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -212,6 +214,7 @@ jobs:
     runs-on: macos-11
     timeout-minutes: 240
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       JOB_BASE_NAME: macos-11-py3-x86-64-test
       TEST_CONFIG: default
       SHARD_NUMBER: 2
@@ -306,6 +309,7 @@ jobs:
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: macos-11-py3-x86-64-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
