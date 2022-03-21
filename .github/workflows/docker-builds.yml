@@ -1,0 +1,81 @@
+name: docker-builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .circleci/docker/**
+      - .github/workflows/docker-builds.yml
+  schedule:
+    - cron: 1 3 * * 3
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+env:
+  ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
+  AWS_DEFAULT_REGION: us-east-1
+
+jobs:
+  docker-build:
+    runs-on: [self-hosted, linux.2xlarge]
+    timeout-minutes: 240
+    strategy:
+      matrix:
+        include:
+          - docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
+          - docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
+          - docker-image-name: pytorch-linux-bionic-py3.7-clang9
+          - docker-image-name: pytorch-linux-bionic-rocm4.3.1-py3.7
+          - docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
+          - docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
+          - docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+          - docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+          - docker-image-name: pytorch-linux-xenial-py3-clang5-asan
+          - docker-image-name: pytorch-linux-xenial-py3-clang7-asan
+          - docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+          - docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
+          - docker-image-name: pytorch-linux-xenial-py3.7-gcc7
+    env:
+      DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup Linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build docker image
+        id: build-docker-image
+        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
+        with:
+          docker-image-name: ${{ matrix.docker-image-name }}
+          always-rebuild: true
+
+      - name: Pull docker image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
+        with:
+          docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
+
+      - name: Chown workspace
+        uses: pytorch/pytorch/.github/actions/chown-workspace@master
+        if: always()
+
+      - name: Teardown Linux
+        uses: pytorch/pytorch/.github/actions/teardown-linux@master
+        if: always()

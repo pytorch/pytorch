@@ -10,10 +10,11 @@ from typing import (
     Any,
     Callable,
     Dict,
-    List,
-    Optional,
     Generator,
+    Iterator,
+    List,
     NamedTuple,
+    Optional,
     Set,
     Tuple,
     Union,
@@ -28,18 +29,20 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.distributed import ProcessGroup
 from torch.distributed._sharded_tensor import (
-    init_from_local_shards,
     Shard,
     ShardedTensor,
+    init_from_local_shards,
 )
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
-from .flatten_params_wrapper import FlatParameter, FlattenParamsWrapper, FLAT_PARAM
-from .utils import (
-    _apply_to_tensors,
-    _replace_by_prefix,
+from .flatten_params_wrapper import (
+    FLAT_PARAM,
+    FPW_MODULE,
+    FlatParameter,
+    FlattenParamsWrapper,
 )
+from .utils import _apply_to_tensors, _replace_by_prefix
 from .wrap import _recursive_wrap
 
 if TYPE_CHECKING:
@@ -47,6 +50,7 @@ if TYPE_CHECKING:
 
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
+FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 
 class ShardingStrategy(Enum):
@@ -1355,6 +1359,26 @@ class FullyShardedDataParallel(nn.Module):
                         stack.close()
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
+
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of the FSDP-specific flattened parameter prefix
+        when inside the :meth:`summon_full_params` context manager.
+        """
+        # Determine which logic to use based on the context at call time
+        in_summon_full_params = getattr(self, "training_state", None) == \
+            TrainingState_.SUMMON_FULL_PARAMS
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            if in_summon_full_params:
+                # Remove any instances of the FSDP-specific prefix; there can
+                # be multiple in the case of nested FSDP modules
+                param_name = param_name.replace(FSDP_PREFIX, "")
+            yield (param_name, param)
 
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's

@@ -317,39 +317,72 @@ class TestMasked(TestCase):
             expected = op.op(r_inp, *r_args, **r_kwargs)
             self.assertEqualMasked(actual, expected, outmask)
 
-    @parametrize("sparse_dims,fill_value", [(2, 0), (1, 0), (2, 123), (1, 123)],
-                 name_fn=lambda sparse_dims, fill_value: {1: 'hybrid_', 2: ''}[sparse_dims] + f'fill_value_{fill_value}')
-    def test_sparse_coo_where(self, sparse_dims, fill_value):
+    @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
+                                            ('coo', 123), ('hybrid_coo', 123),
+                                            ('csr', 0), ('csr', 123)],
+                 name_fn=lambda sparse_kind, fill_value: f'{sparse_kind}_fill_value_{fill_value}')
+    def test_where(self, sparse_kind, fill_value):
+
+        is_hybrid = False
+        if sparse_kind == 'coo':
+
+            def to_sparse(dense):
+                return dense.to_sparse(2)
+
+            def set_values(sparse, index, value):
+                sparse._values()[index] = value
+
+        elif sparse_kind == 'hybrid_coo':
+            is_hybrid = True
+
+            def to_sparse(dense):
+                return dense.to_sparse(1)
+
+            def set_values(sparse, index, value):
+                sparse._values()[index] = value
+
+        elif sparse_kind == 'csr':
+
+            def to_sparse(dense):
+                return dense.to_sparse_csr()
+
+            def set_values(sparse, index, value):
+                sparse.values()[index] = value
+
+        else:
+            assert 0, sparse_kind
 
         mask = torch.tensor([[1, 0, 1, 0, 0],
                              [1, 1, 1, 1, 0],
                              [0, 1, 0, 1, 0],
                              [0, 0, 0, 0, 0],
                              [0, 0, 1, 1, 0],
-                             [1, 1, 0, 0, 0]]).to(dtype=bool).to_sparse(sparse_dims)
+                             [1, 1, 0, 0, 0]]).to(dtype=bool)
+        mask = to_sparse(mask)
         # make some specified mask elements as explicit masked-out masks:
-        if sparse_dims == 2:
-            mask._values()[3] = False
-            mask._values()[-3] = False
+        if is_hybrid:
+            set_values(mask, (1, 1), False)
+            set_values(mask, (-2, -2), False)
         else:
-            mask._values()[1, 1] = False
-            mask._values()[-2, -2] = False
+            set_values(mask, 3, False)
+            set_values(mask, -3, False)
 
         input = torch.tensor([[1, 0, 0, 0, -1],
                               [2, 3, 0, 0, -2],
                               [0, 4, 5, 0, -3],
                               [0, 0, 6, 7, 0],
                               [0, 8, 9, 0, -3],
-                              [10, 11, 0, 0, -5]]).to_sparse(sparse_dims)
+                              [10, 11, 0, 0, -5]])
+        input = to_sparse(input)
         # make specified input elements have zero values:
-        if sparse_dims == 2:
-            input._values()[3] = 0
-            input._values()[-3] = 0
-            F = 0
-        else:
-            input._values()[1, 1] = 0
-            input._values()[-1, 0] = 0
+        if is_hybrid:
+            set_values(input, (1, 1), 0)
+            set_values(input, (-1, 0), 0)
             F = fill_value
+        else:
+            set_values(input, 3, 0)
+            set_values(input, -3, 0)
+            F = 0
 
         # expected where result:
         Z = 99
@@ -360,24 +393,38 @@ class TestMasked(TestCase):
                             [F, 4, F, Z, F],
                             [0, 0, 0, 0, 0],
                             [F, F, 9, F, F],
-                            [Z, 11, F, F, F]]).to_sparse(sparse_dims)
-        expected_sparse = torch.sparse_coo_tensor(
-            tmp.indices(),
-            torch.where(tmp.values() != Z, tmp.values(), tmp.values().new_full([], 0)),
-            input.shape)
+                            [Z, 11, F, F, F]])
+        tmp = to_sparse(tmp)
 
-        # _sparse_coo_where result:
-        sparse = torch._masked._sparse_coo_where(mask, input,
-                                                 torch.tensor(fill_value, dtype=input.dtype, device=input.device))
+        sparse = torch._masked._where(mask, input,
+                                      torch.tensor(fill_value, dtype=input.dtype, device=input.device))
+
+        if tmp.layout == torch.sparse_coo:
+            expected_sparse = torch.sparse_coo_tensor(
+                tmp.indices(),
+                torch.where(tmp.values() != Z, tmp.values(), tmp.values().new_full([], 0)),
+                input.shape)
+            outmask = torch.sparse_coo_tensor(sparse.indices(),
+                                              sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool),
+                                              sparse.shape)._coalesced_(True)
+        elif tmp.layout == torch.sparse_csr:
+            expected_sparse = torch.sparse_csr_tensor(
+                tmp.crow_indices(),
+                tmp.col_indices(),
+                torch.where(tmp.values() != Z, tmp.values(), tmp.values().new_full([], 0)),
+                input.shape)
+            outmask = torch.sparse_csr_tensor(sparse.crow_indices(), sparse.col_indices(),
+                                              sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool),
+                                              sparse.shape)
+        else:
+            assert 0
+
         self.assertEqual(sparse, expected_sparse)
 
         # check invariance:
         #  torch.where(mask.to_dense(), input.to_dense(), fill_value)
         #    == where(mask, input, fill_value).to_dense(fill_value)
         expected = torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, F))
-        outmask = torch.sparse_coo_tensor(sparse.indices(),
-                                          sparse.values().new_full(sparse.values().shape, 1).to(dtype=bool),
-                                          sparse.shape)._coalesced_(True)
         dense = torch.where(outmask.to_dense(), sparse.to_dense(), torch.full(sparse.shape, F))
         self.assertEqual(dense, expected)
 
