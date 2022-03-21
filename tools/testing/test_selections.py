@@ -68,6 +68,7 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, flo
     filtered_job_times: Dict[str, float] = dict()
     unknown_jobs : List[str] = []
     for test in tests:
+        print(test)
         if test in job_times:
             filtered_job_times[test] = job_times[test]
         else:
@@ -84,9 +85,8 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, flo
         curr_shard_jobs.append(job)
         sharded_jobs[min_shard_index] = (curr_shard_time + filtered_job_times[job], curr_shard_jobs)
 
-    print("Calculating Shard 1 " + str(sharded_jobs[0]))
-    print("Calculating Shard 2 " + str(sharded_jobs[1]))
-    print("Calculating Shard 3 " + str(sharded_jobs[2]))
+    for s in num_shards:
+        print("Calculating Shard "+str(s)+" "+str(sharded_jobs[s]))
 
     print("Calculating sharing for unkonw " + str(unknown_jobs))
     # Round robin the unknown jobs starting with the smallest shard
