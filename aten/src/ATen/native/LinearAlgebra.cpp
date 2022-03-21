@@ -26,6 +26,7 @@
 #include <numeric>
 #include <string>
 #include <tuple>
+#include "ATen/ops/_efficientzerotensor.h"
 
 namespace at {
 namespace meta {
@@ -1134,6 +1135,21 @@ static void addmm_impl_cpu_(
     return;
   }
 
+  // beta*self + alpha*(mat1@mat2) = 0
+  // Note that alpha*(mat1@mat2) calls into mm so is not special cased
+  if ((m1._is_zerotensor() || m2._is_zerotensor() || alpha.equal(0.0)) &&
+      (self._is_zerotensor() || beta.equal(0.0))) {
+    result = at::_efficientzerotensor(self_sizes, self.options());
+    return;
+  }
+
+  // beta*self
+  if (m1._is_zerotensor() || m2._is_zerotensor() || alpha.equal(0.0)){
+    result = beta.equal(1) ? self.clone() : self * beta;
+    return;
+  }
+
+
   // Some paths in the code below do not handle multiplications of the form [a, 0] x [0, b]
   if (m1_sizes[1] == 0) {
     if (beta.toComplexDouble() == 0.0) {
@@ -1144,12 +1160,6 @@ static void addmm_impl_cpu_(
       }
       result.mul_(beta);
     }
-    return;
-  }
-
-  if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
-    result.copy_(self);
-  }
 
   if (use_mkldnn_bf16_matmul(m1, m2, result)){
     mkldnn_matmul(m1, m2, result, beta.to<float>(), alpha.to<float>());
