@@ -4082,23 +4082,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 break
         self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: False")
 
-    def test_stack_trace_preserved_subgraph_rewriter(self):
-        # a functional relu is taking the subgraph rewriter code path
-        class M(nn.Module):
-            def forward(self, x):
-                x = F.relu(x)
-                return x
-
-        m = M().eval()
-        mp = prepare_fx(m, get_default_qconfig_dict())
-        mq = convert_fx(copy.deepcopy(mp), is_reference=False)
-        found_stack_trace = False
-        for n in mq.graph.nodes:
-            if n.op == 'call_function' and n.target == F.relu:
-                found_stack_trace = n.stack_trace is not None
-                break
-        self.assertTrue(found_stack_trace, f"stack trace not found, node: {n.format_node()}, is_reference: True")
-
     def test_qat_skip_untraced(self):
         class UnTraceableModuleClass(nn.Module):
             def __init__(self):
@@ -4130,16 +4113,22 @@ class TestQuantizeFx(QuantizationTestCase):
         mod = M()
 
         qconfig_dict = {"": torch.quantization.get_default_qat_qconfig()}
-        prepare_custom_config_dict = {"non_traceable_module_class": [UnTraceableModuleClass],
-            "non_traceable_module_name": ["untraceable_module_name"]}
+        prepare_custom_config_dict = {
+            "non_traceable_module_class": [UnTraceableModuleClass],
+            "non_traceable_module_name": ["untraceable_module_name"],
+        }
         mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             mod.train(), qconfig_dict, prepare_custom_config_dict
         )
         mod_prep = torch.ao.quantization.quantize_fx.prepare_qat_fx(
             mod.train(), qconfig_dict, prepare_custom_config_dict
         )
-        self.assertTrue(isinstance(mod_prep.untraceable_module_class.linear, torch.nn.Linear))
-        self.assertTrue(isinstance(mod_prep.untraceable_module_name.linear, torch.nn.Linear))
+        self.assertTrue(
+            isinstance(mod_prep.untraceable_module_class.linear, torch.nn.Linear)
+        )
+        self.assertTrue(
+            isinstance(mod_prep.untraceable_module_name.linear, torch.nn.Linear)
+        )
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
             is not torch.nn.qat.modules.linear.Linear,

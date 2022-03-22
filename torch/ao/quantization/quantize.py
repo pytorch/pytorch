@@ -68,8 +68,9 @@ def _propagate_qconfig_helper(module, qconfig_dict,
             name in prepare_custom_config_dict.get("non_traceable_module_name", [])
             or type(child) in prepare_custom_config_dict.get("non_traceable_module_class", [])
         ):
-            _propagate_qconfig_helper(child, qconfig_dict,
-                                  qconfig_with_device_check, module_prefix)
+            _propagate_qconfig_helper(
+                child, qconfig_dict, qconfig_with_device_check, module_prefix
+            )
 
 def propagate_qconfig_(module, qconfig_dict=None, prepare_custom_config_dict=None):
     r"""Propagate qconfig through the module hierarchy and assign `qconfig`
