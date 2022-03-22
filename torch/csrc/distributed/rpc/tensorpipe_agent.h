@@ -204,6 +204,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   TensorPipeRpcBackendOptions getBackendOptions() const;
 
+  const c10::intrusive_ptr<::c10d::Store>& getStore() const;
+
   DeviceMap getDeviceMap(const WorkerInfo& dest) const override;
 
   const std::vector<c10::Device>& getDevices() const override;
@@ -222,6 +224,9 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t timeoutMapSize();
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
+
+  bool isStaticGroup_;
+  const c10::intrusive_ptr<::c10d::Store>& store_;
 
  protected:
   // TensorPipe write function that could be used to write response
@@ -344,7 +349,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // the shutdown process
   ::c10d::PrefixStore shutdownStore_;
   int worldSize_ = 0;
+<<<<<<< Updated upstream
   const bool isStaticGroup_;
+=======
+>>>>>>> Stashed changes
 
   std::atomic<uint64_t> nextMessageID_{0};
 

@@ -410,6 +410,7 @@ TensorPipeAgent::TensorPipeAgent(
       threadPool_(opts_.numWorkerThreads),
       context_(std::make_shared<tensorpipe::Context>(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
+      store_(store),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
       shutdownStore_("shutdown", store),
@@ -1242,6 +1243,7 @@ void TensorPipeAgent::updateGroupMembership(
   }
   // TODO: Rank with workerInfo is leaving, update internal mappings
   else {
+    std::cout << "is leaving" << std::endl;
   }
 }
 
@@ -1413,6 +1415,10 @@ DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dst) const {
     return {};
   }
   return it->second;
+}
+
+const c10::intrusive_ptr<::c10d::Store>& TensorPipeAgent::getStore() const {
+  return store_;
 }
 
 TensorPipeRpcBackendOptions TensorPipeAgent::getBackendOptions() const {

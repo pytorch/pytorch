@@ -38,6 +38,8 @@ from .internal import (
 
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 
+from . import utils
+
 logger = logging.getLogger(__name__)
 
 # NB: Ignoring RRef leaks during shutdown. Without this, applications have to
@@ -333,9 +335,17 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     """
     if graceful:
         try:
-            _wait_all_workers(timeout)
-            _delete_all_user_and_unforked_owner_rrefs()
-            _get_current_rpc_agent().join(shutdown=True)
+            agent = _get_current_rpc_agent()
+            if agent.is_static_group:
+                _wait_all_workers(timeout)
+                _delete_all_user_and_unforked_owner_rrefs()
+                agent.join(shutdown=True)
+            else:
+                # This is a dynamic group so we need to grab the token for the operation
+                workerInfo = agent.get_worker_info()
+                with utils.group_membership_management(agent._get_store(), workerInfo.name):
+                    agent.join(shutdown=True)
+
         finally:
             # In case of errors, continue to complete the local shutdown.
             _finalize_shutdown()
