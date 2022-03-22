@@ -25,23 +25,6 @@
 
 namespace at { namespace native {
 
-// Used as an interface between the different BLAS-like libraries
-enum class TransposeType {
-  NoTranspose,
-  Transpose,
-  ConjTranspose,
-};
-
-// Transforms TransposeType into the BLAS / LAPACK format
-static char to_blas(TransposeType trans) {
-  switch (trans) {
-    case TransposeType::Transpose: return 'T';
-    case TransposeType::NoTranspose: return 'N';
-    case TransposeType::ConjTranspose: return 'C';
-  }
-  TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
-}
-
 static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
   if (tensor.is_conj()) {
     return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
@@ -213,7 +196,7 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   auto a_broadcasts_over_b = (a_batch_sizes != b_batch_sizes);
   Tensor a_buffer, a_was_accessed, a_buffer_3d;
   std::function<void(int64_t)> check_if_copy_needed_for_a
-    = [](int64_t a_curr_linear_batch_idx){};
+    = [](int64_t /*a_curr_linear_batch_idx*/){};
   if (a_broadcasts_over_b) {
     a_buffer = at::empty_strided(a.sizes(), a.strides(), a.options())
       .copy_(a);

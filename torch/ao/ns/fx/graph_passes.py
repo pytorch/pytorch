@@ -220,6 +220,8 @@ def _insert_dtype_cast_after_node(
     """
     dtype_cast_op = None
     dtype_cast_mod_cls = None
+    dtype_cast_method = None
+    dtype_cast_method_dtype = None
     dtype_cast_scale = None
     dtype_cast_zero_point = None
     node_input_type_a, _node_output_type_a = \
@@ -257,6 +259,12 @@ def _insert_dtype_cast_after_node(
         if node_a_input_qparams is not None:
             dtype_cast_op = torch.quantize_per_tensor  # type: ignore[assignment]
             dtype_cast_scale, dtype_cast_zero_point = node_a_input_qparams
+    elif (
+        node_input_type_a == NodeInputOrOutputType.FP16 and
+        node_input_type_c == NodeInputOrOutputType.FP32
+    ):
+        dtype_cast_method = 'to'
+        dtype_cast_method_dtype = torch.float16
     else:
         raise AssertionError(
             f"dtype cast from {node_input_type_c} {node_c.format_node()} to " +
@@ -274,6 +282,10 @@ def _insert_dtype_cast_after_node(
                 return graph_c.create_node(
                     'call_function', dtype_cast_op, (prev_node_c,), {},
                     new_dtype_cast_name)
+        elif dtype_cast_method:
+            return graph_c.create_node(
+                'call_method', dtype_cast_method,
+                (prev_node_c, dtype_cast_method_dtype), {}, new_dtype_cast_name)
         else:
             assert dtype_cast_mod_cls
             dtype_cast_mod = dtype_cast_mod_cls()
@@ -464,7 +476,7 @@ def _insert_copy_of_node_a_after_input_node_c(
             arg_a = return_first_non_observer_node(node_a_arg, gm_a)
             node_a_arg_copy = _copy_node_from_a_to_c(arg_a, gm_a, gm_b, graph_c)
             new_args.append(node_a_arg_copy)
-        elif isinstance(node_a_arg, (int, float)):
+        elif isinstance(node_a_arg, (int, float, torch.dtype)):
             new_args.append(node_a_arg)
         elif isinstance(node_a_arg, (list, tuple)):
             for el in node_a_arg:

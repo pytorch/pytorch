@@ -66,6 +66,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -256,7 +257,7 @@ jobs:
     name: test (default, 1, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
@@ -278,6 +279,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -355,8 +357,8 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
+        # Time out the test phase after 300 minutes
+        timeout-minutes: 300
         run: |
           set -x
 
@@ -503,7 +505,7 @@ jobs:
     name: test (default, 2, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
@@ -525,6 +527,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -602,8 +605,8 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
+        # Time out the test phase after 300 minutes
+        timeout-minutes: 300
         run: |
           set -x
 
@@ -750,7 +753,7 @@ jobs:
     name: test (default, 3, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
@@ -772,6 +775,7 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -849,8 +853,8 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
+        # Time out the test phase after 300 minutes
+        timeout-minutes: 300
         run: |
           set -x
 
