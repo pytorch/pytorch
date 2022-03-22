@@ -22,7 +22,8 @@
 #include <nvfuser_resources/block_sync_default.h>
 #include <nvfuser_resources/broadcast.h>
 #include <nvfuser_resources/fp16_support.h>
-#include <nvfuser_resources/fused_reduction.h>
+#include <nvfuser_resources/fused_reduction_0.h>
+#include <nvfuser_resources/fused_reduction_1.h>
 #include <nvfuser_resources/grid_broadcast.h>
 #include <nvfuser_resources/grid_reduction.h>
 #include <nvfuser_resources/grid_sync.h>
@@ -98,7 +99,8 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::welford_cu;
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
-  ss << nvfuser_resources::fused_reduction_cu;
+  ss << nvfuser_resources::fused_reduction_0_cu;
+  ss << nvfuser_resources::fused_reduction_1_cu;
 
   // Random utilities
   ss << nvfuser_resources::PhiloxCudaStateRaw_cu;
