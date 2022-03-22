@@ -29,6 +29,11 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.arccos(a),
             torch.acosh(a.uniform_(1.0, 2.0)),
             torch.add(a, 20),
+            torch.add(a, b, out=a),
+            b.add(a),
+            b.add(a, out=b),
+            b.add_(a),
+            b.add(1),
             torch.add(a, torch.randn(4, 1), alpha=10),
             torch.addcdiv(
                 torch.randn(1, 3), torch.randn(3, 1), torch.randn(1, 3), value=0.1
@@ -51,6 +56,8 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.bitwise_or(t, torch.tensor([1, 0, 3], dtype=torch.int8)),
             torch.bitwise_xor(t, torch.tensor([1, 0, 3], dtype=torch.int8)),
             torch.ceil(a),
+            torch.ceil(float(torch.tensor(0.5))),
+            torch.ceil(torch.tensor(0.5).item()),
             torch.clamp(a, min=-0.5, max=0.5),
             torch.clamp(a, min=0.5),
             torch.clamp(a, max=0.5),
@@ -64,6 +71,9 @@ class PointwiseOpsModule(torch.nn.Module):
                 torch.tensor([[180.0, -180.0], [360.0, -360.0], [90.0, -90.0]])
             ),
             torch.div(a, b),
+            a.div(b),
+            a.div(1),
+            a.div_(b),
             torch.divide(a, b, rounding_mode="trunc"),
             torch.divide(a, b, rounding_mode="floor"),
             torch.digamma(torch.tensor([1.0, 0.5])),
@@ -71,6 +81,7 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.erfc(torch.tensor([0.0, -1.0, 10.0])),
             torch.erfinv(torch.tensor([0.0, 0.5, -1.0])),
             torch.exp(torch.tensor([0.0, math.log(2.0)])),
+            torch.exp(float(torch.tensor(1))),
             torch.exp2(torch.tensor([0.0, math.log(2.0), 3.0, 4.0])),
             torch.expm1(torch.tensor([0.0, math.log(2.0)])),
             torch.fake_quantize_per_channel_affine(
@@ -85,6 +96,7 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.float_power(torch.randint(10, (4,)), 2),
             torch.float_power(torch.arange(1, 5), torch.tensor([2, -3, 4, -5])),
             torch.floor(a),
+            torch.floor(float(torch.tensor(1))),
             torch.floor_divide(torch.tensor([4.0, 3.0]), torch.tensor([2.0, 2.0])),
             torch.floor_divide(torch.tensor([4.0, 3.0]), 1.4),
             torch.fmod(torch.tensor([-3, -2, -1, 1, 2, 3]), 2),
@@ -142,10 +154,16 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.igamma(a, b),
             torch.igammac(a, b),
             torch.mul(torch.randn(3), 100),
+            b.mul(a),
+            b.mul(5),
+            b.mul(a, out=b),
+            b.mul_(a),
+            b.mul_(5),
             torch.multiply(torch.randn(4, 1), torch.randn(1, 4)),
             torch.mvlgamma(torch.empty(2, 3).uniform_(1.0, 2.0), 2),
             torch.tensor([float("nan"), float("inf"), -float("inf"), 3.14]),
             torch.nan_to_num(w),
+            torch.nan_to_num_(w),
             torch.nan_to_num(w, nan=2.0),
             torch.nan_to_num(w, nan=2.0, posinf=1.0),
             torch.neg(torch.randn(5)),
@@ -155,6 +173,7 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.polygamma(3, torch.tensor([1.0, 0.5])),
             torch.polygamma(4, torch.tensor([1.0, 0.5])),
             torch.pow(a, 2),
+            torch.pow(2, float(torch.tensor(0.5))),
             torch.pow(torch.arange(1.0, 5.0), torch.arange(1.0, 5.0)),
             torch.rad2deg(
                 torch.tensor([[3.142, -3.142], [6.283, -6.283], [1.570, -1.570]])
@@ -164,6 +183,7 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.remainder(torch.tensor([-3.0, -2.0]), 2),
             torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5),
             torch.round(a),
+            torch.round(torch.tensor(0.5).item()),
             torch.rsqrt(a),
             torch.sigmoid(a),
             torch.sign(torch.tensor([0.7, -1.2, 0.0, 2.3])),
@@ -175,9 +195,15 @@ class PointwiseOpsModule(torch.nn.Module):
             torch.sqrt(a),
             torch.square(a),
             torch.sub(torch.tensor((1, 2)), torch.tensor((0, 1)), alpha=2),
+            b.sub(a),
+            b.sub_(a),
+            b.sub(5),
+            torch.sum(5),
             torch.tan(a),
             torch.tanh(a),
+            torch.true_divide(a, a),
             torch.trunc(a),
+            torch.trunc_(a),
             torch.xlogy(f, g),
             torch.xlogy(f, g),
             torch.xlogy(f, 4),
@@ -205,20 +231,27 @@ class ReductionOpsModule(torch.nn.Module):
             torch.all(a),
             torch.any(a),
             torch.max(a),
+            a.max(a),
+            torch.max(a, 0),
             torch.min(a),
+            a.min(a),
+            torch.min(a, 0),
             torch.dist(a, b),
             torch.logsumexp(a, 0),
             torch.mean(a),
+            torch.mean(a, 0),
             torch.nanmean(a),
             torch.median(a),
             torch.nanmedian(a),
             torch.mode(a),
             torch.norm(a),
+            a.norm(2),
             torch.norm(a, dim=0),
             torch.norm(c, torch.tensor(2)),
             torch.nansum(a),
             torch.prod(a),
             torch.quantile(a, torch.tensor([0.25, 0.5, 0.75])),
+            torch.quantile(a, 0.5),
             torch.nanquantile(a, torch.tensor([0.25, 0.5, 0.75])),
             torch.std(a),
             torch.std_mean(a),
@@ -236,11 +269,8 @@ class ComparisonOpsModule(torch.nn.Module):
         super(ComparisonOpsModule, self).__init__()
 
     def forward(self):
-        return self.comparison_ops()
-
-    def comparison_ops(self):
-        a = torch.randn(4)
-        b = torch.randn(4)
+        a = torch.tensor(0)
+        b = torch.tensor(1)
         return (
             torch.allclose(a, b),
             torch.argsort(a),
@@ -334,6 +364,7 @@ class OtherMathOpsModule(torch.nn.Module):
             torch.histc(a),
             torch.histogram(a),
             torch.meshgrid(a),
+            torch.meshgrid(a, indexing="xy"),
             torch.lcm(c, c),
             torch.logcumsumexp(a, 0),
             torch.ravel(a),
@@ -367,6 +398,7 @@ class SpectralOpsModule(torch.nn.Module):
         b = torch.randn(10, 8, 4, 2)
         return (
             torch.stft(a, 8),
+            torch.stft(a, torch.tensor(8)),
             torch.istft(b, 8),
             torch.bartlett_window(2, dtype=torch.float),
             torch.blackman_window(2, dtype=torch.float),

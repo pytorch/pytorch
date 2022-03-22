@@ -1,5 +1,6 @@
 import torch
 import yaml
+from builtin_ops import BuiltinOpsModule
 from math_ops import (
     PointwiseOpsModule,
     ReductionOpsModule,
@@ -23,6 +24,7 @@ from nn_ops import (
     NNLossFunctionModule,
     NNVisionModule,
     NNShuffleModule,
+    NNUtilsModule,
 )
 from quantization_ops import (
     GeneralQuantModule,
@@ -38,6 +40,8 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
+from torch.utils.mobile_optimizer import optimize_for_mobile
+
 
 output_path = "ios/TestApp/models/"
 production_ops_path = "test/mobile/model_test/model_ops.yaml"
@@ -45,16 +49,18 @@ coverage_out_path = "test/mobile/model_test/coverage.yaml"
 
 
 def scriptAndSave(module, name):
-    return save(torch.jit.script(module), name)
+    module = torch.jit.script(module)
+    return save(module, name)
 
 
 def traceAndSave(module, name):
-    return save(torch.jit.trace(module, []), name)
+    module = torch.jit.trace(module, [])
+    return save(module, name)
 
 
 def save(module, name):
-    module._save_for_lite_interpreter(output_path + name)
-    print("model saved to " + output_path + name)
+    module._save_for_lite_interpreter(output_path + name + ".ptl")
+    print("model saved to " + output_path + name + ".ptl")
     ops = torch.jit.export_opnames(module)
     print(ops)
     module()
@@ -63,40 +69,43 @@ def save(module, name):
 
 ops = [
     # math ops
-    scriptAndSave(PointwiseOpsModule(), "pointwise_ops.ptl"),
-    scriptAndSave(ReductionOpsModule(), "reduction_ops.ptl"),
-    scriptAndSave(ComparisonOpsModule(), "comparison_ops.ptl"),
-    scriptAndSave(OtherMathOpsModule(), "other_math_ops.ptl"),
-    scriptAndSave(SpectralOpsModule(), "spectral_ops.ptl"),
-    scriptAndSave(BlasLapackOpsModule(), "blas_lapack_ops.ptl"),
+    scriptAndSave(PointwiseOpsModule(), "pointwise_ops"),
+    scriptAndSave(ReductionOpsModule(), "reduction_ops"),
+    scriptAndSave(ComparisonOpsModule(), "comparison_ops"),
+    scriptAndSave(OtherMathOpsModule(), "other_math_ops"),
+    scriptAndSave(SpectralOpsModule(), "spectral_ops"),
+    scriptAndSave(BlasLapackOpsModule(), "blas_lapack_ops"),
     # sampling
-    scriptAndSave(SamplingOpsModule(), "sampling_ops.ptl"),
+    scriptAndSave(SamplingOpsModule(), "sampling_ops"),
     # tensor ops
-    scriptAndSave(TensorOpsModule(), "tensor_general_ops.ptl"),
-    scriptAndSave(TensorCreationOpsModule(), "tensor_creation_ops.ptl"),
-    scriptAndSave(TensorIndexingOpsModule(), "tensor_indexing_ops.ptl"),
-    scriptAndSave(TensorTypingOpsModule(), "tensor_typing_ops.ptl"),
-    scriptAndSave(TensorViewOpsModule(), "tensor_view_ops.ptl"),
+    scriptAndSave(TensorOpsModule(), "tensor_general_ops"),
+    scriptAndSave(TensorCreationOpsModule(), "tensor_creation_ops"),
+    scriptAndSave(TensorIndexingOpsModule(), "tensor_indexing_ops"),
+    scriptAndSave(TensorTypingOpsModule(), "tensor_typing_ops"),
+    scriptAndSave(TensorViewOpsModule(), "tensor_view_ops"),
     # nn ops
-    scriptAndSave(NNConvolutionModule(), "convolution_ops.ptl"),
-    scriptAndSave(NNPoolingModule(), "pooling_ops.ptl"),
-    scriptAndSave(NNPaddingModule(), "padding_ops.ptl"),
-    scriptAndSave(NNActivationModule(), "activation_ops.ptl"),
-    scriptAndSave(NNNormalizationModule(), "normalization_ops.ptl"),
-    scriptAndSave(NNRecurrentModule(), "recurrent_ops.ptl"),
-    scriptAndSave(NNTransformerModule(), "transformer_ops.ptl"),
-    scriptAndSave(NNLinearModule(), "linear_ops.ptl"),
-    scriptAndSave(NNDropoutModule(), "dropout_ops.ptl"),
-    scriptAndSave(NNSparseModule(), "sparse_ops.ptl"),
-    scriptAndSave(NNDistanceModule(), "distance_function_ops.ptl"),
-    scriptAndSave(NNLossFunctionModule(), "loss_function_ops.ptl"),
-    scriptAndSave(NNVisionModule(), "vision_function_ops.ptl"),
-    scriptAndSave(NNShuffleModule(), "shuffle_ops.ptl"),
+    scriptAndSave(NNConvolutionModule(), "convolution_ops"),
+    scriptAndSave(NNPoolingModule(), "pooling_ops"),
+    scriptAndSave(NNPaddingModule(), "padding_ops"),
+    scriptAndSave(NNActivationModule(), "activation_ops"),
+    scriptAndSave(NNNormalizationModule(), "normalization_ops"),
+    scriptAndSave(NNRecurrentModule(), "recurrent_ops"),
+    scriptAndSave(NNTransformerModule(), "transformer_ops"),
+    scriptAndSave(NNLinearModule(), "linear_ops"),
+    scriptAndSave(NNDropoutModule(), "dropout_ops"),
+    scriptAndSave(NNSparseModule(), "sparse_ops"),
+    scriptAndSave(NNDistanceModule(), "distance_function_ops"),
+    scriptAndSave(NNLossFunctionModule(), "loss_function_ops"),
+    scriptAndSave(NNVisionModule(), "vision_function_ops"),
+    scriptAndSave(NNShuffleModule(), "shuffle_ops"),
+    scriptAndSave(NNUtilsModule(), "nn_utils_ops"),
     # quantization ops
-    scriptAndSave(GeneralQuantModule(), "general_quant_ops.ptl"),
-    scriptAndSave(DynamicQuantModule().getModule(), "dynamic_quant_ops.ptl"),
-    traceAndSave(StaticQuantModule().getModule(), "static_quant_ops.ptl"),
-    scriptAndSave(FusedQuantModule().getModule(), "fused_quant_ops.ptl"),
+    scriptAndSave(GeneralQuantModule(), "general_quant_ops"),
+    scriptAndSave(DynamicQuantModule().getModule(), "dynamic_quant_ops"),
+    traceAndSave(StaticQuantModule().getModule(), "static_quant_ops"),
+    scriptAndSave(FusedQuantModule().getModule(), "fused_quant_ops"),
+    # TorchScript buildin ops
+    scriptAndSave(BuiltinOpsModule(), "torchscript_builtin_ops"),
 ]
 
 
@@ -109,7 +118,7 @@ covered_ops = production_ops.intersection(all_generated_ops)
 uncovered_ops = production_ops - covered_ops
 coverage = 100 * len(covered_ops) / len(production_ops)
 print(
-    f"\nThese generated models covered {len(covered_ops)} of {len(production_ops)} production ops. ({round(coverage, 2)}%)\n"
+    f"\nGenerated {len(all_generated_ops)} ops and covered {len(covered_ops)}/{len(production_ops)} ({round(coverage, 2)}%) production ops. \n"
 )
 with open(coverage_out_path, "w") as f:
     yaml.safe_dump(

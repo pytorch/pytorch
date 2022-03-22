@@ -144,6 +144,10 @@
     [self runModel:@"shuffle_ops"];
 }
 
+- (void)testNNUtilsOps {
+    [self runModel:@"nn_utils_ops"];
+}
+
 - (void)testQuantOps {
     [self runModel:@"general_quant_ops"];
 }
@@ -160,4 +164,7 @@
     [self runModel:@"fused_quant_ops"];
 }
 
+- (void)testTorchScriptBuiltinQuantOps {
+    [self runModel:@"torchscript_builtin_ops"];
+}
 @end
