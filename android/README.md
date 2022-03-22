@@ -235,19 +235,6 @@ To load torchscript model for mobile we need some special setup which is placed 
 
 [Example of linking to libtorch from aar](https://github.com/pytorch/pytorch/tree/master/android/test_app)
 
-## Running Test
-The current test is built with full jit, so we have to manually disable lite interpreter
-```
-BUILD_LITE_INTERPRETER=0 ./scripts/build_pytorch_android.sh x86
-BUILD_LITE_INTERPRETER=0 ./android/run_tests.sh
-```
-
-If the test model is missing or outdated, use this script to regenerate it
-```
-cd android/pytorch_android
-python generate_test_torchscripts.py
-```
-
 ## PyTorch Android API Javadoc
 
 You can find more details about the PyTorch Android API in the [Javadoc](https://pytorch.org/javadoc/).
