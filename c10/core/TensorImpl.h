@@ -953,6 +953,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::ORT);
   }
 
+  bool is_nested() const {
+    return key_set_.has(DispatchKey::NestedTensor);
+  }
+
   // TODO: remove this once we don't automatically enabled Autograd dispatch
   // keys
   //       in TensorImpl constructor.
