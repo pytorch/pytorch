@@ -5630,7 +5630,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(OnesModel(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # torch.zeros/torch.ones with size tensor of dim != 0 not torchScript compatible.
+    @disableScriptTest()  # torch.zeros/torch.ones with size tensor of dim != 0 not scriptable.
     def test_zeros_ones_with_tensor_input(self):
         class ZeroAndOnes(torch.nn.Module):
             def forward(self, x):
