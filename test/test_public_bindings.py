@@ -286,7 +286,7 @@ class TestPublicBindings(TestCase):
         - (for simple python-only modules) Not define `__all__` and all the elements in `dir(submod)` must have their
           `__module__` that start with the current submodule.
         '''
-        allow_list = []
+        failure_list = []
 
         def test_module(modname):
             is_a_private_module = False
@@ -312,12 +312,12 @@ class TestPublicBindings(TestCase):
                     # elem's name must begin with an `_` and it's module name
                     # should NOT start with it's current module since it's a private API
                     if not elem.startswith('_') or elem_modname_starts_with_modname:
-                        allow_list.append((modname, elem, elem_module))
+                        failure_list.append((modname, elem, elem_module))
                 else:
                     # elem's name must NOT begin with an `_` and it's module name
                     # SHOULD start with it's current module since it's a public API
                     if elem.startswith('_') or not elem_modname_starts_with_modname:
-                        allow_list.append((modname, elem, elem_module))
+                        failure_list.append((modname, elem, elem_module))
 
             if hasattr(modname, '__all__'):
                 public_api = mod.__all__
@@ -333,7 +333,7 @@ class TestPublicBindings(TestCase):
             test_module(modname)
 
         test_module('torch')
-        self.assertExpected("\n".join(map(str, allow_list)), 'api_checks')
+        self.assertExpected("\n".join(map(str, failure_list)), 'api_checks')
 
 if __name__ == '__main__':
     run_tests()
