@@ -109,8 +109,6 @@ class TestForeach(TestCase):
         try:
             actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 ref(ref_inputs)
         else:
@@ -122,8 +120,6 @@ class TestForeach(TestCase):
             try:
                 actual = op(inputs, self.is_cuda, is_fastpath, **kwargs)
             except RuntimeError as e:
-                if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                    self.skipTest(str(e))
                 with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     ref(ref_inputs, **kwargs)
             else:
@@ -256,8 +252,6 @@ class TestForeach(TestCase):
         try:
             actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 ref(ref_inputs)
         else:
@@ -267,8 +261,6 @@ class TestForeach(TestCase):
             try:
                 actual = op(inputs + [values], self.is_cuda, is_fastpath)
             except RuntimeError as e:
-                if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                    self.skipTest(str(e))
                 with self.assertRaisesRegex(type(e), re.escape(str(e))):
                     ref(ref_inputs, values=values)
             else:
@@ -334,8 +326,6 @@ class TestForeach(TestCase):
         try:
             actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 ref(inputs)
         else:
@@ -353,8 +343,6 @@ class TestForeach(TestCase):
         try:
             inplace(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 inplace_ref(copied_inputs)
         else:
@@ -478,8 +466,6 @@ class TestForeach(TestCase):
         try:
             foreach_op(tensors, 1)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             runtime_error = e
         self.assertIsNone(runtime_error)
 
@@ -518,15 +504,11 @@ class TestForeach(TestCase):
         try:
             foreach_op(tensors1, tensors2)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 [ref(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
         try:
             foreach_op_(tensors1, tensors2)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 [ref_(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
 
@@ -601,8 +583,6 @@ class TestForeach(TestCase):
         try:
             actual = method((tensors,), False, False)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), str(e)):
                 ref((tensors,))
         else:
@@ -612,8 +592,6 @@ class TestForeach(TestCase):
         try:
             inplace_method((tensors,), False, False)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), str(e)):
                 ref_inplace((tensors,))
         else:
@@ -633,8 +611,6 @@ class TestForeach(TestCase):
         try:
             actual = foreach_op(tensors1, tensors2)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 [native_op(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
         else:
@@ -643,8 +619,6 @@ class TestForeach(TestCase):
         try:
             foreach_op_(tensors1, tensors2)
         except RuntimeError as e:
-            if isinstance(e, NotImplementedError) and self.device_type == 'meta':
-                self.skipTest(str(e))
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
                 [native_op_(t1, t2) for t1, t2 in zip(tensors1, tensors2)]
         else:
