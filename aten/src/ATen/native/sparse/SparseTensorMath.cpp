@@ -67,6 +67,7 @@
 #endif
 
 #include <algorithm>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -708,12 +709,12 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
-  // TODO: Use a specialized CSR kernel for performance if needed
-  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
-  // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
-  TORCH_CHECK(t_.is_sparse_csr() && !t_.is_sparse(), "Expects first input to be either strided or CSR.");
-  // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
-  TORCH_CHECK(src_.is_sparse_csr() && !src_.is_sparse(), "Expects second input to be either strided or CSR.");
+  // // TODO: Use a specialized CSR kernel for performance if needed
+  // TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  // // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
+  // TORCH_CHECK(t_.is_sparse_csr() && !t_.is_sparse(), "Expects first input to be either strided or CSR.");
+  // // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
+  // TORCH_CHECK(src_.is_sparse_csr() && !src_.is_sparse(), "Expects second input to be either strided or CSR.");
   Tensor t = t_.is_sparse_csr() ? t_.to_sparse() : t;
   Tensor src = src_.is_sparse_csr() ? src_.to_sparse() : src_;
   Tensor tmp_result = t.mul(src);
