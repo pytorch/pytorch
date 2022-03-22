@@ -19,7 +19,8 @@ std::unordered_map<std::string, worker_id_t> collectNames(
 // Ranks in dynamic RPC groups will initially call into this to establish the
 // name-to-id mapping for the current peers in the group. The current rank will
 // put its own worker info in the store and discover all the ranks that came
-// before it/
+// before it. NOTE: This needs to be called with the Dynamic RPC group
+// membership management token held.
 std::unordered_map<std::string, worker_id_t> collectCurrentNames(
     ::c10d::PrefixStore store,
     const worker_id_t selfId,
