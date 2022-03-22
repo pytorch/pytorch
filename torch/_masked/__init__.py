@@ -891,7 +891,7 @@ def logsumexp(input: Tensor,
         fill = input.new_full([], _reduction_identity('logsumexp', input))
         inmask = _input_mask(input, mask=mask)
         mask_input = torch.where(inmask, input, fill)
-        return torch.logsumexp(mask_input, dim_, keepdim).to(dtype=dtype)
+        return torch.logsumexp(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
     else:
         raise ValueError(f'masked softmin expects strided tensor (got {input.layout} tensor)')
 
