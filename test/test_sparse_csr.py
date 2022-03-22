@@ -383,7 +383,7 @@ class TestSparseCSR(TestCase):
 
     def test_factory_shape_invariants_check(self, device):
         crow_indices = torch.tensor([0, 2, 4], device=device)
-        col_indices =  torch.tensor([0, 1, 0, 1], device=device)
+        col_indices = torch.tensor([0, 1, 0, 1], device=device)
         values = torch.tensor([1, 2, 3, 4], device=device)
         size = (2, 10)
         torch.sparse_csr_tensor(crow_indices, col_indices, values, size, device=device)
