@@ -57,11 +57,15 @@ extensions = [
     'sphinxcontrib.katex',
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
+    'sphinx_panels'
 ]
 
 # build the templated autosummary files
 autosummary_generate = True
 numpydoc_show_class_members = False
+
+# Theme has bootstrap already
+panels_add_bootstrap_css = False
 
 # autosectionlabel throws warnings if section names are duplicated.
 # The following tells autosectionlabel to not throw a warning for
@@ -82,6 +86,8 @@ templates_path = ['_templates']
 # TODO: document these and remove them from here.
 
 coverage_ignore_functions = [
+    # torch
+    "typename",
     # torch.autograd
     "register_py_tensor_class_for_device",
     "variable",
@@ -125,9 +131,41 @@ coverage_ignore_functions = [
     "execWrapper",
     # torch.onnx
     "unregister_custom_op_symbolic",
+    # torch.ao.quantization
+    "default_eval_fn",
+    # torch.ao.quantization.fx.backend_config
+    "validate_backend_config_dict",
+    # torch.backends
+    "disable_global_flags",
+    "flags_frozen",
+    # torch.distributed.algorithms.ddp_comm_hooks
+    "register_ddp_comm_hook",
+    # torch.nn
+    "factory_kwargs",
+    # torch.nn.parallel
+    "DistributedDataParallelCPU",
+    # torch.utils
+    "set_module",
+    # torch.utils.model_dump
+    "burn_in_info",
+    "get_info_and_burn_skeleton",
+    "get_inline_skeleton",
+    "get_model_info",
+    "get_storage_info",
+    "hierarchical_pickle",
 ]
 
 coverage_ignore_classes = [
+    # torch
+    "FatalError",
+    "QUInt2x4Storage",
+    "Size",
+    "Storage",
+    "Stream",
+    "Tensor",
+    "finfo",
+    "iinfo",
+    "qscheme",
     # torch.cuda
     "BFloat16Storage",
     "BFloat16Tensor",
@@ -180,6 +218,7 @@ coverage_ignore_classes = [
     "ReshapeTransform",
     "SigmoidTransform",
     "SoftmaxTransform",
+    "SoftplusTransform",
     "StackTransform",
     "StickBreakingTransform",
     "TanhTransform",
@@ -192,108 +231,24 @@ coverage_ignore_classes = [
     # torch.onnx
     "CheckerError",
     "ExportTypes",
+    # torch.backends
+    "ContextProp",
+    "PropModule",
+    # torch.backends.cuda
+    "cuBLASModule",
+    "cuFFTPlanCache",
+    "cuFFTPlanCacheAttrContextProp",
+    "cuFFTPlanCacheManager",
+    # torch.distributed.algorithms.ddp_comm_hooks
+    "DDPCommHookType",
+    # torch.jit.mobile
+    "LiteScriptModule",
+    # torch.nn.quantized.modules
+    "DeQuantize",
+    "Quantize",
+    # torch.utils.backcompat
+    "Warning",
 ]
-
-# List of modules that do not have automodule/py:module in the doc yet
-# We should NOT add anything to this list, see the CI failure message
-# on how to solve missing automodule issues
-coverage_missing_automodule = [
-    "torch",
-    "torch.ao",
-    "torch.ao.nn",
-    "torch.ao.nn.sparse",
-    "torch.ao.nn.sparse.quantized",
-    "torch.ao.nn.sparse.quantized.dynamic",
-    "torch.ao.ns",
-    "torch.ao.ns.fx",
-    "torch.ao.quantization",
-    "torch.ao.quantization.fx",
-    "torch.ao.quantization.fx.backend_config",
-    "torch.ao.sparsity",
-    "torch.ao.sparsity.experimental",
-    "torch.ao.sparsity.experimental.pruner",
-    "torch.ao.sparsity.scheduler",
-    "torch.ao.sparsity.sparsifier",
-    "torch.backends",
-    "torch.backends.cuda",
-    "torch.backends.cudnn",
-    "torch.backends.mkl",
-    "torch.backends.mkldnn",
-    "torch.backends.openmp",
-    "torch.backends.quantized",
-    "torch.backends.xnnpack",
-    "torch.contrib",
-    "torch.cpu",
-    "torch.cpu.amp",
-    "torch.distributed.algorithms",
-    "torch.distributed.algorithms.ddp_comm_hooks",
-    "torch.distributed.algorithms.model_averaging",
-    "torch.distributed.elastic",
-    "torch.distributed.elastic.utils",
-    "torch.distributed.elastic.utils.data",
-    "torch.distributed.launcher",
-    "torch.distributed.nn",
-    "torch.distributed.nn.api",
-    "torch.distributed.nn.jit",
-    "torch.distributed.nn.jit.templates",
-    "torch.distributed.pipeline",
-    "torch.distributed.pipeline.sync",
-    "torch.distributed.pipeline.sync.skip",
-    "torch.fft",
-    "torch.for_onnx",
-    "torch.fx.experimental",
-    "torch.fx.experimental.unification",
-    "torch.fx.experimental.unification.multipledispatch",
-    "torch.fx.passes",
-    "torch.jit.mobile",
-    "torch.nn",
-    "torch.nn.backends",
-    "torch.nn.intrinsic",
-    "torch.nn.intrinsic.modules",
-    "torch.nn.intrinsic.qat",
-    "torch.nn.intrinsic.qat.modules",
-    "torch.nn.intrinsic.quantized",
-    "torch.nn.intrinsic.quantized.dynamic",
-    "torch.nn.intrinsic.quantized.dynamic.modules",
-    "torch.nn.intrinsic.quantized.modules",
-    "torch.nn.modules",
-    "torch.nn.parallel",
-    "torch.nn.qat",
-    "torch.nn.qat.modules",
-    "torch.nn.qat.dynamic",
-    "torch.nn.qat.dynamic.modules",
-    "torch.nn.quantizable",
-    "torch.nn.quantizable.modules",
-    "torch.nn.quantized",
-    "torch.nn.quantized.dynamic",
-    "torch.nn.quantized.dynamic.modules",
-    "torch.nn.quantized.modules",
-    "torch.nn.utils",
-    "torch.package",
-    "torch.package.analyze",
-    "torch.quantization",
-    "torch.quantization.fx",
-    "torch.sparse",
-    "torch.special",
-    "torch.utils",
-    "torch.utils.backcompat",
-    "torch.utils.benchmark.examples",
-    "torch.utils.benchmark.op_fuzzers",
-    "torch.utils.benchmark.utils",
-    "torch.utils.benchmark.utils.valgrind_wrapper",
-    "torch.utils.bottleneck",
-    "torch.utils.data.communication",
-    "torch.utils.data.datapipes",
-    "torch.utils.data.datapipes.dataframe",
-    "torch.utils.data.datapipes.iter",
-    "torch.utils.data.datapipes.map",
-    "torch.utils.data.datapipes.utils",
-    "torch.utils.ffi",
-    "torch.utils.hipify",
-    "torch.utils.model_dump",
-    "torch.utils.tensorboard",
-]
-
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -412,6 +367,11 @@ def coverage_post_process(app, exception):
     if not isinstance(app.builder, CoverageBuilder):
         return
 
+    if not torch.distributed.is_available():
+        raise RuntimeError("The coverage tool cannot run with a version "
+                           "of PyTorch that was built with USE_DISTRIBUTED=0 "
+                           "as this module's API changes.")
+
     # These are all the modules that have "automodule" in an rst file
     # These modules are the ones for which coverage is checked
     # Here, we make sure that no module is missing from that list
@@ -438,26 +398,16 @@ def coverage_post_process(app, exception):
             if modname not in modules:
                 missing.add(modname)
 
-    expected = set(coverage_missing_automodule)
-
     output = []
 
-    unexpected_missing = missing - expected
-    if unexpected_missing:
-        mods = ", ".join(unexpected_missing)
+    if missing:
+        mods = ", ".join(missing)
         output.append(f"\nYou added the following module(s) to the PyTorch namespace '{mods}' "
                       "but they have no corresponding entry in a doc .rst file. You should "
                       "either make sure that the .rst file that contains the module's documentation "
                       "properly contains either '.. automodule:: mod_name' (if you do not want "
-                      "the paragraph added by the automodule, you can simply use py:module) or "
-                      "make the module private (by appending an '_' at the beginning of its name.")
-
-    unexpected_not_missing = expected - missing
-    if unexpected_not_missing:
-        mods = ", ".join(unexpected_not_missing)
-        output.append(f"\nThank you for adding the missing .rst entries for '{mods}', please update "
-                      "the 'coverage_missing_automodule' in 'torch/docs/source/conf.py' to remove "
-                      "the module(s) you fixed and make sure we do not regress on this in the future.")
+                      "the paragraph added by the automodule, you can simply use '.. py:module:: mod_name') "
+                      " or make the module private (by appending an '_' at the beginning of its name).")
 
     # The output file is hard-coded by the coverage tool
     # Our CI is setup to fail if any line is added to this file

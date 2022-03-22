@@ -209,6 +209,13 @@ __global__ void valueSparseIntersectionKernel(
   int64_t match, d;
   int64_t nDimI = r_indices.sizes[0];
   IndexType valueSize = r_values.strides[0];
+  // reset valueSize if a dense dimension is zero:
+  for (d=0; d<r_values.dims; d++) {
+    if (r_values.sizes[d] == 0) {
+      valueSize = 0;
+      break;
+    }
+  }
   IndexType r_i = 0, t_i = 0, s_i = 0;
   while (t_i < t_nnz && s_i < s_nnz) {
     match = 1;

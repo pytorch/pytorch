@@ -893,6 +893,7 @@ if _enabled:
         "double",
         "half",
         "state_dict",
+        "_state_dict_impl",
         "_save_to_state_dict",
         "load_state_dict",
         "_load_from_state_dict",

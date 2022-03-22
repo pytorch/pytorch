@@ -47,12 +47,32 @@ query ($owner: String!, $name: String!, $number: Int!) {
               name
             }
             oid
-            checkSuites(filterBy: {appId: 12274}, first: 1) {
+            checkSuites(first: 50) {
               nodes {
                 app {
+                  name
                   databaseId
                 }
+                workflowRun {
+                  workflow {
+                    name
+                  }
+                }
+                checkRuns(first: 10) {
+                  nodes {
+                    name
+                    conclusion
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
                 conclusion
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
               }
             }
           }
@@ -60,9 +80,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
         totalCount
       }
       changedFiles
-      files(last: 100) {
+      files(first: 100) {
         nodes {
           path
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
         }
       }
       reviews(last: 100) {
@@ -83,6 +107,68 @@ query ($owner: String!, $name: String!, $number: Int!) {
           authorAssociation
           editor {
             login
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_NEXT_FILES_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      files(first: 100, after: $cursor) {
+        nodes {
+          path
+        }
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 100, after: $cursor) {
+              nodes {
+                app {
+                  name
+                  databaseId
+                }
+                workflowRun {
+                  workflow {
+                    name
+                  }
+                }
+                checkRuns(first: 10) {
+                  nodes {
+                    name
+                    conclusion
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+                conclusion
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+            }
           }
         }
       }
@@ -172,6 +258,8 @@ class GitHubPR:
         self.project = project
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
+        self.changed_files: Optional[List[str]] = None
+        self.conclusions: Optional[Dict[str, str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -198,10 +286,24 @@ class GitHubPR:
         return int(self.info["changedFiles"])
 
     def get_changed_files(self) -> List[str]:
-        rc = [x["path"] for x in self.info["files"]["nodes"]]
-        if len(rc) != self.get_changed_files_count():
+        if self.changed_files is None:
+            info = self.info
+            self.changed_files = []
+            # Do not try to fetch more than 10K files
+            for _ in range(100):
+                self.changed_files += [x["path"] for x in info["files"]["nodes"]]
+                if not info["files"]["pageInfo"]["hasNextPage"]:
+                    break
+                rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
+                                name=self.project,
+                                owner=self.org,
+                                number=self.pr_num,
+                                cursor=info["files"]["pageInfo"]["endCursor"])
+                info = rc["data"]["repository"]["pullRequest"]
+
+        if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
-        return rc
+        return self.changed_files
 
     def _get_reviewers(self) -> List[Tuple[str, str]]:
         reviews_count = int(self.info["reviews"]["totalCount"])
@@ -226,18 +328,51 @@ class GitHubPR:
         return cast(str, self.info["author"]["login"])
 
     def get_committer_login(self, num: int = 0) -> str:
-        return cast(str, self.info["commits"]["nodes"][num]["commit"]["author"]["user"]["login"])
+        user = self.info["commits"]["nodes"][num]["commit"]["author"]["user"]
+        # If author is not github user, user node will be null
+        if user is None:
+            return ""
+        return cast(str, user["login"])
 
     def get_committer_author(self, num: int = 0) -> str:
         node = self.info["commits"]["nodes"][num]["commit"]["author"]
         return f"{node['name']} <{node['email']}>"
 
-    def get_check_suite_conclusions(self) -> Dict[int, str]:
-        last_commit = self.info["commits"]["nodes"][-1]["commit"]
-        rc = {}
-        for node in last_commit["checkSuites"]["nodes"]:
-            rc[int(node["app"]["databaseId"])] = node["conclusion"]
-        return rc
+
+    def get_checkrun_conclusions(self) -> Dict[str, str]:
+        """ Returns list of checkrun / conclusions """
+        if self.conclusions is not None:
+            return self.conclusions
+        orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
+        checksuites = orig_last_commit["checkSuites"]
+        conclusions = {}
+
+        def add_conclusions(nodes: List[Dict[str, Any]]) -> None:
+            for node in nodes:
+                workflow_run = node["workflowRun"]
+                checkruns = node["checkRuns"]
+                if workflow_run is not None:
+                    conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
+                    continue
+                if checkruns is not None:
+                    for checkrun_node in checkruns["nodes"]:
+                        conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
+
+        add_conclusions(checksuites["nodes"])
+        while bool(checksuites["pageInfo"]["hasNextPage"]):
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=checksuites["pageInfo"]["endCursor"])
+            info = rc["data"]["repository"]["pullRequest"]
+            last_commit = info["commits"]["nodes"][-1]["commit"]
+            if last_commit["oid"] != orig_last_commit["oid"]:
+                raise RuntimeError("Last commit changed on PR")
+            checksuites = last_commit["checkSuites"]
+            add_conclusions(checksuites["nodes"])
+        self.conclusions = conclusions
+        return conclusions
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
@@ -278,8 +413,22 @@ class GitHubPR:
     def get_comment_author_association(self, num: int = -1) -> str:
         return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
 
+    def get_diff_revision(self) -> Optional[str]:
+        rc = RE_DIFF_REV.search(self.get_body())
+        return rc.group(1) if rc is not None else None
+
+    def has_internal_changes(self) -> bool:
+        checkrun_name = "Meta Internal-Only Changes Check"
+        if self.get_diff_revision() is None:
+            return False
+        checks = self.get_checkrun_conclusions()
+        if checks is None or checkrun_name not in checks:
+            return False
+        return checks[checkrun_name] != "SUCCESS"
+
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
+        approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
         orig_ref = f"{repo.remote}/{re.sub(r'/head$', '/orig', self.head_ref())}"
         rev_list = repo.revlist(f"{self.default_branch()}..{orig_ref}")
@@ -296,20 +445,30 @@ class GitHubPR:
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
+                approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo)
 
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
             repo.cherry_pick(rev)
-            repo.amend_commit_message(re.sub(RE_GHSTACK_SOURCE_ID, "", msg))
+            msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
+            msg += f"\nApproved by: {approved_by_urls}\n"
+            repo.amend_commit_message(msg)
 
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
+        if self.has_internal_changes():
+            raise RuntimeError("This PR must be landed via phabricator")
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
             msg = self.get_title() + "\n\n" + self.get_body()
             msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+            msg += f"Approved by: {approved_by_urls}\n"
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
@@ -325,7 +484,7 @@ class MergeRule:
     name: str
     patterns: List[str]
     approved_by: List[str]
-    mandatory_app_id: Optional[int]
+    mandatory_checks_name: Optional[List[str]]
 
 
 def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
@@ -354,11 +513,17 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             print(f"Skipping rule {rule_name} due to no approvers overlap")
             continue
-        if rule.mandatory_app_id is not None:
-            cs_conslusions = pr.get_check_suite_conclusions()
-            mandatory_app_id = rule.mandatory_app_id
-            if mandatory_app_id not in cs_conslusions or cs_conslusions[mandatory_app_id] != "SUCCESS":
-                print(f"Skipping rule {rule_name} as mandatory app {mandatory_app_id} is not in {cs_conslusions}")
+        if rule.mandatory_checks_name is not None:
+            pass_checks = True
+            checks = pr.get_checkrun_conclusions()
+            for checkname in rule.mandatory_checks_name:
+                if checkname not in checks or checks[checkname] != "SUCCESS":
+                    if checkname not in checks:
+                        print(f"Skipping rule {rule_name} as mandatory check {checkname} is not in {checks.keys()}")
+                    else:
+                        print(f"Skipping rule {rule_name} as mandatory check {checkname} failed")
+                    pass_checks = False
+            if not pass_checks:
                 continue
         non_matching_files = []
         for fname in changed_files:
@@ -368,6 +533,8 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
             print(f"Skipping rule {rule_name} due to non-matching files: {non_matching_files}")
             continue
         print(f"Matched rule {rule_name} for {pr.pr_num}")
+        if pr.has_internal_changes():
+            raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
@@ -404,11 +571,16 @@ def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of @{author_login}\n"
+    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}\n"
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     if not dry_run:
         gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
+
+
+def prefix_with_github_url(suffix_str: str) -> str:
+    return f"https://github.com/{suffix_str}"
+
 
 def main() -> None:
     args = parse_args()

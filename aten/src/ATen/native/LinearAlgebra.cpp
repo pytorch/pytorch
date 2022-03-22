@@ -416,6 +416,7 @@ Tensor linalg_matrix_power_impl(
     const Tensor& self,
     int64_t n,
     c10::optional<Tensor> _out) {
+  NoTF32Guard disable_tf32;
   auto out = _out.value_or(Tensor());
 
   squareCheckInputs(self, "linalg.matrix_power");
@@ -1582,6 +1583,32 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
   return result.fill_(self.vdot(other));
 }
 
+namespace {
+bool should_fold_into_mm(const Tensor& tensor1, const Tensor& tensor2) {
+  auto dim_tensor1 = tensor1.dim();
+  auto dim_tensor2 = tensor2.dim();
+  if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+    if (dim_tensor1 == 3 && dim_tensor2 == 2 &&
+        tensor1.stride(-1) != 1 && tensor1.stride(0) == tensor1.size(1) * tensor1.size(2)) {
+      // First dim is slowest moving, and then the following two dims are
+      // transposed. This can happen for example by permute(0, 2, 1).
+      // First 2 dims could be folded to use mm but would require permutation
+      // with actual data movement, which can be instead handled by BMM with each
+      // GEMM transposed.
+      // This can be generalized to a tensor with dim X + Y + Z where X, Y, and Z
+      // dims are contiguous, Y dims and Z dims are transposed, and X, Y, Z > 0.
+      // For example, this can happen by permute(0, 1, 5, 2, 3, 4), where X = 2,
+      // Y = 3, and Z = 1.
+      return false;
+    } else {
+      return true;
+    }
+  } else {
+    return false;
+  }
+}
+} // anonymous namespace
+
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
@@ -1620,7 +1647,7 @@ Tensor matmul(
                    : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
-  } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
+  } else if (should_fold_into_mm(tensor1, tensor2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
 
