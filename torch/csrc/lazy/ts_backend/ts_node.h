@@ -13,11 +13,6 @@ namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-// Helper that makes it easy to access the TsNode::shape() method
-// from an torch::lazy::Output* that holds a Node* that points to a TsNode
-// TODO(whc) remove these once migrating to codegen and cleaning up Shape use
-TORCH_API const Shape& GetShapeFromTsOutput(const Output& output);
-TORCH_API const Shape& GetShapeFromTsValue(const Value& value);
 TORCH_API void TsNodeSetShapeDeferred(
     NodePtr node, const std::function<Shape()>& shape_fn);
 
@@ -48,10 +43,10 @@ class TORCH_API TsNode : public lazy::Node {
       const std::function<Shape()>& shape_fn) const;
 
   // Retrieves the full shape of the IR Node.
-  c10::ArrayRef<Shape> shapes() const { return shapes_; }
+  c10::ArrayRef<Shape> shapes() const override { return shapes_; }
 
   // Retrieves the shape of the output at a given index.
-  const Shape& shape(size_t output_index = 0) const;
+  const Shape& shape(size_t output_index = 0) const override;
 
   std::string ToString() const override;
 
@@ -62,6 +57,10 @@ class TORCH_API TsNode : public lazy::Node {
   }
   const Output& operand(size_t i) const override {
     return operands_as_outputs_.at(i);
+  }
+
+  const std::string& getPythonStacktrace() const {
+         return python_stacktrace_;
   }
 
   // Lower is a backend-specific method since it returns a backend specific
@@ -80,6 +79,30 @@ class TORCH_API TsNode : public lazy::Node {
   // Outputs do not hold references on the nodes, and neither do the uses, since
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;
+  std::string python_stacktrace_;
+};
+
+// Note: this OpKind is separate from ltc_ops.h since it would be a circular import otherwise, I like leaving TensorList
+// in this file, and I think most of ltc_ops special cases will be deleted anyway
+const OpKind tensor_list_opkind = OpKind::Get("lazy_tensors::tensor_list");
+
+// TensorList represents an at::TensorList which is a vector[Tensor] but is also a first-class IValue
+// and can be fed as a single input to a TS program.  It is much easier to handle TensorLists in Lazy Tensor code
+// if they are represented as a single Node so there can be more than one TensorList and more than one Tensor
+// side-by-side as operands to an op.
+//
+// Note: shape is undefined for TensorList.  We assert in some places that #shapes matches #outputs and this stems from
+//       the fact that currently all IR nodes represent tensors (there is no type system for this IR).  Becuase of this,
+//       TensorList is a bit of a hack.
+//
+// TODO(whc) once Shape() API is moved to Node base, also make it virtual, and then implement it as NotImplemented for
+// TensorList, also fixing the assertion that would fail.
+struct TORCH_API TensorList : public TsNode {
+  TensorList() = delete;
+  TensorList(OpList values);
+
+  TSOpVector Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                   TSLoweringContext* loctx) const override;
 };
 
 }  // namespace lazy
