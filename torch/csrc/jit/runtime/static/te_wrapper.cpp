@@ -148,7 +148,7 @@ std::shared_ptr<TEWrapper> createRelu() {
   Tensor B = Compute("B", {N}, [&](const VarHandle& i) {
     auto zero = FloatImm::make(0.f);
     auto a = A.load(i);
-    return ifThenElse(a < zero, zero, a);
+    return CompareSelect::make(a, zero, zero, a, kLT);
   });
   wrap = wrapTECompute(wrap, B, {A, N});
   updateNNCCache(aten::relu, wrap);

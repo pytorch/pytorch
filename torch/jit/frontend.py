@@ -1,7 +1,6 @@
 import torch
 import sys
 import ast
-import dataclasses
 import inspect
 import string
 from collections import namedtuple
@@ -18,8 +17,7 @@ from torch._C._jit_tree_views import (
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
     DictComp,
 )
-from torch._sources import get_source_lines_and_file, ParsedDef, parse_def, make_source_context
-from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
+from torch._sources import get_source_lines_and_file, parse_def, make_source_context
 from torch.jit._monkeytype_config import monkeytype_trace, get_qualified_name
 from torch._jit_internal import should_drop, is_static_fn, FunctionModifiers  # noqa: F401
 import torch.jit.annotations
@@ -197,46 +195,24 @@ def get_jit_class_def(cls, self_name):
     def is_classmethod(fn):
         return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
 
-    # Get and parse the source code for this class
-    sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
-    source = ''.join(sourcelines)
+    methods = [get_jit_def(obj,
+                           name,
+                           self_name=self_name,
+                           is_classmethod=is_classmethod(obj)) for (name, obj) in methods]
 
-    dedent_src = dedent(source)
-    py_ast = ast.parse(dedent_src)
-
-    class_ast = py_ast.body[0]
-    assert isinstance(class_ast, ast.ClassDef)
-
-    # Special case for dataclasses. In general we need access to the source code for
-    # an object in order to JIT compile it. But the dataclasses module dynamically synthesizes
-    # magic methods for classes, and we can't get the source code for these methods. As a
-    # workaround, we synthesize TorchScript-friendly implementations ourselves.
-    if dataclasses.is_dataclass(cls):
-        # Detect whether the user manually implemented any of the magic methods. If they did,
-        # we don't want to synthesize/override them.
-        overrides = {
-            method.name
-            for method in class_ast.body
-            if isinstance(method, ast.FunctionDef) and method.name in DATACLASS_MAGIC_METHODS
-        }
-
-        for i, (name, _) in enumerate(methods):
-            # Is this a magic method we can synthesize?
-            synthesizer_fn = DATACLASS_MAGIC_METHODS.get(name)
-            if synthesizer_fn and name not in overrides:
-                methods[i] = name, synthesizer_fn(cls)
-
-    method_defs = [
-        get_jit_def(obj, name, self_name=self_name, is_classmethod=is_classmethod(obj))
-        for (name, obj) in methods
-    ]
     properties = get_class_properties(cls, self_name)
 
+    sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
+    source = ''.join(sourcelines)
+    dedent_src = dedent(source)
+    py_ast = ast.parse(dedent_src)
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     ctx = make_source_context(source, filename, file_lineno, leading_whitespace_len, False)
+    class_ast = py_ast.body[0]
+    assert isinstance(class_ast, ast.ClassDef)
     assigns = get_class_assigns(ctx, class_ast)
 
-    return build_class_def(ctx, class_ast, method_defs, properties, self_name, assigns)
+    return build_class_def(ctx, class_ast, methods, properties, self_name, assigns)
 
 
 def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
@@ -244,7 +220,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     Build a JIT AST (TreeView) from the given function.
 
     Args:
-        fn: A function object to compile or a pre-parsed ParsedDef object
+        fn: A function object to compile
         def_name: The name to give to the resulting AST object. This is not
             always the same as `fn.__name__`, for example:
                 def _forward(self):
@@ -254,7 +230,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
             but we want the result AST to have the name "forward".
         self_name: If this function is a method, what the type name of `self` is.
     """
-    parsed_def = parse_def(fn) if not isinstance(fn, ParsedDef) else fn
+    parsed_def = parse_def(fn)
     type_line = torch.jit.annotations.get_type_line(parsed_def.source)
     fn_def = parsed_def.ast.body[0]
 
@@ -281,7 +257,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
-    if monkeytype_trace and not isinstance(fn, ParsedDef):
+    if monkeytype_trace:
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 

@@ -718,8 +718,40 @@ void EliminateTrivialEquallySplit(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 }
 
-// NB: The alias type of the fused op needs to be changed to
-// c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
+namespace {
+
+bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
+  const static std::array<c10::Symbol, 3> sigrid_transforms_symbols{
+      c10::Symbol::fromQualString("fb::variadic_sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::sigrid_transforms_torch_bind"),
+      c10::Symbol::fromQualString("fb::sigrid_transforms")};
+
+  if (std::find(
+          sigrid_transforms_symbols.begin(),
+          sigrid_transforms_symbols.end(),
+          node->kind()) == sigrid_transforms_symbols.end()) {
+    return false;
+  }
+
+  // To fuse with sigrid transforms, we must be able to statically determine
+  // `instance` and `use_offsets` - these two together let us statically
+  // determine the types of the outputs. Rationale: it is a huge pain to write
+  // fused sigrid transforms without static type information, and these two
+  // arguments are indeed statically known in every model we've seen.
+  // The reason why trying to fuse the outputs is annoying without static type
+  // information is that, if one of the outputs is not managed, you need to
+  // reset to an empty tensor of the correct type each iteration. So, if we
+  // can't collect types ahead of time, we would have to do it lazily on the
+  // first iteration, which would could be wasteful in terms of time/memory
+  // - either each thread would have its own set of output types, or we would
+  // need a lock to prevent data races.
+  const auto num_inputs = node->inputs().size();
+  return !toIValue(node->input(0)).has_value() ||
+      !toIValue(node->input(num_inputs - 1)).has_value();
+}
+
+} // namespace
+
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
@@ -746,12 +778,7 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       OP_PAIR(
           "fb::split_and_squeeze", "static_runtime::fused_split_and_squeeze")};
 
-  AliasDb alias_db(
-      graph,
-      /*isFrozen=*/false);
   // replacement contains (old_node, new_node, list_unpack_node)
-  const std::vector<Value*> graph_outputs(
-      graph->outputs().begin(), graph->outputs().end());
   std::vector<std::tuple<Node*, Node*, Node*>> replacement;
   DepthFirstGraphNodeIterator graph_it(graph);
   for (auto node = graph_it.next(); node != nullptr; node = graph_it.next()) {
@@ -775,20 +802,8 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       continue;
     }
 
-    const bool checks_all_outputs =
-        node->kind() == fromQualString("fb::equally_split") ||
-        node->kind() == fromQualString("fb::gather_ranges_to_dense") ||
-        node->kind() == fromQualString("fb::gather_ranges_to_dense_v2");
-
-    if (!checks_all_outputs) {
-      // If any output of the ListUnpack node is unmanaged, disable fusion
-      // since the fused op assumes all outputs are either managed or not.
-      // Ops excluded here check all outputs.
-      const std::vector<Value*> list_unpack_outputs_vec(
-          list_unpack_outputs.begin(), list_unpack_outputs.end());
-      if (alias_db.mayContainAlias(list_unpack_outputs_vec, graph_outputs)) {
-        continue;
-      }
+    if (shouldNotFuseListUnpackSpecialCase(node)) {
+      continue;
     }
 
     const auto& new_sym = unfused_to_fused_it->second;
@@ -815,12 +830,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
     list_unpack_node->destroy();
     old_node->destroy();
   }
-
-#ifndef NDEBUG
-  graph->lint();
-  AliasDb db2(graph);
-  torch::jit::Lint(&db2);
-#endif
 } // namespace jit
 
 void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
