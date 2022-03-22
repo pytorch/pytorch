@@ -8,5 +8,6 @@ from .importer import (
     OrderedImporter,
     sys_importer,
 )
-from .package_exporter import EmptyMatchError, PackageExporter, PackagingError
+from .package_exporter import PackageExporter
+from .package_exporter_no_torch import EmptyMatchError, PackagingError
 from .package_importer import PackageImporter

@@ -40,12 +40,12 @@ class TestPackageScript(PackageTestCase):
         scripted.proxy_mod = torch.jit.script(fake.NewModule())
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", uses_interface)
         buffer.seek(0)
 
-        package_importer = PackageImporter(buffer, use_torch=True)
+        package_importer = PackageImporter(buffer)
         loaded = package_importer.load_pickle("model", "model.pkl")
 
         scripted_loaded = torch.jit.script(loaded)
@@ -66,7 +66,7 @@ class TestPackageScript(PackageTestCase):
         # Simulate a package that contains a different version of the
         # interface, with the exact same name.
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_source_string(
                 fake.__name__,
                 dedent(
@@ -97,7 +97,7 @@ class TestPackageScript(PackageTestCase):
             )
         buffer.seek(0)
 
-        package_importer = PackageImporter(buffer, use_torch=True)
+        package_importer = PackageImporter(buffer)
         diff_fake = package_importer.import_module(fake.__name__)
         # We should be able to script successfully.
         torch.jit.script(diff_fake.UsesInterface())
@@ -106,11 +106,11 @@ class TestPackageScript(PackageTestCase):
         import package_a.fake_script_class as fake
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_module(fake.__name__)
         buffer.seek(0)
 
-        package_importer = PackageImporter(buffer, use_torch=True)
+        package_importer = PackageImporter(buffer)
         loaded = package_importer.import_module(fake.__name__)
 
         input = torch.tensor(1)
@@ -130,12 +130,12 @@ class TestPackageScript(PackageTestCase):
         torch.jit.script(obj)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.intern("**")
             exporter.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         obj_loaded = importer.load_pickle("obj", "obj.pkl")
         scripted_obj_loaded = torch.jit.script(obj_loaded)
 
@@ -153,7 +153,7 @@ class TestPackageScript(PackageTestCase):
         # Simulate a package that contains a different version of the
         # script class ,with the attribute `bar` instead of `foo`
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as pe2:
+        with PackageExporter(buffer) as pe2:
             pe2.save_source_string(
                 fake.__name__,
                 dedent(
@@ -169,7 +169,7 @@ class TestPackageScript(PackageTestCase):
             )
         buffer.seek(0)
 
-        package_importer = PackageImporter(buffer, use_torch=True)
+        package_importer = PackageImporter(buffer)
         diff_fake = package_importer.import_module(fake.__name__)
         input = torch.rand(2, 3)
         loaded_script_class = diff_fake.MyScriptClass(input)
@@ -185,11 +185,11 @@ class TestPackageScript(PackageTestCase):
         scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod = importer.load_pickle("res", "mod.pkl", map_location="cpu")
         input = torch.rand(1, 2, 3)
         self.assertEqual(loaded_mod(input), scripted_mod(input))
@@ -207,10 +207,10 @@ class TestPackageScript(PackageTestCase):
         scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         filename = self.temp()
-        with PackageExporter(filename, use_torch=True) as e:
+        with PackageExporter(filename) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
-        importer = PackageImporter(filename, use_torch=True)
+        importer = PackageImporter(filename)
         loaded_mod = importer.load_pickle("res", "mod.pkl")
         input = torch.rand(1, 2, 3)
         self.assertEqual(loaded_mod(input), scripted_mod(input))
@@ -226,11 +226,11 @@ class TestPackageScript(PackageTestCase):
         )
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod = importer.load_pickle("res", "mod.pkl", map_location="cpu")
         input = torch.rand(1, 2, 3)
         self.assertEqual(loaded_mod(input), scripted_mod(input))
@@ -274,12 +274,12 @@ class TestPackageScript(PackageTestCase):
         scripted_mod_1 = torch.jit.script(TopMod())
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_0)
             e.save_pickle("res", "mod2.pkl", scripted_mod_1)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod_0 = importer.load_pickle("res", "mod1.pkl")
         loaded_mod_1 = importer.load_pickle("res", "mod2.pkl")
         self.assertEqual(loaded_mod_0("input"), scripted_mod_0("input"))
@@ -297,12 +297,12 @@ class TestPackageScript(PackageTestCase):
         scripted_mod_1 = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_0)
             e.save_pickle("res", "mod2.pkl", scripted_mod_1)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod_0 = importer.load_pickle("res", "mod1.pkl")
         loaded_mod_1 = importer.load_pickle("res", "mod2.pkl")
         input = torch.rand(1, 2, 3)
@@ -331,7 +331,7 @@ class TestPackageScript(PackageTestCase):
         )
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("res", "mod0.pkl", scripted_mod_0)
             e.save_pickle("res", "mod1.pkl", scripted_mod_1)
             e.save_pickle("res", "mod2.pkl", scripted_mod_0)
@@ -339,7 +339,7 @@ class TestPackageScript(PackageTestCase):
             e.save_pickle("res", "mod4.pkl", scripted_mod_2)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod_0 = importer.load_pickle("res", "mod0.pkl")
         loaded_mod_1 = importer.load_pickle("res", "mod3.pkl")
         loaded_mod_2 = importer.load_pickle("res", "mod4.pkl")
@@ -363,20 +363,20 @@ class TestPackageScript(PackageTestCase):
         )
 
         buffer_0 = BytesIO()
-        with PackageExporter(buffer_0, use_torch=True) as e:
+        with PackageExporter(buffer_0) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_0)
 
         buffer_0.seek(0)
-        importer_0 = PackageImporter(buffer_0, use_torch=True)
+        importer_0 = PackageImporter(buffer_0)
         loaded_module_0 = importer_0.load_pickle("res", "mod1.pkl")
 
         buffer_1 = BytesIO()
-        with PackageExporter(buffer_1, use_torch=True) as e:
+        with PackageExporter(buffer_1) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_1)
             e.save_pickle("res", "mod2.pkl", loaded_module_0)
 
         buffer_1.seek(0)
-        importer_1 = PackageImporter(buffer_1, use_torch=True)
+        importer_1 = PackageImporter(buffer_1)
         loaded_module_1 = importer_1.load_pickle("res", "mod1.pkl")
         reloaded_module_0 = importer_1.load_pickle("res", "mod2.pkl")
 
@@ -407,18 +407,18 @@ class TestPackageScript(PackageTestCase):
         scripted_mod_1 = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         buffer_0 = BytesIO()
-        with PackageExporter(buffer_0, use_torch=True) as e:
+        with PackageExporter(buffer_0) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_0)
 
         buffer_0.seek(0)
-        importer_0 = importer = PackageImporter(buffer_0, use_torch=True)
+        importer_0 = importer = PackageImporter(buffer_0)
 
         buffer_1 = BytesIO()
-        with PackageExporter(buffer_1, use_torch=True) as e:
+        with PackageExporter(buffer_1) as e:
             e.save_pickle("res", "mod1.pkl", scripted_mod_1)
 
         buffer_1.seek(0)
-        importer_1 = PackageImporter(buffer_1, use_torch=True)
+        importer_1 = PackageImporter(buffer_1)
 
         self.assertTrue("torchvision" in str(importer_0.file_structure()))
         self.assertFalse("torchvision" in str(importer_1.file_structure()))
@@ -437,11 +437,11 @@ class TestPackageScript(PackageTestCase):
         script_mods_list = [scripted_mod_a, scripted_mod_b]
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("res", "list.pkl", script_mods_list)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod_list = importer.load_pickle("res", "list.pkl")
         input = torch.rand(1, 2, 3)
         self.assertEqual(loaded_mod_list[0](input), scripted_mod_a(input))
@@ -461,13 +461,13 @@ class TestPackageScript(PackageTestCase):
         mod2 = ModWithSubmod(scripted_mod)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.intern("**")
             e.save_pickle("res", "mod1.pkl", mod1)
             e.save_pickle("res", "mod2.pkl", mod2)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         file_structure = importer.file_structure()
         self.assertTrue(file_structure.has_file(".data/ts_code/0"))
         self.assertFalse(file_structure.has_file(".data/ts_code/1"))
@@ -491,12 +491,12 @@ class TestPackageScript(PackageTestCase):
         mod_parent = ModWithMultipleSubmods(mod1, mod2)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.intern("**")
             e.save_pickle("res", "mod.pkl", mod_parent)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
 
         loaded_mod = importer.load_pickle("res", "mod.pkl")
         self.assertTrue(
@@ -516,14 +516,14 @@ class TestPackageScript(PackageTestCase):
         mod2 = ModWithSubmodAndTensor(shared_tensor, scripted_mod)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.intern("**")
             e.save_pickle("res", "tensor", shared_tensor)
             e.save_pickle("res", "mod1.pkl", mod1)
             e.save_pickle("res", "mod2.pkl", mod2)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
         # assert that there is only one storage stored in package
@@ -560,12 +560,12 @@ class TestPackageScript(PackageTestCase):
         )
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.intern("**")
             e.save_pickle("res", "mod1.pkl", mod1)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
 
         self.assertEqual(
@@ -608,21 +608,21 @@ class TestPackageScript(PackageTestCase):
         mod1 = ModWithTwoSubmodsAndTensor(shared_tensor, scripted_mod_0, scripted_mod_1)
 
         buffer_0 = BytesIO()
-        with PackageExporter(buffer_0, use_torch=True) as e:
+        with PackageExporter(buffer_0) as e:
             e.intern("**")
             e.save_pickle("res", "mod1.pkl", mod1)
 
         buffer_0.seek(0)
-        importer_0 = PackageImporter(buffer_0, use_torch=True)
+        importer_0 = PackageImporter(buffer_0)
         loaded_mod_0 = importer_0.load_pickle("res", "mod1.pkl")
 
         buffer_1 = BytesIO()
-        with PackageExporter(buffer_1, importer=importer_0, use_torch=True) as e:
+        with PackageExporter(buffer_1, importer=importer_0) as e:
             e.intern("**")
             e.save_pickle("res", "mod1.pkl", loaded_mod_0)
 
         buffer_1.seek(0)
-        importer = PackageImporter(buffer_1, use_torch=True)
+        importer = PackageImporter(buffer_1)
         loaded_mod_1 = importer.load_pickle("res", "mod1.pkl")
         self.assertEqual(
             loaded_mod_1.tensor.storage()._cdata,
@@ -654,12 +654,12 @@ class TestPackageScript(PackageTestCase):
         orig_mod = SimpleTest()
 
         buffer_0 = BytesIO()
-        with PackageExporter(buffer_0, use_torch=True) as e:
+        with PackageExporter(buffer_0) as e:
             e.intern("**")
             e.save_pickle("model", "model.pkl", orig_mod)
 
         buffer_0.seek(0)
-        importer_0 = PackageImporter(buffer_0, use_torch=True)
+        importer_0 = PackageImporter(buffer_0)
         loaded_mod = importer_0.load_pickle("model", "model.pkl")
 
         input = torch.rand(2, 3)
@@ -668,12 +668,12 @@ class TestPackageScript(PackageTestCase):
         scripted_mod = torch.jit.script(loaded_mod)
 
         buffer_1 = BytesIO()
-        with PackageExporter(buffer_1, importer=importer_0, use_torch=True) as e:
+        with PackageExporter(buffer_1, importer=importer_0) as e:
             e.intern("**")
             e.save_pickle("res", "scripted_mod.pkl", scripted_mod)
 
         buffer_1.seek(0)
-        importer_1 = PackageImporter(buffer_1, use_torch=True)
+        importer_1 = PackageImporter(buffer_1)
         loaded_mod_scripted = importer_1.load_pickle("res", "scripted_mod.pkl")
 
         self.assertEqual(loaded_mod_scripted(input), orig_mod(input))
@@ -703,12 +703,12 @@ class TestPackageScript(PackageTestCase):
         scripted_imported = torch.jit.script(imported_mod)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("model", "inline.pkl", scripted_inline)
             e.save_pickle("model", "imported.pkl", scripted_imported)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_inline = importer.load_pickle("model", "inline.pkl")
         loaded_imported = importer.load_pickle("model", "imported.pkl")
 
@@ -744,12 +744,12 @@ class TestPackageScript(PackageTestCase):
         scripted_imported = torch.jit.script(imported_mod)
 
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=True) as e:
+        with PackageExporter(buffer) as e:
             e.save_pickle("model", "inline.pkl", scripted_inline)
             e.save_pickle("model", "imported.pkl", scripted_imported)
 
         buffer.seek(0)
-        importer = PackageImporter(buffer, use_torch=True)
+        importer = PackageImporter(buffer)
         loaded_inline = importer.load_pickle("model", "inline.pkl")
         loaded_imported = importer.load_pickle("model", "imported.pkl")
 
@@ -774,13 +774,13 @@ class TestPackageScript(PackageTestCase):
         original_tensor = torch.ones(0)
 
         f = BytesIO()
-        with torch.package.PackageExporter(f, use_torch=True) as exporter:
+        with torch.package.PackageExporter(f) as exporter:
             exporter.save_pickle("model", "model.pkl", scripted_m)
             exporter.save_pickle("model", "input.pkl", original_tensor)
 
         f.seek(0)
         # Should be able to load correctly
-        importer = PackageImporter(f, use_torch=True)
+        importer = PackageImporter(f)
         loaded_m = importer.load_pickle("model", "model.pkl")
         loaded_tensor = importer.load_pickle("model", "input.pkl")
 

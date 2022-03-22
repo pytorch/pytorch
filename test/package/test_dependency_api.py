@@ -26,11 +26,11 @@ class TestDependencyAPI(PackageTestCase):
 
     def test_extern(self):
         buffer = BytesIO()
-        with PackageExporter(buffer, use_torch=False) as he:
+        with PackageExporter(buffer) as he:
             he.extern(["package_a.subpackage", "module_a"])
             he.save_source_string("foo", "import package_a.subpackage; import module_a")
         buffer.seek(0)
-        hi = PackageImporter(buffer, use_torch=False)
+        hi = PackageImporter(buffer)
         import module_a
         import package_a.subpackage
 

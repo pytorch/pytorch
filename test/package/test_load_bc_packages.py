@@ -24,7 +24,7 @@ class TestLoadBCPackages(PackageTestCase):
     )
     def test_load_bc_packages_nn_module(self):
         """Tests for backwards compatible nn module"""
-        importer1 = PackageImporter(f"{packaging_directory}/test_nn_module.pt", use_torch=True)
+        importer1 = PackageImporter(f"{packaging_directory}/test_nn_module.pt")
         loaded1 = importer1.load_pickle("nn_module", "nn_module.pkl")
 
     @skipIf(
@@ -34,7 +34,7 @@ class TestLoadBCPackages(PackageTestCase):
     def test_load_bc_packages_torchscript_module(self):
 
         """Tests for backwards compatible torchscript module"""
-        importer2 = PackageImporter(f"{packaging_directory}/test_torchscript_module.pt", use_torch=True)
+        importer2 = PackageImporter(f"{packaging_directory}/test_torchscript_module.pt")
         loaded2 = importer2.load_pickle("torchscript_module", "torchscript_module.pkl")
 
     @skipIf(
@@ -43,7 +43,7 @@ class TestLoadBCPackages(PackageTestCase):
     )
     def test_load_bc_packages_fx_module(self):
         """Tests for backwards compatible fx module"""
-        importer3 = PackageImporter(f"{packaging_directory}/test_fx_module.pt", use_torch=True)
+        importer3 = PackageImporter(f"{packaging_directory}/test_fx_module.pt")
         loaded3 = importer3.load_pickle("fx_module", "fx_module.pkl")
 
 
