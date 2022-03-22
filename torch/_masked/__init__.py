@@ -164,6 +164,7 @@ Example::
         amin=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        median=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
@@ -227,6 +228,7 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         amax='maximum',
         amin='minimum',
         mean='mean',
+        median='median',
         norm='norm',
         var='variance')
 
@@ -250,6 +252,9 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         example_input = example_input.to(dtype=torch.float32)
     elif func.__name__ in {'var'}:
         example_args = (example_dim, False)
+    elif func.__name__ == 'median':
+        example_args = (example_dim,)
+        example_input = example_input.to(dtype=torch.float32)
     else:
         example_args = (example_dim,)
 
@@ -360,6 +365,11 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         # consider the identity value of the mean operation ambiguous.
         # Moreover, the mean value of empty input is undefined.
         return None
+    elif op_name == 'median':
+        # We use NaN for now because the implementation is currently using torch.nanmedian
+        # and NaN is the identity for that function since it gets ignored
+        dtype = input.dtype if torch.is_floating_point(input) else torch.float
+        return torch.tensor(torch.nan, dtype=dtype, device=device)
     elif op_name == 'norm':
         ord = args[0] if args else 2
         if ord == float('-inf'):
@@ -564,7 +574,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'median', 'norm', 'var'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -602,6 +612,44 @@ def sum(input: Tensor,
         return torch.sum(mask_input, dim_, bool(keepdim), dtype=dtype)
     else:
         raise ValueError(f'masked sum expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def median(input: Tensor,
+           dim: int = -1,
+           keepdim: Optional[bool] = False,
+           dtype: Optional[DType] = None,
+           mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+{reduction_descr}
+By definition, the identity value of a median operation is the median
+value of the tensor. If all elements of the input tensor along given
+dimension(s) :attr:`dim` are masked-out, the identity value of the
+median is undefined.  Due to this ambiguity, the elements of output
+tensor with strided layout, that correspond to fully masked-out
+elements, have ``nan`` values.
+{reduction_args}
+{reduction_example}"""
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = -1 if dim is None else dim
+    if input.layout == torch.strided:
+        is_float = torch.is_floating_point(input)
+        if not is_float:
+            input = input.to(dtype=torch.float)
+        fill = input.new_full([], _reduction_identity('median', input))
+        inmask = _input_mask(input, mask=mask)
+        mask_input = torch.where(inmask, input, fill)
+        output = torch.nanmedian(mask_input, dim_, keepdim=keepdim).values
+        if is_float: 
+            return output
+        elif not is_float and not torch.isnan(output).any():
+            return output.to(dtype=dtype)
+        else:
+            raise ValueError("masked median expects no fully masked out rows if dtype is not floating point")
+    else:
+        raise ValueError(f'masked median expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates

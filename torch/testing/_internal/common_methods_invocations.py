@@ -15412,6 +15412,27 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
+    OpInfo(
+        '_masked.median',
+        dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),  # row may be masked out so need floating type for nan's
+        method_variant=None,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        skips=(
+            # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-03, rtol=1e-03)}),
+            #              'TestGradients', 'test_forward_mode_AD', device_type='cpu'),
+            # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-03, rtol=1e-03)}),
+            #              'TestGradients', 'test_fn_gradgrad', device_type='cpu'),
+        ],
+        # Also requires int dim, so can use the same sample_inputs function
+        sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
     ReductionOpInfo(
         '_masked.norm',
         identity=0,
