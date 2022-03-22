@@ -1,0 +1,76 @@
+name: build android
+
+description: build android for a specific arch
+
+inputs:
+  arch:
+    description: arch to build
+    required: true
+  arch-for-build-env:
+    description: |
+      arch to pass to build environment.
+      This is currently different than the arch name we use elswhere, which
+      should be fixed.
+    required: true
+  github-secret:
+    description: github token
+    required: true
+  build-environment:
+    required: true
+    description: Top-level label for what's being built/tested.
+  docker-image:
+    required: true
+    description: Name of the base docker image to build with.
+  branch:
+    required: true
+    description: What branch we are building on.
+
+runs:
+  using: composite
+  steps:
+    - name: Build-${{ inputs.arch }}
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
+        BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-${{ inputs.arch-for-build-env }}-build"
+        AWS_DEFAULT_REGION: us-east-1
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+        CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+        SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        DOCKER_IMAGE: ${{ inputs.docker-image  }}
+        MATRIX_ARCH: ${{ inputs.arch }}
+      run: |
+        # detached container should get cleaned up by teardown_ec2_linux
+        #!/bin/bash -eo pipefail
+        export container_name
+        container_name=$(docker run \
+          -e BUILD_ENVIRONMENT \
+          -e JOB_BASE_NAME \
+          -e MAX_JOBS="$(nproc --ignore=2)" \
+          -e AWS_DEFAULT_REGION \
+          -e IS_GHA \
+          -e PR_NUMBER \
+          -e SHA1 \
+          -e BRANCH \
+          -e GITHUB_RUN_ID \
+          -e SCCACHE_BUCKET \
+          -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
+          -e SKIP_SCCACHE_INITIALIZATION=1 \
+          --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+          --security-opt seccomp=unconfined \
+          --cap-add=SYS_PTRACE \
+          --tty \
+          --detach \
+          --user jenkins \
+          -w /var/lib/jenkins/workspace \
+          "${DOCKER_IMAGE}"
+        )
+        git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
+        docker cp "${GITHUB_WORKSPACE}/." "${container_name}:/var/lib/jenkins/workspace"
+        (echo "sudo chown -R jenkins . && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete" | docker exec -u jenkins -i "${container_name}" bash) 2>&1
+
+        # Copy install binaries back
+        mkdir -p "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
+        docker cp "${container_name}:/var/lib/jenkins/workspace/build_android/install" "${GITHUB_WORKSPACE}/build_android_install_${MATRIX_ARCH}"
