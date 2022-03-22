@@ -5,6 +5,9 @@ from enum import Enum
 import functorch._src.top_operators_github_usage as top_ops
 import pprint
 import unittest
+import enum
+from functorch_lagging_op_db import in_functorch_lagging_op_db
+from torch.testing._internal.common_device_type import toleranceOverride
 
 # Importing these files make modifications to the op_db that we need
 import test_ops  # noqa: F401
@@ -24,7 +27,7 @@ public_docs = [
 # torch.abs, Tensor.abs, Tensor.abs_ are all considered to be different
 
 
-def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/quick'):
+def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/debug-cpu'):
     results = {}
     all_overridable_apis = set(torch.overrides.get_testing_overrides().keys())
     for module, module_name, src in public_docs:
@@ -280,11 +283,12 @@ tests = {
 def is_decorateinfo_skip_or_xfail(decorateinfo):
     assert len(decorateinfo.decorators) == 1
     actual_decorator = decorateinfo.decorators[0]
-    if actual_decorator == unittest.skip("Skipped!"):
-        return True
+    if isinstance(actual_decorator, toleranceOverride):
+        return False
     if actual_decorator == unittest.expectedFailure:
         return True
-    return False
+    # Assume the rest are skips
+    return True
 
 
 def get_all_tested_ops():
@@ -540,45 +544,249 @@ def print_coverage_info(th=100, nn=25):
     pprint.pprint(statuses)
 
 
-# print_coverage_info(100, 25)
-# print_coverage_info(200, 50)
+def get_name_to_opinfo_map():
+    dct = {}
+    for op in op_db:
+        def add(name, op):
+            if name not in dct:
+                dct[name] = []
+            dct[name].append(op)
+        add(op.name, op)
+        for alias in op.aliases:
+            add(alias.name, op)
+    return dct
 
-# pprint.pprint(get_top_ops(100, 25))
 
-dct = {}
-for op in op_db:
-    def add(name, op):
-        if name not in dct:
-            dct[name] = []
-        dct[name].append(op)
-    add(op.name, op)
-    for alias in op.aliases:
-        add(alias.name, op)
+NAME_TO_OPINFO = get_name_to_opinfo_map()
 
-top_ops_125 = set(get_top_ops(100, 25))
-dct_keys = set(dct.keys())
 
-# only has 110, but that's OK
-dct_125 = {k: v for k, v in dct.items() if k in top_ops_125}
-failed_ops = get_skipped_or_xfailed_ops_for('test_vmapjvpall_has_batch_rule')
-failed_ops = set([k for k in failed_ops if k in dct_125])
-supports_bwd = {k: v for k, v in dct_125.items()
-                if any(opinfo.supports_autograd for opinfo in v)}
-supports_fwd = {k: v for k, v in dct_125.items()
-                if all(opinfo.supports_forward_ad for opinfo in v)}
-supports_fwd = set(supports_fwd.keys())
-supports_bwd = set(supports_bwd.keys())
-assert set(supports_fwd).issubset(set(supports_bwd))
-supports_bwd_but_not_fwd = set(supports_bwd) - set(supports_fwd)
-unsupported = failed_ops.union(supports_bwd_but_not_fwd)
-supported = set(dct_125.keys()) - unsupported
+class Support(enum.Enum):
+    NO = 0
+    YES = 1
+    UNKNOWN = 2
 
-print(len(supported) + len(unsupported))
 
-print("&" * 80)
-for x in supported:
-    print(x)
+FACTORY_FNS = {
+    'tensor', 'zeros', 'ones', 'randn', 'arange', 'rand', 'empty', 'range',
+    'full', 'randperm', 'eye', 'randint', 'linspace', 'logspace',
+}
 
-print("&" * 80)
-for x in unsupported:
-    print(x)
+VMAP_EXEMPTIONS = {
+    'randn_like',  # randomness
+    'rand_like',  # randomness
+    'allclose',  # number output
+    'unique',  # dynamic
+    'nonzero',  # dynamic
+    'masked_select',  # dynamic
+    'prod',  # dynamic (backward)
+    'norm',  # norm with nuc is not commonly used; we support the other cases.
+    'svd',  # There isn't a bug, it is just nondeterministic so we can't test it.
+    'nn.functional.embedding',  # We support everything except the sparse option.
+    'nn.functional.dropout',  # randomness
+}
+
+JVP_EXEMPTIONS = {
+    'nn.functional.dropout',  # not actually problem, randomness testing artifact
+    'nn.functional.rrelu',  # not actually problem, randomness testing artifact
+    # 'normal',
+    # 'bernoulli',
+    # 'multinomial',
+}
+
+
+class Operator:
+    def __init__(self, name):
+        self.name = name
+        self.opinfos = NAME_TO_OPINFO.get(name, None)
+        assert self.opinfos is None or len(self.opinfos) > 0
+
+    def has_opinfo(self):
+        return self.opinfos is not None
+
+    def __repr__(self):
+        return f'Operator("{self.name}")'
+
+    def no_opinfos_skip_test(self, test_name):
+        """Returns NO if any opinfos have a skip or xfail for the test"""
+        if not self.has_opinfo():
+            return Support.UNKNOWN
+        if not any([in_functorch_lagging_op_db(o) for o in self.opinfos]):
+            return Support.UNKNOWN
+        for opinfo in self.opinfos:
+            for decorator in opinfo.decorators:
+                if not hasattr(decorator, 'test_name'):
+                    continue
+                if decorator.test_name != test_name:
+                    continue
+                if is_decorateinfo_skip_or_xfail(decorator):
+                    return Support.NO
+        return Support.YES
+
+    def any_opinfo_attr(self, attr):
+        if not self.has_opinfo():
+            raise RuntimeError()
+        return any([getattr(opinfo, attr) for opinfo in self.opinfos])
+
+    def all_opinfo_attr(self, attr):
+        if not self.has_opinfo():
+            raise RuntimeError()
+        return all([getattr(opinfo, attr) for opinfo in self.opinfos])
+
+    def supports_vjp(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        return self.no_opinfos_skip_test('test_vjp')
+
+    def supports_vmap(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in VMAP_EXEMPTIONS:
+            return Support.YES
+        return self.no_opinfos_skip_test('test_vmap_exhaustive')
+
+    def supports_fast_vmap(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in VMAP_EXEMPTIONS:
+            return Support.YES
+        return self.no_opinfos_skip_test('test_op_has_batch_rule')
+
+    def supports_vmapvjp(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in VMAP_EXEMPTIONS:
+            return Support.YES
+        return self.no_opinfos_skip_test('test_vmapvjp')
+
+    def supports_fast_vmapvjp(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in VMAP_EXEMPTIONS:
+            return Support.YES
+        return self.no_opinfos_skip_test('test_vmapvjp_has_batch_rule')
+
+    def supports_jvp(self):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in JVP_EXEMPTIONS:
+            return Support.YES
+        if not self.has_opinfo():
+            return Support.UNKNOWN
+        if self.any_opinfo_attr('supports_autograd') and \
+                not self.all_opinfo_attr('supports_forward_ad'):
+            return Support.NO
+        return self.no_opinfos_skip_test('test_jvp')
+
+    def _supports_vmapjvp_base(self, test):
+        if self.name in FACTORY_FNS:
+            return Support.YES
+        if self.name in VMAP_EXEMPTIONS:
+            return Support.YES
+        if self.name in JVP_EXEMPTIONS:
+            return Support.YES
+        if not self.has_opinfo():
+            return Support.UNKNOWN
+        if self.any_opinfo_attr('supports_autograd') and \
+                not self.all_opinfo_attr('supports_forward_ad'):
+            return Support.NO
+        return self.no_opinfos_skip_test(test)
+
+    def supports_vmapjvp(self):
+        return self._supports_vmapjvp_base('test_vmapjvpall')
+
+    def supports_fast_vmapjvp(self):
+        return self._supports_vmapjvp_base('test_vmapjvpall_has_batch_rule')
+
+
+class OperatorSet:
+    def __init__(self, operators):
+        self.data = set(operators)
+
+    @classmethod
+    def from_names(cls, names):
+        return OperatorSet([Operator(name) for name in names])
+
+    @classmethod
+    def from_top_ops_threshold(cls, torch_threshold, nn_fn_threshold):
+        names = get_top_ops(torch_threshold, nn_fn_threshold)
+        return cls.from_names(names)
+
+    @classmethod
+    def from_top125(cls):
+        return cls.from_top_ops_threshold(100, 25)
+
+    @classmethod
+    def from_top160(cls):
+        return cls.from_top_ops_threshold(107, 53)
+
+    @classmethod
+    def all(cls):
+        dct = get_public_overridable_outplace_we_care_about()
+        names = dct.keys()
+        names_sanitized = []
+        for n in names:
+            torch_tensor = 'torch.Tensor.'
+            torch_dot = 'torch.'
+            if n.startswith(torch_tensor):
+                names_sanitized.append(n[len(torch_tensor):])
+            elif n.startswith(torch_dot):
+                names_sanitized.append(n[len(torch_dot):])
+            else:
+                assert False
+        return cls.from_names(names_sanitized)
+
+    def query(self, operator_method, filter=(Support.NO, Support.YES, Support.UNKNOWN)):
+        result = {}
+        for key in filter:
+            result[key] = set([])
+        for op in self.data:
+            support_status = operator_method(op)
+            if support_status in filter:
+                result[support_status].add(op)
+        return result
+
+    def summary(self):
+        checks = [
+            'supports_vjp',
+            'supports_vmap',
+            'supports_fast_vmap',
+            'supports_vmapvjp',
+            'supports_fast_vmapvjp',
+            'supports_jvp',
+            'supports_vmapjvp',
+            'supports_fast_vmapjvp',
+        ]
+        result = ['test, yes, no, unknown']
+        for check in checks:
+            accessor = getattr(Operator, check)
+            all_results = self.query(accessor)
+            yes_amt = len(all_results[Support.YES])
+            no_amt = len(all_results[Support.NO])
+            unknown_amt = len(all_results[Support.UNKNOWN])
+            result.append(f'{check}, {yes_amt}, {no_amt}, {unknown_amt}')
+        return '\n'.join(result)
+
+
+opset = OperatorSet.all()
+has_no_opinfo = opset.query(Operator.has_opinfo, (False,))
+
+print("=" * 30 + " Summary " + "=" * 30)
+print(opset.summary())
+
+# sanity checks
+result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+
+print("=" * 30 + " Top 125 Summary " + "=" * 30)
+opset = OperatorSet.from_top125()
+result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
+pprint.pprint(result)
+result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+print(opset.summary())
+
+print("=" * 30 + " Top 160 Summary " + "=" * 30)
+opset = OperatorSet.from_top160()
+result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
+# pprint.pprint(result)
+print(opset.summary())
