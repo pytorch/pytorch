@@ -1058,6 +1058,21 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(torch.mul, 100, [100, 1])
         _test_spadd_shape(torch.mul, 100, [1, 100])
 
+        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
+        s = s.to_sparse_csr()
+        t23 = s.to_dense()
+
+        if device == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, r"mul\(sparse_csr, dense\) is not supported"):
+                s * t23
+            with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse_csr\) is not supported"):
+                t23 * s
+        elif device == 'cuda':
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                s * t23
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                t23 * s
+
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):

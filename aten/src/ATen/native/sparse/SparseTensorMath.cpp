@@ -67,7 +67,6 @@
 #endif
 
 #include <algorithm>
-#include <iostream>
 
 namespace at { namespace native {
 
@@ -710,8 +709,8 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
   // // TODO: Use a specialized CSR kernel for performance if needed
-  TORCH_CHECK(t_.is_sparse_csr(), "mul(dense, sparse) is not supported");
-  TORCH_CHECK(src_.is_sparse_csr(), "mul(sparse, dense) is not supported");
+  TORCH_CHECK(t_.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(src_.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
   TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
   Tensor t = t_.to_sparse();
   Tensor src = src_.to_sparse();
@@ -725,11 +724,9 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 
 Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  // Arbitrary (dense, sparse) and (sparse, dense) multiplication is not
-  // currently supported, but (0dim-dense, sparse) and (sparse, 0dim-dense) is.
-  // Make sure we use the sparse exemplar for result.
-  auto result_options = self.is_sparse() ?
-    self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
+  TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
+  TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  auto result_options = self.options().dtype(commonDtype);
   // CSR is 2d!
   Tensor result = at::empty({0, 0}, result_options);
   return at::mul_out(result, self, other);  // redispatch!
