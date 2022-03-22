@@ -31,8 +31,8 @@ with open(args.input, 'r') as fin:
         for line in fin:
             accumulated_chars = accumulated_chars + len(line) + 1
             if accumulated_chars >= MAX_STRING_LITERAL:
-                fout.write(f')"\n')
-                fout.write(f'R"(\n')
+                fout.write(')"\n')
+                fout.write('R"(\n')
                 fout.write(line)
                 accumulated_chars = len(line) + 1
             else:
