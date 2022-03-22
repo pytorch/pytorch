@@ -555,6 +555,8 @@ const auto entr_string = jiterator_stringify(
   }
 ); // entr_string
 
+// NOTE: `kaiser_window_string` depends on `i0_string`
+//       for its implementation.
 const auto i0_string = jiterator_stringify(
   template<typename T>
   T chbevl(T x, const T array[], const int len) {
