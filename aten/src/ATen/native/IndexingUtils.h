@@ -2,7 +2,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
@@ -14,7 +14,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 }
 
 
-static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTensorRefList indices) {
+static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTensorListRef indices) {
   // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (const auto& index_opt : indices) {
@@ -48,8 +48,8 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
   return result;
 }
 
-static C10_UNUSED void checkIndexTensorTypes(IOptTensorRefList indices) {
-  for (const auto tensor : indices) {
+static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices) {
+  for (const auto& tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
       if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
