@@ -8363,7 +8363,7 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
 
 
 def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
-    """Gradcheck wrapper for masked pointwise operations. Assumes that if either 
+    """Gradcheck wrapper for masked pointwise operations. Assumes that if either
     tensor is masked at a specific index, then the result will be maxed
     When mask is specified, replaces masked-out elements with zeros.
     Use for operations that produce non-finite masked-out elements,
@@ -15574,10 +15574,12 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         '_masked.logsumexp',
-        ref=reference_reduction_numpy(scipy.special.logsumexp) if TEST_SCIPY else _NOTHING,
         dtypes=all_types_and(torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         method_variant=None,
         supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
