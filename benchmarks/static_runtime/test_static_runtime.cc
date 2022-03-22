@@ -3050,3 +3050,11 @@ TEST(StaticRuntime, Select) {
   )IR";
   testStaticRuntime(src, {at::randn({2, 2}), 0, 1});
 }
+
+TEST(StaticRuntime, ReshapeAs) {
+  const auto src = R"JIT(
+    def forward(self, a, b):
+        return a.reshape_as(b).clone()
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
+}

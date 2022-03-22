@@ -1047,5 +1047,21 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::reshape_as,
+    aten_reshape_as,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto& other = pnode->Input(1).toTensor();
+        pnode->Output(0) = at::native::reshape(self, other.sizes());
+      };
+    });
+
 } // namespace jit
 } // namespace torch
