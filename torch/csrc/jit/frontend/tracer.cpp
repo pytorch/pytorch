@@ -716,21 +716,21 @@ void addInputs(
 void addInputs(
     Node* n,
     const char* name,
-    std::vector<at::Tensor> value,
-    bool allow_undefined) {
-  addInputs(n, name, at::ITensorList(value), allow_undefined);
-}
-void addInputs(
-    Node* n,
-    const char* name,
     at::ArrayRef<at::Tensor> value,
     bool allow_undefined) {
-  addInputs(n, name, at::ITensorList(value), allow_undefined);
+  addInputs(n, name, at::ITensorListRef(value), allow_undefined);
 }
 void addInputs(
     Node* n,
     const char* name,
-    at::ITensorList value,
+    std::vector<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorListRef(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;

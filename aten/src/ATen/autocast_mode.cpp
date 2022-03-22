@@ -776,7 +776,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
   // promote
   KERNEL_CPU(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
-  KERNEL_CPU(ADD_NS(cat), "cat", Tensor (const ITensorList &, int64_t), promote)
+  KERNEL_CPU(ADD_NS(cat), "cat", Tensor (const ITensorListRef &, int64_t), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy.dimname", Tensor (const Tensor &, at::Dimname, const Tensor &, const Tensor &), promote)
 
