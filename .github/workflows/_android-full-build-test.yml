@@ -12,6 +12,23 @@ on:
         type: string
         description: Name of the base docker image to build with.
 
+    secrets:
+      SONATYPE_NEXUS_USERNAME:
+        description: nexus user
+        required: true
+      SONATYPE_NEXUS_PASSWORD:
+        description: nexus pass
+        required: true
+      ANDROID_SIGN_KEY:
+        description: android key
+        required: true
+      ANDROID_SIGN_PASS:
+        description: android pass
+        required: true
+      SCRIBE_GRAPHQL_ACCESS_TOKEN:
+        description: token for writing to scribe/scuba
+        required: true
+
 env:
   IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
   IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
@@ -24,20 +41,22 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
-      - uses: ./.github/actions/pull-docker-image
+      - name: Pull docker image
+        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -55,45 +74,48 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Build arm_v7a
-        uses: ./.github/actions/build-android
+      - name: Build arm-v7a
+        uses: pytorch/pytorch/.github/actions/build-android@master
         with:
           arch: arm_v7a
+          arch-for-build-env: arm-v7a
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
           branch: ${{ steps.parse-ref.outputs.branch }}
 
-      - name: Build arm_v8a
-        uses: ./.github/actions/build-android
+      - name: Build arm-v8a
+        uses: pytorch/pytorch/.github/actions/build-android@master
         with:
           arch: arm_v8a
+          arch-for-build-env: arm-v8a
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build x86_32
-        uses: ./.github/actions/build-android
+        uses: pytorch/pytorch/.github/actions/build-android@master
         with:
           arch: x86_32
+          arch-for-build-env: x86_32
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
           branch: ${{ steps.parse-ref.outputs.branch }}
 
       - name: Build x86_64
-        uses: ./.github/actions/build-android
+        uses: pytorch/pytorch/.github/actions/build-android@master
         with:
           arch: x86_64
+          arch-for-build-env: x86_64
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           build-environment: ${{ inputs.build-environment }}
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
           branch: ${{ steps.parse-ref.outputs.branch }}
 
-      # TODO: pretty sure this is wrong, since DOCKER_IMAGE is no longer built on every commit
-      # https://github.com/pytorch/pytorch/issues/74073
       - name: Build final artifact
+        id: build-final
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -107,9 +129,10 @@ jobs:
 
           # x86_32
           export id_x86_32
-          id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}-x86_32")
+          id_x86_32=$(docker run -e GRADLE_OFFLINE=1 --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins "${DOCKER_IMAGE}")
 
           # Putting everything together
+          docker cp "${GITHUB_WORKSPACE}/." "${id_x86_32}:/var/lib/jenkins/workspace"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
@@ -135,6 +158,7 @@ jobs:
 
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
+          echo "::set-output name=id_x86_32::${id_x86_32}"
 
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
@@ -146,14 +170,15 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
-          ARTIFACTS: ${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz
           ANDROID_BUILD_TYPE: prebuilt
+          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
         run: |
           # The artifact file is created inside docker container, which contains the result binaries.
           # Now unpackage it into the project folder. The subsequent script will scan project folder
           # to locate result binaries and report their sizes.
           # If artifact file is not provided it assumes that the project folder has been mounted in
           # the docker during build and already contains the result binaries, so this step can be skipped.
+          export ARTIFACTS=${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz
           if [ -n "${ARTIFACTS}" ]; then
             tar xf "${ARTIFACTS}" -C "${GITHUB_WORKSPACE}"
             cd "${GITHUB_WORKSPACE}"
@@ -163,6 +188,26 @@ jobs:
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba "android" || exit 0
 
+      - name: Publish android snapshot
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        env:
+          SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+          ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
+          ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
+          ID_X86_32: ${{ steps.build-final.outputs.id_x86_32 }}
+        run: |
+          set -eux
+          # shellcheck disable=SC2154
+          (echo "cd workspace && ./.circleci/scripts/publish_android_snapshot.sh" | docker exec \
+            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot" \
+            -e SONATYPE_NEXUS_USERNAME \
+            -e SONATYPE_NEXUS_PASSWORD \
+            -e ANDROID_SIGN_KEY \
+            -e ANDROID_SIGN_PASS \
+            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
+            -u jenkins -i "${ID_X86_32}" bash) 2>&1
+
       - name: Store PyTorch Android Build Artifacts on S3
         uses: seemethere/upload-artifact-s3@v3
         with:
@@ -171,8 +216,10 @@ jobs:
           if-no-files-found: error
           path: build_android_artifacts/artifacts.tgz
 
-      - uses: ./.github/actions/chown-workspace
+      - name: Chown workspace
+        uses: pytorch/pytorch/.github/actions/chown-workspace@master
         if: always()
 
-      - uses: ./.github/actions/teardown-linux
+      - name: Teardown Linux
+        uses: pytorch/pytorch/.github/actions/teardown-linux@master
         if: always()
