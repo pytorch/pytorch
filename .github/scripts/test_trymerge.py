@@ -85,8 +85,8 @@ class TestGitHubPR(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_comments_pagination(self, mocked_gql: Any) -> None:
-        "Tests that PR with 100+ comments can be fetched"
-        pr = GitHubPR("pytorch", "pytorch", 68111)
+        "Tests that PR with 50+ comments can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 31093)
         self.assertGreater(len(pr.get_comments()), 50)
 
 

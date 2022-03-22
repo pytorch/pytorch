@@ -117,9 +117,6 @@ query ($owner: String!, $name: String!, $number: Int!) {
       }
     }
   }
-  rateLimit {
-    cost
-  }
 }
 """
 
@@ -137,9 +134,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         }
       }
     }
-  }
-  rateLimit {
-    cost
   }
 }
 """
@@ -185,9 +179,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
       }
     }
   }
-  rateLimit {
-    cost
-  }
 }
 """
 
@@ -197,7 +188,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
     pullRequest(number: $number) {
       comments(last: 100, before: $cursor) {
         nodes {
-          databaseId
           bodyText
           author {
             login
@@ -206,6 +196,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
           editor {
             login
           }
+          databaseId
         }
         pageInfo {
           startCursor
@@ -213,9 +204,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         }
       }
     }
-  }
-  rateLimit {
-    cost
   }
 }
 """
