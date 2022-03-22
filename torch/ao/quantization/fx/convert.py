@@ -533,11 +533,15 @@ def convert_custom_module(
         assert isinstance(prev_node, Node), \
             f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
         if prev_node.op == "call_method" and prev_node.target == "dequantize":
-            assert len(prev_node.users) == 1, "dequantize node before custom module is used "
-            "multiple times, this is currently not supported yet, but it can be "
-            "supported by duplicating the dequantize nodes in these cases"
-            prev_node.replace_all_uses_with(prev_node.args[0])
-            graph.erase_node(prev_node)
+            # change the connection for custom module, we'll change the input
+            # of custom module node to quantize node:
+            # Before: quantize - dequantize - custom - module
+            # After: quantize - custom - module
+            #              \ - dequantize
+            #                  (may be dangling depending on how many users it has before)
+            # if the custom module node is the only user of dequantize node, then the
+            # dequantize node will be remove in the dead code elimination pass
+            node.replace_input_with(prev_node, prev_node.args[0])
 
         # absorb the following observer into the module conversion
         activation_post_process = maybe_get_observer_for_node(node, modules)

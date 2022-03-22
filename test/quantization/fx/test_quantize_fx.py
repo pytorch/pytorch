@@ -2246,6 +2246,88 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertEqual(res, ref_res)
 
     @skipIfNoFBGEMM
+    def test_custom_module_class_input_has_multiple_users(self):
+        """ Tests that the flow still works when the input of custom module
+        has multiple users
+        """
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                observed = cls(float_module.linear)
+                observed.qconfig = float_module.qconfig
+                return observed
+
+        class StaticQuantCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.linear.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Linear.from_float(observed_module.linear))
+                return quantized
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.custom = CustomModule()
+
+            def forward(self, x0):
+                x1 = self.custom(x0)
+                x2 = self.linear(x0)
+                return x1 + x2
+
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                "static": {
+                    CustomModule: ObservedCustomModule
+                }
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                "static": {
+                    ObservedCustomModule: StaticQuantCustomModule
+                }
+            }
+        }
+        m = M().eval()
+        m = prepare_fx(
+            m,
+            {"": default_qconfig},
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        # make sure it works
+        m = convert_fx(
+            m,
+            convert_custom_config_dict=convert_custom_config_dict)
+        # make sure it runs
+        m(torch.randn(3, 3))
+
+    @skipIfNoFBGEMM
     def test_non_traceable_module(self):
         class NonTraceable(torch.nn.Module):
             def __init__(self):
