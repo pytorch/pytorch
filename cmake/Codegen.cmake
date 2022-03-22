@@ -210,6 +210,7 @@ if(INTERN_BUILD_ATEN_OPS)
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
