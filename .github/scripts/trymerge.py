@@ -477,9 +477,9 @@ class GitHubPR:
         if self.comments is None:
             # Fastpath - try searching in partial prefetched comments
             for node in self.info["comments"]["nodes"]:
-               comment = self._comment_from_node(node)
-               if comment.database_id == database_id:
-                   return comment
+                comment = self._comment_from_node(node)
+                if comment.database_id == database_id:
+                    return comment
 
         for comment in self.get_comments():
             if comment.database_id == database_id:
