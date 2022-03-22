@@ -645,8 +645,9 @@ inline static void svd_cusolver_gesvdaStridedBatched(
   });
 }
 
-// Check if gesvdj results converge. If not, return a vector that contains the non-converging batch index.
-// If the returned vector is empty, all the matrices converged.
+// Check convergence of gesvdj/gesvdjBatched/gesvdaStridedBatched results.
+// If not converged, return a vector that contains indices of the non-converging batches.
+// If the returned vector is empty, all the matrices are converged.
 // This function will cause a device-host sync.
 std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_converging_info) {
   at::Tensor infos_cpu = infos.cpu();
@@ -660,7 +661,12 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
     // From cusolver doc, if info < 0, the i-th function call parameter is wrong,
     // which means pytorch implementation of cusolver is wrong.
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info_for_batch_i >= 0);
+
+    // In our use case, gesvdj, gesvdjBatched, and gesvdaStridedBatched have the same notations for `info`.
     if (info_for_batch_i == non_converging_info) res.push_back(i);
+
+    // However, it is not the same for gesvd, though we don't use this function to check gesvd convergence either.
+    // If it's implemented some day in the future, this needs to be handled carefully.
   }
 
   return res;
@@ -704,12 +710,17 @@ void svd_cusolver(const Tensor& A,
   const auto n = A.size(-1);
   const auto k = std::min(m, n);
 
-  // heuristic for using `gesvdjBatched` over `gesvdj`
+  // heuristic for using `gesvdjBatched` or `gesvdaStridedBatched` over `gesvdj`
   // gesvdjBatched just works for square matrices
+  // gesvdaStridedBatched is preferred for "tall skinny" matrices
+  // gesvdj has good performance for general matrices, but may hard to converge for certain large size or ill-conditioned matrices,
+  //   svd then takes a fallbacks to gesvd, which will converge for nearly all matrices (unless input matrix contains nan/inf)
+  // Todo: add a `driver=` option to let power users select their preferred svd drivers (above three + gesvd)
+
   // Need to pass a copy of A, since A will be rewritten inside the function call
   if (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n)) {
     svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
-  } else if (batch_size > 1 && m > 0 && n > 0 && m >= 3 * n /* gesvda heuristics: tall and thin matrix */) {
+  } else if (batch_size > 1 && m > 0 && n > 0 && m >= 3 * n) {
     svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
   } else {
     svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
@@ -717,19 +728,19 @@ void svd_cusolver(const Tensor& A,
 
   // A device-host sync will be performed.
   // Todo: implement the svd_ex variant to not check result convergence, thus removing the device-host sync
-  const auto gesvdj_convergence_check = _check_gesvdj_convergence(info, k + 1);
+  const auto svd_non_converging_batches = _check_gesvdj_convergence(info, k + 1);
 
-  if (!gesvdj_convergence_check.empty()) {
+  if (!svd_non_converging_batches.empty()) {
     // fall back to gesvd path for those non-converging batches
 
     TORCH_WARN_ONCE("During the SVD execution, ",
-                    _format_non_converging_batches(gesvdj_convergence_check),
+                    _format_non_converging_batches(svd_non_converging_batches),
                     " failed to converge. ",
                     "A more accurate method will be used to calculate the SVD as a fallback.");
     // We'll copy A inside svd_cusolver_gesvd
     svd_cusolver_gesvd(A, U, S, V, info, full_matrices, compute_uv,
       /* calculate_all_batches = */ false,
-      /* batches = */ gesvdj_convergence_check
+      /* batches = */ svd_non_converging_batches
       );
   }
 }
