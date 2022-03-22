@@ -157,7 +157,7 @@ at::Tensor log1p_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sparse_constructor_values_backward(const at::Tensor& sparse_grad_out, const at::Tensor& indices);
 at::Tensor embedding_dense_double_backward(const at::Tensor & grad, const at::Tensor & indices, int64_t padding_idx);
-at::Tensor index_backward(at::Tensor zeros_like_self, at::IOptTensorRefList indices, const at::Tensor& grad);
+at::Tensor index_backward(at::Tensor zeros_like_self, at::IOptTensorListRef indices, const at::Tensor& grad);
 at::Tensor _cudnn_ctc_loss_backward(const at::Tensor& grad_out, const at::Tensor& loss, const at::Tensor& raw_grad, bool zero_infinity);
 at::Tensor elu_double_backward(const Tensor& grad, const Tensor& grad_output, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale, bool is_result, const Tensor& self_or_result);
 
@@ -454,8 +454,8 @@ Tensor _convolution_jvp(
 
 Tensor convolution_backward_jvp_grad_bias(const Tensor& grad_out_t, const Tensor& grad_bias);
 
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
-Tensor cat_jvp(at::ITensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);

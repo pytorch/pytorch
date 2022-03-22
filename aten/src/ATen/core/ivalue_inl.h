@@ -7,7 +7,7 @@
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
@@ -1994,14 +1994,14 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
 
 inline IValue::IValue(at::OptionalTensorRef v) : IValue() {
   if (v.has_value()) {
-    *this = IValue(std::move(*v));
+    *this = IValue(*v);
   }
 }
 
 template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
-inline IValue::IValue(c10::IList<T> v) : IValue() {
+inline IValue::IValue(c10::IListRef<T> v) : IValue() {
   constexpr bool boxed_type_constructs_ivalue =
-      std::is_constructible<IValue, typename c10::IList<T>::boxed_type>::value;
+      std::is_constructible<IValue, typename c10::IListRef<T>::boxed_type>::value;
   // First, we try to use the boxed value.
   // If we fail (either it's not in the boxed state, or its boxed type
   // can not construct an IValue), we fallback to copying the list.
