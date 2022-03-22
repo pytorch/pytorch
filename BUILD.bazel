@@ -35,7 +35,7 @@ py_binary(
     ],
 )
 
-aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -180,9 +180,10 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/tags.yaml"
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --tags-path $(location aten/src/ATen/native/tags.yaml)--nn-path aten/src",
     tools = [":generate_code"],
 )
 
