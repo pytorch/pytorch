@@ -50,6 +50,9 @@
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
+#   USE_STATIC_MKL
+#     Prefer to link with MKL statically - Unix only
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -936,6 +939,7 @@ if __name__ == '__main__':
                 'nn/*.pyi',
                 'nn/modules/*.pyi',
                 'nn/parallel/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',

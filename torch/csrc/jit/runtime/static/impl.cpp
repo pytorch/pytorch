@@ -164,7 +164,6 @@ void OptimizeGraph(
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
-    EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
 
