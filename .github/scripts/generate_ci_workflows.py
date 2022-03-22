@@ -6,6 +6,9 @@ from typing import Dict, Set, List, Iterable, Any
 
 import jinja2
 import json
+import yaml
+from yaml import Loader
+
 import os
 import sys
 from typing_extensions import Literal, TypedDict
@@ -171,6 +174,7 @@ class CIWorkflow:
     xcode_version: str = ''
     ios_arch: str = ''
     ios_platform: str = ''
+    branches: List[str] = field(default_factory=lambda: ['master', 'main', 'release/*'])
     test_jobs: Any = field(default_factory=list)
 
     enable_default_test: bool = True
@@ -185,6 +189,7 @@ class CIWorkflow:
     enable_xla_test: bool = False
     enable_noarch_test: bool = False
     enable_force_on_cpu_test: bool = False
+    enable_deploy_test: bool = False
 
     def __post_init__(self) -> None:
         if not self.build_generates_artifacts:
@@ -294,6 +299,8 @@ class CIWorkflow:
             configs["xla"] = {"num_shards": 1, "runner": self.test_runner_type}
         if self.enable_noarch_test:
             configs["noarch"] = {"num_shards": 1, "runner": self.test_runner_type}
+        if self.enable_deploy_test:
+            configs["deploy"] = {"num_shards": 1, "runner": self.test_runner_type}
 
         for name, config in configs.items():
             for shard in range(1, config["num_shards"] + 1):
@@ -522,6 +529,18 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="deploy-linux-xenial-cuda11.3-py3.7-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_DEFAULT},
+        ),
+        enable_default_test=False,
+        enable_distributed_test=False,
+        enable_deploy_test=True,
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -740,7 +759,7 @@ XLA_WORKFLOWS = [
         enable_default_test=False,
         on_pull_request=True,
         ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA},
         ),
     ),
 
@@ -774,6 +793,7 @@ ANDROID_WORKFLOWS = [
         arch="linux",
         build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        branches=['master', 'main', 'nightly', 'release/*'],
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
@@ -1156,16 +1176,9 @@ def main() -> None:
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
+
+    # not ported yet
     template_and_workflows = [
-        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("linux_ci_workflow.yml.j2"), XLA_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
-        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
-        (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
-        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
-        (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-        (jinja_env.get_template("android_ci_full_workflow.yml.j2"), ANDROID_WORKFLOWS),
-        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_SHORT_WORKFLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
         (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_SMOKE_WORKFLOWS),
         (jinja_env.get_template("windows_binary_build_workflow.yml.j2"), WINDOWS_BINARY_BUILD_WORKFLOWS),
@@ -1189,6 +1202,57 @@ def main() -> None:
             workflow.generate_workflow_file(workflow_template=template)
             ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
     ciflow_ruleset.generate_json()
+
+    # check ported workflows for correctness
+    ported_workflows = LINUX_WORKFLOWS + \
+        XLA_WORKFLOWS + \
+        WINDOWS_WORKFLOWS + \
+        BAZEL_WORKFLOWS + \
+        IOS_WORKFLOWS + \
+        MACOS_WORKFLOWS + \
+        ANDROID_WORKFLOWS + \
+        ANDROID_SHORT_WORKFLOWS
+
+    ciflow_ruleset = CIFlowRuleset()
+    for workflow in ported_workflows:  # type: ignore[assignment]
+        ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+
+
+    # check new pull workflow matches ciflow/default
+    with open(f"{GITHUB_DIR}/workflows/pull.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_pull = set([i["name"] for i in y["jobs"].values()])
+
+    # binary builds are erroneously marked as ciflow/default
+    old_pull_ex_binary = set([i for i in ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT] if "binary" not in i])
+    print(new_pull - old_pull_ex_binary)
+    print(old_pull_ex_binary - new_pull)
+    assert new_pull == old_pull_ex_binary
+
+    # check new trunk workflow matches ciflow/trunk
+    with open(f"{GITHUB_DIR}/workflows/trunk.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_trunk = set([i["name"] for i in y["jobs"].values()])
+    old_trunk = ciflow_ruleset.label_rules[LABEL_CIFLOW_TRUNK] - ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT]
+
+    # docker builds are erroneously marked ciflow/trunk
+    old_trunk = old_trunk - {"docker-builds"}
+    assert new_trunk == old_trunk
+
+    with open(f"{GITHUB_DIR}/workflows/periodic.yml") as f:
+        y = yaml.load(f, Loader=Loader)
+    new_periodic = set([i["name"] for i in y["jobs"].values()])
+    old_periodic_l = list(ciflow_ruleset.label_rules[LABEL_CIFLOW_SCHEDULED])
+
+    # strip "periodic-" from beginning, since we removed those as part of migration.
+    for i, job in enumerate(old_periodic_l):
+        if job.startswith("periodic-"):
+            old_periodic_l[i] = job[len("periodic-"):]
+    old_periodic = set(old_periodic_l)
+    # this is moved to nightly
+    old_periodic = old_periodic - {"linux-docs-push"}
+
+    assert new_periodic == old_periodic
 
 
 if __name__ == "__main__":
