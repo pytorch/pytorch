@@ -606,6 +606,41 @@ static inline bool linalg_solve_is_vector_rhs(const Tensor& input, const Tensor&
   return vector_case;
 }
 
+/*
+  Computes linear indices for a tensor with original_shape to access its elements like it was a materialized broadcast tensor.
+*/
+static inline Tensor get_linear_indices(int64_t numel, IntArrayRef original_shape, IntArrayRef broadcast_shape) {
+  TensorOptions options = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  return at::arange(numel, options).view(original_shape).broadcast_to(broadcast_shape).contiguous();
+}
+
+class BroadcastLinearIndices {
+ private:
+  Tensor linear_indices_;
+  bool is_broadcasting_;
+
+ public:
+  BroadcastLinearIndices(
+      int64_t numel,
+      IntArrayRef original_shape,
+      IntArrayRef broadcast_shape) {
+    // The assumption is that the broadcast_shape is a materialized broadcast
+    // shape of the original_shape. We need to compute the linear indices
+    // compatible with the original_shape to access the elements in the original
+    // tensor corresponding to the broadcast tensor.
+    is_broadcasting_ = !original_shape.equals(broadcast_shape);
+    if (is_broadcasting_) {
+      linear_indices_ =
+          get_linear_indices(numel, original_shape, broadcast_shape);
+    }
+  }
+  int64_t operator()(int64_t broadcast_linear_index) {
+    return is_broadcasting_
+        ? linear_indices_.data_ptr<int64_t>()[broadcast_linear_index]
+        : broadcast_linear_index;
+  }
+};
+
 static inline bool is_blas_compatible_column_major_order(const Tensor& input) {
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();

@@ -76,6 +76,7 @@ from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  
 from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
+from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -11046,6 +11047,26 @@ dedent """
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
             FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
+
+    @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_autodiff_complex(self):
+        def foo(x: torch.Tensor, y: torch.Tensor, W: torch.Tensor):
+            return torch.exp(torch.mm(torch.complex(x, y), W.cfloat()))
+
+        @torch.jit.script
+        def jitted_foo(x: torch.Tensor, y: torch.Tensor, W: torch.Tensor):
+            return torch.exp(torch.mm(torch.complex(x, y), W.cfloat()))
+
+        x = torch.randn(128, 16, dtype=torch.float32, device='cuda:0')
+        y = torch.randn(128, 16, dtype=torch.float32, device='cuda:0')
+        W = torch.randn(16, 1, dtype=torch.float32, device='cuda:0', requires_grad=True)
+        W.data /= 4
+
+        with enable_profiling_mode_for_profiling_tests():
+            for i in range(4):
+                self.assertTrue((foo(x, y, W).grad_fn is None) == (jitted_foo(x, y, W).grad_fn is None))
+
 
     def test_linear_grad(self):
         with enable_profiling_mode_for_profiling_tests():
