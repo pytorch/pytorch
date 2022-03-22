@@ -143,7 +143,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-std::ostream& operator<<(std::ostream& os, const SymInt& s) {
+std::ostream& operator<<(std::ostream& os, SymInt s) {
   os << "SymInt(" << s.data_ << ")";
   return os;
 }
