@@ -474,11 +474,6 @@ class TORCH_CUDA_CU_API TensorView : public Val {
 
   void setMaxProducer(unsigned int this_pos, bool decrease = false);
 
-  //! Create a new root domain and replacement TensorDomain.
-  //! If a new symbolic extent exists for the original iterDomain,
-  //! we create a new iterDomain.
-  void createReplacementDomain(const std::vector<Val*>& domain_extents);
-
  private:
   int normalizeAxisPos(int pos) const {
     if (pos < 0) {
