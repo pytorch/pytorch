@@ -51,10 +51,10 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: ./github/actions/checkout-pytorch
+        uses: ./.github/actions/checkout-pytorch
 
       - name: Download build artifacts
-        uses: ./github/actions/download-build-artifacts
+        uses: ./.github/actions/download-build-artifacts
         with:
           name: ${{ inputs.build-environment }}
           use-gha: true
@@ -81,7 +81,7 @@ jobs:
           .jenkins/pytorch/macos-test.sh
 
       - name: Upload test artifacts
-        uses: ./github/actions/upload-test-artifacts
+        uses: ./.github/actions/upload-test-artifacts
         if: always()
         with:
           use-gha: true

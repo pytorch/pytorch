@@ -33,12 +33,12 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: ./github/actions/checkout-pytorch
+        uses: ./.github/actions/checkout-pytorch
         with:
           no-sudo: true
 
       - name: Setup Windows
-        uses: ./github/actions/setup-win
+        uses: ./.github/actions/setup-win
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           cuda-version: ${{ inputs.cuda-version }}
@@ -83,7 +83,7 @@ jobs:
           path: C:\${{ github.run_id }}\build-results
 
       - name: Teardown Windows
-        uses: ./github/actions/teardown-win
+        uses: ./.github/actions/teardown-win
         if: always()
         timeout-minutes: 120
         with:

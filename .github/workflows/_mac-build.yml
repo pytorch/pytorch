@@ -53,7 +53,7 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: ./github/actions/checkout-pytorch
+        uses: ./.github/actions/checkout-pytorch
 
       - name: Set xcode version
         env:
