@@ -276,16 +276,21 @@ Tensor empty_sparse_csr(
     c10::optional<MemoryFormat> optional_memory_format) {
   check_size_nonnegative(size);
 
-  TORCH_CHECK(size.size() == 2, "torch.empty: Only 2D sparse CSR tensors are supported.");
+  TORCH_CHECK(size.size() >= 2, "torch.empty: Only batched sparse CSR matrices are supported, but got size ", size);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout == Layout::SparseCsr);
 
-  auto rows = size[0];
+  auto rows = size[size.size() - 2];
   int64_t nnz = 0;
 
+  auto crow_indices_size = DimVector(size.slice(0, size.size() - 2));
+  crow_indices_size.push_back(rows + 1);
+  auto col_indices_values_size = DimVector(size.slice(0, size.size() - 2));
+  col_indices_values_size.push_back(nnz);
+
   TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
-  auto crow_indices = at::empty({rows + 1}, options);
-  auto col_indices = at::empty({nnz}, options);
-  auto values = at::empty({nnz}, options.dtype(dtype));
+  auto crow_indices = at::empty(crow_indices_size, options);
+  auto col_indices = at::empty(col_indices_values_size, options);
+  auto values = at::empty(col_indices_values_size, options.dtype(dtype));
 
   return at::native::_sparse_csr_tensor_unsafe(
       crow_indices,

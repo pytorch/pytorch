@@ -225,15 +225,17 @@ class TestSparseCSR(TestCase):
     @dtypes(*get_all_dtypes())
     def test_empty(self, device, dtype):
         ns = [5, 2, 0]
-        for shape in itertools.product(ns, ns):
+        batch_shapes = [(), (2,), (2, 3)]
+        for m, n, b in itertools.product(ns, ns, batch_shapes):
+            shape = (*b, m, n)
             result = torch.empty(shape, dtype=dtype, device=device, layout=torch.sparse_csr)
             self.assertEqual(result.shape, shape)
             self.assertEqual(result.dtype, dtype)
             self.assertEqual(result.device, torch.device(device))
             self.assertEqual(result.layout, torch.sparse_csr)
-            self.assertEqual(result.crow_indices().shape, (shape[0] + 1,))
-            self.assertEqual(result.col_indices().shape, (0,))
-            self.assertEqual(result.values().shape, (0,))
+            self.assertEqual(result.crow_indices().shape, (*b, shape[-2] + 1,))
+            self.assertEqual(result.col_indices().shape, (*b, 0,))
+            self.assertEqual(result.values().shape, (*b, 0,))
             self.assertEqual(result._nnz(), 0)
             self.assertEqual(result.crow_indices().device, torch.device(device))
             self.assertEqual(result.col_indices().device, torch.device(device))
@@ -245,11 +247,8 @@ class TestSparseCSR(TestCase):
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_empty_errors(self, device, dtype):
-        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
+        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only batched sparse CSR matrices are supported, but got size"):
             torch.empty((5,), dtype=dtype, device=device, layout=torch.sparse_csr)
-
-        with self.assertRaisesRegex(RuntimeError, "torch.empty: Only 2D sparse CSR tensors are supported."):
-            torch.empty((2, 3, 4), dtype=dtype, device=device, layout=torch.sparse_csr)
 
     @skipMeta
     @dtypes(*get_all_dtypes())
