@@ -265,6 +265,10 @@ struct TORCH_API Module : public Object {
     return _ivalue() == y._ivalue();
   }
 
+  void set_delete_memory(std::shared_ptr<char> delete_mem) {
+    mem_to_delete_ = delete_mem;
+  }
+
  private:
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
@@ -286,6 +290,9 @@ struct TORCH_API Module : public Object {
       const c10::optional<at::Device>& device,
       const c10::optional<at::ScalarType>& dtype,
       bool non_blocking);
+
+  // Extra handle for the module to delete when itself is deleted
+  std::shared_ptr<char> mem_to_delete_;
 };
 
 // C++ equivalent api of `torch.jit.freeze`. See documentation there for

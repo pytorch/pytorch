@@ -363,7 +363,13 @@ void ConvertGraphToONNXProto(
     int opset_version) {
   RawDataExportMap export_map;
   bool val_use_external_data_format;
-  std::tie(model_proto, export_map, symbol_map, val_use_external_data_format) =
+  NodeNameMap node_names;
+  std::tie(
+      model_proto,
+      export_map,
+      symbol_map,
+      val_use_external_data_format,
+      node_names) =
       export_onnx(
           graph,
           {},
@@ -425,8 +431,9 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
     return onnx_constant_fold::runTorchBackendForOnnx(
         n, inputTensorValues, opset_version);
   } catch (const std::exception& ex) {
-    TORCH_WARN(
-        "Constant folding in symbolic shape inference fails: ", ex.what());
+    auto ex_str = std::string(ex.what());
+    ex_str = ex_str.substr(0, ex_str.find("\n"));
+    TORCH_WARN("Constant folding in symbolic shape inference fails: ", ex_str);
     return c10::nullopt;
   }
 }
