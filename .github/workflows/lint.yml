@@ -354,7 +354,7 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
-    runs-on: linux.2xlarge
+    runs-on: [self-hosted, linux.2xlarge]
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
@@ -511,6 +511,60 @@ jobs:
             false
           fi
 
+  test-tools:
+    name: Test tools
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          fetch-depth: 0 # deep clone, to allow us to use git log
+      - name: Install dependencies
+        # mypy and boto3 versions copied from
+        # .circleci/docker/common/install_conda.sh
+        run: |
+          set -eux
+          python3 -mpip install -r requirements.txt
+          python3 -mpip install boto3==1.16.34
+          make setup_lint
+      - name: Test tools
+        run: |
+          python3 -m unittest discover -vs tools/test -p 'test_*.py'
+          python3 -m unittest discover -vs .github/scripts -p 'test_*.py'
+
+  test_collect_env:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Test collect_env
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        with_torch: [with_torch, without_torch]
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          fetch-depth: 0 # deep clone, to allow us to use git log
+      - name: Install torch
+        if: matrix.with_torch == 'with_torch'
+        run: |
+          # Doesn't really matter what torch version, we just need ANY torch installed
+          pip install 'torch==1.*'
+      - name: Run collect_env.py
+        run: |
+          # All we need to see is that it passes
+          python3 torch/utils/collect_env.py
+
 concurrency:
-  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
