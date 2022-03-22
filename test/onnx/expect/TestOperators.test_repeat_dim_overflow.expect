@@ -45,7 +45,7 @@ graph {
     name: "Tile_3"
     op_type: "Tile"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 1
     data_type: 7

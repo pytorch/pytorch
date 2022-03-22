@@ -311,7 +311,7 @@ Tensor _bincount_cuda_template(
         weights.options().layout_opt(),
         weights.options().device_opt(),
         weights.options().pinned_memory_opt());
-    auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
+    cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, minvalue, maxvalue);
   } else {
     output = native::zeros(
@@ -320,7 +320,7 @@ Tensor _bincount_cuda_template(
         c10::nullopt /* layout */,
         DeviceType::CUDA,
         c10::nullopt /* pin_memory */);
-    auto ret = cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
+    cuda::CUDA_tensor_histogram<int64_t, input_t, false>(
         output, self, weights, nbins, minvalue, maxvalue);
   }
   return output;
@@ -374,7 +374,7 @@ Tensor _histc_cuda_template(
 #endif
   TORCH_CHECK(minvalue < maxvalue, "max must be larger than min");
 
-  auto ret = cuda::CUDA_tensor_histogram<input_t, input_t, false>(
+  cuda::CUDA_tensor_histogram<input_t, input_t, false>(
     output, self, Tensor(), nbins, minvalue, maxvalue);
   return output;
 }

@@ -292,5 +292,15 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   return c10::nullopt;
 }
 
+void RegisterShapeComputeGraphForSchema(
+    const FunctionSchema& schema,
+    std::shared_ptr<Graph> g) {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+  cached_schema_to_graph[&schema] = g;
+}
+
 } // namespace jit
 } // namespace torch

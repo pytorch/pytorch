@@ -63,6 +63,7 @@ from torch._six import string_classes
 from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.xnnpack
 from enum import Enum
 from statistics import mean
 import functools
@@ -978,6 +979,14 @@ def _test_function(fn, device):
         return fn(self, device)
     return run_test_function
 
+def skipIfNoXNNPACK(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.backends.xnnpack.enabled:
+            raise unittest.SkipTest('XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNoLapack(fn):
     @wraps(fn)
@@ -1570,15 +1579,6 @@ class TensorOrArrayPair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    # TODO: As discussed in https://github.com/pytorch/pytorch/issues/68590#issuecomment-975333883,
-    #  this relaxation should only be temporary and this overwrite should be removed completely in the future.
-    def _equalize_attributes(self, actual, expected):
-        actual, expected = super()._equalize_attributes(actual, expected)
-        if not actual.is_sparse:
-            return actual, expected
-
-        return actual.coalesce(), expected.coalesce()
-
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
@@ -2033,7 +2033,7 @@ class TestCase(expecttest.TestCase):
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        self.assertEqual(actual, expected, exact_device=False)
+        self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -2133,7 +2133,7 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
+                torch.storage._TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,

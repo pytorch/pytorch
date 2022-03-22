@@ -3,12 +3,10 @@ import warnings
 from collections import deque
 from typing import Any, Callable, Iterator, List, Optional, Set, Sized, Tuple, TypeVar, Deque
 
-from torch.utils.data import IterDataPipe, functional_datapipe
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
-
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
+from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -16,11 +14,19 @@ T_co = TypeVar('T_co', covariant=True)
 @functional_datapipe('concat')
 class ConcaterIterDataPipe(IterDataPipe):
     r"""
-    Concatenate multiple Iterable DataPipes (functional name: ``concat``). The resulting DataPipe will
+    Concatenates multiple Iterable DataPipes (functional name: ``concat``). The resulting DataPipe will
     yield all the elements from the first input DataPipe, before yielding from the subsequent ones.
 
     Args:
         datapipes: Iterable DataPipes being concatenated
+
+    Example:
+        >>> import random
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp1 = IterableWrapper(range(3))
+        >>> dp2 = IterableWrapper(range(5))
+        >>> list(dp1.concat(dp2))
+        [0, 1, 2, 0, 1, 2, 3, 4]
     """
     datapipes: Tuple[IterDataPipe]
     length: Optional[int]
@@ -53,7 +59,7 @@ class ConcaterIterDataPipe(IterDataPipe):
 @functional_datapipe('fork')
 class ForkerIterDataPipe(IterDataPipe):
     r"""
-    Create multiple instances of the same Iterable DataPipe (functional name: ``fork``).
+    Creates multiple instances of the same Iterable DataPipe (functional name: ``fork``).
 
     Args:
         datapipe: Iterable DataPipe being copied
@@ -61,6 +67,15 @@ class ForkerIterDataPipe(IterDataPipe):
         buffer_size: this restricts how far ahead the leading child DataPipe
            can read relative to the slowest child DataPipe.
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> source_dp = IterableWrapper(range(5))
+        >>> dp1, dp2 = source_dp.fork(num_instances=2)
+        >>> list(dp1)
+        [0, 1, 2, 3, 4]
+        >>> list(dp2)
+        [0, 1, 2, 3, 4]
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
         if num_instances < 1:
@@ -140,6 +155,31 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.leading_ptr = 0
         self.end_ptr = None
 
+    def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
+
+        state = (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+        )
+        return state
+
+    def __setstate__(self, state):
+        (
+            self.main_datapipe,
+            self.num_instances,
+            self.buffer_size,
+        ) = state
+        self._datapipe_iterator = None
+        self.buffer = deque()
+        self.child_pointers = [0] * self.num_instances
+        self.slowest_ptr = 0
+        self.leading_ptr = 0
+        self.end_ptr = None
+
+
 class _ChildDataPipe(IterDataPipe):
     r"""
     Iterable Datapipe that is a child of a main DataPipe. The instance of this class
@@ -176,7 +216,7 @@ class _ChildDataPipe(IterDataPipe):
 @functional_datapipe('demux')
 class DemultiplexerIterDataPipe(IterDataPipe):
     r"""
-    Split the input DataPipe into multiple child DataPipes, using the given
+    Splits the input DataPipe into multiple child DataPipes, using the given
     classification function (functional name: ``demux``). A list of the child DataPipes is returned from this operation.
 
     Args:
@@ -187,6 +227,25 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         buffer_size: this defines the maximum number of inputs that the buffer can hold across all child
             DataPipes while waiting for their values to be yielded.
             Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
+
+    Examples:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> def odd_or_even(n):
+        ...     return n % 2
+        >>> source_dp = IterableWrapper(range(5))
+        >>> dp1, dp2 = source_dp.demux(num_instances=2, classifier_fn=odd_or_even)
+        >>> list(dp1)
+        [0, 2, 4]
+        >>> list(dp2)
+        [1, 3]
+        >>> # It can also filter out any element that gets `None` from the `classifier_fn`
+        >>> def odd_or_even_no_zero(n):
+        ...     return n % 2 if n != 0 else None
+        >>> dp1, dp2 = source_dp.demux(num_instances=2, classifier_fn=odd_or_even_no_zero, drop_none=True)
+        >>> list(dp1)
+        [2, 4]
+        >>> list(dp2)
+        [1, 3]
     """
     def __new__(cls, datapipe: IterDataPipe, num_instances: int,
                 classifier_fn: Callable[[T_co], Optional[int]], drop_none: bool = False, buffer_size: int = 1000):
@@ -285,15 +344,12 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         if IterDataPipe.getstate_hook is not None:
             return IterDataPipe.getstate_hook(self)
 
-        if DILL_AVAILABLE:
-            dill_function = dill.dumps(self.classifier_fn)
-        else:
-            dill_function = self.classifier_fn
+        serialized_fn_with_method = serialize_fn(self.classifier_fn)
         state = (
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            dill_function,
+            serialized_fn_with_method,
             self.drop_none,
         )
         return state
@@ -303,13 +359,10 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
-            dill_function,
+            serialized_fn_with_method,
             self.drop_none,
         ) = state
-        if DILL_AVAILABLE:
-            self.classifier_fn = dill.loads(dill_function)  # type: ignore[assignment]
-        else:
-            self.classifier_fn = dill_function  # type: ignore[assignment]
+        self.classifier_fn = deserialize_fn(serialized_fn_with_method)
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
         self.child_buffers = [deque() for _ in range(self.num_instances)]
@@ -326,6 +379,12 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
     Args:
         datapipes: Iterable DataPipes that will take turn to yield their elements, until they are all exhausted
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> list(dp1.mux(dp2, dp3))
+        [0, 10, 20, 1, 11, 21, 2, 12, 22, 3, 13, 23, 4, 14, 24]
     """
     def __init__(self, *datapipes):
         self.datapipes = datapipes
@@ -363,6 +422,12 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     Args:
         *datapipes: Iterable DataPipes being aggregated
+
+    Example:
+        >>> from torchdata.datapipes.iter import IterableWrapper
+        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> list(dp1.zip(dp2, dp3))
+        [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
     datapipes: Tuple[IterDataPipe]
     length: Optional[int]

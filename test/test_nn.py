@@ -22,6 +22,7 @@ import torch
 torch.set_default_dtype(torch.double)
 
 from torch._six import inf, nan
+import torch.autograd.forward_ad as fwAD
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
@@ -137,6 +138,21 @@ class PackedSequenceTest(TestCase):
         self.assertRaises(
             RuntimeError,
             lambda: rnn_utils.pack_padded_sequence(b_a, [22, 25], enforce_sorted=True))
+
+    def test_pad_sequence_with_tensor_sequences(self):
+        seq_tuple_input = torch.nn.utils.rnn.pad_sequence(
+            (torch.tensor([[7, 6]]), torch.tensor([[-7, -1]]))
+        )
+        seq_tensor_input = torch.nn.utils.rnn.pad_sequence(
+            torch.tensor([[[7, 6]], [[-7, -1]]])
+        )
+        self.assertEqual(seq_tuple_input, seq_tensor_input)
+        self.assertEqual(seq_tuple_input.shape, torch.Size([1, 2, 2]))
+
+    def test_pad_sequence_with_non_iterable_sequences(self):
+        msg = r"Expected iterable for input sequences, but got arg of type"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.utils.rnn.pad_sequence(5)
 
     def test_total_length(self):
         padded, lengths = self._padded_sequence(torch.FloatTensor)
@@ -9187,48 +9203,6 @@ class TestNN(NNTestCase):
         y.mean().backward()
         self.assertEqual(x.grad, None)
 
-    @unittest.skipIf(
-        not TEST_NUMPY or not TEST_SCIPY, "Numpy or Scipy not found")
-    def test_gelu(self):
-        def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
-            numpy_dtype = {
-                torch.bfloat16: torch.float, torch.float: torch.float, torch.double: torch.double
-            }[dtype]
-            devices = ['cpu']
-            devices += ['cuda'] if TEST_CUDA else []
-
-            def _gelu_ref(X):
-                return X * stats.norm.cdf(X)
-
-            for d in devices:
-                if contiguous:
-                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
-                else:
-                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                res = F.gelu(X)
-                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-                if dtype == torch.float64:
-                    gradcheck(F.gelu, [X], eps=1e-4)
-
-        for n in range(1, 10):
-            for m in range(1, 10):
-                _test_gelu(n, m, torch.bfloat16, True, 1e-2, 0)
-                _test_gelu(n, m, torch.bfloat16, False, 1e-2, 0)
-                _test_gelu(n, m, torch.float32, True)
-                _test_gelu(n, m, torch.float32, False)
-                _test_gelu(n, m, torch.float64, True)
-                _test_gelu(n, m, torch.float64, False)
-
-        # Test multi threaded
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(4)
-        try:
-            _test_gelu(32, 32, torch.float32, False)
-        finally:
-            torch.set_num_threads(num_threads)
-
-
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5)
         input = torch.ones(5)
@@ -9602,6 +9576,29 @@ class TestNN(NNTestCase):
         for size in wrong_sizes:
             with self.assertRaises(RuntimeError):
                 F.batch_norm(input, running_mean, running_var, bias=Parameter(torch.rand(size)))
+
+    def test_batchnorm_raises_error_if_running_var_or_running_mean_have_forward_grad(self):
+        args = (
+            torch.randn(3, 2, 5),  # input
+            torch.randn(2),  # running_mean
+            torch.randn(2),  # running_var
+        )
+        kwargs = {'training': False, 'momentum': -1.2}
+        fn = partial(F.batch_norm, **kwargs)
+
+        for dual_indices in ((0,), (1,), (1, 2), (0, 1), (0, 1, 2),):
+            tangents = tuple(torch.rand_like(x) for x in args)
+
+            with fwAD.dual_level():
+                duals = [fwAD.make_dual(primal, tangent) if i in dual_indices else primal
+                         for i, (primal, tangent) in enumerate(zip(args, tangents))]
+                msg = "batch_norm is not differentiable wrt running_mean and running_var"
+                # 0 needs to have forward grad because otherwise we won't even run batch_norm_jvp
+                if (1 in dual_indices or 2 in dual_indices) and 0 in dual_indices:
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        fn(*duals)
+                else:
+                    fn(*duals)
 
     def test_batchnorm_buffer_update_when_stats_are_not_tracked(self):
         input_size = (32, 4)
@@ -10426,26 +10423,24 @@ class TestNN(NNTestCase):
                     W = random.randint(2, 8)
                     input = torch.randn(N, C, H, W, requires_grad=True)
                     grid = torch.randn(N, H, W, 2, requires_grad=True)
-                    self.assertTrue(gradcheck(
-                        lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
-                                                        align_corners=align_corners),
-                        (input, grid)))
-                    input = input.requires_grad_(False)
-                    self.assertTrue(gradcheck(
-                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                                   align_corners=align_corners),
-                        (grid,)))
 
                     for input_requires_grad in [False, True]:
+                        input.requires_grad_(input_requires_grad)
+                        self.assertTrue(gradcheck(
+                            lambda inp, grd: F.grid_sample(inp, grd, mode=mode, padding_mode=padding_mode,
+                                                           align_corners=align_corners),
+                            (input, grid)))
                         test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
                         if TEST_CUDNN:
                             with cudnn.flags(enabled=False):
                                 test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
     def test_grid_sample_3d(self):
-        def test(N, C, D, H, W, mode, padding_mode, align_corners):
+        # Backward pass of native C++ and CUDA kernels branch depending on whether input requires gradient,
+        # so we test both cases.
+        def test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad):
             def test_shape(N, C, ID, IH, IW, D, H, W, mode, padding_mode, align_corners):
-                input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_()
+                input_cpu = torch.randn(C, N, ID, IH, IW).transpose(0, 1).requires_grad_(input_requires_grad)
                 grid_cpu = torch.randn(D, N, H, W, 3).transpose(0, 1).requires_grad_()
                 out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                         align_corners=align_corners)
@@ -10455,24 +10450,25 @@ class TestNN(NNTestCase):
                 out_cpu.backward(gradients)
 
                 if TEST_CUDA:
-                    input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
+                    input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_(input_requires_grad)
                     grid_cuda = grid_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
                     out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                              align_corners=align_corners)
                     self.assertEqual(out_cpu, out_cuda)
 
                     out_cuda.backward(gradients.cuda())
-                    self.assertEqual(input_cpu.grad, input_cuda.grad)
+                    if input_requires_grad:
+                        self.assertEqual(input_cpu.grad, input_cuda.grad)
                     self.assertEqual(grid_cpu.grad, grid_cuda.grad, atol=5e-5, rtol=0)
 
                     # check that zero-dimensional input strides don't error out
                     base_input = torch.randn(N, C, 1, IH, IW)
-                    input_cpu = base_input.expand_as(input_cuda).requires_grad_()
+                    input_cpu = base_input.expand_as(input_cuda).requires_grad_(input_requires_grad)
                     grid_cpu = torch.randn(N, D, H, W, 3, requires_grad=True)
                     out_cpu = F.grid_sample(input_cpu, grid_cpu, mode=mode, padding_mode=padding_mode,
                                             align_corners=align_corners)
 
-                    input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_()
+                    input_cuda = base_input.cuda().expand_as(input_cuda).requires_grad_(input_requires_grad)
                     grid_cuda = grid_cpu.detach().cuda().requires_grad_()
                     out_cuda = F.grid_sample(input_cuda, grid_cuda, mode=mode, padding_mode=padding_mode,
                                              align_corners=align_corners)
@@ -10558,8 +10554,14 @@ class TestNN(NNTestCase):
                         lambda inp, grid: F.grid_sample(inp, grid, mode=mode, padding_mode=padding_mode,
                                                         align_corners=align_corners),
                         (input, grid)))
+                    input = input.requires_grad_(False)
+                    self.assertTrue(gradcheck(
+                        lambda grid: F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
+                                                   align_corners=align_corners),
+                        (grid,)))
 
-                    test(N, C, D, H, W, mode, padding_mode, align_corners)
+                    for input_requires_grad in [False, True]:
+                        test(N, C, D, H, W, mode, padding_mode, align_corners, input_requires_grad)
 
     def test_affine_grid(self):
         # test known input on CPU
@@ -12824,9 +12826,8 @@ class TestNNDeviceType(NNTestCase):
             (2, 6, 4, 2, 2): 4,
         }
         for shape, g in bad_shape_g.items():
-            gn = nn.GroupNorm(g, shape[1])
-            input = torch.empty(*shape, device=device, dtype=dtype).uniform_(0, 10)
-            self.assertRaises(RuntimeError, lambda: gn(input))
+            with self.assertRaises(ValueError):
+                gn = nn.GroupNorm(g, shape[1])
 
     def _test_GroupNorm_cuda_half(self):
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
@@ -14431,6 +14432,20 @@ class TestNNDeviceType(NNTestCase):
             mod(inp)
 
     @onlyNativeDeviceTypes
+    def test_FractionalMaxPool2d_zero_out_size(self, device):
+        mod = nn.FractionalMaxPool2d([2, 2], output_size=[0, 1])
+        inp = torch.rand([16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((16, 50, 0, 1), device=device))
+
+    @onlyNativeDeviceTypes
+    def test_FractionalMaxPool3d_zero_out_size(self, device):
+        mod = nn.FractionalMaxPool3d([3, 2, 2], output_size=[0, 1, 1])
+        inp = torch.rand([16, 50, 32, 32], device=device)
+        out = mod(inp)
+        self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
+
+    @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
         unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
@@ -14733,6 +14748,21 @@ class TestNNDeviceType(NNTestCase):
 
         with self.assertRaises(RuntimeError):
             torch.nn.functional.one_hot(torch.tensor([3, 4, 1, 0], device=device), -2)
+
+    def test_nn_empty(self, device):
+        # One off tests to ensure scalars from nn.yaml are properly applied
+        def verify_scalars(input, output):
+            self.assertEqual(input.shape, output.shape)
+            self.assertEqual(0, output.numel())
+
+        for input_shape in [(0), (0, 2)]:
+            for module in [torch.nn.ELU, torch.nn.Hardtanh, torch.nn.LeakyReLU, torch.nn.LogSigmoid,
+                           torch.nn.RReLU, torch.nn.Softshrink, torch.nn.Softplus, torch.nn.Sigmoid,
+                           torch.nn.Tanh]:
+                input = torch.randn(input_shape, device=device, requires_grad=True)
+                m = module()
+                output = m(input)
+                verify_scalars(input, output)
 
     def test_nn_scalars(self, device):
         # One off tests to ensure scalars from nn.yaml are properly applied
@@ -16454,7 +16484,6 @@ class TestNNDeviceType(NNTestCase):
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == 'cuda' else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
-        conv.weight = torch.nn.Parameter(torch.randn(2, 2, 8, 8, device=device, dtype=dtype) / 64)
         input_large = torch.randn(4097, 2, 512, 512, dtype=dtype, device=device)
         # forward
         ret = conv(input_large)
@@ -17546,13 +17575,11 @@ class TestNNDeviceType(NNTestCase):
             )
         self.assertEqual(output_non_contig, output_contig)
 
-
     @onlyCUDA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
         self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
         self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
-
 
     @onlyCUDA
     @dtypes(torch.half, torch.float, torch.double)

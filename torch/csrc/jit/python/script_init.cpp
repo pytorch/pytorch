@@ -42,7 +42,6 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -2211,10 +2210,6 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-  m.def(
-      "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });

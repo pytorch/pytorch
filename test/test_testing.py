@@ -40,7 +40,7 @@ class TestTesting(TestCase):
             (0, S),
             (S, 0)]
         for test_size in test_sizes:
-            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
             a_n = a.cpu().numpy()
             msg = f'size: {test_size}'
             self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
@@ -255,7 +255,7 @@ class TestTesting(TestCase):
         def check(size, low, high, requires_grad, noncontiguous):
             if dtype not in [torch.float, torch.cfloat]:
                 requires_grad = False
-            t = make_tensor(size, device, dtype, low=low, high=high,
+            t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
@@ -403,7 +403,7 @@ if __name__ == '__main__':
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
-            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op.op, op.sample_inputs_func, self.device_type)
+            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
             dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypesIfCPU
@@ -574,11 +574,10 @@ class TestAssertClose(TestCase):
 
     def test_meta(self):
         actual = torch.empty((2, 2), device="meta")
-        expected = actual.clone()
+        expected = torch.empty((2, 2), device="meta")
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(NotImplementedError, "meta"):
-                fn()
+            fn()
 
     def test_mismatching_layout(self):
         strided = torch.empty((2, 2))

@@ -782,6 +782,7 @@ class TestProfiler(TestCase):
         if kineto_available():
             self._test_profiler_tracing(True)
 
+    @unittest.skip("Disable forward->backward link to workaround profiler crash")
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)

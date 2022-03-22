@@ -6,11 +6,13 @@
 import itertools
 import torch
 from typing import List, Any
+from functools import wraps
+import unittest
 
 from torch.testing._internal.common_utils import \
-    (TestCase, suppress_warnings)
+    (TestCase, suppress_warnings, _TestParametrizer)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db,)
+    (op_db, SampleInput)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyNativeDeviceTypes)
 
@@ -163,9 +165,109 @@ reference_functions = dict(
 
 masked_ops = [op for op in op_db if op.name.startswith('_masked.')]
 masked_ops_with_references = [op for op in masked_ops if op.name.rsplit('.', 1)[-1] in reference_functions]
+masked_ops_with_non_strided_support = [op for op in masked_ops if op.supports_sparse or op.supports_sparse_csr]
+
+
+def _tensor_to_strided(obj):
+    # after gh-59958 is resolved, replace the usage of this function
+    # with torch.Tensor.to_dense
+    if torch.is_tensor(obj):
+        if obj.layout == torch.strided:
+            return obj
+        return obj.to_dense()
+    return obj
+
+
+def to_strided(obj):
+    """Convert the tensor content of object to strided tensor content.
+    """
+    return torch.utils._pytree.tree_map(_tensor_to_strided, obj)
+
+
+def to_sparse_coo(obj):
+    """Convert the tensor content of object to sparse coo tensor content.
+    """
+    return torch.utils._pytree.tree_map(torch.Tensor.to_sparse, obj)
+
+
+def to_sparse_csr(obj):
+    """Convert the tensor content of object to sparse csr tensor content.
+    """
+    return torch.utils._pytree.tree_map(torch.Tensor.to_sparse_csr, obj)
+
+
+class mask_layouts(_TestParametrizer):
+    """Decorator class for parametrization of test function with an input
+    layout argument and an extra argument of sample inputs generator.
+    The sample_inputs generator provides samples with all supported
+    layouts for the mask argument.
+    """
+    def _parametrize_test(self, test, generic_cls, device_cls):
+
+        @wraps(test)
+        def wrap(self, layout, device, dtype, op):
+            layout_name = str(layout).lstrip('torch.')
+            if layout == torch.strided:
+                # strided layouts are always supported
+                sample_inputs_func = op.sample_inputs
+            elif layout == torch.sparse_coo:
+                if not op.supports_sparse:
+                    raise unittest.SkipTest(f"{op.name} does not support inputs with {layout_name} layout")
+                sample_inputs_func = op.sample_inputs_sparse_coo
+            elif layout == torch.sparse_csr:
+                if not op.supports_sparse_csr:
+                    raise unittest.SkipTest(f"{op.name} does not support inputs with {layout_name} layout")
+                sample_inputs_func = op.sample_inputs_sparse_csr
+            else:
+                raise NotImplementedError(f'{layout}')
+
+            def sample_inputs_generator():
+                for sample_input in sample_inputs_func(device, dtype):
+                    mask = sample_input.kwargs.get('mask')
+                    if mask is None:
+                        yield sample_input
+                    else:
+                        if layout == sample_input.input.layout:
+                            yield sample_input
+                        if layout != torch.strided:
+                            sample_input_kwargs = sample_input.kwargs.copy()
+                            sample_input_kwargs.update(mask=mask.to_dense())
+                            yield SampleInput(sample_input.input.clone(),
+                                              args=sample_input.args,
+                                              kwargs=sample_input_kwargs)
+                        if layout != torch.sparse_coo and op.supports_sparse:
+                            sample_input_kwargs = sample_input.kwargs.copy()
+                            if mask.layout == torch.sparse_csr:
+                                # TODO: remove this if-block when sparse csr supports to_sparse
+                                mask = torch.sparse_coo_tensor(
+                                    torch._convert_indices_from_csr_to_coo(mask.crow_indices(), mask.col_indices()),
+                                    mask.values(), mask.shape)._coalesced_(True)
+                                sample_input_kwargs.update(mask=mask)
+                            else:
+                                sample_input_kwargs.update(mask=mask.to_sparse())
+                            yield SampleInput(sample_input.input.clone(),
+                                              args=sample_input.args,
+                                              kwargs=sample_input_kwargs)
+                        if layout != torch.sparse_csr and op.supports_sparse_csr and sample_input.input.ndim == 2:
+                            sample_input_kwargs = sample_input.kwargs.copy()
+                            sample_input_kwargs.update(mask=mask.to_sparse_csr())
+                            yield SampleInput(sample_input.input.clone(),
+                                              args=sample_input.args,
+                                              kwargs=sample_input_kwargs)
+
+            test(self, layout, device, dtype, op, sample_inputs_generator())
+
+        for layout in (torch.strided, torch.sparse_coo, torch.sparse_csr):
+            yield (wrap, str(layout).lstrip('torch.'), {'layout': layout})
 
 
 class TestMasked(TestCase):
+
+    def assertEqualMasked(self, actual, expected, mask):
+        strided = to_strided(actual)
+        strided = torch.where(mask, strided, strided.new_zeros([]))
+        expected = torch.where(mask, expected, expected.new_zeros([]))
+        self.assertEqual(strided, expected, exact_device=False)
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -182,9 +284,26 @@ class TestMasked(TestCase):
             actual = op.op(t_inp, *t_args, **t_kwargs)
             expected = ref_op(t_inp, *t_args, **t_kwargs)
             outmask = torch._masked._output_mask(op.op, t_inp, *t_args, **t_kwargs)
-            actual = torch.where(outmask, actual, actual.new_zeros([]))
-            expected = torch.where(outmask, expected, expected.new_zeros([]))
-            self.assertEqual(actual, expected, exact_device=False)
+            self.assertEqualMasked(actual, expected, outmask)
+
+    @mask_layouts()
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(masked_ops_with_non_strided_support)
+    def test_mask_layout(self, layout, device, dtype, op, sample_inputs):
+        for sample in sample_inputs:
+            t_inp, t_args, t_kwargs = sample.input, sample.args, sample.kwargs
+            actual = op.op(t_inp, *t_args, **t_kwargs)
+
+            assert actual.layout == layout
+
+            # check masked invariance:
+            #  op(inp, mask).to_dense() == op(inp.to_dense(), mask.to_dense()) at outmask
+            #
+            r_inp, r_args, r_kwargs = to_strided((t_inp, t_args, t_kwargs))
+            outmask = torch._masked._output_mask(op.op, r_inp, *r_args, **r_kwargs)
+            expected = op.op(r_inp, *r_args, **r_kwargs)
+            self.assertEqualMasked(actual, expected, outmask)
 
 
-instantiate_device_type_tests(TestMasked, globals())
+instantiate_device_type_tests(TestMasked, globals(), except_for='meta')
