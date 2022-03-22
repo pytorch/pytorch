@@ -649,6 +649,10 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
       remaining_bailout_depth_ = getInstantiatedBailoutDepth();
     }
   }
+  // TODO: instantiate simple executor when getProfilingMode() is false
+  if (!getProfilingMode()) {
+    remaining_bailout_depth_ = 0;
+  }
 
   // simple executor
   if (*remaining_bailout_depth_ == 0) {

@@ -3,6 +3,7 @@
   "label_rules": {
     "ciflow/all": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
+      "deploy-linux-xenial-cuda11.3-py3.7-gcc7",
       "docker-builds",
       "ios-12-5-1-arm64",
       "ios-12-5-1-arm64-coreml",
@@ -117,6 +118,7 @@
       "win-vs2019-cpu-py3"
     ],
     "ciflow/cuda": [
+      "deploy-linux-xenial-cuda11.3-py3.7-gcc7",
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -130,6 +132,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
+      "deploy-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-binary-conda",
       "linux-binary-libtorch-cxx11-abi",
       "linux-binary-libtorch-pre-cxx11",
@@ -182,6 +185,7 @@
     ],
     "ciflow/linux": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
+      "deploy-linux-xenial-cuda11.3-py3.7-gcc7",
       "libtorch-linux-xenial-cuda10.2-py3.7-gcc7",
       "libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
       "linux-bionic-cuda10.2-py3.9-gcc7",
@@ -262,6 +266,7 @@
     ],
     "ciflow/trunk": [
       "caffe2-linux-xenial-py3.7-gcc5.4",
+      "deploy-linux-xenial-cuda11.3-py3.7-gcc7",
       "docker-builds",
       "ios-12-5-1-x86-64",
       "ios-12-5-1-x86-64-coreml",
