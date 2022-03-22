@@ -335,6 +335,7 @@ all_generated_ops:
 - aten::leaky_relu
 - aten::leaky_relu_
 - aten::len.Dict_int
+- aten::len.Dict_str
 - aten::len.Tensor
 - aten::len.str
 - aten::len.t
@@ -512,6 +513,7 @@ all_generated_ops:
 - aten::resize_as_
 - aten::resolve_conj
 - aten::resolve_neg
+- aten::reverse.t
 - aten::rnn_tanh.input
 - aten::rnn_tanh_cell
 - aten::roll
@@ -522,6 +524,7 @@ all_generated_ops:
 - aten::rsqrt
 - aten::rstrip
 - aten::scatter.src
+- aten::scatter_.src
 - aten::scatter_add
 - aten::scatter_add_
 - aten::searchsorted.Tensor
@@ -953,8 +956,10 @@ covered_ops:
 - aten::resize_as_
 - aten::resolve_conj
 - aten::resolve_neg
+- aten::reverse.t
 - aten::round.Scalar
 - aten::rstrip
+- aten::scatter_.src
 - aten::scatter_add_
 - aten::select.int
 - aten::selu
@@ -1074,9 +1079,7 @@ uncovered_ops:
 - aten::nll_loss
 - aten::nll_loss2d
 - aten::quantized_lstm.data
-- aten::reverse.t
 - aten::rsub.Scalar
-- aten::scatter_.src
 - aten::sparse_coo_tensor.indices
 - aten::sparse_resize_and_clear_
 - aten::to.prim_dtype

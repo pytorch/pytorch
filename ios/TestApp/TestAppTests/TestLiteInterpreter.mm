@@ -167,4 +167,8 @@
 - (void)testTorchScriptBuiltinQuantOps {
     [self runModel:@"torchscript_builtin_ops"];
 }
+
+- (void)testTorchScriptCollectionQuantOps {
+    [self runModel:@"torchscript_collection_ops"];
+}
 @end
