@@ -1,6 +1,6 @@
 from .api import (
-    shard_parameter,
     _shard_tensor,
     shard_module,
-    ShardedModuleSwapper
+    ShardedModuleSwapper,
+    shard_parameter,
 )

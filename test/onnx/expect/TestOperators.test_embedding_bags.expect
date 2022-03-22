@@ -27,6 +27,11 @@ graph {
       type: STRING
     }
     attribute {
+      name: "overload_name"
+      s: ""
+      type: STRING
+    }
+    attribute {
       name: "scale_grad_by_freq"
       i: 0
       type: INT

@@ -47,12 +47,32 @@ query ($owner: String!, $name: String!, $number: Int!) {
               name
             }
             oid
-            checkSuites(filterBy: {appId: 12274}, first: 1) {
+            checkSuites(first: 50) {
               nodes {
                 app {
+                  name
                   databaseId
                 }
+                workflowRun {
+                  workflow {
+                    name
+                  }
+                }
+                checkRuns(first: 10) {
+                  nodes {
+                    name
+                    conclusion
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
                 conclusion
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
               }
             }
           }
@@ -106,6 +126,50 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         pageInfo {
           endCursor
           hasNextPage
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 100, after: $cursor) {
+              nodes {
+                app {
+                  name
+                  databaseId
+                }
+                workflowRun {
+                  workflow {
+                    name
+                  }
+                }
+                checkRuns(first: 10) {
+                  nodes {
+                    name
+                    conclusion
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+                conclusion
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+            }
+          }
         }
       }
     }
@@ -195,6 +259,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
+        self.conclusions: Optional[Dict[str, str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -273,12 +338,41 @@ class GitHubPR:
         node = self.info["commits"]["nodes"][num]["commit"]["author"]
         return f"{node['name']} <{node['email']}>"
 
-    def get_check_suite_conclusions(self) -> Dict[int, str]:
-        last_commit = self.info["commits"]["nodes"][-1]["commit"]
-        rc = {}
-        for node in last_commit["checkSuites"]["nodes"]:
-            rc[int(node["app"]["databaseId"])] = node["conclusion"]
-        return rc
+
+    def get_checkrun_conclusions(self) -> Dict[str, str]:
+        """ Returns list of checkrun / conclusions """
+        if self.conclusions is not None:
+            return self.conclusions
+        orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
+        checksuites = orig_last_commit["checkSuites"]
+        conclusions = {}
+
+        def add_conclusions(nodes: List[Dict[str, Any]]) -> None:
+            for node in nodes:
+                workflow_run = node["workflowRun"]
+                checkruns = node["checkRuns"]
+                if workflow_run is not None:
+                    conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
+                    continue
+                if checkruns is not None:
+                    for checkrun_node in checkruns["nodes"]:
+                        conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
+
+        add_conclusions(checksuites["nodes"])
+        while bool(checksuites["pageInfo"]["hasNextPage"]):
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=checksuites["pageInfo"]["endCursor"])
+            info = rc["data"]["repository"]["pullRequest"]
+            last_commit = info["commits"]["nodes"][-1]["commit"]
+            if last_commit["oid"] != orig_last_commit["oid"]:
+                raise RuntimeError("Last commit changed on PR")
+            checksuites = last_commit["checkSuites"]
+            add_conclusions(checksuites["nodes"])
+        self.conclusions = conclusions
+        return conclusions
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
@@ -319,6 +413,19 @@ class GitHubPR:
     def get_comment_author_association(self, num: int = -1) -> str:
         return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
 
+    def get_diff_revision(self) -> Optional[str]:
+        rc = RE_DIFF_REV.search(self.get_body())
+        return rc.group(1) if rc is not None else None
+
+    def has_internal_changes(self) -> bool:
+        checkrun_name = "Meta Internal-Only Changes Check"
+        if self.get_diff_revision() is None:
+            return False
+        checks = self.get_checkrun_conclusions()
+        if checks is None or checkrun_name not in checks:
+            return False
+        return checks[checkrun_name] != "SUCCESS"
+
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
         approved_by = self.get_approved_by()
@@ -352,6 +459,8 @@ class GitHubPR:
     def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
+        if self.has_internal_changes():
+            raise RuntimeError("This PR must be landed via phabricator")
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -375,7 +484,7 @@ class MergeRule:
     name: str
     patterns: List[str]
     approved_by: List[str]
-    mandatory_app_id: Optional[int]
+    mandatory_checks_name: Optional[List[str]]
 
 
 def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
@@ -404,11 +513,17 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             print(f"Skipping rule {rule_name} due to no approvers overlap")
             continue
-        if rule.mandatory_app_id is not None:
-            cs_conslusions = pr.get_check_suite_conclusions()
-            mandatory_app_id = rule.mandatory_app_id
-            if mandatory_app_id not in cs_conslusions or cs_conslusions[mandatory_app_id] != "SUCCESS":
-                print(f"Skipping rule {rule_name} as mandatory app {mandatory_app_id} is not in {cs_conslusions}")
+        if rule.mandatory_checks_name is not None:
+            pass_checks = True
+            checks = pr.get_checkrun_conclusions()
+            for checkname in rule.mandatory_checks_name:
+                if checkname not in checks or checks[checkname] != "SUCCESS":
+                    if checkname not in checks:
+                        print(f"Skipping rule {rule_name} as mandatory check {checkname} is not in {checks.keys()}")
+                    else:
+                        print(f"Skipping rule {rule_name} as mandatory check {checkname} failed")
+                    pass_checks = False
+            if not pass_checks:
                 continue
         non_matching_files = []
         for fname in changed_files:
@@ -418,6 +533,8 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
             print(f"Skipping rule {rule_name} due to non-matching files: {non_matching_files}")
             continue
         print(f"Matched rule {rule_name} for {pr.pr_num}")
+        if pr.has_internal_changes():
+            raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 

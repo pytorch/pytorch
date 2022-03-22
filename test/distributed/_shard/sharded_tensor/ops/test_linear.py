@@ -5,15 +5,17 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard import shard_parameter
+from torch.distributed._shard import (
+    shard_parameter,
+    _collect_local_shard,
+    _reshard_output,
+)
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
     named_params_with_sharded_tensor,
 )
 from torch.distributed._shard.sharded_tensor import (
     empty,
-    _collect_local_shard,
-    _reshard_output,
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,

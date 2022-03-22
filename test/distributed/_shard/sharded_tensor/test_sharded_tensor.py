@@ -13,6 +13,8 @@ from torch.distributed._shard import (
     shard_parameter,
     sharded_tensor,
     _shard_tensor,
+    _collect_local_shard,
+    _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
     sharded_op_impl,
@@ -20,8 +22,6 @@ from torch.distributed._shard.sharded_tensor import (
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
-    _collect_local_shard,
-    _reshard_output,
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,

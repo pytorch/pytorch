@@ -11,10 +11,8 @@ from torch.distributed._shard.sharded_optim import (
 )
 from torch.distributed._shard import (
     shard_parameter,
-)
-from torch.distributed._shard.sharded_tensor import (
-    _collect_local_shard,
     _reshard_output,
+    _collect_local_shard
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -34,6 +32,7 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common 
     generate_chunk_sharding_specs_for_test,
     generate_local_weight_sharding_params_for_test,
 )
+from torch.testing._internal.distributed._shard.test_common import SimpleMegatronLM
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -44,19 +43,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
-    class SimpleMegatronLM(torch.nn.Module):
-        def __init__(self, linear_size, rank=None):
-            super().__init__()
-            self.fc1 = torch.nn.Linear(*linear_size[0])
-            self.gelu = torch.nn.GELU()
-            self.fc2 = torch.nn.Linear(*linear_size[1])
-            if rank:
-                self.fc1.cuda(rank)
-                self.fc2.cuda(rank)
-
-        def forward(self, inp):
-            return self.fc2(self.gelu(self.fc1(inp)))
-
     def _run_megatron_linear(self, spec, input_size, linear_size):
         def _weight_override(module_dst, module_src):
             module_dst.fc1.weight = clone_module_parameter(module_src.fc1, "weight")
@@ -88,10 +74,10 @@ class TestShardedTensorMegatronLinear(ShardedTensorTestBase):
 
         # Use same seed.
         torch.manual_seed(0)
-        local_megatron_lm = self.SimpleMegatronLM(linear_size, rank=self.rank).cuda(
+        local_megatron_lm = SimpleMegatronLM(linear_size, rank=self.rank).cuda(
             self.rank
         )
-        sharded_megatron_lm = self.SimpleMegatronLM(linear_size)
+        sharded_megatron_lm = SimpleMegatronLM(linear_size)
         _weight_override(sharded_megatron_lm, local_megatron_lm)
 
         # Shard the parameter. First col-wise sharding and then row-wise
