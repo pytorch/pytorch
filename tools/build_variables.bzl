@@ -607,7 +607,6 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     # when it is built in libtorch
     "torch/csrc/jit/mobile/debug_info.cpp",
     "torch/csrc/jit/mobile/function.cpp",
-    "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
@@ -624,7 +623,6 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_bytecode.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
-    "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
     "torch/csrc/utils/out_types.cpp",
