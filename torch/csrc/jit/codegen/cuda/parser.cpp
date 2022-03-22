@@ -577,6 +577,9 @@ class IrParser {
 
   // return nullptr if entry does not exist
   static const RegistrationEntry* lookupInRegistry(const Node* node) {
+    if (parser_skip_set_.count(node->kind()) != 0) {
+      return nullptr;
+    }
     // we need to use maybeSchema for nodes like prim::Constant, which doesn't
     // have a schema
     auto schema_ptr = node->maybeSchema();
@@ -598,6 +601,20 @@ class IrParser {
       }
     }
     return nullptr;
+  }
+
+  static bool querySkipSymbolSet(c10::Symbol symbol, bool flip) {
+    // no need to init registry here (unlike `lookupInSymbolSet`, as
+    // `parser_skip_set_` is not initialized via initialization
+    bool ret = parser_skip_set_.count(symbol) != 0;
+    if (flip) {
+      if (ret) {
+        parser_skip_set_.erase(symbol);
+      } else {
+        parser_skip_set_.insert(symbol);
+      }
+    }
+    return ret;
   }
 
   static void initRegistry() {
@@ -2688,6 +2705,7 @@ class IrParser {
   std::unordered_map<size_t, ValueHolder> value_map_;
 
   static std::unordered_set<Symbol> parser_symbol_set_;
+  static std::unordered_set<Symbol> parser_skip_set_;
 
   // parsing rule registry.
   static std::unordered_map<std::string, RegistrationEntry>
@@ -2701,6 +2719,7 @@ class IrParser {
   static bool init_registry_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
+std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
 std::unordered_map<std::string, IrParser::RegistrationEntry>
     IrParser::jit_operator_registry_; // NOLINT
 std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
@@ -2993,6 +3012,10 @@ bool isNodeParsible(const Node* node) {
 
 bool shouldProfileNode(const Node* node) {
   return IrParser::lookupInSymbolSet(node);
+}
+
+bool skipNodeKind(const std::string& symbol_str, bool flip) {
+  return IrParser::querySkipSymbolSet(c10::Symbol::fromQualString(symbol_str), flip);
 }
 
 bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
