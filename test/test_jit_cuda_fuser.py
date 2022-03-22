@@ -3683,7 +3683,7 @@ class TestCudaFuser(JitTestCase):
             self.assertFalse(torch._C._jit_set_nvfuser_skip_node_kind("aten::add", True))
 
             def fn_1(x):
-                t1 = x + 2.0 # change const value so we'll not reuse plan 
+                t1 = x + 2.0  # change const value so we'll not reuse plan
                 return t1.relu()
 
             fn_1_jit = torch.jit.script(fn_1)
@@ -3693,11 +3693,11 @@ class TestCudaFuser(JitTestCase):
             self.assertGraphContains(fn_1_jit.graph_for(x), FUSION_GUARD)
             self.assertGraphContainsExactly(fn_1_jit.graph_for(x), 'aten::add', 1)
 
-            # flips skip parse for `aten::add`, next fusion should fuse add node 
+            # flips skip parse for `aten::add`, next fusion should fuse add node
             self.assertTrue(torch._C._jit_set_nvfuser_skip_node_kind("aten::add", True))
 
             def fn_2(x):
-                t1 = x + 2.0 # change const value so we'll not reuse plan 
+                t1 = x + 2.0  # change const value so we'll not reuse plan
                 return t1.relu()
 
             fn_2_jit = torch.jit.script(fn_2)

@@ -3015,7 +3015,8 @@ bool shouldProfileNode(const Node* node) {
 }
 
 bool skipNodeKind(const std::string& symbol_str, bool flip) {
-  return IrParser::querySkipSymbolSet(c10::Symbol::fromQualString(symbol_str), flip);
+  return IrParser::querySkipSymbolSet(
+      c10::Symbol::fromQualString(symbol_str), flip);
 }
 
 bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
