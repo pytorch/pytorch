@@ -633,7 +633,7 @@ class NativeFunction:
     def is_view_op(self) -> bool:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
-        is_inplace_view = 'is_inplace_view' in self.tags
+        is_inplace_view = 'inplace_view' in self.tags
         is_wildcard_view = any(inp.annotation is not None and
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view

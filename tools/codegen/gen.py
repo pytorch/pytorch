@@ -161,7 +161,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
             rs.add(name)
     return rs
 
-@functools.cache
+@functools.lru_cache
 def parse_tags_yaml(path: str) -> Set[str]:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     with open(path, 'r') as f:
@@ -195,7 +195,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.func.name} is marked as a structured_delegate pointing to " \
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. " \
                 f"Consider adding 'structured=True' to the delegated operator"
-        if 'is_inplace_view' in f.tags:
+        if 'inplace_view' in f.tags:
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, \
