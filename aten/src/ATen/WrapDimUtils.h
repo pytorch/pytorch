@@ -4,7 +4,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/util/irange.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 
 namespace at {
 
@@ -75,8 +75,8 @@ static inline int64_t legacy_cat_wrap_dim(int64_t dim, const std::vector<std::ve
   return dim;
 }
 
-static inline int64_t legacy_cat_wrap_dim(int64_t dim, ITensorList tensors) {
-  for (auto& tensor : tensors) {
+static inline int64_t legacy_cat_wrap_dim(int64_t dim, const MaterializedITensorListRef& tensors) {
+  for (const Tensor& tensor : tensors) {
     if (tensor.dim() == 1 && tensor.sizes()[0] == 0) {
       continue;
     }

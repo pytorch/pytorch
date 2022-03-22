@@ -72,14 +72,14 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> unpack(at::ITensorList tl, const char *name, int pos) {
+std::vector<at::Tensor> unpack(at::ITensorListRef tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
-  for (const auto i : c10::irange(tl.size())) {
-    const auto &t = tl[i];
+  size_t i = 0;
+  for (const auto& t : tl) {
     if (!t.defined()) {
       continue;
     }
-    ret[i] = static_cast<const Variable&>(t);
+    ret[i++] = static_cast<const Variable&>(t);
   }
   return ret;
 }

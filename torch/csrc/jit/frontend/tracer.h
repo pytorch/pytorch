@@ -267,22 +267,22 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    ArrayRef<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     std::vector<at::Tensor> value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    at::ArrayRef<at::Tensor> value,
+    at::ITensorListRef value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    at::ITensorList value,
-    bool allow_undefined = false);
-TORCH_API void addInputs(
-    Node* n,
-    const char* name,
-    at::IOptTensorRefList value);
+    at::IOptTensorListRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,

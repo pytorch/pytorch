@@ -1782,7 +1782,7 @@ struct getTypePtr_<c10::List<T>> final {
   }
 };
 template <class T>
-struct getTypePtr_<c10::IList<T>> final {
+struct getTypePtr_<c10::IListRef<T>> final {
   static const auto& call() {
     static auto type = ListType::create(getTypePtr_<T>::call());
     return type;
