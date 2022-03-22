@@ -132,8 +132,8 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type in ('at::TensorList', 'const at::ITensorList &'):
-                # The functions taking TensorList or ITensorList handle everything internally
+            if arg.type in ('at::TensorList', 'const at::ITensorListRef &'):
+                # The functions taking TensorList or ITensorListRef handle everything internally
                 continue
             arg_name = arg.name
 

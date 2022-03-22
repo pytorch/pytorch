@@ -4160,7 +4160,7 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(Tensor zeros_like_self, at::IOptTensorRefList indices, const Tensor& grad) {
+Tensor index_backward(Tensor zeros_like_self, at::IOptTensorListRef indices, const Tensor& grad) {
   return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
           areAnyOptionalTensorSubclassLike(indices))
       ? zeros_like_self.index_put(indices, grad, true)
@@ -4689,18 +4689,19 @@ Tensor lu_unpack_backward(
   return res;
 }
 
-Tensor cat_jvp(at::ITensorList tensors, int64_t dim) {
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
 
+  auto materialized = tensors.materialize();
   auto any_defined = false;
-  for (const auto& t: tensors) {
+  for (const Tensor& t : materialized) {
     any_defined |= isFwGradDefined(t);
   }
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (const auto& t: tensors) {
+  for (const Tensor& t : materialized) {
       fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
     }
 
