@@ -57,12 +57,15 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   check_inputs(qa, qb);
 
   // cudnn expects tensors to be at least 3D. So we will append dummy dimensions if the input tensors are not at least 3D
-  std::vector<int64_t> new_sizes{qa.sizes().vec()};
-  while (new_sizes.size() < 3) {
-    new_sizes.emplace_back(1);
+  if (qa.dim() < 3) {
+    std::vector<int64_t> new_sizes{qa.sizes().vec()};
+    while (new_sizes.size() < 3) {
+      new_sizes.emplace_back(1);
+    }
+    qa = at::native::view(qa, new_sizes);
+    qb = at::native::view(qb, new_sizes);
   }
-  qa = at::native::view(qa, new_sizes);
-  qb = at::native::view(qb, new_sizes);
+
 
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   auto requantize_multiplier = qa.q_scale() * qb.q_scale() / output_scale;
