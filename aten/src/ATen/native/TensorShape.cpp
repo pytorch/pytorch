@@ -5,7 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
@@ -30,18 +30,20 @@
 
 namespace at {
 namespace meta {
-static void cat_check_no_zero_dim(ITensorList tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    auto& t = tensors[i];
+inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
+  size_t i = 0;
+  for (const Tensor& t : tensors) {
     TORCH_CHECK(
         t.dim() > 0,
         "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
+    i++;
   }
 }
 
-static c10::MemoryFormat cat_compute_output_memory_format(ITensorList inputs) {
+inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
   c10::optional<c10::MemoryFormat> format = c10::nullopt;
-  for (auto& t : inputs) {
+  auto it = inputs.begin();
+  for (const Tensor& t : inputs) {
     auto f = t.suggest_memory_format();
     if (f == c10::MemoryFormat::Contiguous) {
         return f;
@@ -54,24 +56,26 @@ static c10::MemoryFormat cat_compute_output_memory_format(ITensorList inputs) {
   return format.value();
 }
 
-TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
+TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
-  cat_check_no_zero_dim(tensors);
+  auto materialized = tensors.materialize();
+
+  cat_check_no_zero_dim(materialized);
   dim = at::legacy_cat_wrap_dim(dim, tensors);
 
   // Checking names before the actual dimensions.
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
 
   TORCH_CHECK(
-      tensors.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
+      materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
 
   // Look for the first valid tensor.
-  size_t valid = tensors.size();
-  for (const auto i : c10::irange(tensors.size())) {
-    if (!at::native::cat_should_skip_tensor(tensors[i])) {
+  size_t valid = materialized.size();
+  for (const auto i : c10::irange(materialized.size())) {
+    if (!at::native::cat_should_skip_tensor(materialized[i].get())) {
       valid = i;
       break;
     }
@@ -80,7 +84,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
   bool all_contiguous = true;
   bool all_same_dtype = true;
   bool all_same_sizes_and_stride = true;
-  auto memory_format = cat_compute_output_memory_format(tensors);
+  auto memory_format = cat_compute_output_memory_format(materialized);
 
   // Compute what the output dtype should be:
   const auto& result = maybe_get_output();
@@ -102,40 +106,40 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
   // Fallback 'set_output' parameters.
   // (in case we don't find a valid tensor)
   DimVector sizes {0};
-  TensorOptions options = tensors[0].options()
+  TensorOptions options = materialized[0].get().options()
       .dtype(out_dtype)
       .memory_format(memory_format);
 
   // If we found a valid tensor, check whether the input tensors
   // are compatible, i.e. we can execute `cat` on them.
-  bool found_valid_tensor = valid < tensors.size();
+  bool found_valid_tensor = valid < materialized.size();
   if (found_valid_tensor) {
     TORCH_CHECK(
-        dim <= tensors[valid].dim(), "torch.cat(): dimension ", dim, "out of range");
+        dim <= materialized[valid].get().dim(), "torch.cat(): dimension ", dim, "out of range");
 
     // Compute the output tensor size.
     // It should have the same shape as any other valid tensor,
     // except in the dimension 'dim'.
     size_t size_at_dim = 0;
-    for (const auto i : c10::irange(tensors.size())) {
-      const auto& t = tensors[i];
+    for (const auto i : c10::irange(materialized.size())) {
+      const Tensor& t = materialized[i];
       if (!at::native::cat_should_skip_tensor(t)) {
-        at::native::check_cat_shape_except_dim(tensors[valid], t, dim, i);
+        at::native::check_cat_shape_except_dim(materialized[valid], t, dim, i);
         size_at_dim += t.size(dim);
         all_contiguous = all_contiguous && t.is_contiguous(memory_format);
         all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
         all_same_sizes_and_stride = all_same_sizes_and_stride &&
-            t.sizes() == tensors[valid].sizes() &&
-            t.strides() == tensors[valid].strides();
+            t.sizes() == materialized[valid].get().sizes() &&
+            t.strides() == materialized[valid].get().strides();
       } else {
         all_contiguous = false;
       }
     }
 
     // Actually set the output.
-    sizes = tensors[valid].sizes().vec();
+    sizes = materialized[valid].get().sizes().vec();
     sizes[dim] = size_at_dim;
-    options = tensors[valid].options()
+    options = materialized[valid].get().options()
         .dtype(out_dtype)
         .memory_format(memory_format);
   }
@@ -144,7 +148,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
     at::assert_no_internal_overlap(result);
-    for (const auto& t : tensors) {
+    for (const Tensor& t : materialized) {
       at::assert_no_overlap(result, t);
     }
   }
@@ -303,7 +307,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 }
 
 TORCH_IMPL_FUNC(cat_out_cpu)
-(ITensorList tensors,
+(ITensorListRef tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -315,19 +319,21 @@ TORCH_IMPL_FUNC(cat_out_cpu)
     return;
   }
 
+  auto materialized = tensors.materialize();
+
   // fast path for single thread when both inputs and result are contiguous and not empty
   bool use_serial_kernel = result.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
-  ScalarType dtype = tensors[valid].scalar_type();
+  ScalarType dtype = materialized[valid].get().scalar_type();
   bool serial_dtype = (dtype == ScalarType::Double || dtype == ScalarType::Float || dtype == ScalarType::BFloat16);
   if (use_serial_kernel && all_contiguous && all_same_dtype && serial_dtype) {
-    cat_serial_stub(kCPU, result, tensors, dim);
+    cat_serial_stub(kCPU, result, materialized, dim);
     return;
   }
 
   int64_t offset = 0;
   if (all_same_sizes_and_stride && result.is_contiguous(memory_format) &&
       all_same_dtype) {
-    const auto& source_slice = tensors[valid];
+    const Tensor& source_slice = materialized[valid];
     auto slice_dim_size = source_slice.sizes()[dim];
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
     auto result_slice_data = result_slice.data_ptr();
@@ -341,7 +347,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       .enforce_safe_casting_to_output(true)
       .build();
 
-    for (auto const &tensor : tensors) {
+    for (const Tensor& tensor : materialized) {
       if (cat_should_skip_tensor(tensor)) {
         continue;
       }
@@ -353,7 +359,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       offset += slice_dim_size;
     }
   } else {
-    for (auto const &tensor: tensors) {
+    for (const Tensor& tensor: materialized) {
       if (cat_should_skip_tensor(tensor)) {
         continue;
       }
