@@ -52,7 +52,8 @@ jobs:
       COMPACT_JOB_NAME: ${{ inputs.build-environment }}
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Set xcode version
         env:
