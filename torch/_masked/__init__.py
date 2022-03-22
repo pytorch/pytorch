@@ -641,7 +641,7 @@ elements, have ``nan`` values.
         fill = input.new_full([], _reduction_identity('median', input))
         inmask = _input_mask(input, mask=mask)
         mask_input = torch.where(inmask, input, fill)
-        output = torch.nanmedian(mask_input, dim_, keepdim=keepdim).values
+        output = torch.nanmedian(mask_input, dim_, keepdim).values
         if is_float:
             return output
         elif not is_float and not torch.isnan(output).any():
