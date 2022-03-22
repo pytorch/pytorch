@@ -864,13 +864,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Whether a tensor is sparse CSR or not.
   bool is_sparse_csr() const {
     return (key_set_.has(DispatchKey::SparseCsrCPU) ||
-            key_set_.has(DispatchKey::SparseCsrCUDA)) && !key_set_.has(DispatchKey::CsrTranspose);
+            key_set_.has(DispatchKey::SparseCsrCUDA)) &&
+        !key_set_.has(DispatchKey::CsrTranspose);
   }
 
   // Whether a tensor is sparse CSC or not.
   bool is_sparse_csc() const {
     return (key_set_.has(DispatchKey::SparseCsrCPU) ||
-            key_set_.has(DispatchKey::SparseCsrCUDA)) && key_set_.has(DispatchKey::CsrTranspose);
+            key_set_.has(DispatchKey::SparseCsrCUDA)) &&
+        key_set_.has(DispatchKey::CsrTranspose);
   }
 
   bool is_quantized() const {

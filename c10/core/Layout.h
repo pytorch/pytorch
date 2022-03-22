@@ -6,7 +6,14 @@
 #include <ostream>
 
 namespace c10 {
-enum class Layout : int8_t { Strided, Sparse, SparseCsr, SparseCsc, Mkldnn, NumOptions };
+enum class Layout : int8_t {
+  Strided,
+  Sparse,
+  SparseCsr,
+  SparseCsc,
+  Mkldnn,
+  NumOptions
+};
 
 constexpr auto kStrided = Layout::Strided;
 constexpr auto kSparse = Layout::Sparse;
