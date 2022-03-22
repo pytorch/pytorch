@@ -5379,13 +5379,6 @@
   device_check: NoCheck
   device_guard: False
 
-# - func: _batch_dim(Tensor self) -> int
-#   variants: method
-#   dispatch:
-#     SparseCsrCPU, SparseCsrCUDA: _batch_dim_sparse_csr
-#   device_check: NoCheck
-#   device_guard: False
-
 # NOTE: [ coalesce autograd ]
 # coalesce returns self directly for already coalesced sparse tensors.
 # This means coalesce cannot have a derivative registered, otherwise it creates

@@ -15,7 +15,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-// #include <ATen/ops/_batch_dim_native.h>
 #include <ATen/ops/_nnz_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
@@ -247,12 +246,6 @@ Tensor sparse_csr_tensor(
   auto size = DimVector(IntArrayRef(col_indices.sizes().data(), col_indices.dim() - 1));
   size.push_back(crow_indices.size(-1) - 1);
   size.push_back(col_indices.max().item<int64_t>() + 1);
-  // if (col_indices.numel() > 0) {
-  //   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
-  //     size[0] = crow_indices.numel() - 1;
-  //     size[1] = col_indices.max().item<index_t>() + 1;
-  //   });
-  // }
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);
 
@@ -354,10 +347,6 @@ Tensor crow_indices_sparse_csr(const Tensor& self) {
 Tensor col_indices_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->col_indices().alias();
 }
-
-// int64_t _batch_dim_sparse_csr(const Tensor& self) {
-//   return get_sparse_csr_impl(self)->batch_dim();
-// }
 
 bool _is_same_size_as_sparse_csr(
     const SparseCsrTensor& self,
