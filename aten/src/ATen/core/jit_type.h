@@ -1237,6 +1237,10 @@ struct TORCH_API ComplexType : public NumberType {
   }
 };
 
+// We need to introduce `SymIntType` to represent the `SymInt` type
+// in function schemas e.g. `aten::narrow_copy(... SymInt length)
+// JIT types are tightly integrated into Dispatcher and function
+// schema handling
 struct SymIntType;
 using SymIntTypePtr = SingletonTypePtr<SymIntType>;
 struct TORCH_API SymIntType : public Type {

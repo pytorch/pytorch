@@ -6,7 +6,7 @@
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
-#include <ATen/core/symint.h>
+#include <ATen/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
