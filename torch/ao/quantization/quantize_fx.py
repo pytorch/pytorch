@@ -7,7 +7,7 @@ from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
-from .fx._convert_do_not_use import _convert_do_not_use as convert
+from .fx.convert import convert
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule
 from .fx.qconfig_utils import (
@@ -119,16 +119,11 @@ class ScopeContextManager(object):
 
 class QuantizationTracer(Tracer):
     def __init__(
-        self, skipped_module_names: List[str],
-        skipped_module_classes: List[Callable],
-        non_traceable_module_names: List[str] = list(),
-        non_traceable_module_classes: List[Callable] = list()
+        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
     ):
         super().__init__()
         self.skipped_module_names = skipped_module_names
         self.skipped_module_classes = skipped_module_classes
-        self.non_traceable_module_names = non_traceable_module_names
-        self.non_traceable_module_classes = non_traceable_module_classes
         # NB: initialized the module_type of top level module to None
         # we are assuming people won't configure the model with the type of top level
         # module here, since people can use "" for global config
@@ -139,22 +134,13 @@ class QuantizationTracer(Tracer):
         self.record_stack_traces = True
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
-        # children of untraceable modules need to be identified so that
-        # qconfigs are not propagated to them incorrectly later.
-        if (
-            module_qualified_name in self.non_traceable_module_names
-            or type(m) in self.non_traceable_module_classes
-        ):
-            for name, child in m.named_children():
-                if not hasattr(child, "qconfig"):
-                    child.qconfig = None  # type: ignore[assignment]
         return (
             (
                 m.__module__.startswith("torch.nn")
                 and not isinstance(m, torch.nn.Sequential)
             )
-            or module_qualified_name in self.skipped_module_names + self.non_traceable_module_names
-            or type(m) in self.skipped_module_classes + self.non_traceable_module_classes
+            or module_qualified_name in self.skipped_module_names
+            or type(m) in self.skipped_module_classes
             or isinstance(m, _FusedModule)
         )
 
@@ -217,14 +203,12 @@ forward graph of the parent module,
     check_is_valid_prepare_custom_config_dict(prepare_custom_config_dict)
     check_is_valid_qconfig_dict(equalization_qconfig_dict)
 
-    non_traceable_module_names = prepare_custom_config_dict.get(
+    skipped_module_names = prepare_custom_config_dict.get(
         "non_traceable_module_name", []
     )
-    non_traceable_classes = prepare_custom_config_dict.get(
+    skipped_module_classes = prepare_custom_config_dict.get(
         "non_traceable_module_class", []
     )
-    skipped_module_names = []
-    skipped_module_classes = []
 
     # swap FloatFunctional with FXFloatFunctional
     _swap_ff_with_fxff(model)
@@ -249,7 +233,7 @@ forward graph of the parent module,
         skipped_module_classes += float_custom_module_classes
 
     preserved_attributes = prepare_custom_config_dict.get("preserved_attributes", [])
-    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes, non_traceable_module_names, non_traceable_classes)
+    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
         setattr(graph_module, attr_name, getattr(model, attr_name))
