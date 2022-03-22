@@ -49,6 +49,8 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
+from torch.utils.mobile_optimizer import optimize_for_mobile
+
 
 output_path = "ios/TestApp/models/"
 production_ops_path = "test/mobile/model_test/model_ops.yaml"
