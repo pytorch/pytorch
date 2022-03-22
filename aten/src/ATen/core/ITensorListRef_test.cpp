@@ -16,9 +16,12 @@ static std::vector<at::Tensor> get_tensor_vector() {
 template <typename T>
 void check_elements_same(ITensorListRef list, const T& thing, int use_count) {
   EXPECT_EQ(thing.size(), list.size());
-  for (size_t i = 0; i < thing.size(); i++) {
-    EXPECT_EQ(thing[i].use_count(), use_count);
-    EXPECT_TRUE(thing[i].is_same(list[i]));
+  size_t i = 0;
+  for (const auto& t : list) {
+    const at::Tensor& other = thing[i];
+    EXPECT_EQ(other.use_count(), use_count);
+    EXPECT_TRUE(other.is_same(t));
+    i++;
   }
 }
 
@@ -72,20 +75,20 @@ TEST(ITensorListRefTest, Boxed_GetConstRefTensor) {
   const List<at::Tensor> boxed(vec);
   ITensorListRef list(boxed);
   static_assert(
-      std::is_same<decltype(list[0]), const at::Tensor&>::value,
+      std::is_same<decltype(*list.begin()), const at::Tensor&>::value,
       "Accessing elements from List<Tensor> through a ITensorListRef should be const references.");
-  EXPECT_TRUE(boxed[0].is_same(list[0]));
-  EXPECT_TRUE(boxed[1].is_same(list[1]));
+  EXPECT_TRUE(boxed[0].is_same(*list.begin()));
+  EXPECT_TRUE(boxed[1].is_same(*(++list.begin())));
 }
 
 TEST(ITensorListRefTest, Unboxed_GetConstRefTensor) {
   auto vec = get_tensor_vector();
   ITensorListRef list(vec);
   static_assert(
-      std::is_same<decltype(list[0]), const at::Tensor&>::value,
+      std::is_same<decltype(*list.begin()), const at::Tensor&>::value,
       "Accessing elements from ArrayRef<Tensor> through a ITensorListRef should be const references.");
-  EXPECT_TRUE(vec[0].is_same(list[0]));
-  EXPECT_TRUE(vec[1].is_same(list[1]));
+  EXPECT_TRUE(vec[0].is_same(*list.begin()));
+  EXPECT_TRUE(vec[1].is_same(*(++list.begin())));
 }
 
 TEST(ITensorListRefTest, Boxed_Equal) {
@@ -105,6 +108,24 @@ TEST(ITensorListRefTest, UnboxedIndirect_Equal) {
   check_elements_same({vec.data(), vec.size()}, vec, /* use_count= */ 1);
   check_elements_same({&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
   check_elements_same(vec, vec, /* use_count= */ 1);
+}
+
+TEST(ITensorListRefTest, BoxedMaterialize_Equal) {
+  auto vec = get_tensor_vector();
+  List<at::Tensor> boxed(vec);
+  ITensorListRef list(boxed);
+  auto materialized = list.materialize();
+  check_elements_same(list, vec, 2);
+  check_elements_same(list, materialized, 2);
+}
+
+TEST(ITensorListRefTest, UnboxedMaterialize_Equal) {
+  auto vec = get_tensor_vector();
+  at::ArrayRef<at::Tensor> unboxed(vec);
+  ITensorListRef list(unboxed);
+  auto materialized = list.materialize();
+  check_elements_same(list, vec, 1);
+  check_elements_same(list, materialized, 1);
 }
 
 TEST(ITensorListRefIteratorTest, CtorEmpty_ThrowsError) {
@@ -150,9 +171,8 @@ TEST(ITensorListRefIteratorTest, Boxed_Iterate) {
   const List<at::Tensor> boxed(vec);
   ITensorListRef list(boxed);
   size_t i = 0;
-  for (auto it = list.begin(); it != list.end(); ++it) {
-    EXPECT_TRUE(boxed[i].is_same(*it));
-    i++;
+  for (const auto& t : list) {
+    EXPECT_TRUE(boxed[i++].is_same(t));
   }
   EXPECT_EQ(i, list.size());
 }
@@ -161,9 +181,8 @@ TEST(ITensorListRefIteratorTest, Unboxed_Iterate) {
   auto vec = get_tensor_vector();
   ITensorListRef list(vec);
   size_t i = 0;
-  for (auto it = list.begin(); it != list.end(); it++) {
-    EXPECT_TRUE(vec[i].is_same(*it));
-    i++;
+  for (const auto& t : list) {
+    EXPECT_TRUE(vec[i++].is_same(t));
   }
   EXPECT_EQ(i, list.size());
 }
