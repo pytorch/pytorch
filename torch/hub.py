@@ -77,11 +77,6 @@ def _import_module(name, path):
     return module
 
 
-def import_module(name, path):
-    warnings.warn('The use of torch.hub.import_module is deprecated in v0.11 and will be removed in v0.12', DeprecationWarning)
-    return _import_module(name, path)
-
-
 def _remove_if_exists(path):
     if os.path.exists(path):
         if os.path.isfile(path):
@@ -495,13 +490,6 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
         f.close()
         if os.path.exists(f.name):
             os.remove(f.name)
-
-
-def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
-    warnings.warn('torch.hub._download_url_to_file has been renamed to\
-            torch.hub.download_url_to_file to be a public API,\
-            _download_url_to_file will be removed in after 1.3 release')
-    download_url_to_file(url, dst, hash_prefix, progress)
 
 
 # Hub used to support automatically extracts from zipfile manually compressed by users.
