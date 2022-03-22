@@ -6,7 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, enable_doc_jobs) }}
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, branches, enable_doc_jobs) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}

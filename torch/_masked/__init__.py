@@ -388,6 +388,159 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
     return tuple(sorted(dims))
 
 
+def _sparse_coo_flatten_indices(indices: Tensor, shape: tuple):
+    # Flatted N-D indices to 1-D indices
+    flat_indices = indices.new_zeros(indices.size(1))
+    for d, sz in enumerate(shape):
+        flat_indices.mul_(sz)
+        flat_indices.add_(indices[d])
+    return flat_indices
+
+
+def _any(input: Tensor, dim: tuple, keepdim: bool):
+    # Support torch.any with tuple dim argument.
+    # Workaround of https://github.com/pytorch/pytorch/issues/56586
+    r = input
+    for d in reversed(dim):
+        r = r.any(dim=d, keepdim=keepdim)
+    return r
+
+
+def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
+    """Sparse variant of torch.where. Supports sparse COO and hybrid sparse COO tensors.
+
+    _sparse_coo_where implements the following invariant:
+
+      _sparse_coo_where(mask, input, fill_value).to_dense(fill_value) ==
+        torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, fill_value))
+
+    where `a == b` means `assertEqual(a, b)`, mask is boolean sparse
+    tensor, and `to_dense(fill_value)` is like `to_dense()` except
+    that the unspecified elements are mapped to `fill_value` rather
+    than to `0`.
+
+    Returns a sparse COO tensor with the following features:
+
+    - all specified elements correspond to masked-in elements that
+      have the values of the input tensor. If there exists a masked-in
+      element (as specified by mask) that is not specified in the
+      input, in the result tensor, the corresponding element has value
+      0. In the dense part of the sparse tensor, the masked-out
+      elements are replaced with fill_value.
+
+    - all unspecified elements correspond to masked-out elements.
+    """
+
+    assert input.layout == torch.sparse_coo
+    assert mask.layout == input.layout
+    assert mask.shape == input.shape
+    assert mask.dense_dim() == input.dense_dim()  # TODO: eliminate this restriction
+
+    input = input.coalesce()
+
+    # For set operations on sparse tensor indices, we'll convert
+    # multi-dimensional indices to 1-D indices for efficiency.
+    input_flat_indices = _sparse_coo_flatten_indices(input.indices(), input.shape[:input.sparse_dim()])
+    mask_flat_indices = _sparse_coo_flatten_indices(mask.indices(), mask.shape[:mask.sparse_dim()])
+
+    # the set of mask flat indices that define masked-in elements:
+    if mask.dense_dim() > 0:
+        mask_values = _any(mask.values(), tuple(range(1, input.sparse_dim() + 1)), False)
+    else:
+        mask_values = mask.values()
+    maskin_flat_indices = mask_flat_indices[mask_values.nonzero()[:, 0]]
+
+    def intersection(i1, i2):
+        union, counts = torch.cat([i1, i2]).unique(return_counts=True)
+        return union, torch.where(counts.gt(1))
+
+    def minus(i1, i2):
+        union, counts = torch.cat([i1, i2]).unique(return_counts=True)
+        return intersection(union[torch.where(counts.eq(1))], i1)
+
+    def _apply(a):
+        obj, w = a
+        return obj[w]
+
+    # the set of input flat indices of specified and masked-in elements:
+    maskin_input_flat_indices = _apply(intersection(maskin_flat_indices, input_flat_indices))
+    _, w = intersection(input_flat_indices, maskin_input_flat_indices)
+
+    # the indices and values of masked-in elements
+    where_input_indices = input.indices()[(slice(None),) + w]
+    where_input_values = input.values()[w]
+
+    if mask.dense_dim() > 0:
+        # apply mask to the dense part of the input values:
+        _, w1 = intersection(mask_flat_indices, maskin_input_flat_indices)
+        where_mask_values = mask.values()[w1]
+        where_input_values = torch.where(where_mask_values, where_input_values,
+                                         where_input_values.new_full([], fill_value.item()))
+
+    # the set of flat indices of unspecified input and masked-in elements:
+    maskin_zero_flat_indices = _apply(minus(maskin_flat_indices, maskin_input_flat_indices))
+
+    # the indices of masked-in zero elements
+    _, w = intersection(mask_flat_indices, maskin_zero_flat_indices)
+    where_zero_indices = mask.indices()[(slice(None),) + w]
+
+    # construct result
+    n = where_zero_indices.size(1)
+    if n == 0:
+        # the input is coalesced, hence input_flat_indices are ordered
+        # and the result is guaranteed to be coalesced:
+        result = torch.sparse_coo_tensor(where_input_indices, where_input_values, input.shape)
+        return result._coalesced_(True)
+
+    where_indices = torch.cat([where_input_indices, where_zero_indices], dim=1)
+    where_values = torch.cat([where_input_values, where_input_values.new_zeros((n,) + where_input_values.shape[1:])])
+    result = torch.sparse_coo_tensor(where_indices, where_values, input.shape)
+
+    # appending zero elements leads to uncoalesced sparse tensor
+    return result.coalesce()
+
+
+def _sparse_csr_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
+    """Sparse variant of torch.where. Supports sparse CSR tensors.
+    """
+    # TODO: implement sparse CSR specific where operator for efficiency
+    return _sparse_coo_where(mask.to_sparse_coo(), input.to_sparse_coo(), fill_value).to_sparse_csr()
+
+
+def _where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
+    """torch.where with sparse inputs support.
+
+    _where implements the following invariant:
+
+      _where(mask, input, fill_value).to_dense(fill_value) ==
+        torch.where(mask.to_dense(), input.to_dense(), torch.full(input.shape, fill_value))
+
+    where `a == b` means `assertEqual(a, b)`, mask is boolean sparse
+    tensor, and `to_dense(fill_value)` is like `to_dense()` except
+    that the unspecified elements are mapped to `fill_value` rather
+    than to `0`.
+
+    Returns a sparse tensor with the following features:
+
+    - all specified elements correspond to masked-in elements that
+      have the values of the input tensor. If there exists a masked-in
+      element (as specified by mask) that is not specified in the
+      input, in the result tensor, the corresponding element has value
+      0. In the dense part of the sparse tensor, the masked-out
+      elements are replaced with fill_value.
+
+    - all unspecified elements correspond to masked-out elements.
+    """
+    if mask.layout == torch.strided:
+        return torch.where(mask, input, input.new_full([], fill_value.item()))
+    elif mask.layout == torch.sparse_coo:
+        return _sparse_coo_where(mask, input, fill_value)
+    elif mask.layout == torch.sparse_csr:
+        return _sparse_csr_where(mask, input, fill_value)
+    else:
+        raise ValueError(f'_where expects strided or sparse COO or sparse CSR tensor but got {mask.layout}')
+
+
 def _input_mask(input: Tensor, *args, **kwargs) -> Tensor:
     """Return canonical input mask.
     Canonical input mask is a boolean tensor with the same shape as
@@ -421,10 +574,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
             outmask = _input_mask(input, *args, **kwargs)
             keepdim = kwargs.get('keepdim', False)
             dim_ = _canonical_dim(dim, input.ndim)
-            # Workaround https://github.com/pytorch/pytorch/issues/56586
-            for d in reversed(dim_):
-                outmask = outmask.any(dim=d, keepdim=bool(keepdim))
-            return outmask
+            return _any(outmask, dim_, bool(keepdim))
         elif is_normalization:
             return _input_mask(input, *args, **kwargs)
         else:
