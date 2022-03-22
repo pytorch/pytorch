@@ -10,7 +10,7 @@ _T = TypeVar('_T')
 TENSOR_LIST_LIKE_CTYPES = [
     'at::TensorList',
     'const c10::List<c10::optional<at::Tensor>> &',
-    'const at::ITensorList &',
+    'const at::ITensorListRef &',
 ]
 
 # An ArgName is just the str name of the argument in schema;
@@ -59,8 +59,8 @@ scalarTypeT = BaseCppType('at', 'ScalarType')
 tensorT = BaseCppType('at', 'Tensor')
 optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
 tensorListT = BaseCppType('at', 'TensorList')
-iTensorListT = BaseCppType('at', 'ITensorList')
-iOptTensorRefListT = BaseCppType('at', 'IOptTensorRefList')
+iTensorListRefT = BaseCppType('at', 'ITensorListRef')
+iOptTensorListRefT = BaseCppType('at', 'IOptTensorListRef')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 dimVectorT = BaseCppType('at', 'DimVector')
@@ -400,8 +400,8 @@ class CppSignature:
     # [Note: Structured Type Override]
     # We override Tensor[] for structured kernels in both the dispatcher
     # and in the C++ API.
-    # This is a step towards enabling the new API: ITensorList.
-    # See [Note: ITensorList]
+    # This is a step towards enabling the new API: ITensorListRef.
+    # See [Note: ITensorListRef]
 
     # Should the arguments be overriden with structured types?
     structured_type_override: bool

@@ -56,7 +56,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -75,7 +75,7 @@
 namespace at {
 namespace native {
 
-static std::string shapes_as_str(TensorList tensors) {
+inline std::string shapes_as_str(TensorList tensors) {
   std::ostringstream os;
   bool first = true;
   for (auto& tensor : tensors) {
@@ -90,7 +90,7 @@ static std::string shapes_as_str(TensorList tensors) {
   return os.str();
 }
 
-static AdvancedIndex make_info(Tensor self, IOptTensorRefList orig) {
+inline AdvancedIndex make_info(Tensor self, IOptTensorListRef orig) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -345,7 +345,7 @@ static void build_index_op(
 
 void check_indices_on_cpu_or_selfdevice(
     const Tensor& self,
-    at::IOptTensorRefList indices) {
+    const at::MaterializedIOptTensorListRef& indices) {
   auto dev = self.device();
   bool indices_on_cpu_or_dev = std::all_of(
       indices.begin(), indices.end(), [=](const at::OptionalTensorRef& opt) {
@@ -358,23 +358,24 @@ void check_indices_on_cpu_or_selfdevice(
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
-(const Tensor& self, at::IOptTensorRefList indices) {
+(const Tensor& self, at::IOptTensorListRef indices) {
+  auto materialized = indices.materialize();
+
   TORCH_CHECK_INDEX(
-      indices.size() <= (size_t)self.dim(),
+      materialized.size() <= (size_t)self.dim(),
       "too many indices for tensor of dimension ",
-      self.dim(), " (got ", indices.size(), ")");
+      self.dim(), " (got ", materialized.size(), ")");
 
   // Only allow: `dev_tensor[{cpu,dev}_tensor]`.
   // See: https://github.com/pytorch/pytorch/pull/69607
-  check_indices_on_cpu_or_selfdevice(self, indices);
+  check_indices_on_cpu_or_selfdevice(self, materialized);
 
   const auto& result = maybe_get_output();
 
   if (result.defined()) {
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
-    // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-    for (const auto& index: indices) {
+    for (const at::OptionalTensorRef& index : materialized) {
       if (index.has_value()) {
         at::assert_no_overlap(result, *index);
       }

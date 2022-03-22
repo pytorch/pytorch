@@ -28,7 +28,7 @@ class Dict;
 template <class T>
 class List;
 template <class T>
-class IList;
+class IListRef;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -650,11 +650,11 @@ public:
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
       std::is_constructible<IValue, T>::value ||
-          std::is_constructible<IValue, typename IList<T>::boxed_type>::value,
+          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value,
       std::nullptr_t>;
 
   template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
-  IValue(c10::IList<T> v);
+  IValue(c10::IListRef<T> v);
 
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);

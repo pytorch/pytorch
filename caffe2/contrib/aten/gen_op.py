@@ -72,7 +72,7 @@ def value_is_tensor_type(v):
 
 TENSORLIST_TYPE = [
     'at::TensorList',
-    'const at::ITensorList &',
+    'const at::ITensorListRef &',
     'const c10::List<c10::optional<at::Tensor>> &',
 ]
 
@@ -292,7 +292,7 @@ if __name__ == '__main__':
             env['arguments'].append(arg['name'])
             # Pretend the flat argument list is a stack where the end is the top.
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
-            if arg['type'] == 'at::TensorList' or arg['type'] == 'const at::ITensorList &':
+            if arg['type'] == 'at::TensorList' or arg['type'] == 'const at::ITensorListRef &':
                 # NOTE: do not advance real_inputs here. After this we will
                 # switch to indexing the "stack" from the end
                 env['statements'].append(
