@@ -199,6 +199,7 @@ class TensorIndexingOpsModule(torch.nn.Module):
             torch.select_scatter(y, torch.ones(4), 0, 0),
             torch.slice_scatter(x, x),
             torch.scatter_add(x, 0, t, x),
+            x.scatter_(0, t, y),
             x.scatter_add_(0, t, y),
             # torch.scatter_reduce(x, 0, t, reduce="sum"),
             torch.split(x, 1),
