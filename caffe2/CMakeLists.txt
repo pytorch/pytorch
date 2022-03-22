@@ -350,18 +350,25 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     )
+    if(BUILD_LAZY_TS_BACKEND)
+      list(APPEND GENERATED_CXX_TORCH
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
+      )
+    endif()
   endif()
 
   set(GENERATED_H_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
-    "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
-    "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
   endif()
 
@@ -420,6 +427,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
     "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
+    "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
     "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
     "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
@@ -490,7 +498,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
-
+    if(BUILD_LAZY_TS_BACKEND)
+      append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
+    endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
       set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)

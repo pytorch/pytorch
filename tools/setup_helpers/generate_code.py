@@ -189,7 +189,8 @@ def main() -> None:
     if options.gen_lazy_ts_backend:
         aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
         ts_backend_yaml = os.path.join(aten_path, 'native/ts_native_functions.yaml')
-
+        ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+        ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
         if options.install_dir is None:
             options.install_dir = "torch/csrc"
         lazy_install_dir = os.path.join(options.install_dir, "lazy/generated")
@@ -197,16 +198,17 @@ def main() -> None:
             os.makedirs(lazy_install_dir)
 
         assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
                             output_dir=lazy_install_dir,
                             dry_run=False,
-                            # TODO(whc) reimplement checking of hand-implemented nativefunc file after landing it
-                            impl_path=None,
+                            impl_path=ts_native_functions,
                             gen_ts_lowerings=True,
                             node_base="TsNode",
-                            node_base_hdr="torch/csrc/lazy/ts_backend/ts_node.h",
+                            node_base_hdr=ts_node_base,
+                            build_in_tree=True,
                             per_operator_headers=options.per_operator_headers)
 
 
