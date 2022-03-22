@@ -28,7 +28,7 @@
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
 // fuser and IR parser
-#include "test_gpu_validator.h"
+#include <test_gpu_validator.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
