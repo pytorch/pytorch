@@ -380,7 +380,7 @@ class NNVisionModule(torch.nn.Module):
             [
                 nn.PixelShuffle(2),
                 nn.PixelUnshuffle(3),
-                nn.Upsample(scale_factor=2, mode="nearest"),  # ,
+                nn.Upsample(scale_factor=2, mode="nearest"),
                 nn.Upsample(scale_factor=2, mode="bilinear"),
                 nn.Upsample(scale_factor=2, mode="bicubic"),
                 nn.UpsamplingNearest2d(scale_factor=2),
@@ -407,3 +407,18 @@ class NNShuffleModule(torch.nn.Module):
 
     def forward(self):
         return (self.shuffle(torch.randn(1, 4, 2, 2)),)
+
+
+class NNUtilsModule(torch.nn.Module):
+    def __init__(self):
+        super(NNUtilsModule, self).__init__()
+        self.flatten = nn.Sequential(
+            nn.Linear(50, 50),
+            nn.Unflatten(1, (2, 5, 5))
+        )
+
+    def forward(self):
+        input = torch.randn(2, 50)
+        return (
+            self.flatten(input),
+        )
