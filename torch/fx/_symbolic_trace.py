@@ -467,8 +467,8 @@ class Tracer(TracerBase):
 
 
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
-        if isinstance(attr_val, torch.nn.Parameter):
-            for n, p in self.root.named_parameters():
+        def maybe_get_proxy_for_attr(attr_val, collection_to_search, parameter_proxy_cache):
+            for n, p in collection_to_search:
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
                         kwargs = {}
@@ -478,6 +478,17 @@ class Tracer(TracerBase):
                         val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
+            return None
+
+        if isinstance(attr_val, torch.nn.Parameter):
+            maybe_parameter_proxy = maybe_get_proxy_for_attr(attr_val, self.root.named_parameters(), parameter_proxy_cache)
+            if maybe_parameter_proxy is not None:
+                return maybe_parameter_proxy
+
+        if self.proxy_buffer_attributes and isinstance(attr_val, torch.Tensor):
+            maybe_buffer_proxy = maybe_get_proxy_for_attr(attr_val, self.root.named_buffers(), parameter_proxy_cache)
+            if maybe_buffer_proxy is not None:
+                return maybe_buffer_proxy
 
         return attr_val
 

@@ -48,6 +48,7 @@
 #include <torch/csrc/lazy/core/shape.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/WrapDimUtils.h>
 #include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
