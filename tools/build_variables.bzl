@@ -607,6 +607,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     # when it is built in libtorch
     "torch/csrc/jit/mobile/debug_info.cpp",
     "torch/csrc/jit/mobile/function.cpp",
+    "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
