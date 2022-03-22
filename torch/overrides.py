@@ -218,6 +218,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__delattr__,
         Tensor.__setattr__,
         Tensor.__torch_function__,
+        Tensor.__torch_dispatch__,
         Tensor.__new__,
         Tensor.__class__,
         Tensor.__subclasshook__,

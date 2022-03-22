@@ -795,6 +795,7 @@ SROperator aten_stack(Node* n) {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "stack expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
@@ -2288,6 +2289,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto size = p_node->Input(0).toDimVector();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(1).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(2).toOptional<c10::Layout>();
+      const auto device = p_node->Input(3).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(4).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::ones(size, dtype, layout, device, pin_memory);
+      return;
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::ones_out(size, out_t);
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"))) {
@@ -2368,6 +2392,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
   }
   return [](ProcessedNode* p_node) {
     const auto inputs = p_node->Input(0).toTensorVector();
+    TORCH_CHECK(inputs.size() > 0, "concat expects non-empty tensor list");
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::cat(inputs, dim);
