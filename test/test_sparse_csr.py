@@ -569,12 +569,12 @@ class TestSparseCSR(TestCase):
             sparse = dense.to_sparse_csr()
             self.assertEqual(sparse.to_dense(), dense)
 
-        crow_indices = torch.tensor([0, 3, 5])
-        col_indices = torch.tensor([0, 1, 2, 0, 1])
-        values = torch.tensor([1, 2, 1, 3, 4], dtype=dtype)
-        csr = torch.sparse_csr_tensor(crow_indices, col_indices,
-                                      values, dtype=dtype, device=device)
-        dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device)
+        batch_shape = (2, 3)
+        crow_indices = torch.tensor([0, 3, 5], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        col_indices = torch.tensor([0, 1, 2, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        values = torch.tensor([1, 2, 1, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
+        csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
+        dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(csr.shape)
         self.assertEqual(csr.to_dense(), dense)
 
     @skipCPUIfNoMklSparse
@@ -1094,6 +1094,9 @@ class TestSparseCSR(TestCase):
     @dtypes(torch.float, torch.double)
     def test_add(self, device, dtype):
         def _test_spadd_shape(nnz, shape):
+            # sparse.to_dense() uses torch.add internally so if torch.add is wrong,
+            # the dense tensor will be wrong but this test would still pass
+            # there's a separate test that checks for the correctness of the .to_dense() call
             x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
             y = torch.randn(*shape, dtype=dtype, device=device)
             r = random.random()
@@ -1115,10 +1118,12 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(res, expected)
 
-        _test_spadd_shape(10, [100, 100])
-        _test_spadd_shape(0, [100, 100])
-        _test_spadd_shape(10, [100, 1])
-        _test_spadd_shape(10, [1, 100])
+        ns = [2, 5]
+        batch_shapes = [(), (2,), (2, 3)]
+        for b, m, n in itertools.product(batch_shapes, ns, ns):
+            _test_spadd_shape(0, (*b, m, n))
+            _test_spadd_shape(m * n // 2, (*b, m, n))
+            _test_spadd_shape(m * n, (*b, m, n))
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
