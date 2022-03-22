@@ -32,12 +32,13 @@ jobs:
       JOB_BASE_NAME: ${{ inputs.build-environment }}-build
     steps:
       # [see note: pytorch repo ref]
-      - uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           no-sudo: true
 
       - name: Setup Windows
-        uses: ./.github/actions/setup-win
+        uses: pytorch/pytorch/.github/actions/setup-win@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
           cuda-version: ${{ inputs.cuda-version }}
@@ -81,7 +82,8 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
 
-      - uses: ./.github/actions/teardown-win
+      - name: Teardown Windows
+        uses: pytorch/pytorch/.github/actions/teardown-win@master
         if: always()
         timeout-minutes: 120
         with:
