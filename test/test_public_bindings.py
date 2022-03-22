@@ -298,34 +298,36 @@ class TestPublicBindings(TestCase):
                     break
 
             if is_a_private_module:
-                assert not hasattr(modname, '__all__')
                 return
 
-            def module_starts_with_modname(elem, modname, mod, private_api):
+            # verifies that each API has the correct module name and naming semantics
+            # depending on whether it's public or private
+            def verify_correct_modulename(elem, modname, mod, private_api):
                 obj = getattr(mod, elem)
                 if not (isinstance(obj, Callable) or inspect.isclass(obj)):
-                    return True
+                    return
                 elem_module = getattr(obj, '__module__', None)
                 elem_modname_starts_with_modname = elem_module is not None and elem_module.startswith(modname)
                 if private_api:
-                    if elem_modname_starts_with_modname:
+                    # elem's name must begin with an `_` and it's module name
+                    # should NOT start with it's current module since it's a private API
+                    if not elem.startswith('_') or elem_modname_starts_with_modname:
                         allow_list.append((modname, elem, elem_module))
-                        return False
                 else:
+                    # elem's name must NOT begin with an `_` and it's module name
+                    # SHOULD start with it's current module since it's a public API
                     if elem.startswith('_') or not elem_modname_starts_with_modname:
                         allow_list.append((modname, elem, elem_module))
-                        return False
-                return True
 
             if hasattr(modname, '__all__'):
                 public_api = mod.__all__
                 all_api = dir(modname)
                 for elem in all_api:
-                    module_starts_with_modname(elem, modname, elem not in public_api)
+                    verify_correct_modulename(elem, modname, elem not in public_api)
             else:
                 all_api = dir(mod)
                 for elem in all_api:
-                    module_starts_with_modname(elem, modname, mod, elem.startswith('_'))
+                    verify_correct_modulename(elem, modname, mod, elem.startswith('_'))
 
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
