@@ -166,8 +166,8 @@ def parse_tags_yaml(path: str) -> Set[str]:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     with open(path, 'r') as f:
         es = yaml.load(f, Loader=LineLoader)
-        ValidTags = parse_tags_yaml_struct(es, path=path)
-    return ValidTags
+        valid_tags = parse_tags_yaml_struct(es, path=path)
+    return valid_tags
 
 def parse_native_yaml(path: str, tags_yaml_path: str) -> ParsedYaml:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
