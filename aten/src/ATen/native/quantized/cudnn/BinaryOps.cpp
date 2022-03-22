@@ -60,8 +60,10 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     while (new_sizes.size() < 3) {
       new_sizes.emplace_back(1);
     }
-    qa = at::native::view(qa, new_sizes);
-    qb = at::native::view(qb, new_sizes);
+    // I think cudnn expects leading dimensions to be the dummy dimensions
+    std::swap(new_sizes.front(), new_sizes.back());
+    qa.view(new_sizes);
+    qb.view(new_sizes);
   }
 
 
@@ -167,7 +169,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       .build();
   auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                     .setOperationGraph(opGraph)
-                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+                    .setOperation(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                     .build();
 
   auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());

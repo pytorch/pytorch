@@ -829,7 +829,8 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                              msg="AddReLU.out failed")
 
-    """Tests the correctness of the cudnn add and add_relu op (Similar to test_qadd_relu_same_qparams, will probably merge in the future)"""
+    """Tests the correctness of the cudnn add and add_relu op
+    (Similar to test_qadd_relu_same_qparams, will probably merge in the future)"""
     def test_qadd_relu_cudnn(self):
         for dtype in [torch.qint8]:
             add_relu = torch.ops.quantized.add_relu
@@ -850,7 +851,7 @@ class TestQuantizedOps(TestCase):
             # Add ground truth
             C = (qA.dequantize() + qB.dequantize()).cpu().numpy()
             qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
-            qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
+            qC_hat = add(qA, qB, scale=scale, zero_point=zero_point).cpu()
             np.testing.assert_equal(qC, qC_hat.int_repr(),
                                     "Quantized addition failed.")
 
