@@ -85,7 +85,7 @@ def calculate_shards(num_shards: int, tests: List[str], job_times: Dict[str, flo
         curr_shard_jobs.append(job)
         sharded_jobs[min_shard_index] = (curr_shard_time + filtered_job_times[job], curr_shard_jobs)
 
-    for s in num_shards:
+    for s in range(0, num_shards):
         print("Calculating Shard "+str(s)+" "+str(sharded_jobs[s]))
 
     print("Calculating sharing for unkonw " + str(unknown_jobs))
