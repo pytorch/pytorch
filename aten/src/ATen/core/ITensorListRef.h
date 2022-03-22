@@ -4,6 +4,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
+#include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <type_traits>
@@ -18,7 +19,7 @@ class ITensorListRefIterator;
 
 // Applies arbitrary macros to each `ITensorListRefTag`.
 #define TORCH_ITENSORLISTREF_FORALL_TAGS(_, ...) \
-  _(Unboxed, ##__VA_ARGS__)                   \
+  _(Unboxed, ##__VA_ARGS__)                      \
   _(Boxed, ##__VA_ARGS__)
 
 // Builds the name of the implementation class for `TAG`.
@@ -32,17 +33,17 @@ class ITensorListRefIterator;
 #define TORCH_ITENSORLISTREF_UNWRAP_CASE(TAG, BODY) \
   case c10::ITensorListRefTag::TAG: {               \
     using ImplT = TORCH_ITENSORLISTREF_IMPL(TAG);   \
-    auto& this_ = ImplT::unwrap(*this);          \
-    BODY                                         \
+    auto& this_ = ImplT::unwrap(*this);             \
+    BODY                                            \
   } break;
 
 // Dispatches the unwrap call, depending on `TAG`, followed by
 // the execution of `BODY`. It aborts if `TAG` is not a `ITensorListRefTag`.
-#define TORCH_ITENSORLISTREF_UNWRAP(TAG, BODY)                            \
-  switch (TAG) {                                                       \
+#define TORCH_ITENSORLISTREF_UNWRAP(TAG, BODY)                               \
+  switch (TAG) {                                                             \
     TORCH_ITENSORLISTREF_FORALL_TAGS(TORCH_ITENSORLISTREF_UNWRAP_CASE, BODY) \
-    default:                                                           \
-      TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");        \
+    default:                                                                 \
+      TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");           \
   }
 
 enum class ITensorListRefTag {
@@ -103,6 +104,20 @@ class ITensorListRefTagImpl<ITensorListRefTag::Boxed> {
 } // namespace detail
 
 /*
+ * Materialized list for `ITensorListRef`.
+ *
+ * Container that groups `Tensor` references together. This exchanges the
+ * overhead of every method call from `ITensorListRef` for a dynamic allocation.
+ *
+ * You should use this container instead of `ITensorListRef` if:
+ *
+ *   - You are going to iterate the list of tensors more than once
+ *   - You need to repeatedly access arbitrary elements (using `operator[]`)
+ */
+using MaterializedITensorListRef =
+    std::vector<std::reference_wrapper<const at::Tensor>>;
+
+/*
  * Wrapper around both boxed and unboxed iterators.
  *
  * Currently, a `std::bidirectional_iterator` that wraps those
@@ -112,7 +127,12 @@ class ITensorListRefTagImpl<ITensorListRefTag::Boxed> {
  * iterators themselves.
  */
 class ITensorListRefIterator
-    : public std::iterator<std::bidirectional_iterator_tag, at::Tensor> {
+    : public std::iterator<
+          std::bidirectional_iterator_tag,
+          detail::ITensorListRefConstRef,
+          ptrdiff_t,
+          std::add_pointer<detail::ITensorListRefConstRef>,
+          std::add_rvalue_reference<detail::ITensorListRefConstRef>> {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...) friend class TORCH_ITENSORLISTREF_IMPL(TAG);
   TORCH_ITENSORLISTREF_FORALL_TAGS(DEFINE_FRIEND_CLASS)
@@ -133,6 +153,9 @@ class ITensorListRefIterator
 
  public:
   ITensorListRefIterator() : tag_(ITensorListRefTag::None) {}
+
+  ITensorListRefIterator(const ITensorListRefIterator& iterator)
+      : payload_(iterator.payload_), tag_(iterator.tag_) {}
 
   ITensorListRefIterator(boxed_iterator_type boxed) : tag_(ITensorListRefTag::Boxed) {
     payload_.boxed_iterator = boxed;
@@ -267,12 +290,17 @@ class ITensorListRef {
     TORCH_ITENSORLISTREF_UNWRAP(tag_, { return this_.end(); });
   }
 
-  detail::ITensorListRefConstRef operator[](size_t i) const {
-    TORCH_ITENSORLISTREF_UNWRAP(tag_, { return this_[i]; });
+  MaterializedITensorListRef materialize() const {
+    MaterializedITensorListRef materialized;
+    materialized.reserve(size());
+    for (const auto& t : *this) {
+      materialized.emplace_back(t);
+    }
+    return materialized;
   }
 
-#define DEFINE_CHECK(TAG, ...)          \
-  bool is##TAG() const {                \
+#define DEFINE_CHECK(TAG, ...)             \
+  bool is##TAG() const {                   \
     return tag_ == ITensorListRefTag::TAG; \
   }
   TORCH_ITENSORLISTREF_FORALL_TAGS(DEFINE_CHECK);
@@ -282,10 +310,10 @@ class ITensorListRef {
     return tag_ == ITensorListRefTag::None;
   }
 
-#define DEFINE_CASTING(TAG, ...)                                        \
+#define DEFINE_CASTING(TAG, ...)                                              \
   const typename TORCH_ITENSORLISTREF_IMPL(TAG)::list_type& to##TAG() const { \
-    TORCH_INTERNAL_ASSERT(is##TAG());                                   \
-    return TORCH_ITENSORLISTREF_IMPL(TAG)::unwrap(*this);                  \
+    TORCH_INTERNAL_ASSERT(is##TAG());                                         \
+    return TORCH_ITENSORLISTREF_IMPL(TAG)::unwrap(*this);                     \
   }
   TORCH_ITENSORLISTREF_FORALL_TAGS(DEFINE_CASTING);
 #undef DEFINE_CASTING
@@ -294,6 +322,7 @@ class ITensorListRef {
   Payload payload_;
   ITensorListRefTag tag_;
 };
+
 } // namespace c10
 
 inline
@@ -359,3 +388,9 @@ TORCH_ITENSORLISTREF_IMPL(Boxed)::iterator_get(
 ) {
   return (*it).get().toTensor();
 }
+
+namespace at {
+using ITensorListRef = c10::ITensorListRef;
+using ITensorListRefIterator = c10::ITensorListRefIterator;
+using MaterializedITensorListRef = c10::MaterializedITensorListRef;
+} // namespace at
