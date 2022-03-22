@@ -816,6 +816,10 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
+        # See https://github.com/pytorch/pytorch/issues/74352
+        target_compile_options(asmjit PRIVATE -Wno-deprecated-copy -Wno-unused-but-set-variable)
+    endif()
   endif()
 
   if(USE_FBGEMM)
