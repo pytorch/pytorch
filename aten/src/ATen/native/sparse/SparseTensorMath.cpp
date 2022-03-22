@@ -707,6 +707,39 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
+Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
+  // TODO: Use a specialized CSR kernel for performance if needed
+  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
+  TORCH_CHECK(t_.is_sparse_csr() && !t_.is_sparse(), "Expects first input to be either strided or CSR.");
+  // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
+  TORCH_CHECK(src_.is_sparse_csr() && !src_.is_sparse(), "Expects second input to be either strided or CSR.");
+  Tensor t = t_.is_sparse_csr() ? t_.to_sparse() : t;
+  Tensor src = src_.is_sparse_csr() ? src_.to_sparse() : src_;
+  Tensor tmp_result = t.mul(src);
+  auto r_sparse_csr = tmp_result.to_sparse_csr();
+  r.resize_as_sparse_(r_sparse_csr);
+  r.copy_(r_sparse_csr);
+  return r;
+}
+
+
+Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
+  auto commonDtype = at::result_type(self, other);
+  // Arbitrary (dense, sparse) and (sparse, dense) multiplication is not
+  // currently supported, but (0dim-dense, sparse) and (sparse, 0dim-dense) is.
+  // Make sure we use the sparse exemplar for result.
+  auto result_options = self.is_sparse() ?
+    self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
+  // CSR is 2d!
+  Tensor result = at::empty({0, 0}, result_options);
+  return at::mul_out(result, self, other);  // redispatch!
+}
+
+Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
+  return at::mul_out(self, self, other);  // redispatch!
+}
+
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
     return mul_out_sparse_zerodim(r, t_, src_);

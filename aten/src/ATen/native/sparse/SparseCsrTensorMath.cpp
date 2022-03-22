@@ -685,38 +685,5 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
   }
 }
 
-Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
-  // TODO: Use a specialized CSR kernel for performance if needed
-  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
-  // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
-  TORCH_CHECK(t_.is_sparse_csr() && !t_.is_sparse(), "Expects first input to be either strided or CSR.");
-  // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
-  TORCH_CHECK(src_.is_sparse_csr() && !src_.is_sparse(), "Expects second input to be either strided or CSR.");
-  Tensor t = t_.is_sparse_csr() ? t_.to_sparse() : t;
-  Tensor src = src_.is_sparse_csr() ? src_.to_sparse() : src_;
-  Tensor r_sparse = r.is_sparse_csr() ? r.to_sparse() : r;
-  mul_out_sparse_cpu(t, src, r_sparse);
-  auto r_sparse_csr = r_sparse.to_sparse_csr();
-  r.copy_(r_sparse_csr);
-  return r;
-//  // Use at::to_sparse_csr once native
-//  Tensor self = r_sparse;
-//  auto coalesced_self = self.coalesce();
-//  auto row_indices = coalesced_self.indices()[0];
-//  bool out_int32 = (row_indices.scalar_type() == at::kInt);
-//  auto crow_indices = at::_convert_indices_from_coo_to_csr(
-//      row_indices, self.size(0), out_int32);
-//  Tensor r_sparse_csr = at::native::_sparse_csr_tensor_unsafe(
-//      crow_indices,
-//      coalesced_self.indices()[1].contiguous(),
-//      coalesced_self.values(),
-//      coalesced_self.sizes(),
-//      coalesced_self.scalar_type(),
-//      coalesced_self.layout(),
-//      coalesced_self.device());
-//  r.copy_(r_sparse_csr);
-//  return r;
-}
-
 } // namespace native
 } // namespace at
