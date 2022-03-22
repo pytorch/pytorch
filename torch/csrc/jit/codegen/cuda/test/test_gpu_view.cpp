@@ -120,7 +120,7 @@ TEST_F(NVFuserTest, FusionViewDtypeFailMismatchSize_CUDA) {
   fusion.addInput(bias);
 
   auto x_add_bias = add(x, bias);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE([cppcoreguidelines-avoid-goto,hicpp-avoid-goto,-warnings-as-errors])
   ASSERT_ANY_THROW(view(x_add_bias, DataType::Int));
 }
 
@@ -203,7 +203,7 @@ TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
   fusion.addInput(bias);
 
   auto x_add_bias = add(x, bias);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE([cppcoreguidelines-avoid-goto,hicpp-avoid-goto,-warnings-as-errors])
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
@@ -222,7 +222,7 @@ TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
   fusion.addInput(bias);
 
   auto x_add_bias = add(x, bias);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto)
+  // NOLINTNEXTLINE([cppcoreguidelines-avoid-goto,hicpp-avoid-goto,-warnings-as-errors])
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
