@@ -1096,23 +1096,32 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
-             bool _save_mobile_debug_info = false) {
-            m._save_for_mobile(filename, _extra_files, _save_mobile_debug_info);
+             bool _save_mobile_debug_info = false,
+             bool _use_flatbuffer = false) {
+            m._save_for_mobile(
+                filename,
+                _extra_files,
+                _save_mobile_debug_info,
+                _use_flatbuffer);
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap(),
-          py::arg("_save_mobile_debug_info") = false)
+          py::arg("_save_mobile_debug_info") = false,
+          py::arg("_use_flatbuffer") = false)
       .def(
           "_save_to_buffer_for_mobile",
           [](Module& m,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
-             bool _save_mobile_debug_info = false) {
+             bool _save_mobile_debug_info = false,
+             bool _use_flatbuffer = false) {
             std::ostringstream buf;
-            m._save_for_mobile(buf, _extra_files, _save_mobile_debug_info);
+            m._save_for_mobile(
+                buf, _extra_files, _save_mobile_debug_info, _use_flatbuffer);
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap(),
-          py::arg("_save_mobile_debug_info") = false)
+          py::arg("_save_mobile_debug_info") = false,
+          py::arg("_use_flatbuffer") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -1891,6 +1900,10 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_mobile_model_contained_types(in);
       });
+  m.def("_nn_module_to_mobile", [](const Module& module) {
+    CompilationOptions options;
+    return jitModuleToMobile(module, options);
+  });
   py::class_<OperatorInfo>(m, "OperatorInfo")
       .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
   m.def("_get_model_ops_and_info", [](const std::string& filename) {
