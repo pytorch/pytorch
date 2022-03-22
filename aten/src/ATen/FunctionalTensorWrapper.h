@@ -2,7 +2,7 @@
 #pragma once
 
 #include <ATen/ArrayRef.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/FunctionalStorageImpl.h>
 
 #include <c10/core/DispatchKey.h>
@@ -122,20 +122,20 @@ TORCH_API inline bool isFunctionalTensor(const at::Tensor& tensor) {
 }
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
-TORCH_API std::vector<Tensor> to_functional_tensor(ITensorList t_list);
+TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
 
 TORCH_API Tensor from_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> from_functional_tensor(const c10::optional<Tensor>& t);
-TORCH_API std::vector<Tensor> from_functional_tensor(ITensorList t_list);
-TORCH_API std::vector<OptionalTensorRef> from_functional_tensor(IOptTensorRefList t_list);
+TORCH_API std::vector<Tensor> from_functional_tensor(ITensorListRef t_list);
+TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(IOptTensorListRef t_list);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
-TORCH_API void sync(ITensorList t_list);
-TORCH_API void sync(IOptTensorRefList t_list);
+TORCH_API void sync(ITensorListRef t_list);
+TORCH_API void sync(IOptTensorListRef t_list);
 
 Tensor create_functional_tensor_with_view_meta(const Tensor& view_to_wrap, const Tensor& base, functionalization::ViewMeta meta, int64_t out_idx = 0);
-std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorList view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);
+std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_to_wrap, const Tensor& base, functionalization::ViewMeta meta);
 
 void mutate_view_meta(const Tensor& self, functionalization::ViewMeta meta);
 

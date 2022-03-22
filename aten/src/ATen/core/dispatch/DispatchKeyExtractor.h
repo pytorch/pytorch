@@ -62,13 +62,13 @@ namespace detail {
       }
     }
     // Tensor[] translates to this case
-    void operator()(at::ITensorList xs) {
+    void operator()(at::ITensorListRef xs) {
       for (const auto& x : xs) {
         ts = ts | x.key_set();
       }
     }
     // Tensor?[] translates to this case.
-    void operator()(at::IOptTensorRefList xs) {
+    void operator()(at::IOptTensorListRef xs) {
       for (at::OptionalTensorRef x : xs) {
         if (x.has_value()) {
           ts = ts | x->key_set();

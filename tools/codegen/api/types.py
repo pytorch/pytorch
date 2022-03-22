@@ -10,8 +10,8 @@ _T = TypeVar('_T')
 TENSOR_LIST_LIKE_CTYPES = [
     'at::TensorList',
     'const c10::List<c10::optional<at::Tensor>> &',
-    'const at::ITensorList &',
-    'const at::IOptTensorRefList &'
+    'const at::ITensorListRef &',
+    'const at::IOptTensorListRef &'
 ]
 
 # An ArgName is just the str name of the argument in schema;
@@ -60,8 +60,8 @@ scalarTypeT = BaseCppType('at', 'ScalarType')
 tensorT = BaseCppType('at', 'Tensor')
 optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
 tensorListT = BaseCppType('at', 'TensorList')
-iTensorListT = BaseCppType('at', 'ITensorList')
-iOptTensorRefListT = BaseCppType('at', 'IOptTensorRefList')
+iTensorListRefT = BaseCppType('at', 'ITensorListRef')
+iOptTensorListRefT = BaseCppType('at', 'IOptTensorListRef')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 dimVectorT = BaseCppType('at', 'DimVector')

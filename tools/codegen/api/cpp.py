@@ -7,7 +7,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ConstRefCType,
                                      OptionalCType, TupleCType, SpecialArgName, boolT, scalarT,
                                      dimnameListT, tensorT, voidT, longT,
                                      BaseTypeToCppMapping, intArrayRefT, tensorOptionsT,
-                                     iTensorListT, iOptTensorRefListT)
+                                     iTensorListRefT, iOptTensorListRefT)
 from tools.codegen import local
 from tools.codegen.utils import assert_never
 from typing import Optional, Sequence, Union, List, Set
@@ -103,13 +103,13 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName, remove_non_owni
             else:
                 return NamedCType(binds, BaseCType(intArrayRefT))
         elif str(t.elem) == 'Tensor':
-            return NamedCType(binds, ConstRefCType(BaseCType(iTensorListT)))
+            return NamedCType(binds, ConstRefCType(BaseCType(iTensorListRefT)))
         elif str(t.elem) == 'Scalar':
             return NamedCType(binds, ArrayRefCType(BaseCType(scalarT)))
         elif str(t.elem) == 'Dimname':
             return NamedCType(binds, BaseCType(dimnameListT))
         elif str(t.elem) == 'Tensor?':
-            return NamedCType(binds, ConstRefCType(BaseCType(iOptTensorRefListT)))
+            return NamedCType(binds, ConstRefCType(BaseCType(iOptTensorListRefT)))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, ArrayRefCType(elem.type))
     else:

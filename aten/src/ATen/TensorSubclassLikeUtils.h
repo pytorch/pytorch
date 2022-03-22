@@ -1,6 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 
 namespace at {
 
@@ -45,7 +45,7 @@ inline bool areAnyTensorSubclassLike(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
 }
 
-inline bool areAnyOptionalTensorSubclassLike(IOptTensorRefList tensors) {
+inline bool areAnyOptionalTensorSubclassLike(IOptTensorListRef tensors) {
   return std::any_of(tensors.begin(), tensors.end(), [](const auto& opt_tensor) {
     return (opt_tensor.has_value() && isTensorSubclassLike(*opt_tensor));
   });
