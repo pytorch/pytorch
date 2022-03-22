@@ -4,6 +4,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type_base.h>
+#include <ATen/ops/allclose.h>
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -78,8 +80,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "ATen/core/jit_type_base.h"
-#include "ATen/ops/allclose.h"
 
 namespace torch {
 namespace jit {

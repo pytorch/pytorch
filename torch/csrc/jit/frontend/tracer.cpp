@@ -24,7 +24,6 @@
 #include <memory>
 #include <sstream>
 #include <string>
-#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 namespace jit {

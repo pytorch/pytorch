@@ -6,8 +6,6 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
-#include <ATen/core/jit_type_base.h>
-#include "c10/util/Exception.h"
 
 namespace torch {
 namespace lazy {

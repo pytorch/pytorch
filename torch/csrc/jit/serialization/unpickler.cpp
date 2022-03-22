@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#include "ATen/core/jit_type_base.h"
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
@@ -87,10 +86,13 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      case c10::SymIntType::Kind:
+        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // no op, there is nothing to tag
+        break;
       case DynamicType::Kind:
       case UnionType::Kind:
       case EnumType::Kind:
-      case c10::SymIntType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         TORCH_INTERNAL_ASSERT(false);
       case TupleType::Kind: {

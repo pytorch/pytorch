@@ -15,7 +15,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 

@@ -40,7 +40,6 @@
 //      they only bind to Tensor).
 
 
-#include <pybind11/pytypes.h>
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Stream.h>
@@ -74,7 +73,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "ATen/core/jit_type_base.h"
 
 namespace torch {
 

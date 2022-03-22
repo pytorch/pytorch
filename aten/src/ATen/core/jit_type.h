@@ -15,7 +15,6 @@
 #include <ostream>
 #include <sstream>
 #include <type_traits>
-#include "c10/util/Exception.h"
 
 namespace torch {
 namespace jit {
