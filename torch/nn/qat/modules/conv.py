@@ -111,9 +111,9 @@ class Conv2d(_ConvNd):
                  groups: int = 1,
                  bias: bool = True,
                  padding_mode: str = 'zeros',
-                 qconfig = None,
-                 device = None,
-                 dtype = None) -> None:
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
         super().__init__(
             in_channels,
             out_channels,
@@ -161,9 +161,9 @@ class Conv3d(_ConvNd):
                  groups: int = 1,
                  bias: bool = True,
                  padding_mode: str = 'zeros',
-                 qconfig = None,
-                 device = None,
-                 dtype = None) -> None:
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
         super().__init__(
             in_channels,
             out_channels,
