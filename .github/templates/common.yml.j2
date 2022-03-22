@@ -22,7 +22,7 @@ concurrency:
           }
 {%- endmacro -%}
 
-{%- macro gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_labels, enable_doc_jobs = True) -%}
+{%- macro gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_labels, branches = ['master', 'main', 'release/*'], enable_doc_jobs = True) -%}
 on:
 {%- if on_pull_request %}
   pull_request:
@@ -44,9 +44,9 @@ on:
 {%- endfor %}
 {%- if not is_scheduled %}
     branches:
-      - master
-      - main
-      - release/*
+{%- for branch in branches %}
+      - !{{ branch }}
+{%- endfor %}
 {%- endif %}
 {%- if is_scheduled %}
   schedule:
