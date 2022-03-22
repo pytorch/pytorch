@@ -4,6 +4,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.parameter import Parameter
+from torch.nn.utils.fusion import fuse_linear_bn_weights
 
 
 class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
@@ -152,3 +153,15 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         qat_linearbn.bn.running_var = bn.running_var
         qat_linearbn.bn.num_batches_tracked = bn.num_batches_tracked
         return qat_linearbn
+
+    def to_float(self):
+        linear = torch.nn.Linear(self.in_features, self.out_features)
+        linear.weight, linear.bias = fuse_linear_bn_weights(
+            self.weight,
+            self.bias,
+            self.bn.running_mean,
+            self.bn.running_var,
+            self.bn.eps,
+            self.bn.weight,
+            self.bn.bias)
+        return linear

@@ -5,6 +5,7 @@ import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
+from torch.nn.utils import fuse_conv_bn_weights
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.parameter import Parameter
 from typing import TypeVar
@@ -217,7 +218,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         return qat_convbn
 
     def to_float(self):
-        modules = []
         cls = type(self)
         conv = cls._FLOAT_CONV_MODULE(  # type: ignore[attr-defined]
             self.in_channels,
@@ -232,27 +232,30 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         conv.weight = torch.nn.Parameter(self.weight.detach())
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
-        modules.append(conv)
 
         if cls._FLOAT_BN_MODULE:  # type: ignore[attr-defined]
-            bn = cls._FLOAT_BN_MODULE(  # type: ignore[attr-defined]
-                self.bn.num_features,
+            # fuse bn into conv
+            conv.weight, conv.bias = fuse_conv_bn_weights(
+                conv.weight,
+                conv.bias,
+                self.bn.running_mean,
+                self.bn.running_var,
                 self.bn.eps,
-                self.bn.momentum,
-                self.bn.affine,
-                self.bn.track_running_stats)
-            bn.weight = Parameter(self.bn.weight.detach())
-            if self.bn.affine:
-                bn.bias = Parameter(self.bn.bias.detach())
-            modules.append(bn)
+                self.bn.weight,
+                self.bn.bias
+            )
 
         if cls._FLOAT_RELU_MODULE:  # type: ignore[attr-defined]
+            modules = []
+            modules.append(conv)
             relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
             modules.append(relu)
-
-        result = cls._FLOAT_MODULE(*modules)  # type: ignore[operator]
-        result.train(self.training)
-        return result
+            conv_relu = cls._FUSED_FLOAT_MODULE(*modules)  # type: ignore[attr-defined]
+            conv_relu.train(self.training)
+            return conv_relu
+        else:
+            conv.train(self.training)
+            return conv
 
 class ConvBn1d(_ConvBnNd, nn.Conv1d):
     r"""
@@ -319,6 +322,8 @@ class ConvBnReLU1d(ConvBn1d):
     _FLOAT_CONV_MODULE = nn.Conv1d
     _FLOAT_BN_MODULE = nn.BatchNorm1d
     _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
+    # module class after fusing bn into conv
+    _FUSED_FLOAT_MODULE = nni.ConvReLU1d
 
     def __init__(self,
                  # Conv1d args
@@ -412,6 +417,8 @@ class ConvBnReLU2d(ConvBn2d):
     _FLOAT_CONV_MODULE = nn.Conv2d
     _FLOAT_BN_MODULE = nn.BatchNorm2d
     _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
+    # module class after fusing bn into conv
+    _FUSED_FLOAT_MODULE = nni.ConvReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -565,6 +572,8 @@ class ConvBnReLU3d(ConvBn3d):
     _FLOAT_CONV_MODULE = nn.Conv3d
     _FLOAT_BN_MODULE = nn.BatchNorm3d
     _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
+    # module class after fusing bn into conv
+    _FUSED_FLOAT_MODULE = nni.ConvReLU3d
 
     def __init__(
         self,
