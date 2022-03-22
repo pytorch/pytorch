@@ -76,7 +76,7 @@ class TestShardingPlan(ShardedTensorTestBase):
 
             # Use same seed.
             torch.manual_seed(0)
-            local_megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)            # sharded_megatron_lm = SimpleMegatronLM(linear_size)
+            local_megatron_lm = SimpleMegatronLM([[17, 12], [12, 29]]).cuda(self.rank)
             megatron_lm = copy.deepcopy(local_megatron_lm)
 
             # shard the module with the provided sharding plan

@@ -173,7 +173,7 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
             # Squeeze the # of dimensions manually, only applicable to ChunkShardingSpec
             sharding_spec = output._sharding_spec
             if isinstance(sharding_spec, ChunkShardingSpec) \
-               and local_tensor.size(sharding_spec.dim) == 1:  # type: ignore[attr-defined]
+               and local_tensor.size(sharding_spec.dim) == 1:  # type: ignore[attr-defined, arg-type]
                 local_tensor = local_tensor.squeeze(
                     output._sharding_spec.dim  # type: ignore[attr-defined]
                 )
