@@ -14,6 +14,7 @@ on:
     branches:
       - master
       - main
+      - nightly
       - release/*
   workflow_dispatch:
 
@@ -400,6 +401,7 @@ jobs:
 
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
+          echo "id_x86_32=${id_x86_32}" >> "${GITHUB_ENV}"
 
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
@@ -437,6 +439,26 @@ jobs:
           if-no-files-found: error
           path:
             build_android_artifacts/artifacts.tgz
+
+      - name: Publish android snapshot
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        env:
+          SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+          ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
+          ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
+        run: |
+          set -eux
+          # shellcheck disable=SC2154
+          (echo "cd workspace && ./.circleci/scripts/publish_android_snapshot.sh" | docker exec \
+            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot" \
+            -e SONATYPE_NEXUS_USERNAME \
+            -e SONATYPE_NEXUS_PASSWORD \
+            -e ANDROID_SIGN_KEY \
+            -e ANDROID_SIGN_PASS \
+            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
+            -u jenkins -i "$id_x86_32" bash) 2>&1
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
