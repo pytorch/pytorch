@@ -123,7 +123,7 @@ def main() -> None:
         default='benchmarks/static_runtime/test_generated_ops.cc')
     options = parser.parse_args()
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
-    tags_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
+    tags_yaml_path = os.path.join(options.source_path, 'native/tags.yaml')
     parsed_yaml = gen.parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = gen.get_grouped_native_functions(native_functions)

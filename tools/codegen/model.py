@@ -3,7 +3,7 @@ import re
 from tools.codegen.utils import assert_never
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union, Any
+from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
 
