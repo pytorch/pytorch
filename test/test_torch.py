@@ -447,25 +447,11 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
         self.assertEqual((), torch.cummin(zero_d, 0)[0].shape)
 
-        # renorm
-        self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
-
         # sort, topk
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
         self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
-
-        # lstsq (gels)
-        self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
-
-        # eig
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
-
-        # this is only implemented on cpu
-        if (torch.device(device).type == 'cpu'):
-            self.assertRaises(RuntimeError, lambda: torch.ormqr(zero_d, zero_d, zero_d))
 
         # max, min
         self.assertEqual((), torch.max(zero_d, zero_d).shape)
@@ -474,9 +460,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.min(zero_d, zero_d).shape)
         self.assertEqual((1,), torch.min(one_d, zero_d).shape)
         self.assertEqual((1,), torch.min(zero_d, one_d).shape)
-
-        # diag
-        self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
 
         zero_d_int = torch.tensor(1, device=device)
         one_d_int = torch.tensor([1], device=device)
@@ -1402,16 +1385,6 @@ else:
 
         backward_func(self, device)
 
-    def test_embedding_scalar_weight_error(self, device):
-        indices = torch.rand(2, 2, device=device).long()
-        weights = [
-            torch.tensor(1.0, device=device),
-            torch.tensor(1.0, device=device).reshape(1, 1, 1),
-        ]
-        for weight in weights:
-            with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
-                torch.embedding(weight, indices)
-
     def test_dist(self, device):
         def run_test(x, y):
             for p in [0, 1, 2, 3, 4, inf, -inf]:
@@ -2057,37 +2030,6 @@ else:
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
-    def test_multinomial_constraints(self, device):
-        x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "prob_dist must be 1 or 2 dim",
-            lambda: torch.multinomial(x, 2))
-        x = torch.empty(1, 2, dtype=torch.long, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "multinomial only supports floating-point dtypes for input",
-            lambda: torch.multinomial(x, 2))
-        x = torch.empty(1, 2, dtype=torch.double, device=device)
-        y = torch.empty(1, 2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "multinomial expects Long tensor out",
-            lambda: torch.multinomial(x, 2, out=y))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample <= 0 samples",
-            lambda: torch.multinomial(x, 0))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample <= 0 samples",
-            lambda: torch.multinomial(x, -1))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample > prob_dist",
-            lambda: torch.multinomial(x, 3, False))
-        x = torch.empty(16777217, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "number of categories cannot exceed",
-            lambda: torch.multinomial(x, 3))
-
     def test_cumsum(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumsum(x, 1)
@@ -2520,38 +2462,6 @@ else:
             else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
-
-    # FIXME: port this to ErrorInputs
-    @onlyNativeDeviceTypes
-    @dtypes(torch.long, torch.float32, torch.complex64)
-    def test_error_gradient(self, device, dtype):
-        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected spacing to be unspecified, a scalar '):
-            dim = (1, 0)
-            spacing = [0.1]
-            torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 and edge_order=2.'):
-            torch.gradient(t, edge_order=3)
-
-        with self.assertRaisesRegex(RuntimeError, 'dim 1 appears multiple times in the list of dims'):
-            dim = (1, 1)
-            spacing = 0.1
-            torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each tensor to be on the same device,'):
-            dim = (0, 1)
-            coordinates = [torch.tensor([1, 2, 4], device='cpu'), torch.tensor([1, 2, 4], device='meta')]
-            torch.gradient(t, spacing=coordinates, dim=dim, edge_order=1)
-
-        with self.assertRaises(IndexError):
-            torch.gradient(t, dim=3)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
-            torch.gradient(torch.tensor([[1], [2], [3]]), edge_order=1)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
-            torch.gradient(torch.tensor([[1, 2], [3, 4]]), edge_order=2)
 
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
@@ -4004,19 +3914,6 @@ else:
             mask[1:].masked_fill_(mask[:-1], False)
 
     # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_masked_select_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((3,))
-        y = torch.rand((6,), device=device)
-        mask = torch.tensor([True, False, True, True, False, False], device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.masked_select(y, mask, out=x)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.masked_select(y, mask, out=y)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.masked_select(mask.clone(), mask, out=mask)
-
-    # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
@@ -4026,15 +3923,6 @@ else:
 
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.masked_scatter_(mask, src)
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_index_select_mem_overlap(self, device):
-        x = torch.rand((1, 6), device=device).expand((2, 6))
-        y = torch.rand((3, 6), device=device)
-        ind = torch.tensor([0, 1], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.index_select(y, 1, ind, out=x)
 
     # FIXME: convert to ErrorInputs
     @onlyNativeDeviceTypes
@@ -4049,32 +3937,6 @@ else:
             src.scatter_(0, ind, src)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.scatter_(0, ind, ind.clone())
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_gather_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((3,))
-        src = torch.rand((6,), device=device)
-        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(src, 0, ind, out=x)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(src, 0, ind, out=src)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(ind.clone(), 0, ind[1:], out=ind[:1])
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_take_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((3,))
-        src = torch.rand((6,), device=device)
-        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.take(src, ind, out=x)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.take(src, ind, out=src)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.take(ind.clone(), ind[1:], out=ind[:-1])
 
     # FIXME: move to test distributions
     @onlyCUDA
