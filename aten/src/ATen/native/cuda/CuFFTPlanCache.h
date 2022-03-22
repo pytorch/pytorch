@@ -1,5 +1,5 @@
-#include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/core/DimVector.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/utils/ParamsHash.h>

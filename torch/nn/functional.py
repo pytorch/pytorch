@@ -645,12 +645,6 @@ def max_pool1d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool1d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d_with_indices,
@@ -676,12 +670,6 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool1d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -743,12 +731,6 @@ def max_pool2d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool2d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d_with_indices,
@@ -774,12 +756,6 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool2d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -841,12 +817,6 @@ def max_pool3d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool3d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d_with_indices,
@@ -872,12 +842,6 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool3d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -5357,8 +5321,9 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
     attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
     if need_weights:
         # optionally average attention weights over heads

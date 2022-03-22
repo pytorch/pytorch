@@ -76,6 +76,7 @@ from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  
 from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
+from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1640,6 +1641,55 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    def test_python_ir_utils(self):
+        @torch.jit.script
+        def foo(inp):
+            x = inp + 1
+            y = x / 2
+            z = y * y
+            return z
+
+        add_node = foo.graph.findNode("aten::add")
+        div_node = foo.graph.findNode("aten::div")
+
+        with foo.graph.insert_point_guard(add_node):
+            with foo.graph.insert_point_guard(div_node):
+                foo.graph.insertConstant("goodbye")
+            foo.graph.insertConstant("hello")
+        with foo.graph.insert_point_guard(foo.graph.findNode("aten::mul")):
+            foo.graph.insertConstant("hello")
+        FileCheck().check("hello").check("goodbye").check("hello").run(foo.graph)
+
+        self.assertTrue(add_node.matches(add_node.schema()))
+        self.assertFalse(add_node.matches(div_node.schema()))
+
+    def test_python_ir_utils_graph(self):
+        @torch.jit.script
+        def unrolled_mul(x: torch.Tensor, y: int):
+            out = x
+            for _ in range(y - 1):
+                out = out + x
+            return out
+
+        @torch.jit.script
+        def foo(x):
+            return x * 4
+
+        g = foo.graph
+        muls = g.findAllNodes("aten::mul")
+        scalar_muls = filter(lambda x: x.matches("aten::mul(Tensor self, Scalar other) -> Tensor"), muls)
+        mul_constant_int = filter(lambda x: isinstance(list(x.inputs())[1].toIValue(), int), scalar_muls)
+        for mul in mul_constant_int:
+            with g.insert_point_guard(mul):
+                outputs = g.insertGraph(unrolled_mul.graph, list(mul.inputs()))
+                assert len(outputs) == len(list(mul.outputs()))
+                for new_out, old_out in zip(outputs, g.outputs()):
+                    old_out.replaceAllUsesWith(new_out)
+                mul.destroy()
+
+        FileCheck().check_not("aten::mul").check("aten::add").run(foo.graph)
+        self.assertEqual(foo(torch.ones([2, 2])), torch.ones([2, 2]) * 4)
+
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
@@ -1868,8 +1918,8 @@ graph(%Ra, %Rb):
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
 
-        x = make_tensor((5,), 'cpu', torch.float32)
-        y = make_tensor((10,), 'cpu', torch.float32)
+        x = make_tensor((5,), dtype=torch.float32, device="cpu")
+        y = make_tensor((10,), dtype=torch.float32, device="cpu")
 
         for fn in [equation_format, equation_format_varargs, sublist_format]:
             check(fn, torch.jit.script(fn), x, y)
@@ -6616,6 +6666,13 @@ a")
         script_model_2 = torch.jit.script(model2)
         self.assertEqual(model1.forward(), script_model_1.forward())
         self.assertEqual(model2.forward(), script_model_2.forward())
+
+    def test_ternary_right_associative(self):
+        def plus_123(x: int):
+            return x + 1 if x == 1 else x + 2 if x == 2 else x + 3
+        self.checkScript(plus_123, (1,))
+        self.checkScript(plus_123, (2,))
+        self.checkScript(plus_123, (3,))
 
     def test_print(self):
         def func(x, y):
@@ -15770,6 +15827,13 @@ dedent """
                 self.b = b  # type: int
 
         torch.jit.script(M(2, 3))
+
+    def test_input_keyword_in_schema(self):
+        def f(x):
+            return torch.ceil(input=x)
+
+        inp = torch.randn(10)
+        self.checkScript(f, (inp, ))
 
     def test_module_method_reassignment(self):
         class Foo(torch.nn.Module):

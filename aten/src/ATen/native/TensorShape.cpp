@@ -1453,21 +1453,9 @@ Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, 
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
-  TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
-  TORCH_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
-  int64_t dim_size = self.size(dim);
-  TORCH_CHECK(split_size > 0 || dim_size == 0,
-           "split_size can only be 0 if dimension size is 0, "
-           "but got dimension size of ", dim_size);
-  // if split_size is 0 and dimension size is 0, there is 1 split.
-  int64_t num_splits = 1;
-  if (split_size != 0) {
-    // ensuring num_splits is at least 1 makes consistent the case where split_size > dim_size
-    // (returns a single split).  We might want to error here, but keep it for BC.
-    num_splits = std::max<int64_t>((dim_size + split_size - 1) / split_size, 1);
-  }
+  const auto num_splits = get_num_splits(self, split_size, dim);
   std::vector<Tensor> splits(num_splits);
-  int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
+  int64_t last_split_size = split_size - (split_size * num_splits - self.size(dim));
 
   for (const auto i : c10::irange(num_splits)) {
     auto length = i < num_splits - 1 ? split_size : last_split_size;
