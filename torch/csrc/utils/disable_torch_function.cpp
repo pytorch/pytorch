@@ -120,7 +120,7 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   if (args == nullptr) {
     py_args = py::make_tuple();
   } else if (PyList_CheckExact(args)) {
-    py_args = py::reinterpret_borrow<py::tuple>(PyList_AsTuple(args));
+    py_args = py::reinterpret_steal<py::tuple>(PyList_AsTuple(args));
   } else {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   }
@@ -147,7 +147,7 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
   if (args == nullptr) {
     py_args = py::make_tuple();
   } else if (PyList_CheckExact(args)) {
-    py_args = py::reinterpret_borrow<py::tuple>(PyList_AsTuple(args));
+    py_args = py::reinterpret_steal<py::tuple>(PyList_AsTuple(args));
   } else {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   }
