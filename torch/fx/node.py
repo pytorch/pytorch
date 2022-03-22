@@ -26,7 +26,9 @@ Argument = Optional[Union[
 ]]
 
 _side_effectful_functions: Set[Callable] = {
-    torch._assert, torch.ops.profiler._record_function_enter,
+    torch._assert,
+    torch.ops.profiler._record_function_enter,
+    torch.ops.profiler._record_function_enter_new,
     torch.ops.profiler._record_function_exit}
 
 # this is fixed on master, WAR for 1.5

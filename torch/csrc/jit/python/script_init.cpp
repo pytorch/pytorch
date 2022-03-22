@@ -2191,10 +2191,6 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
 
-  m.def(
-      "_set_should_use_format_with_string_table",
-      setShouldUseFormatWithStringTable);
-
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");

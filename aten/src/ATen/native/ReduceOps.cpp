@@ -267,17 +267,31 @@ TORCH_META_FUNC(aminmax)
 }
 
 TORCH_META_FUNC(amax)
-(const Tensor& self, IntArrayRef dims, bool keepdim) {
+(const Tensor& self, IntArrayRef dim, bool keepdim) {
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
     TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
             self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
   }
   if (self.numel() == 0) {
-    at::native::zero_numel_check_dims(self, dims, "amax()");
+    at::native::zero_numel_check_dims(self, dim, "amax()");
   }
   const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
-  resize_reduction(*this, self, dims, keepdim, out_dtype);
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
+}
+
+TORCH_META_FUNC(amin)
+(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  auto maybe_result = maybe_get_output();
+  if (maybe_result.defined()) {
+    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+                self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+  }
+  if (self.numel() == 0) {
+    at::native::zero_numel_check_dims(self, dim, "amin()");
+  }
+  const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 } // namespace meta
@@ -1429,29 +1443,17 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<0>(self, result, {}, false, or_stub);
 }
 
-Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
-  if (self.numel() == 0) {
-    zero_numel_check_dims(self, dim, "amin()");
-  }
-
-  auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
+TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+  auto iter =
+      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     min_values_stub(iter.device_type(), iter);
   }
-  return result;
-}
-
-Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::amin_out(result, self, dim, keepdim);
 }
 
 TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
-  c10::MaybeOwned<Tensor> in = c10::MaybeOwned<Tensor>::borrowed(self);
   auto iter =
-      meta::make_reduction(*in, result, dim, keepdim, self.scalar_type());
+      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     max_values_stub(iter.device_type(), iter);
   }
