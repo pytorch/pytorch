@@ -17,9 +17,9 @@ class _ConvNd(nn.modules.conv._ConvNd):
                  groups: int,
                  bias: bool,
                  padding_mode: str,
-                 qconfig = None,
-                 device = None,
-                 dtype = None) -> None:
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
         nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
                                          stride, padding, dilation, transposed,
                                          output_padding, groups, bias, padding_mode, device, dtype)
@@ -109,9 +109,9 @@ class Conv1d(_ConvNd):
                  groups: int = 1,
                  bias: bool = True,
                  padding_mode: str = 'zeros',
-                 qconfig = None,
-                 device = None,
-                 dtype = None) -> None:
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
         super().__init__(
             in_channels,
             out_channels,
@@ -159,9 +159,9 @@ class Conv2d(_ConvNd):
                  groups: int = 1,
                  bias: bool = True,
                  padding_mode: str = 'zeros',
-                 qconfig = None,
-                 device = None,
-                 dtype = None) -> None:
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
         super().__init__(
             in_channels,
             out_channels,
@@ -209,9 +209,9 @@ class Conv3d(_ConvNd):
                  groups: int = 1,
                  bias: bool = True,
                  padding_mode: str = 'zeros',
-                 qconfig = None,
-                 device = None,
-                 dtype = None) -> None:
+                 qconfig=None,
+                 device=None,
+                 dtype=None) -> None:
         super().__init__(
             in_channels,
             out_channels,
