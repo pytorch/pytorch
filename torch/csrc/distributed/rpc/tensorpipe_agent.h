@@ -335,7 +335,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // the shutdown process
   ::c10d::PrefixStore shutdownStore_;
   int worldSize_ = 0;
-  bool isStaticGroup_;
+  const bool isStaticGroup_;
 
   std::atomic<uint64_t> nextMessageID_{0};
 

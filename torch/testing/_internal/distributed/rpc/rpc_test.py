@@ -4330,7 +4330,13 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # TODO: shutdown is ungraceful, not yet fully implemented
+        # TODO: Need to sync before shutdown since ungraceful shutdown is not fully implemented
+        # Using process_group initialization as sync (could also use store based barrier)
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)
