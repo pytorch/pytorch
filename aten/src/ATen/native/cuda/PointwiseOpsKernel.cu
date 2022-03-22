@@ -36,7 +36,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
         auto alpha = value.to<scalar_t>();
         gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
           return a + alpha * b * c;
-        })
+        });
       });
     #endif
   } else {
