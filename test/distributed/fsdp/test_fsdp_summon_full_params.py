@@ -244,7 +244,6 @@ class TestSummonFullParams(FSDPTest):
 
         # trigger lazy init
         model(torch.zeros(5).cuda(self.rank))
-        print(outer_param.size(), outer_full_param_size)
         # the root FSDP module keeps all params around
         self.assertEqual(
             outer_full_param_size, outer_param._full_param_padded.storage().size()
@@ -448,6 +447,33 @@ class TestSummonFullParams(FSDPTest):
         with self.assertRaisesRegex(ValueError, "is not supported"):
             with fsdp_model.summon_full_params(rank0_only=True, writeback=True):
                 pass
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("prefix", ["", "test_prefix"])
+    @parametrize("recurse", [False, True])
+    def test_named_parameters_buffers(self, prefix: str, recurse: bool):
+        fsdp_model = FSDP(
+            NestedWrappedModule(
+                group=dist.distributed_c10d._get_default_group(),
+                wrap_fsdp=True,
+                fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+            )
+        )
+        fsdp_model.register_buffer("buffer", torch.ones(1))
+        model = NestedWrappedModule(
+            group=dist.distributed_c10d._get_default_group(),
+            wrap_fsdp=False,
+            fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
+        )
+        model.register_buffer("buffer", torch.ones(1))
+        with fsdp_model.summon_full_params():
+            for call in ["named_parameters", "named_buffers"]:
+                for (n1, p1), (n2, p2) in itertools.zip_longest(
+                    getattr(fsdp_model, call)(prefix=prefix, recurse=recurse),
+                    getattr(model, call)(prefix=prefix, recurse=recurse),
+                ):
+                    self.assertEqual(n1, n2)
+                    self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)
