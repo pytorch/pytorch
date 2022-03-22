@@ -77,30 +77,15 @@ class NestedTensor:
         return self._impl.is_contiguous()
 
     def __str__(self):
-        def _str(x, indent=0, tab="  "):
-            s = indent * tab + "[\n"
-            strs = list(map(str, x.unbind()))
-            strs = list(
-                map(
-                    lambda xi: "\n".join(
-                        map(lambda xij: (indent + 1) * tab + xij, xi.split("\n"))
-                    ),
-                    strs,
-                )
-            )
-            s += ",\n".join(strs)
-            s += "\n" + indent * tab + "]"
-            return s
-
-        return "nested_tensor(" + _str(self) + ")"
+        return str(self._impl)
 
     def __repr__(self):
         return self.__str__()
 
     def unbind(self, dim=None):
         if dim is None:
-            unbound = torch.ops.aten.unbind.int(self._impl, 0)
+            unbound = self._impl.unbind(0)
             if len(unbound) == 0:
                 return ()
             return unbound
-        return torch.ops.aten.unbind.int(self._impl, dim)
+        return self._impl.unbind(dim)
