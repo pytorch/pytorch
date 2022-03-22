@@ -681,6 +681,7 @@ def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_n
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
 def _demangle(str) -> str: ...  # c10::demangle
 def _disabled_torch_function_impl(func: Callable, types: Iterable[Type], args: Tuple, kwargs: Dict) -> Any: ...  # THPModule_disable_torch_function
+def _disabled_torch_dispatch_impl(func: Callable, types: Iterable[Type], args: Tuple, kwargs: Dict) -> Any: ...  # THPModule_disable_dispatch_function
 def _get_linalg_preferred_backend() -> torch._C._LinalgBackend: ...
 def _set_linalg_preferred_backend(arg: torch._C._LinalgBackend): ...
 class _LinalgBackend:

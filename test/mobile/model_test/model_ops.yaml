@@ -1,0 +1,1143 @@
+kernel_metadata:
+  GeluKernelImpl:
+  - Float
+  LayerNormBackwardKernelImpl:
+  - Float
+  LayerNormKernelImpl:
+  - Float
+  __unused__:
+  - Float
+  _embedding_bag_cpu_impl:
+  - Long
+  _local_scalar_dense_cpu:
+  - Bool
+  - Int
+  - Double
+  - Float
+  - Long
+  abs_cpu:
+  - Float
+  adaptive_avg_pool2d_quantized_cpu:
+  - QUInt8
+  adaptive_avg_pool3d_ndhwc:
+  - QUInt8
+  add_cpu/sub_cpu:
+  - Double
+  - Float
+  - Long
+  - Int
+  addmm_impl_cpu_:
+  - Float
+  aminmax_cpu:
+  - Float
+  arange_cpu:
+  - Long
+  argmax_cpu:
+  - Float
+  atan_vml_cpu:
+  - Float
+  avg_pool2d:
+  - Float
+  avg_pool2d_channels_last:
+  - Float
+  avg_pool2d_nhwc:
+  - QUInt8
+  avg_pool2d_quantized_cpu:
+  - QUInt8
+  batch_index_select_compute:
+  - Long
+  batch_norm:
+  - Float
+  batch_norm_cpu_channels_last:
+  - Float
+  batch_norm_cpu_contiguous:
+  - Float
+  batch_one_hot_input:
+  - Long
+  batch_one_hot_lengths:
+  - Int
+  bernoulli_scalar_cpu_:
+  - Float
+  binary_cross_entropy:
+  - Float
+  binary_cross_entropy_backward:
+  - Float
+  bmm:
+  - Float
+  cadd_sparse:
+  - Float
+  cat_serial_kernel:
+  - Float
+  ceil_vml_cpu:
+  - Float
+  check_convert:
+  - Float
+  - Long
+  check_random_fp_bounds:
+  - Float
+  check_uniform_bounds:
+  - Float
+  clamp_max_scalar_cpu:
+  - Long
+  clamp_min_cpu:
+  - Float
+  - Long
+  clamp_scalar_cpu:
+  - Float
+  - Long
+  clip_ranges:
+  - Int
+  coalesce:
+  - Float
+  compute_indices_weights_linear:
+  - Float
+  compute_indices_weights_nearest:
+  - Float
+  copy_:
+  - Bool
+  - Int
+  - Short
+  - Byte
+  - Char
+  - Float
+  - Double
+  - Long
+  copy_kernel:
+  - Bool
+  - QUInt8
+  - Int
+  - QInt8
+  - Float
+  - Long
+  - Double
+  cos_vml_cpu:
+  - Float
+  cpublas_axpy_impl:
+  - Float
+  cpublas_copy_impl:
+  - Float
+  cpublas_gemm_impl:
+  - Float
+  ctc_loss_cpu:
+  - Float
+  cumsum_out_cpu:
+  - Float
+  - Long
+  dequantize_tensor_per_tensor_affine:
+  - QUInt8
+  - QInt8
+  dequantize_tensor_per_tensor_affine_cpu:
+  - QUInt8
+  - QInt8
+  div_cpu:
+  - Double
+  - Float
+  div_trunc_cpu:
+  - Float
+  - Long
+  embedding_bag_no_grad_cpu_out:
+  - Float
+  - Long
+  embedding_dense_backward_cpu:
+  - Long
+  eq_cpu:
+  - Float
+  - Long
+  exp_vml_cpu:
+  - Double
+  - Float
+  fill_cpu:
+  - Float
+  - Long
+  - Int
+  fill_out:
+  - Bool
+  - Double
+  - Long
+  - Float
+  floor_vml_cpu:
+  - Float
+  gather_ranges_data:
+  - Long
+  gather_ranges_index:
+  - Int
+  gather_ranges_to_dense_v2:
+  - Long
+  - Int
+  ge_cpu:
+  - Float
+  glu_cpu:
+  - Float
+  grid_sampler_2d_cpu_kernel_impl:
+  - Float
+  gt_cpu:
+  - Float
+  hardsigmoid_cpu:
+  - Float
+  index_add_:
+  - Long
+  index_add_cpu_:
+  - Long
+  index_cpu:
+  - Float
+  - Long
+  index_fill_cpu:
+  - Float
+  index_put:
+  - Long
+  index_select:
+  - Float
+  index_select_out_cpu_:
+  - Long
+  isfinite:
+  - Float
+  le_cpu:
+  - Float
+  leaky_qrelu:
+  - QUInt8
+  leaky_relu_cpu:
+  - Float
+  lengths_to_offset_compute:
+  - Long
+  lerp_kernel_tensor:
+  - Float
+  linspace_cpu:
+  - Float
+  log10_vml_cpu:
+  - Double
+  log1p_vml_cpu:
+  - Float
+  log_softmax_backward_lastdim_kernel_impl:
+  - Float
+  log_softmax_lastdim_kernel_impl:
+  - Float
+  log_vml_cpu:
+  - Float
+  logical_and_cpu:
+  - Bool
+  logit_cpu:
+  - Float
+  lt_cpu:
+  - Float
+  - Long
+  - Int
+  make_per_tensor_quantized_tensor:
+  - QInt8
+  masked_fill:
+  - Double
+  - Float
+  - Long
+  max_all:
+  - Float
+  max_cpu:
+  - Float
+  - Long
+  max_pool2d:
+  - QUInt8
+  max_pool2d_nhwc:
+  - QUInt8
+  maximum_cpu:
+  - Double
+  - Int
+  - Float
+  min_all:
+  - Float
+  min_cpu:
+  - Float
+  - Long
+  minimum_cpu:
+  - Double
+  - Float
+  - Long
+  mul_cpu:
+  - Double
+  - Float
+  - Long
+  - Int
+  nan_to_num:
+  - Float
+  ne_cpu:
+  - Double
+  - Long
+  - Float
+  neg_cpu:
+  - Float
+  - Long
+  - Int
+  nll_loss_backward_out_frame:
+  - Float
+  nll_loss_out_frame:
+  - Float
+  nonzero_count_cpu:
+  - Bool
+  - Float
+  - Long
+  nonzero_cpu:
+  - Bool
+  - Long
+  norm_cpu:
+  - Float
+  pow:
+  - Float
+  qadd:
+  - QUInt8
+  qbatch_norm:
+  - QUInt8
+  qcat:
+  - QUInt8
+  - QInt8
+  qcat_nhwc:
+  - QUInt8
+  qhardsigmoid:
+  - QUInt8
+  qhardswish:
+  - QUInt8
+  qmul:
+  - QUInt8
+  qmul_scalar:
+  - QUInt8
+  qrelu:
+  - QUInt8
+  qsigmoid:
+  - QUInt8
+  qtanh:
+  - QUInt8
+  quantize_tensor_per_channel_affine:
+  - QInt32
+  quantize_tensor_per_channel_affine_cpu:
+  - QInt32
+  quantize_tensor_per_tensor_affine:
+  - QInt32
+  - QUInt8
+  - QInt8
+  quantize_tensor_per_tensor_affine_cpu:
+  - QInt32
+  - QUInt8
+  - QInt8
+  quantized_layer_norm_kernel_impl_cpu:
+  - QUInt8
+  random_from_to_kernel_cpu:
+  - Float
+  random_update_from_to:
+  - Float
+  reciprocal_cpu:
+  - Double
+  reflection_pad2d:
+  - Float
+  remainder_cpu:
+  - Long
+  scatter_gather_scalar_cpu:
+  - Long
+  scatter_gather_tensor_cpu:
+  - Float
+  - Long
+  sigmoid_backward_cpu:
+  - Float
+  sigmoid_cpu:
+  - Float
+  sigrid_hash:
+  - Long
+  sin_vml_cpu:
+  - Float
+  slow_conv2d_cpu:
+  - Float
+  slow_conv2d_cpu_grad_input:
+  - Float
+  slow_conv2d_cpu_grad_weight:
+  - Float
+  slow_conv_transpose2d_out_cpu:
+  - Float
+  softmax_kernel_impl:
+  - Float
+  softmax_lastdim_kernel_impl:
+  - Float
+  softplus_cpu:
+  - Float
+  sorting_kernel_method_name:
+  - Float
+  - Long
+  sqrt_vml_cpu:
+  - Float
+  sum_cpu:
+  - Float
+  - Long
+  tanh_backward_cpu:
+  - Float
+  tanh_vml_cpu:
+  - Float
+  tensor_cpu:
+  - Long
+  threshold_cpu:
+  - Float
+  topk_cpu:
+  - Float
+  triu:
+  - Long
+  trunc_vml_cpu:
+  - Float
+  unfolded2d_acc:
+  - Float
+  unfolded2d_copy:
+  - Float
+  uniform_kernel_cpu:
+  - Float
+  unique:
+  - Long
+  upsample_bilinear2d_nhwc:
+  - QUInt8
+  upsample_generic_Nd:
+  - Float
+  upsample_nearest2d:
+  - QUInt8
+  upsample_nearest2d_channels_last:
+  - Float
+  where_cpu:
+  - Double
+  - Float
+  - Long
+root_operators:
+- aten::Bool.Tensor
+- aten::Bool.int
+- aten::Float.Scalar
+- aten::Float.Tensor
+- aten::Float.str
+- aten::FloatImplicit
+- aten::Int.Scalar
+- aten::Int.Tensor
+- aten::Int.float
+- aten::Int.str
+- aten::IntImplicit
+- aten::ScalarImplicit
+- aten::__and__.Tensor
+- aten::__and__.bool
+- aten::__and__.int
+- aten::__contains__.int
+- aten::__contains__.int_list
+- aten::__contains__.str
+- aten::__contains__.str_list
+- aten::__derive_index
+- aten::__getitem__.Dict_int
+- aten::__getitem__.Dict_str
+- aten::__getitem__.str
+- aten::__getitem__.t
+- aten::__is__
+- aten::__isnot__
+- aten::__lshift__.int
+- aten::__not__
+- aten::__range_length
+- aten::__rshift__.int
+- aten::__xor__.bool
+- aten::_aminmax
+- aten::_convolution
+- aten::_convolution.deprecated
+- aten::_infer_size
+- aten::_make_per_tensor_quantized_tensor
+- aten::_pack_padded_sequence
+- aten::_pad_packed_sequence
+- aten::_reshape_from_tensor
+- aten::_set_item.int
+- aten::_set_item.str
+- aten::_set_item.t
+- aten::_shape_as_tensor
+- aten::adaptive_avg_pool1d
+- aten::adaptive_avg_pool2d
+- aten::adaptive_avg_pool3d
+- aten::add.Scalar
+- aten::add.Tensor
+- aten::add.float
+- aten::add.int
+- aten::add.out
+- aten::add.str
+- aten::add.t
+- aten::add_.Scalar
+- aten::add_.Tensor
+- aten::addcmul
+- aten::addmm
+- aten::all
+- aten::allclose
+- aten::any
+- aten::append.t
+- aten::arange
+- aten::arange.start
+- aten::arange.start_step
+- aten::argmax
+- aten::as_strided
+- aten::as_tensor.list
+- aten::atan
+- aten::avg_pool1d
+- aten::avg_pool2d
+- aten::backward
+- aten::batch_norm
+- aten::binary_cross_entropy
+- aten::binary_cross_entropy_with_logits
+- aten::bitwise_not
+- aten::bmm
+- aten::broadcast_tensors
+- aten::cat
+- aten::ceil
+- aten::ceil.float
+- aten::chunk
+- aten::clamp
+- aten::clamp_
+- aten::clamp_min
+- aten::clear.str
+- aten::clone
+- aten::coalesce
+- aten::conj
+- aten::constant_pad_nd
+- aten::contiguous
+- aten::conv1d
+- aten::conv2d
+- aten::conv_transpose2d.input
+- aten::copy_
+- aten::copy_.Tensor
+- aten::copy_.int
+- aten::cos
+- aten::count_nonzero
+- aten::ctc_loss.Tensor
+- aten::cumsum
+- aten::dequantize.list
+- aten::dequantize.self
+- aten::dequantize.tensor
+- aten::detach
+- aten::dim
+- aten::div
+- aten::div.Scalar
+- aten::div.Tensor
+- aten::div.Tensor_mode
+- aten::div.float
+- aten::div.int
+- aten::div_.Tensor
+- aten::dropout
+- aten::embedding
+- aten::embedding_bag.padding_idx
+- aten::empty.memory_format
+- aten::empty_like
+- aten::empty_strided
+- aten::eq.Scalar
+- aten::eq.Tensor
+- aten::eq.int
+- aten::eq.int_list
+- aten::eq.str
+- aten::exp
+- aten::exp.float
+- aten::expand
+- aten::expand_as
+- aten::extend.t
+- aten::feature_dropout
+- aten::fill_.Scalar
+- aten::find
+- aten::flatten.using_ints
+- aten::flip
+- aten::floor
+- aten::floor.float
+- aten::floor_divide
+- aten::floor_divide.Scalar
+- aten::floordiv.int
+- aten::format
+- aten::full
+- aten::full_like
+- aten::gather
+- aten::ge.Scalar
+- aten::ge.Tensor
+- aten::ge.int
+- aten::gelu
+- aten::get.default_str
+- aten::glu
+- aten::grid_sampler
+- aten::gt.Scalar
+- aten::gt.float
+- aten::gt.float_int
+- aten::gt.int
+- aten::hardsigmoid
+- aten::hardsigmoid_
+- aten::hardswish_
+- aten::hardtanh
+- aten::hardtanh_
+- aten::hstack
+- aten::index.Tensor
+- aten::index_fill.int_Scalar
+- aten::index_put_
+- aten::index_select
+- aten::is_coalesced
+- aten::is_floating_point
+- aten::isnan
+- aten::item
+- aten::items.str
+- aten::keys.str
+- aten::layer_norm
+- aten::le.Scalar
+- aten::le.Tensor
+- aten::le.float
+- aten::le.int
+- aten::leaky_relu
+- aten::leaky_relu_
+- aten::len.Dict_int
+- aten::len.Tensor
+- aten::len.str
+- aten::len.t
+- aten::linear
+- aten::linspace
+- aten::list.t
+- aten::log
+- aten::log10
+- aten::log1p
+- aten::log_softmax.int
+- aten::logical_and
+- aten::logical_not
+- aten::logit
+- aten::lower
+- aten::lstm.data
+- aten::lstm.input
+- aten::lt.Scalar
+- aten::lt.Tensor
+- aten::lt.float
+- aten::lt.int
+- aten::masked_fill.Scalar
+- aten::matmul
+- aten::max
+- aten::max.dim
+- aten::max.other
+- aten::max_pool2d
+- aten::maximum
+- aten::mean
+- aten::mean.dim
+- aten::meshgrid.indexing
+- aten::min
+- aten::min.dim
+- aten::min.other
+- aten::minimum
+- aten::mse_loss
+- aten::mul.Scalar
+- aten::mul.Tensor
+- aten::mul.float
+- aten::mul.float_int
+- aten::mul.int
+- aten::mul.int_float
+- aten::mul.left_t
+- aten::mul.out
+- aten::mul_.Scalar
+- aten::mul_.Tensor
+- aten::nan_to_num
+- aten::nan_to_num_
+- aten::narrow
+- aten::ne.Scalar
+- aten::ne.Tensor
+- aten::ne.int
+- aten::ne.int_float
+- aten::ne.int_list
+- aten::ne.str
+- aten::neg
+- aten::neg.int
+- aten::new_zeros
+- aten::nll_loss
+- aten::nll_loss2d
+- aten::nll_loss_nd
+- aten::nonzero
+- aten::norm.Scalar
+- aten::norm.ScalarOpt_dim
+- aten::numel
+- aten::one_hot
+- aten::ones
+- aten::ones_like
+- aten::ord
+- aten::permute
+- aten::pop.t
+- aten::pow.Tensor_Scalar
+- aten::pow.int_float
+- aten::quantile.scalar
+- aten::quantize_per_tensor
+- aten::quantize_per_tensor.tensor_qparams
+- aten::quantized_lstm.data
+- aten::rand
+- aten::randint.low
+- aten::randn_like
+- aten::reciprocal
+- aten::reflection_pad2d
+- aten::relu
+- aten::relu_
+- aten::remainder.Scalar
+- aten::remainder.int
+- aten::repeat
+- aten::replace
+- aten::requires_grad_
+- aten::reshape
+- aten::resize_as_
+- aten::resolve_conj
+- aten::resolve_neg
+- aten::reverse.t
+- aten::round.Scalar
+- aten::rstrip
+- aten::rsub.Scalar
+- aten::scatter_.src
+- aten::scatter_add_
+- aten::select.int
+- aten::sigmoid
+- aten::sin
+- aten::size
+- aten::size.int
+- aten::slice.Tensor
+- aten::slice.str
+- aten::slice.t
+- aten::softmax.int
+- aten::softplus
+- aten::sort
+- aten::sparse_coo_tensor.indices
+- aten::sparse_resize_and_clear_
+- aten::split.str
+- aten::sqrt
+- aten::squeeze.dim
+- aten::stack
+- aten::startswith
+- aten::str
+- aten::strip
+- aten::sub
+- aten::sub.Scalar
+- aten::sub.Tensor
+- aten::sub.float
+- aten::sub.int
+- aten::sub.int_float
+- aten::sub_.Tensor
+- aten::sum
+- aten::sum.dim_IntList
+- aten::sum.int
+- aten::t
+- aten::tanh
+- aten::tensor
+- aten::tensor.float
+- aten::tensor.int
+- aten::tensor_split.indices
+- aten::to.device
+- aten::to.dtype
+- aten::to.dtype_layout
+- aten::to.prim_Device
+- aten::to.prim_dtype
+- aten::topk
+- aten::transpose.int
+- aten::triu
+- aten::true_divide.Tensor
+- aten::trunc_
+- aten::type_as
+- aten::unbind.int
+- aten::unique_consecutive
+- aten::unsqueeze
+- aten::unsqueeze_
+- aten::update.str
+- aten::upsample_bicubic2d.vec
+- aten::upsample_bilinear2d.vec
+- aten::upsample_linear1d.vec
+- aten::upsample_nearest1d.vec
+- aten::upsample_nearest2d
+- aten::upsample_nearest2d.vec
+- aten::upsample_nearest3d.vec
+- aten::upsample_trilinear3d.vec
+- aten::values.int
+- aten::view
+- aten::vstack
+- aten::where.ScalarOther
+- aten::where.self
+- aten::zeros
+- aten::zeros.out
+- aten::zeros_like
+- prepacked::conv2d_clamp_prepack
+- prepacked::conv2d_clamp_run
+- prepacked::conv2d_transpose_clamp_prepack
+- prepacked::conv2d_transpose_clamp_run
+- prepacked::linear_clamp_run
+- prim::ModuleContainerIndex.list
+- prim::NumToTensor.Scalar
+- prim::Print
+- prim::RaiseException
+- prim::TupleIndex
+- prim::TupleUnpack
+- prim::Uninitialized
+- prim::device
+- prim::dtype
+- prim::is_cuda
+- prim::max.float
+- prim::max.int
+- prim::max.self_int
+- prim::min
+- prim::min.int
+- prim::min.self_int
+- prim::unchecked_cast
+- quantized::add
+- quantized::add_relu
+- quantized::batch_norm2d
+- quantized::cat
+- quantized::conv1d
+- quantized::conv2d
+- quantized::conv2d.new
+- quantized::conv2d_prepack
+- quantized::conv2d_relu.new
+- quantized::conv_prepack
+- quantized::conv_transpose2d
+- quantized::embedding_byte
+- quantized::hardswish
+- quantized::instance_norm
+- quantized::leaky_relu
+- quantized::linear
+- quantized::linear_dynamic
+- quantized::linear_dynamic_fp16
+- quantized::linear_prepack
+- quantized::linear_prepack_fp16
+- quantized::linear_relu
+- quantized::linear_unpack
+- quantized::linear_unpack_fp16
+- quantized::mul
+- quantized::mul.Scalar
+traced_operators:
+- aten::__and__.Tensor
+- aten::__iand__.Tensor
+- aten::__ior__.Tensor
+- aten::_adaptive_avg_pool2d
+- aten::_aminmax
+- aten::_batch_norm_impl_index
+- aten::_cat
+- aten::_coalesce
+- aten::_coalesced_
+- aten::_convolution
+- aten::_convolution.deprecated
+- aten::_ctc_loss
+- aten::_embedding_bag
+- aten::_embedding_bag_backward
+- aten::_embedding_bag_sparse_backward
+- aten::_empty_affine_quantized
+- aten::_empty_per_channel_affine_quantized
+- aten::_index_put_impl_
+- aten::_indices
+- aten::_local_scalar_dense
+- aten::_log_softmax
+- aten::_log_softmax_backward_data
+- aten::_make_per_tensor_quantized_tensor
+- aten::_nnz
+- aten::_pack_padded_sequence
+- aten::_pack_padded_sequence_backward
+- aten::_pad_packed_sequence
+- aten::_reshape_alias
+- aten::_reshape_from_tensor
+- aten::_s_where
+- aten::_shape_as_tensor
+- aten::_slow_conv2d_backward.output_mask
+- aten::_slow_conv2d_forward
+- aten::_softmax
+- aten::_sparse_coo_tensor_unsafe
+- aten::_sparse_coo_tensor_with_dims_and_tensors
+- aten::_to_copy
+- aten::_unsafe_view
+- aten::_values
+- aten::abs
+- aten::abs.out
+- aten::adaptive_avg_pool2d
+- aten::add.Scalar
+- aten::add.Tensor
+- aten::add.out
+- aten::add_.Scalar
+- aten::add_.Tensor
+- aten::addmm
+- aten::alias
+- aten::all
+- aten::allclose
+- aten::aminmax
+- aten::any
+- aten::any.dim
+- aten::arange
+- aten::arange.start
+- aten::arange.start_out
+- aten::arange.start_step
+- aten::argmax
+- aten::as_strided
+- aten::as_strided_
+- aten::atan
+- aten::atleast_1d.Sequence
+- aten::atleast_2d.Sequence
+- aten::avg_pool2d
+- aten::batch_norm
+- aten::bernoulli_.float
+- aten::binary_cross_entropy
+- aten::binary_cross_entropy_backward
+- aten::binary_cross_entropy_with_logits
+- aten::binary_cross_entropy_with_logits_backward
+- aten::bitwise_and.Tensor
+- aten::bitwise_and_.Tensor
+- aten::bitwise_not
+- aten::bitwise_or_.Tensor
+- aten::bmm
+- aten::broadcast_tensors
+- aten::cat
+- aten::ceil
+- aten::ceil_
+- aten::chunk
+- aten::clamp
+- aten::clamp_
+- aten::clamp_min
+- aten::clamp_min.out
+- aten::clamp_min_
+- aten::clone
+- aten::coalesce
+- aten::conj
+- aten::constant_pad_nd
+- aten::contiguous
+- aten::conv1d
+- aten::conv2d
+- aten::conv_transpose2d.input
+- aten::convolution
+- aten::convolution_backward
+- aten::copy_
+- aten::copy_sparse_to_sparse_
+- aten::cos
+- aten::count_nonzero
+- aten::count_nonzero.dim_IntList
+- aten::ctc_loss.Tensor
+- aten::cudnn_is_acceptable
+- aten::cumsum
+- aten::dense_dim
+- aten::dequantize.self
+- aten::dequantize.tensors
+- aten::detach
+- aten::div.Scalar
+- aten::div.Tensor
+- aten::div.Tensor_mode
+- aten::div_.Scalar
+- aten::div_.Tensor
+- aten::dropout
+- aten::embedding
+- aten::embedding_backward
+- aten::embedding_bag.padding_idx
+- aten::embedding_dense_backward
+- aten::embedding_sparse_backward
+- aten::empty.memory_format
+- aten::empty_like
+- aten::empty_strided
+- aten::eq.Scalar
+- aten::eq.Tensor
+- aten::exp
+- aten::exp_
+- aten::expand
+- aten::expand_as
+- aten::feature_dropout
+- aten::fill_.Scalar
+- aten::flatten.using_ints
+- aten::flip
+- aten::floor
+- aten::floor_divide
+- aten::floor_divide.Scalar
+- aten::full
+- aten::full_like
+- aten::gather
+- aten::ge.Scalar
+- aten::gelu
+- aten::glu
+- aten::grid_sampler
+- aten::grid_sampler_2d
+- aten::gt.Scalar
+- aten::hardsigmoid
+- aten::hardsigmoid_
+- aten::hardswish_
+- aten::hardtanh
+- aten::hstack
+- aten::index.Tensor
+- aten::index_add_
+- aten::index_fill.int_Scalar
+- aten::index_fill_.int_Scalar
+- aten::index_put_
+- aten::index_select
+- aten::index_select_backward
+- aten::is_coalesced
+- aten::is_floating_point
+- aten::isclose
+- aten::isfinite
+- aten::isnan
+- aten::item
+- aten::layer_norm
+- aten::le.Scalar
+- aten::le.Tensor
+- aten::leaky_relu
+- aten::leaky_relu_
+- aten::lerp_.Tensor
+- aten::linear
+- aten::linspace
+- aten::linspace.out
+- aten::log
+- aten::log10
+- aten::log1p
+- aten::log_
+- aten::log_softmax.int
+- aten::logical_and
+- aten::logical_and.out
+- aten::logical_and_
+- aten::logit
+- aten::lstm.data
+- aten::lstm.input
+- aten::lt.Scalar
+- aten::lt.Tensor
+- aten::masked_fill.Scalar
+- aten::masked_fill_.Scalar
+- aten::matmul
+- aten::max
+- aten::max.dim
+- aten::max.other
+- aten::max_pool2d
+- aten::maximum
+- aten::mean
+- aten::mean.dim
+- aten::meshgrid.indexing
+- aten::min
+- aten::min.dim
+- aten::min.other
+- aten::minimum
+- aten::mm
+- aten::mul.Scalar
+- aten::mul.Tensor
+- aten::mul.out
+- aten::mul_.Scalar
+- aten::mul_.Tensor
+- aten::nan_to_num
+- aten::nan_to_num.out
+- aten::nan_to_num_
+- aten::narrow
+- aten::native_batch_norm
+- aten::native_layer_norm
+- aten::native_layer_norm_backward
+- aten::ne.Scalar
+- aten::ne.Tensor
+- aten::neg
+- aten::new_empty_strided
+- aten::nll_loss
+- aten::nll_loss_backward
+- aten::nll_loss_forward
+- aten::nll_loss_nd
+- aten::nonzero
+- aten::norm.Scalar
+- aten::norm.ScalarOpt_dim
+- aten::normal_
+- aten::one_hot
+- aten::ones
+- aten::ones_like
+- aten::permute
+- aten::pow.Tensor_Scalar
+- aten::q_per_channel_scales
+- aten::q_per_channel_zero_points
+- aten::q_scale
+- aten::q_zero_point
+- aten::qscheme
+- aten::quantile.scalar
+- aten::quantize_per_tensor
+- aten::quantize_per_tensor.tensor_qparams
+- aten::quantized_lstm.data
+- aten::quantized_max_pool2d
+- aten::rand
+- aten::randint.low
+- aten::randn_like
+- aten::random_.from
+- aten::reciprocal
+- aten::reflection_pad2d
+- aten::relu
+- aten::relu_
+- aten::remainder.Scalar
+- aten::remainder.Tensor
+- aten::repeat
+- aten::requires_grad_
+- aten::reshape
+- aten::resize_
+- aten::resize_as_
+- aten::resolve_conj
+- aten::resolve_neg
+- aten::result_type.Scalar
+- aten::rsub.Scalar
+- aten::scalar_tensor
+- aten::scatter_.src
+- aten::scatter_.value
+- aten::scatter_add_
+- aten::select.int
+- aten::select_backward
+- aten::set_.source_Storage
+- aten::set_.source_Storage_storage_offset
+- aten::sigmoid
+- aten::sigmoid_
+- aten::sigmoid_backward
+- aten::sin
+- aten::slice.Tensor
+- aten::slice_backward
+- aten::slow_conv_transpose2d
+- aten::softmax.int
+- aten::softplus
+- aten::sort
+- aten::sparse_coo_tensor.indices
+- aten::sparse_dim
+- aten::sparse_resize_and_clear_
+- aten::split.Tensor
+- aten::sqrt
+- aten::squeeze
+- aten::squeeze.dim
+- aten::squeeze_.dim
+- aten::stack
+- aten::sub.Scalar
+- aten::sub.Tensor
+- aten::sub_.Scalar
+- aten::sub_.Tensor
+- aten::sum
+- aten::sum.IntList_out
+- aten::sum.dim_IntList
+- aten::t
+- aten::tanh
+- aten::tanh_
+- aten::tanh_backward
+- aten::tensor_split.indices
+- aten::thnn_conv2d
+- aten::threshold_backward
+- aten::to.device
+- aten::to.dtype
+- aten::to.dtype_layout
+- aten::topk
+- aten::transpose.int
+- aten::triu
+- aten::true_divide.Tensor
+- aten::trunc_
+- aten::type_as
+- aten::unbind.int
+- aten::unfold
+- aten::uniform_
+- aten::unique_consecutive
+- aten::unsafe_chunk
+- aten::unsafe_split.Tensor
+- aten::unsqueeze
+- aten::unsqueeze_
+- aten::upsample_bilinear2d
+- aten::upsample_bilinear2d.vec
+- aten::upsample_nearest2d
+- aten::upsample_nearest2d.vec
+- aten::value_selecting_reduction_backward
+- aten::view
+- aten::vstack
+- aten::where.ScalarOther
+- aten::where.self
+- aten::zero_
+- aten::zeros
+- aten::zeros.out
+- aten::zeros_like
+- prepacked::conv2d_clamp_prepack
+- prepacked::conv2d_clamp_run
+- prepacked::conv2d_transpose_clamp_run
+- prepacked::linear_clamp_run
+- quantized::add
+- quantized::add_relu
+- quantized::batch_norm2d
+- quantized::cat
+- quantized::conv1d
+- quantized::conv2d
+- quantized::conv2d.new
+- quantized::conv2d_prepack
+- quantized::conv2d_relu.new
+- quantized::conv_prepack
+- quantized::conv_transpose2d
+- quantized::embedding_byte
+- quantized::hardswish
+- quantized::instance_norm
+- quantized::leaky_relu
+- quantized::linear
+- quantized::linear_dynamic
+- quantized::linear_prepack
+- quantized::linear_relu
+- quantized::mul
+- quantized::mul.Scalar

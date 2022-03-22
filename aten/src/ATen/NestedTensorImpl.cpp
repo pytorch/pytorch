@@ -29,6 +29,13 @@ NestedTensorImpl::NestedTensorImpl(
   remove_autograd_key();
   key_set_ =
       key_set_ - c10::DispatchKeySet({c10::DispatchKey::ADInplaceOrView});
+  refresh_dim();
+}
+
+void NestedTensorImpl::refresh_dim() {
+  const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
+  sizes_and_strides_.resize(my_dim);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
 
 } // namespace native
