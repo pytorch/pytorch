@@ -602,37 +602,19 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_load_from_github(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            source='github',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example', 'mnist', source='github', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload(
-            'ailzhang/torchhub_example', force_reload=False)
-        hub_model = hub.load(
-            local_dir,
-            'mnist',
-            source='local',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        local_dir = hub._get_cache_or_reload('ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(local_dir, 'mnist', source='local', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_load_from_branch(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example:ci/test_slash',
-            'mnist',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example:ci/test_slash', 'mnist', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_get_set_dir(self):
@@ -642,13 +624,8 @@ class TestHub(TestCase):
             self.assertEqual(torch.hub.get_dir(), tmpdir)
             self.assertNotEqual(previous_hub_dir, tmpdir)
 
-            hub_model = hub.load(
-                'ailzhang/torchhub_example',
-                'mnist',
-                pretrained=True,
-                verbose=False)
-            self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                             SUM_OF_HUB_EXAMPLE)
+            hub_model = hub.load('ailzhang/torchhub_example', 'mnist', pretrained=True, verbose=False)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
             assert os.path.exists(os.path.join(tmpdir, 'ailzhang_torchhub_example_master'))
 
     @retry(Exception, tries=3)
@@ -681,20 +658,14 @@ class TestHub(TestCase):
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
             hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip', pretrained=True, verbose=False)
-            self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                             SUM_OF_HUB_EXAMPLE)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
             assert any("will be deprecated in favor of default zipfile" in str(w) for w in ws)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
     @retry(Exception, tries=3)
     def test_load_zip_1_6_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_hub_parse_repo_info(self):
@@ -716,10 +687,8 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_load_commit_from_forked_repo(self):
-        with self.assertRaisesRegex(
-                ValueError,
-                'If it\'s a commit from a forked repo'):
-            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+        with self.assertRaisesRegex(ValueError, 'If it\'s a commit from a forked repo'):
+            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
