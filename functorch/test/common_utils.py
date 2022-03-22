@@ -187,13 +187,15 @@ def skipOps(test_case_name, base_test_name, to_skip):
         for opinfo in matching_opinfos:
             decorators = list(opinfo.decorators)
             if expected_failure:
-                decorators.append(DecorateInfo(unittest.expectedFailure,
-                                               test_case_name, base_test_name,
-                                               device_type=device_type, dtypes=dtypes))
+                decorator = DecorateInfo(unittest.expectedFailure,
+                                         test_case_name, base_test_name,
+                                         device_type=device_type, dtypes=dtypes)
+                decorators.append(decorator)
             else:
-                decorators.append(DecorateInfo(unittest.skip("Skipped!"),
-                                               test_case_name, base_test_name,
-                                               device_type=device_type, dtypes=dtypes))
+                decorator = DecorateInfo(unittest.skip("Skipped!"),
+                                         test_case_name, base_test_name,
+                                         device_type=device_type, dtypes=dtypes)
+                decorators.append(decorator)
             opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
