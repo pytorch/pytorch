@@ -4,9 +4,11 @@ import contextlib
 import ctypes
 import sys
 import types
+import os
 
 import torch.jit
 import torch._utils_internal
+from tools.codegen.gen import parse_native_yaml
 
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
@@ -24,6 +26,22 @@ def dl_open_guard():
     yield
     if _SET_GLOBAL_FLAGS:
         sys.setdlopenflags(old_flags)
+
+def get_tags():
+    tags = {}
+    native_yaml_path = os.path.join('aten/src/ATen/native/native_functions.yaml')
+    tags_yaml_path = os.path.join('aten/src/ATen/native/tags.yaml')
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
+    native_functions = parsed_yaml.native_functions
+    for item in native_functions:
+        key = item.func.name.overload_name
+        if key == '':
+            key = '.default'
+        if len(item.tags) > 0:
+            tags[item.func.name.__str__()+key] = item.tags
+    return tags
+
+TAGS = get_tags()
 
 # Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
@@ -64,6 +82,10 @@ class OpOverload:
     @property
     def op(self):
         return self._op
+
+    @property
+    def tags(self):
+        return TAGS.get(self.__name__, [])
 
     # TODO: add more methods to expose information about input and output arguments
 
