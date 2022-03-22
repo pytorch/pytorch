@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.modules.utils import _pair, _triple
 from torch.nn.intrinsic import _FusedModule
-from typing import Tuple, Any
+from typing import Tuple
 
 class _ConvNd(nn.modules.conv._ConvNd):
     def __init__(self,
