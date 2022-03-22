@@ -851,6 +851,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
 
  public:
+  // Whether a tensor is sparse COO or not.
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -860,11 +861,16 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::SparseXPU);
   }
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
-  // format.
+  // Whether a tensor is sparse CSR or not.
   bool is_sparse_csr() const {
-    return key_set_.has(DispatchKey::SparseCsrCPU) ||
-        key_set_.has(DispatchKey::SparseCsrCUDA);
+    return (key_set_.has(DispatchKey::SparseCsrCPU) ||
+            key_set_.has(DispatchKey::SparseCsrCUDA)) && !key_set_.has(DispatchKey::CsrTranspose);
+  }
+
+  // Whether a tensor is sparse CSC or not.
+  bool is_sparse_csc() const {
+    return (key_set_.has(DispatchKey::SparseCsrCPU) ||
+            key_set_.has(DispatchKey::SparseCsrCUDA)) && key_set_.has(DispatchKey::CsrTranspose);
   }
 
   bool is_quantized() const {
@@ -996,6 +1002,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return kSparse;
     } else if (is_sparse_csr()) {
       return kSparseCsr;
+    } else if (is_sparse_csc()) {
+      return kSparseCsc;
     } else if (is_mkldnn()) {
       return kMkldnn;
     } else {

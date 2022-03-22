@@ -415,6 +415,12 @@ class TORCH_API TensorBase {
     return impl_->is_sparse_csr();
   }
 
+  /// Returns is a `Tensor` has a sparse CSR backend with CsrTranspose set.
+  bool is_sparse_csc() const {
+    // NB: this is not a native function to avoid dispatching overhead.
+    return impl_->is_sparse_csc();
+  }
+
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const {
     // NB: this is not a native function to avoid dispatching overhead.

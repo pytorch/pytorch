@@ -6,11 +6,12 @@
 #include <ostream>
 
 namespace c10 {
-enum class Layout : int8_t { Strided, Sparse, SparseCsr, Mkldnn, NumOptions };
+enum class Layout : int8_t { Strided, Sparse, SparseCsr, SparseCsc, Mkldnn, NumOptions };
 
 constexpr auto kStrided = Layout::Strided;
 constexpr auto kSparse = Layout::Sparse;
 constexpr auto kSparseCsr = Layout::SparseCsr;
+constexpr auto kSparseCsc = Layout::SparseCsc;
 constexpr auto kMkldnn = Layout::Mkldnn;
 
 inline Layout layout_from_backend(Backend backend) {
@@ -39,6 +40,8 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
       return stream << "Sparse";
     case at::kSparseCsr:
       return stream << "SparseCsr";
+    case at::kSparseCsc:
+      return stream << "SparseCsc";
     case at::kMkldnn:
       return stream << "Mkldnn";
     default:

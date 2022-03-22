@@ -360,6 +360,10 @@ struct C10_API TensorOptions {
     return layout_ == c10::Layout::SparseCsr;
   }
 
+  bool is_sparse_csc() const {
+    return layout_ == c10::Layout::SparseCsc;
+  }
+
   // For compatibility with legacy tensor.type() comparisons
   bool type_equal(const TensorOptions& other) const {
     return computeDispatchKey() == other.computeDispatchKey() &&
@@ -716,6 +720,7 @@ inline DispatchKey computeDispatchKey(
               device_.type());
       }
     case Layout::SparseCsr:
+    case Layout::SparseCsc:
       switch (device_.type()) {
         case DeviceType::CPU:
           return DispatchKey::SparseCsrCPU;
@@ -738,7 +743,7 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
-    case DispatchKey::SparseCsrCPU:
+    case DispatchKey::SparseCsrCPU:  // why not map SparseCsrCPU/CUDA to Layout::SparseCsr?
     case DispatchKey::SparseCsrCUDA:
       return Layout::Sparse;
     case DispatchKey::MkldnnCPU:
