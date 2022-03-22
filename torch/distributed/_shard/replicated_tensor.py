@@ -54,7 +54,9 @@ class ReplicatedTensor(torch.Tensor):
         # converting results back to ReplicatedTensor if not all operands are replicated.
         all_replicated = True
         replicated_pg = None
-        for arg in args:
+
+        def dispatch_arg(arg):
+            nonlocal replicated_pg, all_replicated
             if isinstance(arg, ShardedTensor):
                 # redispatch to ShardedTensor
                 # TODO: handle ShardedTensor/PartialTensor inter-op with ReplicatedTensor
@@ -70,22 +72,12 @@ class ReplicatedTensor(torch.Tensor):
             else:
                 all_replicated = False
 
+        for arg in args:
+            dispatch_arg(arg)
+
         if kwargs is not None:
             for k, v in kwargs.items():
-                if isinstance(v, ShardedTensor):
-                    # redispatch to ShardedTensor
-                    # TODO: handle ShardedTensor/PartialTensor inter-op with ReplicatedTensor
-                    return v.__torch_function__(func, types, args, kwargs)
-                if isinstance(v, ReplicatedTensor):
-                    if replicated_pg is None:
-                        replicated_pg = v.process_group
-                    elif replicated_pg != v.process_group:
-                        raise RuntimeError(
-                            f"ReplicatedTensor operands must be in the same process group "
-                            f"in torch function '{func.__name__}', but found at least two "
-                            f"ReplicatedTensor operands in different process groups! ")
-                else:
-                    all_replicated = False
+                dispatch_arg(v)
 
         # We cann't do super().__torch_function__() as it implicitly convert the result
         # back to tensor subclasses, where in our case, we need to control the output type
