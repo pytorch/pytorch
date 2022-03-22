@@ -9,7 +9,7 @@ from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
     named_params_with_sharded_tensor,
 )
-from torch.distributed._shard import (
+from torch.distributed._shard.api import (
     shard_parameter,
     _reshard_output,
     _collect_local_shard
