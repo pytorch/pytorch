@@ -1371,7 +1371,7 @@ def handle_torch_function(
     Example
     -------
     >>> def func(a):
-    ...     if type(a) is not torch.Tensor:  # This will make func dispatchable by __torch_function__
+    ...     if has_torch_function_unary(a):
     ...         return handle_torch_function(func, (a,), a)
     ...     return a + 0
     """
