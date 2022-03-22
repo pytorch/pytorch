@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import textwrap
 import unittest
+import warnings
 import torch
 import torch.nn as nn
 import torch.utils.data
@@ -676,14 +677,13 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
-    def test_load_zip_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip',
-            pretrained=True,
-            verbose=False)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+    def test_load_legacy_zip_checkpoint(self):
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip', pretrained=True, verbose=False)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                             SUM_OF_HUB_EXAMPLE)
+            assert any("will be deprecated in favor of default zipfile" in str(w) for w in ws)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
     @retry(Exception, tries=3)
