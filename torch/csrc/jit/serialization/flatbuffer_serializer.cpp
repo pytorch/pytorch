@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
+#include <torch/csrc/jit/serialization/import.h>
 #include <string>
 
 namespace torch {
@@ -38,7 +40,9 @@ class FlatbufferSerializer {
   flatbuffers::DetachedBuffer serializeModule(
       const mobile::Module& module,
       bool include_tensor_data_in_flatbuffer,
-      const ExtraFilesMap& extra_files = ExtraFilesMap());
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      const ExtraFilesMap& jit_sources = ExtraFilesMap(),
+      const std::vector<IValue>& jit_constants = {});
 
  private:
   template <typename It>
@@ -300,7 +304,9 @@ FlatbufferSerializer::storeExtraFilesAndGetOffset(
 flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     const mobile::Module& module,
     bool include_tensor_data_in_flatbuffer,
-    const ExtraFilesMap& extra_files) {
+    const ExtraFilesMap& extra_files,
+    const ExtraFilesMap& jit_sources,
+    const std::vector<IValue>& jit_constants) {
   FlatBufferBuilder fbb;
 
   mcu_ = &module.compilation_unit();
@@ -352,6 +358,13 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
 
   auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
 
+  auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
+  std::vector<uint32_t> jit_constants_indexes;
+  jit_constants_indexes.reserve(jit_constants.size());
+  for (const auto& ival : jit_constants) {
+    jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
+  }
+
   auto mod = CreateModule(
       fbb,
       0, /* version */
@@ -361,7 +374,9 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
       fbb.CreateVector(ivalue_offsets_),
       tensor_data_.size(),
       storage_data_offset,
-      fbb.CreateVector(obj_types_offset_));
+      fbb.CreateVector(obj_types_offset_),
+      jit_source_offset,
+      fbb.CreateVector(jit_constants_indexes));
   FinishModuleBuffer(fbb, mod);
   return fbb.Release();
 }
@@ -696,9 +711,11 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
 void save_mobile_module(
     const mobile::Module& module,
     const std::string& filename,
-    const ExtraFilesMap& extra_files) {
-  FlatbufferSerializer fb_serializer;
-  auto buffer = fb_serializer.serializeModule(module, true, extra_files);
+    const ExtraFilesMap& extra_files,
+    const ExtraFilesMap& jit_sources,
+    const std::vector<IValue>& jit_constants) {
+  auto buffer = save_mobile_module_to_bytes(
+      module, extra_files, jit_sources, jit_constants);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
   ofile.close();
@@ -706,12 +723,61 @@ void save_mobile_module(
 
 flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
     const mobile::Module& module,
-    const ExtraFilesMap& extra_files) {
+    const ExtraFilesMap& extra_files,
+    const ExtraFilesMap& jit_sources,
+    const std::vector<IValue>& jit_constants) {
   FlatbufferSerializer fb_serializer;
   return fb_serializer.serializeModule(
       module,
       /*include_tensor_data_in_flatbuffer*/ true,
-      extra_files);
+      extra_files,
+      jit_sources,
+      jit_constants);
+}
+
+Module parse_and_initialize_jit_module(
+    std::shared_ptr<char> data,
+    size_t,
+    c10::optional<at::Device>) {
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  FlatbufferLoader loader;
+  mobile::Module mobilem = loader.parseModule(flatbuffer_module);
+  ExtraFilesMap files;
+  std::vector<IValue> constants;
+  loader.extractJitSourceAndConstants(&files, &constants);
+  Module m = jitModuleFromSourceAndConstants(
+      mobilem._ivalue(), files, constants, flatbuffer_module->version());
+  m.set_delete_memory(data);
+  return m;
+}
+
+Module load_jit_module_from_file(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  auto data = get_file_content(filename.c_str());
+  return parse_and_initialize_jit_module(
+      std::move(std::get<0>(data)), std::get<1>(data), device);
+}
+
+void save_jit_module(
+    const Module& module,
+    const std::string& filename,
+    const ExtraFilesMap& extra_files) {
+  auto buffer = save_jit_module_to_bytes(module, extra_files);
+  std::fstream ofile(filename, std::ios::binary | std::ios::out);
+  ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size()); // NOLINT
+  ofile.close();
+}
+
+flatbuffers::DetachedBuffer save_jit_module_to_bytes(
+    const Module& module,
+    const ExtraFilesMap& extra_files) {
+  ExtraFilesMap jitfiles;
+  std::vector<IValue> constants;
+  jitModuleToPythonCodeAndConstants(module, &jitfiles, &constants);
+  CompilationOptions options;
+  mobile::Module mobilem = jitModuleToMobile(module, options);
+  return save_mobile_module_to_bytes(mobilem, extra_files, jitfiles, constants);
 }
 
 } // namespace jit
