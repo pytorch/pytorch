@@ -492,13 +492,6 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
             os.remove(f.name)
 
 
-def _download_url_to_file(url, dst, hash_prefix=None, progress=True):
-    warnings.warn('torch.hub._download_url_to_file has been renamed to\
-            torch.hub.download_url_to_file to be a public API,\
-            _download_url_to_file will be removed in after 1.3 release')
-    download_url_to_file(url, dst, hash_prefix, progress)
-
-
 # Hub used to support automatically extracts from zipfile manually compressed by users.
 # The legacy zip format expects only one file from torch.save() < 1.6 in the zip.
 # We should remove this support since zipfile is now default zipfile format for torch.save().
