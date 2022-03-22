@@ -6,7 +6,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
                                      tensorT, scalarT, intArrayRefT, dimnameListT,
                                      optionalTensorRefT, optionalScalarRefT,
-                                     iTensorListT, iOptTensorRefListT)
+                                     iTensorListRefT, iOptTensorListRefT)
 
 from tools.codegen.api import cpp
 from tools.codegen.utils import assert_never
@@ -42,9 +42,9 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
-            return NamedCType(binds, BaseCType(iTensorListT))
+            return NamedCType(binds, BaseCType(iTensorListRefT))
         elif t.elem == OptionalType(BaseType(BaseTy.Tensor)):
-            return NamedCType(binds, BaseCType(iOptTensorRefListT))
+            return NamedCType(binds, BaseCType(iOptTensorListRefT))
         # TODO: delete these special cases; see tools.codegen.api.cpp--these
         # must be changed in tandem, but there are problems; see
         # https://github.com/pytorch/pytorch/pull/51485
