@@ -1,6 +1,9 @@
 import torch
 import yaml
-from builtin_ops import BuiltinOpsModule
+from builtin_ops import (
+    TSBuiltinOpsModule,
+    TSCollectionOpsModule,
+)
 from math_ops import (
     PointwiseOpsModule,
     ReductionOpsModule,
@@ -40,8 +43,6 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
-from torch.utils.mobile_optimizer import optimize_for_mobile
-
 
 output_path = "ios/TestApp/models/"
 production_ops_path = "test/mobile/model_test/model_ops.yaml"
@@ -105,7 +106,8 @@ ops = [
     traceAndSave(StaticQuantModule().getModule(), "static_quant_ops"),
     scriptAndSave(FusedQuantModule().getModule(), "fused_quant_ops"),
     # TorchScript buildin ops
-    scriptAndSave(BuiltinOpsModule(), "torchscript_builtin_ops"),
+    scriptAndSave(TSBuiltinOpsModule(), "torchscript_builtin_ops"),
+    scriptAndSave(TSCollectionOpsModule(), "torchscript_collection_ops"),
 ]
 
 
