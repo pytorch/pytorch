@@ -1199,6 +1199,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/fake_quant_per_tensor_affine.cpp",
     "aten/src/ATen/native/quantized/library.cpp",
     "aten/src/ATen/native/quantized/cpu/xnnpack_utils.cpp",
+    "aten/src/ATen/native/quantized/qconv_unpack.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
     "aten/src/ATen/native/Activation.cpp",
