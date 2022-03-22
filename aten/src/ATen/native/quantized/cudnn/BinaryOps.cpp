@@ -53,25 +53,25 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   if (qa.numel() == 0) {
     return Tensor{};
   }
-  // TODO: add shape checking? I think this is contingent on whether we support broadcasting, so maybe leave this out for now?
+  // TODO: add shape checking? I think this is contingent on whether we support broadcasting in qadd, so maybe leave this out for now?
   check_inputs(qa, qb);
 
   // cudnn expects tensors to be at least 3D. So we will append dummy dimensions if the input tensors are not at least 3D
-  // TODO: I feel this is expensive. Ask cudnn to support 1D and 2D tensors?
-  while (qa.dim() < 3) {
-    // this assumes qa and qb have the same size
-    qa = qa.unsqueeze(-1);
-    qb = qb.unsqueeze(-1);
+  std::vector<int64_t> new_sizes{qa.sizes().vec()};
+  while (new_sizes.size() < 3) {
+    new_sizes.emplace_back(1);
   }
+  qa = at::native::view(qa, new_sizes);
+  qb = at::native::view(qb, new_sizes);
 
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   auto requantize_multiplier = qa.q_scale() * qb.q_scale() / output_scale;
-  // TODO: When cudnn enables support for broadcasting, we can remove this tensor
   at::Tensor quantized_output = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
       output_scale,
       output_zero_point);
+  // TODO: When cudnn enables support for broadcasting, we can remove this tensor
   at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(requantize_multiplier);
 
@@ -175,9 +175,8 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   cudnn_frontend::EngineConfigList filtered_configs;
   cudnn_utils::filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
   cudnn_utils::filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
-  std::cout << "before" << std::endl;
   for (auto &cfg : engine_configs) {
-    std::cout << "asdf" << std::endl;
+    std::cout << "cfg" << std::endl;
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
         .setHandle(handle)

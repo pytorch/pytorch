@@ -792,8 +792,8 @@ class TestQuantizedOps(TestCase):
             # NB: This is a strange size so that we exercise both the vectorized
             # implementation (64-element chunks at at time) as well as the scalar
             # implementation
-            A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
-            B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+            A = torch.arange(-128, 130, dtype=torch.float)
+            B = torch.arange(-128, 130, dtype=torch.float)
             scale = 2.0
             zero_point = 127
             qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
@@ -829,6 +829,30 @@ class TestQuantizedOps(TestCase):
             self.assertEqual(qCrelu_hat, qCrelu_out_hat,
                              msg="AddReLU.out failed")
 
+    """Tests the correctness of the cudnn add and add_relu op (Similar to test_qadd_relu_same_qparams, will probably merge in the future)"""
+    def test_qadd_relu_cudnn(self):
+        for dtype in [torch.qint8]:
+            add_relu = torch.ops.quantized.add_relu
+            add = torch.ops.quantized.add
+
+            # NB: This is a strange size so that we exercise both the vectorized
+            # implementation (64-element chunks at at time) as well as the scalar
+            # implementation
+            A = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+            B = torch.arange(-128, 130, dtype=torch.float).to(torch.device("cuda"))
+            scale = 2.0
+            zero_point = 127
+            qA = torch.quantize_per_tensor(A, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
+            qB = torch.quantize_per_tensor(B, scale=scale, zero_point=zero_point,
+                                           dtype=dtype)
+
+            # Add ground truth
+            C = (qA.dequantize() + qB.dequantize()).cpu().numpy()
+            qC = _quantize(C, scale, zero_point, dtype=np_dtype[dtype])
+            qC_hat = add(qA, qB, scale=scale, zero_point=zero_point)
+            np.testing.assert_equal(qC, qC_hat.int_repr(),
+                                    "Quantized addition failed.")
 
     """Tests the correctness of the add and add_relu op."""
     def test_qadd_relu_different_qparams(self):
