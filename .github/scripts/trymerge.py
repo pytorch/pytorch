@@ -457,7 +457,7 @@ class GitHubPR:
     @staticmethod
     def _comment_from_node(node: Any) -> GitHubComment:
         editor = node["editor"]
-        return GitHubComment(body_text=node["nodyText"],
+        return GitHubComment(body_text=node["bodyText"],
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
