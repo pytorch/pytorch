@@ -764,10 +764,16 @@ GraphExecutor::GraphExecutor(
     std::string function_name)
     : pImpl(
           IsNewExecutorEnabled()
-              ? dynamic_cast<GraphExecutorImplBase*>(
-                    new ProfilingGraphExecutorImpl(
-                        graph,
-                        std::move(function_name)))
+              ? (getProfilingMode() ?
+
+                                    dynamic_cast<GraphExecutorImplBase*>(
+                                        new ProfilingGraphExecutorImpl(
+                                            graph,
+                                            std::move(function_name)))
+                                    : dynamic_cast<GraphExecutorImplBase*>(
+                                          new SimpleGraphExecutorImpl(
+                                              graph,
+                                              std::move(function_name))))
               : dynamic_cast<GraphExecutorImplBase*>(
                     new GraphExecutorImpl(graph, std::move(function_name)))) {}
 
