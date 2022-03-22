@@ -595,9 +595,9 @@ def generate_tensor_like_override_tests(cls):
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
-                elif t == 'TensorList' or t == 'ITensorList':
+                elif t == 'TensorList' or t == 'ITensorListRef':
                     func_args.append([instance_gen(), instance_gen()])
-                elif t == 'c10::List<c10::optional<Tensor>>' or t == 'IOptTensorRefList':
+                elif t == 'c10::List<c10::optional<Tensor>>' or t == 'IOptTensorListRef':
                     func_args.append([instance_gen(), instance_gen()])
                 elif t == 'IntArrayRef':
                     size = arg.get('size', 2)
