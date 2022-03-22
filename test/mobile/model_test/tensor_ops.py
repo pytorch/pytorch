@@ -77,7 +77,6 @@ class TensorOpsModule(torch.nn.Module):
             # w.pin_memory(),
             # w.put_(0, torch.tensor([0, 1], w)),
             x.repeat(4, 2),
-
             a.clamp_(0),
             a.clamp(0),
             a.clamp_min(0),
@@ -210,8 +209,6 @@ class TensorIndexingOpsModule(torch.nn.Module):
             torch.vsplit(x, i),
             torch.vstack((x, x)),
             torch.where(x),
-
-
         )
 
 
@@ -237,7 +234,7 @@ class TensorTypingOpsModule(torch.nn.Module):
             x.to(torch.int),
             x.to(torch.long),
             x.to(torch.bool),
-            x.to(torch.device('cpu')),
+            x.to(torch.device("cpu")),
             x.to(memory_format=torch.channels_last),
         )
 

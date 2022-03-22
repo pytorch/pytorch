@@ -35,6 +35,12 @@ from quantization_ops import (
     StaticQuantModule,
     FusedQuantModule,
 )
+from quantization_ops import (
+    GeneralQuantModule,
+    DynamicQuantModule,
+    StaticQuantModule,
+    FusedQuantModule,
+)
 from sampling_ops import SamplingOpsModule
 from tensor_ops import (
     TensorOpsModule,
@@ -42,12 +48,6 @@ from tensor_ops import (
     TensorIndexingOpsModule,
     TensorTypingOpsModule,
     TensorViewOpsModule,
-)
-from quantization_ops import (
-    GeneralQuantModule,
-    DynamicQuantModule,
-    StaticQuantModule,
-    FusedQuantModule,
 )
 
 output_path = "ios/TestApp/models/"
