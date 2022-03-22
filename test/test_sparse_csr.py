@@ -277,9 +277,10 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a, b)
 
         ns = [5, 2, 0]
-        for shape, index_dtype in zip(itertools.product(ns, ns), [torch.int32, torch.int64]):
-            run_test(shape, 0, index_dtype)
-            run_test(shape, shape[0] * shape[1], index_dtype)
+        batch_shapes = [(), (2,), (2, 3)]
+        for (m, n, b), index_dtype in zip(itertools.product(ns, ns, batch_shapes), [torch.int32, torch.int64]):
+            run_test((*b, m, n), 0, index_dtype)
+            run_test((*b, m, n), m * n, index_dtype)
 
     @skipMeta
     @dtypes(*get_all_dtypes())
