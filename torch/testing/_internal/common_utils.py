@@ -2033,7 +2033,7 @@ class TestCase(expecttest.TestCase):
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        self.assertEqual(actual, expected, exact_device=False)
+        self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -2487,12 +2487,11 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
     A = torch.randn(l, l, dtype=dtype, device=device)
     u, s, vh = torch.linalg.svd(A, full_matrices=False)
-    if not s.is_meta:
-        for i in range(l):
-            if i >= rank:
-                s[i] = 0
-            elif s[i] == 0:
-                s[i] = 1
+    for i in range(l):
+        if i >= rank:
+            s[i] = 0
+        elif s[i] == 0:
+            s[i] = 1
     return (u * s.to(dtype).unsqueeze(-2)) @ vh
 
 def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001):
