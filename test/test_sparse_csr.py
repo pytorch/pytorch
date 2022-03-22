@@ -304,23 +304,29 @@ class TestSparseCSR(TestCase):
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_resize(self, device, dtype):
-        for index_dtype in [torch.int32, torch.int64]:
-            shape = (2, 3)
+        batch_shapes = [(), (2,), (2, 3)]
+        for index_dtype, b in zip([torch.int32, torch.int64], batch_shapes):
+            shape = (*b, 2, 3)
             nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
-            new_shape = (4, 5)
+            new_shape = (*b, 4, 5)
             a.resize_(new_shape)
 
             self.assertEqual(a.shape, new_shape)
             # resize to larger shape doesn't add specified elements
             self.assertEqual(a._nnz(), nnz)
 
-            new_shape = (1, 5)
+            new_shape = (*b, 1, 5)
             a.resize_(new_shape)
 
             self.assertEqual(a.shape, new_shape)
             # resize to smaller shape trims specified elements
+            self.assertEqual(a._nnz(), 5)
+
+            # trim batched dimensions
+            a.resize_(new_shape[-2], new_shape[-1])
+            self.assertEqual(a.shape, (new_shape[-2], new_shape[-1]))
             self.assertEqual(a._nnz(), 5)
 
     @skipMeta
@@ -331,7 +337,7 @@ class TestSparseCSR(TestCase):
             nnz = 6
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
 
-            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only 2D sparse CSR tensors are supported."):
+            with self.assertRaisesRegex(RuntimeError, "torch.resize_: Only batched sparse CSR matrices are supported"):
                 new_shape = (4,)
                 a.resize_(new_shape)
 
