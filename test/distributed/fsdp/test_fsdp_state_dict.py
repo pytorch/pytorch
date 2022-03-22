@@ -79,17 +79,17 @@ class TestFSDPStateDict(FSDPTest):
     def _get_simple_nested_model(self, *fsdp_args, **fsdp_kwargs):
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(10, 10, bias=False), *fsdp_args, **fsdp_kwargs),
-                nn.Linear(10, 10, bias=False),
+                FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs),
+                nn.Linear(10, 10, bias=False).cuda(),
             ),
             *fsdp_args,
             **fsdp_kwargs,
         )
-        return model.cuda()
+        return model
 
     def _get_simple_model(self, *fsdp_args, **fsdp_kwargs):
-        model = FSDP(nn.Linear(10, 10, bias=False), *fsdp_args, **fsdp_kwargs)
-        return model.cuda()
+        model = FSDP(nn.Linear(10, 10, bias=False).cuda(), *fsdp_args, **fsdp_kwargs)
+        return model
 
     @skip_if_lt_x_gpu(2)
     @parametrize(

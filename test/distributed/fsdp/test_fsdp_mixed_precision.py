@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from copy import deepcopy
 import contextlib
 from functools import partial
-from typing import Any, Dict
 
 import torch
 import torch.nn as nn

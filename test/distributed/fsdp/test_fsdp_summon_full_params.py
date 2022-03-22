@@ -158,7 +158,7 @@ class TestSummonFullParams(FSDPTest):
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
-                 nn.Linear(5, 3, bias=False)
+                nn.Linear(5, 3, bias=False)
             ),
             mixed_precision=mixed_precision,
         ).cuda(self.rank)

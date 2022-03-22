@@ -552,7 +552,7 @@ class FullyShardedDataParallel(nn.Module):
         with torch.no_grad():
             return (
                 _apply_to_tensors(cast_fn, args),
-                 _apply_to_tensors(cast_fn, kwargs)
+                _apply_to_tensors(cast_fn, kwargs)
             )
 
     @torch.no_grad()
@@ -1154,13 +1154,13 @@ class FullyShardedDataParallel(nn.Module):
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             if self.training_state != TrainingState_.SUMMON_FULL_PARAMS:
                 with self.summon_full_params(recurse=False, writeback=False):
-                # Since buffers are not sharded and stay casted, restore them to their
-                # original user module specified types for checkpoint. We take care to
-                # recast in post_state_dict_hook for consistency with the fact that
-                # buffers stay casted after forward/backward. We must have the
-                # call here instead of above because summon_full_params itself
-                # calls _lazy_init() which would cast the buffers.
-                    if self._is_root:
+                    # Since buffers are not sharded and stay casted, restore them to their
+                    # original user module specified types for checkpoint. We take care to
+                    # recast in post_state_dict_hook for consistency with the fact that
+                    # buffers stay casted after forward/backward. We must have the
+                    # call here instead of above because summon_full_params itself
+                    # calls _lazy_init() which would cast the buffers.
+                    if self.mixed_precision is not None and self._is_root:
                         self._cast_buffers(dtype=self._orig_buffer_dtype)
                     state_dict = super().state_dict(*args, **kwargs)
             else:
@@ -1170,7 +1170,7 @@ class FullyShardedDataParallel(nn.Module):
                 # buffers stay casted after forward/backward. We must have the
                 # call here instead of above because summon_full_params itself
                 # calls _lazy_init() which would cast the buffers.
-                if self._is_root:
+                if self.mixed_precision is not None and self._is_root:
                     self._cast_buffers(dtype=self._orig_buffer_dtype)
                 state_dict = super().state_dict(*args, **kwargs)
 
@@ -2026,8 +2026,10 @@ class FullyShardedDataParallel(nn.Module):
         force_full_precision = (self.training_state == TrainingState_.SUMMON_FULL_PARAMS)
         # full param output tensors and a flag indicating whether
         # summon_full_params can free them or not. It is possible that we can't
-        # free the full param, which currently only occurs when the returned
-        # parameter points to the unsharded param when world_size == 1.
+        # free the full param, which currently occurs when the returned
+        # parameter points to the unsharded param when world_size == 1, or when
+        # we're returning the full parameter and reshard_after_forward=False
+        # (because we need to ensure p._full_param_padded stays intact)
         output_tensors: List[Tuple[torch.Tensor, bool]] = []
         with torch.cuda.stream(self._streams["all_gather"]):
             for p in self.params:
@@ -2050,7 +2052,6 @@ class FullyShardedDataParallel(nn.Module):
                     # p._is_sharded = False. However when it is set, the
                     # device is always self.compute_device.
                     p.data = p.data.to(self.compute_device, non_blocking=True)
-
                 # e.g., when world_size == 1
                 if not p._is_sharded:  # type: ignore[attr-defined]
                     if mixed_precision_cast_ran:
