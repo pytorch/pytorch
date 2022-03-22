@@ -1,3 +1,4 @@
+#include <flatbuffers/base.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 
 #include <ATen/ATen.h>
@@ -15,6 +16,7 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
@@ -26,6 +28,12 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#include <malloc.h>
+#else
+#include <cstdlib>
 #endif
 
 #include <string>
@@ -146,14 +154,21 @@ void FlatbufferLoader::internal_registerTypeResolver(
   type_resolver_ = type_resolver;
 }
 
+void parseExtraFilesFromVector(
+    const flatbuffers::Vector<flatbuffers::Offset<
+        torch::jit::mobile::serialization::ExtraFile>>* files,
+    ExtraFilesMap* extra_files) {
+  for (uint32_t i = 0; i < files->size(); ++i) {
+    const auto* extra_file = files->Get(i);
+    (*extra_files)[extra_file->name()->str()] = extra_file->content()->str();
+  }
+}
+
 void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files) {
   auto extra_files_offsets = module->extra_files();
-  for (uint32_t i = 0; i < extra_files_offsets->size(); ++i) {
-    const auto* extra_file = extra_files_offsets->Get(i);
-    extra_files[extra_file->name()->str()] = extra_file->content()->str();
-  }
+  parseExtraFilesFromVector(module->extra_files(), &extra_files);
 }
 
 mobile::Module FlatbufferLoader::parseModule(
@@ -163,6 +178,7 @@ mobile::Module FlatbufferLoader::parseModule(
   all_types_.clear();
   storages_.clear();
   storage_loaded_.clear();
+  module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
   all_ivalues_.resize(ivalues->size());
@@ -190,6 +206,7 @@ mobile::Module FlatbufferLoader::parseModule(
     class_type->addMethod(f.second);
   }
 
+  module_parsed_ = true;
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
 
@@ -553,6 +570,54 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
   return type;
 }
 
+std::tuple<std::shared_ptr<char>, size_t> get_file_content(
+    const char* filename) {
+#if defined(HAVE_MMAP)
+  int fd = open(filename, O_RDONLY);
+  struct stat statbuf {};
+  fstat(fd, &statbuf);
+  size_t size = statbuf.st_size;
+  void* ptr = mmap(nullptr, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  auto deleter = [statbuf](char* ptr) { munmap(ptr, statbuf.st_size); };
+  std::shared_ptr<char> data(reinterpret_cast<char*>(ptr), deleter);
+#else
+  FILE* f = fopen(filename, "rb");
+  fseek(f, 0, SEEK_END);
+  size_t size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  // make sure buffer size is multiple of alignment
+  size_t buffer_size =
+      (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
+#ifdef _WIN32
+  std::shared_ptr<char> data(
+      static_cast<char*>(
+          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
+      _aligned_free); // NOLINT
+#else
+  std::shared_ptr<char> data(
+      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free); // NOLINT
+#endif
+  fread(data.get(), size, 1, f);
+  fclose(f);
+#endif
+  return std::make_tuple(data, size);
+}
+
+void FlatbufferLoader::extractJitSourceAndConstants(
+    ExtraFilesMap* jit_sources,
+    std::vector<IValue>* constants) {
+  AT_ASSERT(
+      module_parsed_,
+      "Need to first parse a flatbuffer file before extracing jit_sources");
+  const auto* jit_constants = module_->jit_constants();
+  for (auto i = 0; i < jit_constants->size(); ++i) {
+    constants->emplace_back(getIValue(jit_constants->Get(i)));
+  }
+  parseExtraFilesFromVector(module_->jit_sources(), jit_sources);
+}
+
 mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t,
@@ -573,24 +638,9 @@ mobile::Module initialize_mobile_module(
 mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<c10::Device> device) {
-#if defined(HAVE_MMAP)
-  int fd = open(filename.c_str(), O_RDONLY);
-  struct stat statbuf {};
-  fstat(fd, &statbuf);
-  int size = statbuf.st_size;
-  void* ptr = mmap(nullptr, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-  auto deleter = [statbuf](char* ptr) { munmap(ptr, statbuf.st_size); };
-  std::shared_ptr<char> data(reinterpret_cast<char*>(ptr), deleter);
-#else
-  FILE* f = fopen(filename.c_str(), "rb");
-  fseek(f, 0, SEEK_END);
-  long size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  std::shared_ptr<char> data(static_cast<char*>(malloc(size)), free); // NOLINT
-  fread(data.get(), size, 1, f);
-  fclose(f);
-#endif
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(std::move(data), size, device);
 }
 
