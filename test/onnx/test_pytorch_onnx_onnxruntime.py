@@ -24,7 +24,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -2688,8 +2688,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
-    # Enable test when fix for allowzero is in ORT
-    @skipForAllOpsetVersions()
+    @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
         class ReshapeModel(torch.nn.Module):
@@ -10534,6 +10533,7 @@ class TestONNXRuntime(unittest.TestCase):
     #       such that inputs and outputs do not always overflow/underflow.
     #       Otherwise test results could be inaccurate.
     @skipIfUnsupportedMinOpsetVersion(10)
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/74501")
     def test_quantized_linear(self):
         model = torch.nn.quantized.Linear(4, 8)
         # Set non-zero bias.
