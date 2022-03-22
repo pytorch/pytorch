@@ -1,3 +1,4 @@
+jobs:
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:

@@ -114,6 +114,19 @@ class TORCH_API LazyGraphExecutor {
     noop_execution_mode_ = enable_noop;
   }
 
+  struct CachedComputation {
+    explicit CachedComputation(ComputationPtr computation)
+        : computation(std::move(computation)) {}
+
+    ComputationPtr computation;
+  };
+
+  using ComputationCache = Cache<hash_t, CachedComputation, HashReducer>;
+
+  ComputationCache* GetComputationCache();
+
+  hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
+
  private:
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
@@ -147,15 +160,6 @@ class TORCH_API LazyGraphExecutor {
     ComputationPtr computation;
     std::vector<BackendDataPtr> parameters_data;
   };
-
-  struct CachedComputation {
-    explicit CachedComputation(ComputationPtr computation)
-        : computation(std::move(computation)) {}
-
-    ComputationPtr computation;
-  };
-
-  using ComputationCache = Cache<hash_t, CachedComputation, HashReducer>;
 
   struct Async {
     Async(
@@ -201,8 +205,6 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<std::string> devices,
       const SyncTensorCollection& coll,
       PostOrderData* po_data);
-
-  ComputationCache* GetComputationCache();
 
   ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
 
