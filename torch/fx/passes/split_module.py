@@ -8,6 +8,7 @@ import inspect
 class Partition:
     def __init__(self, name: str):
         self.name: str = name
+        self.submod_name = f'submod_{name}'
         self.node_names: List[str] = []
         self.inputs: Dict[str, None] = {}
         self.outputs: Dict[str, None] = {}
@@ -31,6 +32,7 @@ def split_module(
     m: GraphModule,
     root_m: torch.nn.Module,
     split_callback: Callable[[torch.fx.node.Node], int],
+    qualname_map: Optional[Dict[str, str]] = None,
 ):
     """
     Creates subgraphs out of main graph
@@ -44,6 +46,9 @@ def split_module(
             that maps a given Node instance to a numeric partition identifier.
             split_module will use this function as the policy for which operations
             appear in which partitions in the output Module.
+        qualname_map: Optional[Dict[str, str]]: optional output parameter that returns a
+            mapping from new target names in the module after split to old target
+            names in the original module.
 
     Returns:
         GraphModule: the module after split.
@@ -211,6 +216,12 @@ def split_module(
                 # target = target_atoms[-1]
                 target = '_'.join(target_atoms)
                 partition.targets[target] = target_attr
+                # Fill in the passed-in mapping from new qualname to old qualname
+                if qualname_map is not None:
+                    # When creating the split module later, the submodules will have
+                    # path prefix matching the corresponding partition's submod_name
+                    qualname = f'{partition.submod_name}.{target}'
+                    qualname_map[qualname] = node.target
 
             assert isinstance(gathered_args, tuple)
             assert isinstance(gathered_kwargs, dict)
@@ -254,11 +265,10 @@ def split_module(
         partition.graph.output(output_vals)
 
         # Construct GraphModule for this partition
-        submod_name = f'submod_{partition_name}'
-        base_mod_attrs[submod_name] = torch.fx.graph_module.GraphModule(partition.targets, partition.graph)  # noqa: B950
+        base_mod_attrs[partition.submod_name] = torch.fx.graph_module.GraphModule(partition.targets, partition.graph)  # noqa: B950
 
         # Emit call in base graph to this submodule
-        output_val = base_mod_graph.call_module(submod_name, tuple(base_mod_env[name] for name in partition.inputs))
+        output_val = base_mod_graph.call_module(partition.submod_name, tuple(base_mod_env[name] for name in partition.inputs))
         if len(partition.outputs) > 1:
             # Unpack multiple return values from submodule
             output_val_proxy = torch.fx.proxy.Proxy(output_val)

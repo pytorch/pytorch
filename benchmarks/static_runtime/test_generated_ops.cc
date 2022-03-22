@@ -3557,12 +3557,47 @@ TEST(StaticRuntime, autogen__convert_indices_from_csr_to_coo) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto crow_indices1 = torch::tensor({0, 1}, torch::kInt32);
-  auto col_indices1 = torch::tensor({0, 1, 0, 2, 1, 2}, torch::kInt32);
+  auto crow_indices1 = torch::tensor({0}, torch::kInt32);
+  auto col_indices1 =
+      torch::tensor({0, 1, 0, 2, 1, 2, 0, 1, 0, 2, 1, 2}, torch::kInt32);
   auto out_int321 = false;
   auto transpose1 = false;
   std::vector<IValue> args2{
       crow_indices1, col_indices1, out_int321, transpose1};
+  testStaticRuntime(
+      script,
+      args,
+      args2,
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+}
+
+TEST(StaticRuntime, autogen_mse_loss) {
+  const std::string script = R"IR(
+    graph(%self: Tensor, %target: Tensor, %reduction: int):
+        %bias: None = prim::Constant()
+        %ret = aten::mse_loss(%self, %target, %reduction)
+        %cloned = aten::clone(%ret, %bias)
+        return (%cloned)
+  )IR";
+
+  auto self0 = at::rand({6, 6, 6});
+  auto target0 = at::rand({6, 6, 6});
+  auto reduction0 = 1;
+  std::vector<IValue> args{self0, target0, reduction0};
+  testStaticRuntime(
+      script,
+      args,
+      {},
+      /*use_allclose=*/false,
+      /*use_equalnan=*/false,
+      /*check_resize=*/true);
+
+  auto self1 = at::rand({22, 22, 22});
+  auto target1 = at::rand({22, 22, 22});
+  auto reduction1 = 1;
+  std::vector<IValue> args2{self1, target1, reduction1};
   testStaticRuntime(
       script,
       args,

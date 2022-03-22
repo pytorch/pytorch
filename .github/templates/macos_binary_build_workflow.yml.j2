@@ -59,6 +59,7 @@ env:
 jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-10.15
 {%- if config["package_type"] == "libtorch" %}
     # libtorch builds take a long time on github hosted runners

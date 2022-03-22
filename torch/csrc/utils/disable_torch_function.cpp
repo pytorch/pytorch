@@ -6,6 +6,7 @@
 namespace torch {
   static thread_local bool enable_torch_function = true;
   PyObject* disabled_torch_function = nullptr;
+  PyObject* disabled_torch_dispatch = nullptr;
 
   bool torch_function_enabled() {
       return enable_torch_function;
@@ -17,6 +18,14 @@ namespace torch {
 
   void set_disabled_torch_function_impl(PyObject* value) {
     disabled_torch_function = value;
+  }
+
+  PyObject* disabled_torch_dispatch_impl() {
+    return disabled_torch_dispatch;
+  }
+
+  void set_disabled_torch_dispatch_impl(PyObject* value) {
+    disabled_torch_dispatch = value;
   }
 }
 
@@ -124,6 +133,45 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
   torch::enable_torch_function = old_value;
   return result;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
+  HANDLE_TH_ERRORS
+  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
+  if (!PyArg_ParseTuple(a, "OO|OO", &func, &types, &args, &kwargs)) {
+    return nullptr;
+  }
+  py::tuple py_args;
+  if (args == nullptr) {
+    py_args = py::make_tuple();
+  }
+  else {
+    py_args = py::reinterpret_borrow<py::tuple>(args);
+  }
+
+  // This implementation is not completely correct.  The moral
+  // meaning of this function is that we should do a redispatch
+  // "after" PythonKey, aka a redispatch() call.  But we don't have a
+  // dispatcher call here; we have an opaque Python object.
+  //
+  // What we have here is a close approximation: instead of redispatch(), we
+  // just exclude Python and all the keys before it, so that we will go
+  // to the next key after Python.  The difference, however, is we are
+  // now PERMANENTLY after Python.  We don't think there are any legitimate
+  // cases where we want to go for another round on the entire dispatcher key
+  // set, but if there are, then we will have to do something else here.
+  c10::impl::ExcludeDispatchKeyGuard guard_(
+      // TODO: add constructor for this specifically
+      c10::DispatchKeySet(c10::DispatchKeySet::FULL) -
+      c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Python)
+      // NB: off by one hazard here, but it works out: python key is not
+      // included in AFTER, so it is included in the negation (and that's
+      // correct: we want to exclude Python key and everything BEFORE it.)
+  );
+  auto r = PyObject_Call(func, py_args.ptr(), kwargs);
+  if (r == nullptr) throw python_error();
+  return r;
   END_HANDLE_TH_ERRORS
 }
 

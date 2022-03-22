@@ -715,7 +715,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from .autocast_mode import autocast
+from torch.amp import autocast
 
 # Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(manager_path())
@@ -818,6 +818,9 @@ import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
+
+from torch.nested._nestedtensor import NestedTensor
+from torch.nested._nestedtensor import nested_tensor
 
 _C._init_names(list(torch._storage_classes))
 
