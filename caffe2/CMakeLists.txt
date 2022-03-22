@@ -399,6 +399,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_TESTING_PYTHON}
     )
 
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
+  endif()
+
   add_custom_command(
     OUTPUT
     ${TORCH_GENERATED_CODE}
@@ -410,6 +415,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
       --gen_lazy_ts_backend
+      ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
     "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
