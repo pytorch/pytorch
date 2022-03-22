@@ -29,12 +29,11 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/ir/irparser.h>
-
-#include <test_gpu_validator.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
@@ -571,7 +570,7 @@ TEST_F(NVFuserTest, FusionViewStride_CUDA) {
       {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
       {{1, 7844, 1, 7}, {1, 27454, 2}}};
 
-  for (auto e : examples) {
+  for (const auto& e : examples) {
     geluViewAddFusion(e.first, e.second);
   }
 }

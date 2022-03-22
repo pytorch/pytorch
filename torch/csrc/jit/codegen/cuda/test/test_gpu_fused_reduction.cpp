@@ -26,10 +26,9 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 
 // fuser and IR parser
-#include <test_gpu_validator.h>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
