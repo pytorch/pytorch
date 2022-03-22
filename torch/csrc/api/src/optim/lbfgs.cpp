@@ -232,7 +232,6 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
     auto d_norm = val(d.abs().max());
     g = g.clone(at::MemoryFormat::Contiguous);
     // evaluate objective and gradient using initial step
-    auto obj_func_res = obj_func(x, t, d);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double f_new;
     Tensor g_new;
@@ -285,7 +284,6 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       f_prev = f_new;
       g_prev = g_new.clone(at::MemoryFormat::Contiguous);
       gtd_prev = gtd_new;
-      obj_func_res = obj_func(x, t, d);
       std::tie(f_new, g_new) = obj_func(x, t, d);
       ls_func_evals += 1;
       gtd_new = g_new.dot(d);
@@ -335,9 +333,7 @@ std::tuple<double, Tensor, double, int64_t> _strong_wolfe(const Function& obj_fu
       }
 
       // Evaluate new point
-      obj_func_res = obj_func(x, t, d);
-      f_new = std::get<0>(obj_func_res);
-      g_new = std::get<1>(obj_func_res);
+      std::tie(f_new, g_new) = obj_func(x, t, d);
       ls_func_evals += 1;
       gtd_new = g_new.dot(d);
       ls_iter += 1;

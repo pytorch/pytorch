@@ -977,7 +977,7 @@ def is_scripting() -> bool:
 
 
 # Retrieves a fully-qualified name (module hierarchy + classname) for a given obj.
-def _qualified_name(obj) -> str:
+def _qualified_name(obj, mangle_name=True) -> str:
     # This special case allows us to override the qualified name on a type.
     # It's currently used in conjunction with tracing, where we create a
     # fake module to filter only supported attributes. However, since this
@@ -1026,13 +1026,16 @@ def _qualified_name(obj) -> str:
         module_name = module_name.replace("<", "_")
         module_name = module_name.replace(">", "_")
 
-    # __main__ is a builtin module, so rewrite it to "__torch__".
-    if module_name == "__main__":
-        module_name = "__torch__"
-    else:
-        # Everything else gets a "__torch__" prefix to avoid name collisions
-        # with the names of user values.
-        module_name = "__torch__." + module_name
+    # The PythonExceptionValue C++ class in torch/csrc/jit/python/python_sugared_value.h
+    # does not need mangle the python class name.
+    if mangle_name:
+        # __main__ is a builtin module, so rewrite it to "__torch__".
+        if module_name == "__main__":
+            module_name = "__torch__"
+        else:
+            # Everything else gets a "__torch__" prefix to avoid name collisions
+            # with the names of user values.
+            module_name = "__torch__." + module_name
 
     if "." in name:
         raise RuntimeError(f"Could not get qualified name for class '{name}': "

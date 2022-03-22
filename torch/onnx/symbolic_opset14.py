@@ -34,7 +34,9 @@ def triu(g, self, diagonal, out=None):
 
 @parse_args("v", "v")
 def reshape(g, self, shape):
-    return sym_help._reshape_helper(g, self, shape)
+    # NOTE: Due to bug in ORT https://github.com/microsoft/onnxruntime/issues/10664
+    #       Reshape export cannot utilize the new allowzero attribute introduced in opset 14.
+    return sym_help._reshape_helper(g, self, shape, allowzero=0)
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
@@ -52,3 +54,18 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         new_running_mean.setType(running_mean.type())
         new_running_var.setType(running_var.type())
         return res
+
+
+class Quantized:
+    """
+    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+    """
+    domain = "quantized"
+
+    @staticmethod
+    def hardswish(g, x, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+
+        output = hardswish(g, x)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)

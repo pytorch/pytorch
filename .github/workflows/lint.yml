@@ -8,6 +8,7 @@ on:
 
 jobs:
   quick-checks:
+    name: quick-checks
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -113,6 +114,7 @@ jobs:
           .github/scripts/lint_test_ownership.py
 
   clang-format:
+    name: clang-format
     runs-on: ubuntu-18.04
     if: ${{ github.event_name == 'pull_request' }}
     steps:
@@ -153,6 +155,7 @@ jobs:
           exit 1
 
   py2-setup-validate-errormsg:
+    name: py2-setup-validate-errormsg
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -172,6 +175,7 @@ jobs:
         run: python2 -m py_compile torch/utils/collect_env.py
 
   shellcheck:
+    name: shellcheck
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -251,6 +255,7 @@ jobs:
           rm actionlint
 
   toc:
+    name: toc
     runs-on: ubuntu-18.04
     # https://github.com/actions/virtual-environments/issues/599#issuecomment-602754687
     env:
@@ -287,6 +292,7 @@ jobs:
           fi
 
   flake8-py3:
+    name: flake8-py3
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -347,6 +353,7 @@ jobs:
           mode: json
 
   clang-tidy:
+    name: clang-tidy
     runs-on: linux.2xlarge
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
@@ -440,6 +447,7 @@ jobs:
           mode: json
 
   cmakelint:
+    name: cmakelint
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -462,6 +470,7 @@ jobs:
           xargs -0 cmakelint --config=.cmakelintrc --spaces=2 --quiet
 
   mypy:
+    name: mypy
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
@@ -503,5 +512,5 @@ jobs:
           fi
 
 concurrency:
-  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

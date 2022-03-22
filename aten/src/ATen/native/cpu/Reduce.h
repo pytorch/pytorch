@@ -133,7 +133,7 @@ static void set_results(const res_t result, const TensorIteratorBase &iter, cons
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
 static inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
-for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
+for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 
@@ -281,6 +281,34 @@ void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vo
       });
     }
   });
+}
+
+// when reduction is on most inner dimension (dim 0 in TensorIterator)
+// and input has contiguous most inner dimension, `binary_kernel_reduce_lastdim`
+// can be used.
+static inline bool is_reduce_lastdim(TensorIteratorBase& iter) {
+  return iter.num_reduce_dims() == 1 && iter.is_dim_reduced(0)
+      && iter.ninputs() == 1 && iter.strides(1)[0] == iter.element_size(1);
+}
+
+template <typename reduce_func_t>
+void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce_op) {
+  auto shape = iter.shape();
+  int64_t dim_size = shape[0];
+  int64_t grain_size = std::max((int64_t) 1, at::internal::GRAIN_SIZE / dim_size);
+  TensorIterator sub_iter(iter);
+  // create sub iterator to parallel on all non-reduce-dims
+  sub_iter.narrow(0, 0, 1);
+  auto loop = [&](char** data, const int64_t* strides, int64_t size) {
+    char* out = data[0];
+    char* in = data[1];
+    for (int64_t i = 0; i < size; ++i) {
+      reduce_op(out, in, dim_size);
+      out += strides[0];
+      in += strides[1];
+    }
+  };
+  sub_iter.for_each(loop, grain_size);
 }
 
 }}}  // namespace at::native::<anonymous>

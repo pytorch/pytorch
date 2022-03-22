@@ -6,11 +6,9 @@ during QAT.
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
-    MinMaxObserver,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
-    PerChannelMinMaxObserver,
     FixedQParamsObserver,
     default_affine_fixed_qparams_observer,
     default_symmetric_fixed_qparams_observer,
@@ -335,10 +333,11 @@ default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxO
                                                    dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 """
 Default fake_quant for weights.
+Observer is memoryless since averaging_constant is 1.
 """
 
-default_dynamic_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
-                                                    dtype=torch.quint8, memoryless=True)
+default_dynamic_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
+                                                    dtype=torch.quint8, averaging_constant=1)
 """
 Default dynamic fake_quant for activations.
 """
@@ -355,23 +354,25 @@ default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAv
                                                                ch_axis=0)
 """
 Default fake_quant for per-channel weights.
+Observer is memoryless since averaging_constant is 1.
 """
-default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+default_embedding_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
                                                       dtype=torch.quint8,
                                                       quant_min=0,
                                                       quant_max=255,
                                                       ch_axis=0,
-                                                      memoryless=True)
+                                                      averaging_constant=1)
 """
 Default fake_quant for embeddings.
+Observer is memoryless since averaging_constant is 1.
 """
 
-default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                            qscheme=torch.per_channel_affine_float_qparams,
                                                            ch_axis=0,
                                                            dtype=torch.quint4x2,
-                                                           memoryless=True)
+                                                           averaging_constant=1)
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,

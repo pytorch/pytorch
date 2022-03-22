@@ -739,7 +739,7 @@ class Wrapper:
         for a in args:
             if isinstance(a, cls):
                 args_of_this_cls.append(a)
-            elif isinstance(a, collections.Sequence):
+            elif isinstance(a, collections.abc.Sequence):
                 args_of_this_cls.extend(el for el in a if isinstance(el, cls))
         assert len(args_of_this_cls) > 0
         args_of_this_cls[0].used_calls.add(func)
@@ -847,6 +847,7 @@ class TestGradCheckOverride(TestCase):
                 'dtype',
                 'is_floating_point',
                 'is_sparse',
+                'is_sparse_csr',
                 'layout',
                 'new_zeros',
                 'numel',

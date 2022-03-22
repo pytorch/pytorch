@@ -4,12 +4,32 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+inline bool deviceMajorMinorCheck(int major, int minor = 0) {
+  auto dev_prop = at::cuda::getDeviceProperties(0);
+  if (dev_prop->major < major ||
+      (dev_prop->major == major && dev_prop->minor < minor)) {
+    return false;
+  }
+  return true;
+}
+
+class NVFuserTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // requires PASCAL or newer
+    if (!deviceMajorMinorCheck(6)) {
+      GTEST_SKIP() << "skipping tests on pre-PASCAL GPUs";
+    }
+  }
+};
 
 struct ValidationConstants {
   // Tolerances generated from randn + add + sum fusion
@@ -66,8 +86,8 @@ std::pair<double, double> getTolerance(
       } else {
         // Reduction case
         size_t entry = 0;
-        while (sum_tolerance_entry[entry][0] < reduction_size &&
-               entry < sum_tolerance_entry.size()) {
+        while (entry < sum_tolerance_entry.size() &&
+               sum_tolerance_entry[entry][0] < reduction_size) {
           entry++;
         }
         double abs_tol = 0.0;
@@ -221,7 +241,7 @@ class ReductionSizeMapper : private IterVisitor {
   }
 
   void handle(Expr* expr) override {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       return;
     }
 

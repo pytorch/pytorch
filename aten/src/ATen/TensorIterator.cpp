@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/TensorIterator.h>
 #undef TORCH_ASSERT_NO_OPERATORS
@@ -12,6 +13,13 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorIteratorInternal.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/SmallBuffer.h>
@@ -1501,7 +1509,7 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   view_offsets_ = DimVector(ndim_offsets, 0);
 }
 
-// This is the structured kernels implementation of set_output.  It is
+// This is the structured kernels' implementation of set_output.  It is
 // NEVER actually called directly; instead, a subclass of TensorIteratorBase
 // will override set_output to actually do the operation, and then call
 // set_output on the TensorIteratorBase to setup TI's metadata.

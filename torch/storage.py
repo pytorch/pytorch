@@ -8,7 +8,7 @@ import copy
 import collections
 from functools import lru_cache
 
-T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
+T = TypeVar('T', bound='Union[_StorageBase, _TypedStorage]')
 class _StorageBase(object):
     _cdata: Any
     is_cuda: bool = False
@@ -213,7 +213,7 @@ def _storage_type_to_dtype_map():
         val: key for key, val in _dtype_to_storage_type_map().items()}
     return dtype_map
 
-class TypedStorage:
+class _TypedStorage:
     is_sparse = False
 
     def fill_(self, value):
@@ -229,17 +229,17 @@ class TypedStorage:
             ' * no arguments\n'
             ' * (int size)\n'
             ' * (Sequence data)\n')
-        if type(self) == TypedStorage:
-            arg_error_msg += ' * (wrap_storage=<UntypedStorage>, dtype=<torch.dtype>)'
+        if type(self) == _TypedStorage:
+            arg_error_msg += ' * (wrap_storage=<_UntypedStorage>, dtype=<torch.dtype>)'
         else:
-            arg_error_msg += ' * (wrap_storage=<UntypedStorage>)'
+            arg_error_msg += ' * (wrap_storage=<_UntypedStorage>)'
 
         if 'wrap_storage' in kwargs:
             assert len(args) == 0, (
                 "No positional arguments should be given when using "
                 "'wrap_storage'")
 
-            if type(self) == TypedStorage:
+            if type(self) == _TypedStorage:
                 assert 'dtype' in kwargs, (
                     "When using 'wrap_storage', 'dtype' also must be specified")
                 assert len(kwargs) == 2, (
@@ -257,9 +257,9 @@ class TypedStorage:
 
             storage = kwargs['wrap_storage']
 
-            if not isinstance(storage, (torch.UntypedStorage, torch.cuda.UntypedStorage)):
+            if not isinstance(storage, (torch._UntypedStorage, torch.cuda._UntypedStorage)):
                 raise TypeError(arg_error_msg)
-            if type(self) != TypedStorage and storage.__module__ != self.__module__:
+            if type(self) != _TypedStorage and storage.__module__ != self.__module__:
                 raise TypeError((
                     arg_error_msg +
                     f'\n`storage` `module {storage.__module__}` does not match '
@@ -267,9 +267,9 @@ class TypedStorage:
             self._storage = storage
 
         else:
-            assert type(self) != TypedStorage, (
-                "Calling __init__ this way is only supported in TypedStorage's "
-                "child classes. TypedStorage can only be directly instantiated "
+            assert type(self) != _TypedStorage, (
+                "Calling __init__ this way is only supported in _TypedStorage's "
+                "child classes. _TypedStorage can only be directly instantiated "
                 "when kwargs 'wrap_storage' and 'dtype' are given.")
 
             assert len(kwargs) == 0, "invalid keyword arguments"
@@ -282,10 +282,10 @@ class TypedStorage:
                 return True
 
             if len(args) == 0:
-                self._storage = eval(self.__module__).UntypedStorage()
+                self._storage = eval(self.__module__)._UntypedStorage()
 
             elif len(args) == 1 and isint(args[0]):
-                self._storage = eval(self.__module__).UntypedStorage(int(args[0]) * self.element_size())
+                self._storage = eval(self.__module__)._UntypedStorage(int(args[0]) * self.element_size())
 
             elif len(args) == 1 and isinstance(args[0], collections.abc.Sequence):
                 if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
@@ -321,10 +321,10 @@ class TypedStorage:
 
     def _new_wrapped_storage(self, untyped_storage):
         module = eval(untyped_storage.__module__)
-        assert type(untyped_storage) == module.UntypedStorage
+        assert type(untyped_storage) == module._UntypedStorage
 
-        if type(self) == TypedStorage:
-            return TypedStorage(wrap_storage=untyped_storage, dtype=self.dtype)
+        if type(self) == _TypedStorage:
+            return _TypedStorage(wrap_storage=untyped_storage, dtype=self.dtype)
         else:
             # NOTE: We need to use the module of untyped_storage in case self's
             # module is different, e.g. if self is on CPU and untyped_storage
@@ -371,7 +371,7 @@ class TypedStorage:
                 torch.qint8: torch.int8
             }
             tmp_dtype = interpret_dtypes[self.dtype]
-            tmp_tensor = torch.tensor([], dtype=tmp_dtype, device=self.device).set_(TypedStorage(
+            tmp_tensor = torch.tensor([], dtype=tmp_dtype, device=self.device).set_(_TypedStorage(
                 wrap_storage=self._storage,
                 dtype=tmp_dtype))
         else:
@@ -380,12 +380,12 @@ class TypedStorage:
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
-        # NOTE: Before TypedStorage existed, indexing with a slice used to be
+        # NOTE: Before _TypedStorage existed, indexing with a slice used to be
         # possible for <type>Storage objects. However, it would return
-        # a storage view, which would be a hassle to implement in TypedStorage,
+        # a storage view, which would be a hassle to implement in _TypedStorage,
         # so it was disabled
         if isinstance(idx, slice):
-            raise RuntimeError('slices are only supported in UntypedStorage.__getitem__')
+            raise RuntimeError('slices are only supported in _UntypedStorage.__getitem__')
         elif not isinstance(idx, int):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
 
@@ -397,7 +397,7 @@ class TypedStorage:
                 torch.qint32: torch.int32,
                 torch.qint8: torch.int8
             }
-            return TypedStorage(
+            return _TypedStorage(
                 wrap_storage=self._storage,
                 dtype=interpret_dtypes[self.dtype])[idx]
 
@@ -430,7 +430,7 @@ class TypedStorage:
 
     def __str__(self):
         data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
-        if type(self) == TypedStorage:
+        if type(self) == _TypedStorage:
             return data_str + (
                 f'\n[{torch.typename(self)} with dtype {self.dtype} '
                 f'of size {len(self)}]')
@@ -450,7 +450,7 @@ class TypedStorage:
         return self._new_wrapped_storage(copy.deepcopy(self._storage, memo))
 
     def __sizeof__(self):
-        return super(TypedStorage, self).__sizeof__() + self.nbytes()
+        return super(_TypedStorage, self).__sizeof__() + self.nbytes()
 
     def clone(self):
         """Returns a copy of this storage"""
@@ -484,7 +484,7 @@ class TypedStorage:
     def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
         module = eval(cls.__module__)
-        untyped_storage = module.UntypedStorage._new_shared(size * cls().element_size())
+        untyped_storage = module._UntypedStorage._new_shared(size * cls().element_size())
         return cls(wrap_storage=untyped_storage)
 
     @property
@@ -517,25 +517,25 @@ class TypedStorage:
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
-        return eval(cls.__module__).UntypedStorage._free_weak_ref(*args, **kwargs)
+        return eval(cls.__module__)._UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
         return self._storage._weak_ref(*args, **kwargs)
 
     @classmethod
     def from_buffer(cls, *args, **kwargs):
-        if cls == TypedStorage:
+        if cls == _TypedStorage:
             raise RuntimeError(
-                'from_buffer: only supported for subclasses of TypedStorage')
+                'from_buffer: only supported for subclasses of _TypedStorage')
 
         if 'dtype' in kwargs or len(args) == 5:
             raise RuntimeError((
                 "from_buffer: 'dtype' can only be specified in "
-                "UntypedStorage.from_buffer"))
+                "_UntypedStorage.from_buffer"))
 
         kwargs['dtype'] = cls().dtype
 
-        untyped_storage = eval(cls.__module__).UntypedStorage.from_buffer(*args, **kwargs)
+        untyped_storage = eval(cls.__module__)._UntypedStorage.from_buffer(*args, **kwargs)
         return cls(wrap_storage=untyped_storage)
 
     def _to(self, dtype):
@@ -594,9 +594,9 @@ class TypedStorage:
 
     @classmethod
     def from_file(cls, filename, shared, size):
-        if cls == TypedStorage:
+        if cls == _TypedStorage:
             raise RuntimeError('from_file can only be called on derived classes')
-        untyped_storage = eval(cls.__module__).UntypedStorage.from_file(
+        untyped_storage = eval(cls.__module__)._UntypedStorage.from_file(
             filename,
             shared,
             size * torch._utils._element_size(cls.dtype))
@@ -605,7 +605,7 @@ class TypedStorage:
 
     @classmethod
     def _expired(cls, *args, **kwargs):
-        return eval(cls.__module__).UntypedStorage._expired(*args, **kwargs)
+        return eval(cls.__module__)._UntypedStorage._expired(*args, **kwargs)
 
     def is_pinned(self):
         return self._storage.is_pinned()
@@ -627,11 +627,11 @@ class TypedStorage:
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
-        return eval(cls.__module__).UntypedStorage._new_shared_cuda(*args, **kwargs)
+        return eval(cls.__module__)._UntypedStorage._new_shared_cuda(*args, **kwargs)
 
     @classmethod
     def _new_with_weak_ptr(cls, *args, **kwargs):
-        return eval(cls.__module__).UntypedStorage._new_with_weak_ptr(*args, **kwargs)
+        return eval(cls.__module__)._UntypedStorage._new_with_weak_ptr(*args, **kwargs)
 
     def _share_filename_(self, *args, **kwargs):
         manager_handle, storage_handle, size = self._storage._share_filename_(*args, **kwargs)
@@ -640,7 +640,7 @@ class TypedStorage:
     @classmethod
     def _new_shared_filename(cls, manager, obj, size):
         bytes_size = size * torch._utils._element_size(cls.dtype)
-        return cls(wrap_storage=eval(cls.__module__).UntypedStorage._new_shared_filename(manager, obj, bytes_size))
+        return cls(wrap_storage=eval(cls.__module__)._UntypedStorage._new_shared_filename(manager, obj, bytes_size))
 
     def _shared_decref(self):
         self._storage._shared_decref()
@@ -648,7 +648,7 @@ class TypedStorage:
 
     @classmethod
     def _release_ipc_counter(cls, *args, **kwargs):
-        return eval(cls.__module__).UntypedStorage._release_ipc_counter(*args, **kwargs)
+        return eval(cls.__module__)._UntypedStorage._release_ipc_counter(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
         return self._storage._shared_incref(*args, **kwargs)

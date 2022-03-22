@@ -50,7 +50,7 @@ if [[ -z ${IS_GHA:-} ]]; then
   export PACKAGE_TYPE="${configs[0]}"
   export DESIRED_PYTHON="${configs[1]}"
   export DESIRED_CUDA="${configs[2]}"
-  if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+  if [[ "${OSTYPE}" == "msys" ]]; then
     export DESIRED_DEVTOOLSET=""
     export LIBTORCH_CONFIG="${configs[3]:-}"
     if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
@@ -91,11 +91,6 @@ if [[ ${DESIRED_CUDA} == "cpu" ]]; then
   USE_GOLD_LINKER="ON"
 fi
 
-USE_WHOLE_CUDNN="OFF"
-# Link whole cuDNN for CUDA-11.1 to include fp16 fast kernels
-if [[  "$(uname)" == "Linux" && "${DESIRED_CUDA}" == "cu111" ]]; then
-  USE_WHOLE_CUDNN="ON"
-fi
 
 # Default to nightly, since that's where this normally uploads to
 PIP_UPLOAD_FOLDER='nightly/'
@@ -158,10 +153,14 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
-export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
-if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
-  export DEBUG="${DEBUG:-}"
+  if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
+    export DEBUG=1
+  fi
+  export DESIRED_DEVTOOLSET=""
+else
+  export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 fi
 
 export DATE="$DATE"
@@ -184,7 +183,6 @@ export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
 export USE_GLOO_WITH_OPENSSL="ON"
-export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
