@@ -528,18 +528,6 @@ inline static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const T
   });
 }
 
-template<typename scalar_t>
-inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
-  const Tensor& infos, bool full_matrices, bool compute_uv) {
-
-}
-
-inline static void svd_cusolver_gesvdaStridedBatched(
-  const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
-  const Tensor& infos, bool full_matrices, bool compute_uv) {
-
-}
-
 // call cusolver gesvdj batched function to calculate svd
 template<typename scalar_t>
 inline static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
@@ -590,6 +578,70 @@ inline static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tenso
 inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool compute_uv) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdjBatched", [&] {
     apply_svd_cusolver_gesvdjBatched<scalar_t>(A, U, S, V, infos, compute_uv);
+  });
+}
+
+template<typename scalar_t>
+inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+    const Tensor& infos, bool full_matrices, bool compute_uv) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  int m = cuda_int_cast(A.size(-2), "m");
+  int n = cuda_int_cast(A.size(-1), "n");
+  int k = std::min(m, n);
+  int batchsize = cuda_int_cast(batchCount(A), "batch size");
+
+  int lda = A.stride(-1);
+  int ldu = compute_uv ? U.stride(-1) : m;
+  int ldv = compute_uv ? V.stride(-1) : n;
+
+  auto A_stride = matrixStride(A);
+  auto S_stride = S.size(-1);
+  auto rank = S_stride; // number of singular values
+  auto U_stride = compute_uv ? matrixStride(U) : ldu * rank;  // The strides for "empty matrices" are needed to satisfy cusolver.
+  auto V_stride = compute_uv ? matrixStride(V) : ldv * rank;
+
+  // Need to pass allocated memory to the function, otherwise it fails
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
+  auto& host_allocator = *at::getCPUAllocator();
+  auto dataPtr_U = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * m * k) : c10::DataPtr{};
+  auto dataPtr_V = !compute_uv ? allocator.allocate(sizeof(scalar_t) * batchsize * n * k) : c10::DataPtr{};
+
+  auto A_data = A.data_ptr<scalar_t>();
+  auto U_data = compute_uv ? U.data_ptr<scalar_t>() : reinterpret_cast<scalar_t*>(dataPtr_U.get());
+  auto S_data = S.data_ptr<value_t>();
+  auto V_data = compute_uv ? V.data_ptr<scalar_t>() : reinterpret_cast<scalar_t*>(dataPtr_V.get());
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
+
+  int lwork = -1;
+  at::cuda::solver::gesvdaStridedBatched_buffersize<scalar_t>(
+    handle, jobz, rank, m, n, A_data, lda, A_stride, S_data, S_stride, U_data, ldu, U_stride, V_data, ldv, V_stride,
+    &lwork, batchsize);
+  TORCH_INTERNAL_ASSERT(lwork >= 0, "gesvdaStridedBatched_buffersize failed to get needed buffer size, got lwork = ", lwork);
+  auto workspace = allocator.allocate(sizeof(scalar_t)*lwork);
+
+  // The residual Frobenius norm is always returned in double.
+  // cuSOLVER remark: if the user is confident on the accuracy of singular values and singular vectors,
+  //   for example, certain conditions hold (required singular value is far from zero),
+  //   then the performance can be improved by passing a null pointer to h_RnrmF, i.e. no computation of residual norm.
+  // Comment: although this residual is not checked or presented to end user, but it's still too dangerous to not calculate that.
+  //   We may consider to return or check this array in some way in the future.
+  auto residual_frobenius_norm = host_allocator.allocate(sizeof(double) * batchsize);
+
+  at::cuda::solver::gesvdaStridedBatched<scalar_t>(
+    handle, jobz, rank, m, n, A_data, lda, A_stride, S_data, S_stride, U_data, ldu, U_stride, V_data, ldv, V_stride,
+    reinterpret_cast<scalar_t*>(workspace.get()),
+    lwork, infos.data_ptr<int>(),
+    reinterpret_cast<double*>(residual_frobenius_norm.get()),
+    batchsize);
+}
+
+inline static void svd_cusolver_gesvdaStridedBatched(
+    const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+    const Tensor& infos, bool full_matrices, bool compute_uv) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdaStridedBatched", [&] {
+    apply_svd_cusolver_gesvdaStridedBatched<scalar_t>(A, U, S, V, infos, full_matrices, compute_uv);
   });
 }
 
@@ -657,13 +709,14 @@ void svd_cusolver(const Tensor& A,
   // Need to pass a copy of A, since A will be rewritten inside the function call
   if (m <= 32 && n <= 32 && batch_size > 1 && (full_matrices || m == n)) {
     svd_cusolver_gesvdjBatched(cloneBatchedColumnMajor(A), U, S, V, info, compute_uv);
-  } else if (batch_size > 1 && m >= 3 * n /* gesvda heuristics: tall and thin matrix */) {
+  } else if (batch_size > 1 && m > 0 && n > 0 && m >= 3 * n /* gesvda heuristics: tall and thin matrix */) {
     svd_cusolver_gesvdaStridedBatched(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
   } else {
     svd_cusolver_gesvdj(cloneBatchedColumnMajor(A), U, S, V, info, full_matrices, compute_uv);
   }
 
   // A device-host sync will be performed.
+  // Todo: implement the svd_ex variant to not check result convergence, thus removing the device-host sync
   const auto gesvdj_convergence_check = _check_gesvdj_convergence(info, k + 1);
 
   if (!gesvdj_convergence_check.empty()) {
