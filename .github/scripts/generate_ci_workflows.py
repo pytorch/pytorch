@@ -171,6 +171,7 @@ class CIWorkflow:
     xcode_version: str = ''
     ios_arch: str = ''
     ios_platform: str = ''
+    branches: List[str] = field(default_factory=lambda: ['master', 'main', 'release/*'])
     test_jobs: Any = field(default_factory=list)
 
     enable_default_test: bool = True
@@ -789,6 +790,7 @@ ANDROID_WORKFLOWS = [
         arch="linux",
         build_environment="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
+        branches=['master', 'main', 'nightly', 'release/*'],
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
