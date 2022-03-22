@@ -3273,6 +3273,39 @@ def error_inputs_gather(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(src, args=(1, idx,)),
                          error_regex="index 23 is out of bounds for dimension")
 
+    x = torch.rand((1,), device=device).expand((3,))
+    src = torch.rand((6,), device=device)
+    ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
+
+    yield ErrorInput(SampleInput(src, args=(0, ind,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(src, args=(0, ind,), kwargs=dict(out=src)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(ind.clone(), args=(0, ind[1:],), kwargs=dict(out=ind[:1])),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+def error_inputs_take(op_info, device, **kwargs):
+    x = torch.rand((1,), device=device).expand((3,))
+    src = torch.rand((6,), device=device)
+    ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
+
+    yield ErrorInput(SampleInput(src, args=(ind,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(src, args=(ind,), kwargs=dict(out=src)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(ind.clone(), args=(ind[1:],), kwargs=dict(out=ind[:-1])),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
 # Error inputs for scatter
 def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
     # Error when self.dtype != src.dtype (and src is not a scalar)
@@ -3311,6 +3344,143 @@ def error_inputs_scatter_and_scatter_add(op_info, device, **kwargs):
         dst = torch.zeros((3, 5), device=device, dtype=torch.float32)
         yield ErrorInput(SampleInput(dst, args=(0, idx, src)),
                          error_regex="index 34 is out of bounds for dimension 0 with size 3")
+
+def error_inputs_renorm(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(0.5, 0, 1.0)), error_type=RuntimeError,
+                     error_regex="needs at least 2 dimensions, got 0 dimensions")
+
+def error_inputs_lstsq(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
+                     error_regex="iteration over a 0-d tensor")
+
+def error_inputs_eig(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+
+    yield ErrorInput(SampleInput(zero_d, args=(False,)), error_type=RuntimeError,
+                     error_regex="input should be 2 dimensional")
+
+    yield ErrorInput(SampleInput(zero_d, args=(True,)), error_type=RuntimeError,
+                     error_regex="input should be 2 dimensional")
+
+def error_inputs_ormqr(op_info, device, **kwargs):
+    # this is only implemented on cpu
+    if (torch.device(device).type == 'cpu'):
+        zero_d = torch.randn((), device=device)
+        yield ErrorInput(SampleInput(zero_d, args=(zero_d, zero_d)), error_type=RuntimeError,
+                         error_regex="input must have at least 2 dimensions")
+
+def error_inputs_diag(op_info, device, **kwargs):
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d)), error_type=TypeError,
+                     error_regex="iteration over a 0-d tensor")
+
+def error_inputs_embedding(op_info, device, **kwargs):
+    indices = torch.rand(2, 2, device=device).long()
+    weights = [
+        torch.tensor(1.0, device=device),
+        torch.tensor(1.0, device=device).reshape(1, 1, 1),
+    ]
+
+    for weight in weights:
+        yield ErrorInput(SampleInput(weight, args=(indices,)), error_type=RuntimeError,
+                         error_regex="'weight' must be 2-D")
+
+def error_inputs_multinomial(op_info, device, **kwargs):
+    x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
+                     error_regex="prob_dist must be 1 or 2 dim")
+
+    x = torch.empty(1, 2, dtype=torch.long, device=device)
+    yield ErrorInput(SampleInput(x, args=(2,)), error_type=RuntimeError,
+                     error_regex="multinomial only supports floating-point dtypes for input")
+
+    x = torch.empty(1, 2, dtype=torch.double, device=device)
+    y = torch.empty(1, 2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(2,), kwargs=dict(out=y)), error_type=RuntimeError,
+                     error_regex="multinomial expects Long tensor out")
+
+    x = torch.empty(2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(0,)), error_type=RuntimeError,
+                     error_regex="cannot sample n_sample <= 0 samples")
+
+    x = torch.empty(2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(-1,)), error_type=RuntimeError,
+                     error_regex="cannot sample n_sample <= 0 samples")
+
+    x = torch.empty(2, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(3, False,)), error_type=RuntimeError,
+                     error_regex="cannot sample n_sample > prob_dist")
+
+    x = torch.empty(16777217, dtype=torch.double, device=device)
+    yield ErrorInput(SampleInput(x, args=(3,)), error_type=RuntimeError,
+                     error_regex="number of categories cannot exceed")
+
+def error_inputs_gradient(op_info, device, **kwargs):
+    for dtype in [torch.long, torch.float32, torch.complex64]:
+        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], device=device, dtype=dtype)
+
+        dim = (1, 0)
+        spacing = [0.1]
+        yield ErrorInput(SampleInput(t, kwargs=dict(spacing=spacing, dim=dim, edge_order=1)),
+                         error_type=RuntimeError,
+                         error_regex='torch.gradient expected spacing to be unspecified, a scalar ')
+
+        yield ErrorInput(SampleInput(t, kwargs=dict(edge_order=3)),
+                         error_type=RuntimeError,
+                         error_regex='torch.gradient only supports edge_order=1 and edge_order=2.')
+
+        dim = (1, 1)
+        spacing = 0.1
+        yield ErrorInput(SampleInput(t, kwargs=dict(spacing=spacing, dim=dim, edge_order=1)),
+                         error_type=RuntimeError,
+                         error_regex='dim 1 appears multiple times in the list of dims')
+
+        dim = (0, 1)
+        coordinates = [torch.tensor([1, 2, 4], device='cpu'), torch.tensor([1, 2, 4], device='meta')]
+        yield ErrorInput(SampleInput(t, kwargs=dict(spacing=coordinates, dim=dim, edge_order=1)),
+                         error_type=RuntimeError,
+                         error_regex='torch.gradient expected each tensor to be on the same device,')
+
+        yield ErrorInput(SampleInput(t, kwargs=dict(dim=3)),
+                         error_type=IndexError, error_regex='')
+
+        t = torch.tensor([[1], [2], [3]])
+        yield ErrorInput(SampleInput(t, kwargs=dict(edge_order=1)),
+                         error_type=RuntimeError,
+                         error_regex='torch.gradient expected each dimension size to be at least')
+
+        t = torch.tensor([[1, 2], [3, 4]])
+        yield ErrorInput(SampleInput(t, kwargs=dict(edge_order=2)),
+                         error_type=RuntimeError,
+                         error_regex='torch.gradient expected each dimension size to be at least')
+
+def error_inputs_masked_select(op_info, device, **kwargs):
+    x = torch.rand((1,), device=device).expand((3,))
+    y = torch.rand((6,), device=device)
+    mask = torch.tensor([True, False, True, True, False, False], device=device)
+
+    yield ErrorInput(SampleInput(y, args=(mask,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(y, args=(mask,), kwargs=dict(out=y)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+    yield ErrorInput(SampleInput(mask.clone(), args=(mask,), kwargs=dict(out=mask)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
+
+def error_inputs_index_select(op_info, device, **kwargs):
+    x = torch.rand((1, 6), device=device).expand((2, 6))
+    y = torch.rand((3, 6), device=device)
+    ind = torch.tensor([0, 1], dtype=torch.int64, device=device)
+
+    yield ErrorInput(SampleInput(y, args=(1, ind,), kwargs=dict(out=x)),
+                     error_type=RuntimeError,
+                     error_regex='unsupported operation')
 
 def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(make_tensor((S, S), dtype=dtype, device=device,
@@ -9249,7 +9419,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_diag),
+           sample_inputs_func=sample_inputs_diag,
+           error_inputs_func=error_inputs_diag),
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
@@ -9745,7 +9916,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness'),
            ),
            supports_inplace_autograd=False,
-           sample_inputs_func=sample_inputs_gradient),
+           sample_inputs_func=sample_inputs_gradient,
+           error_inputs_func=error_inputs_gradient),
     OpInfo('inverse',
            op=torch.inverse,
            dtypes=floating_and_complex_types(),
@@ -9916,6 +10088,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
+           error_inputs_func=error_inputs_lstsq,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # we skip gradient checks for this suite as they are tested in
@@ -9930,6 +10103,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
+           error_inputs_func=error_inputs_lstsq,
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -10253,7 +10427,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_masked_select),
+           sample_inputs_func=sample_inputs_masked_select,
+           error_inputs_func=error_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
@@ -11898,6 +12073,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_ormqr,
+           error_inputs_func=error_inputs_ormqr,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
     OpInfo('permute',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -12836,6 +13012,7 @@ op_db: List[OpInfo] = [
            op=torch.eig,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_eig,
+           error_inputs_func=error_inputs_eig,
            decorators=[
                skipCUDAIfNoMagma,
                skipCPUIfNoLapack,
@@ -13244,6 +13421,7 @@ op_db: List[OpInfo] = [
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_index,
+           error_inputs_func=error_inputs_index_select,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -13337,7 +13515,8 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,  # vmap complains of the sizes
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=False,  # Need: put_
-           sample_inputs_func=sample_inputs_take),
+           sample_inputs_func=sample_inputs_take,
+           error_inputs_func=error_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
@@ -13717,6 +13896,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_multinomial,
+           error_inputs_func=error_inputs_multinomial,
            skips=(
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
@@ -13954,7 +14134,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_movedim_moveaxis),
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_renorm),
+           sample_inputs_func=sample_inputs_renorm,
+           error_inputs_func=error_inputs_renorm),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
@@ -14725,6 +14906,7 @@ op_db: List[OpInfo] = [
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding(idx, weight, **kwargs),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_embedding,
+        error_inputs_func=error_inputs_embedding,
         skips=(
             # Does not work with lambda
             # Raises : JIT Test does not execute any logic
