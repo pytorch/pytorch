@@ -27,7 +27,12 @@ static inline at::DeviceType DefaultDevice() {
   return torch::lazy::getBackend()->EagerFallbackDeviceType();
 }
 
-torch::lazy::BackendRegistrar g_registrar(compiler::GetTSBackendImpl());
+static bool inline init_backend(){
+  compiler::InitTorchScriptBackend();
+  return true;
+}
+static const bool backend_initialized = init_backend();
+
 
 }  // namespace
 

@@ -90,18 +90,21 @@ def main() -> None:
     parser.add_argument(
         '--tensor_class_hdr', type=str, default="torch/csrc/lazy/core/tensor.h",
         help='Path to header file defining custom Lazy Tensor class')
+    parser.add_argument(
+        '--backend_name', type=str, default="",
+        help='Name of the backend to generate')
     options = parser.parse_args()
 
     run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
         options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
         options.tensor_class, options.tensor_class_hdr, options.shape_inference_hdr,
-        TSLazyIR)
+        options.backend_name, TSLazyIR)
 
 
 def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str],
         gen_ts_lowerings: bool, node_base: str, node_base_hdr: Optional[str],
         tensor_class: str, tensor_class_hdr: str, shape_inference_hdr: str,
-        lazy_ir_cls: Type[LazyIR]) -> None:
+        backend_name: str, lazy_ir_cls: Type[LazyIR]) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -200,13 +203,17 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     assert class_name is not None
 
     # Generate nativefunction declarations
+    # Note, eager registrations is set to False for the lazy TS backend as another LTC backend
+    # may want to register their own lazy kernels instead of registering the TS ones.
+    # The registration will lazily happen when init_ts_backend is called.
     gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
-                                       grouped_native_functions, backend_key, autograd_key)
+                                       grouped_native_functions, backend_key, autograd_key,
+                                       backend_name, eager_registration=False)
 
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
         gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                     backend_key, dispatch_key, selector)
+                                     backend_key, dispatch_key, selector, backend_name)
 
     # Generate native function impls that build IR nodes
     fm.write_with_template(f'{backend_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {

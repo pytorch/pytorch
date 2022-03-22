@@ -1420,6 +1420,8 @@ def gen_source_files(
         backend_index = backend_indices[dispatch_key]
         dispatch_namespace = str(dispatch_key).lower()
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
+            'BackendName': '',
+            'cpp_namespace': '',
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'external_backend_headers': '',
             'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers, rocm),
