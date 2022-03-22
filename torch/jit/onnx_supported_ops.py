@@ -1,8 +1,6 @@
-import torch
-import inspect
-from inspect import signature
-from torch.onnx.symbolic_registry import is_registered_op, get_registered_op, _registry, register_version
-from typing import List
+from inspect import signature, _empty  # type: ignore[attr-defined]
+from torch.onnx.symbolic_registry import _registry, register_version
+from typing import List, Dict
 
 
 # Class for Torch Schema
@@ -12,7 +10,7 @@ class TorchSchema:
     arguments: List[str]
     optional_arguments: List[str]
     returns: List[str]
-    opset: List[int]
+    opsets: List[int]
 
     def __init__(self, schema, symbolic=False) -> None:
         if symbolic is False:
@@ -46,7 +44,7 @@ class TorchSchema:
         if (
             self.name == other.name
             # TODO: Handle overloads
-            #and
+            # and
             #    (
             #        len(self.arguments) == len(other.arguments)
             #        or len(self.optional_arguments) == 1
@@ -54,7 +52,6 @@ class TorchSchema:
         ):
             return True
         return False
-
 
     def is_aten(self) -> bool:
         return self.name[:6] == "aten::"
@@ -66,24 +63,24 @@ class TorchSchema:
 
         def has_out(self):
             return self.overload_name == "out" or \
-                   self.overload_name == "output" or \
-                   "output" in self.overload_name or \
-                   "_out" in self.overload_name
+                self.overload_name == "output" or \
+                "output" in self.overload_name or \
+                "_out" in self.overload_name
 
         # Named tensors not supported by TorchScript compiler
         def has_dimname(self):
             return self.overload_name == "Dimname" or \
-                   self.overload_name == "dimname" or \
-                   "name" in self.overload_name
+                self.overload_name == "dimname" or \
+                "name" in self.overload_name
 
         def is_inplace(self):
             return self.name[-1] == "_"
 
         def add_to_optional_arguments(self):
             if self.overload_name in self.arguments:
-                #self.arguments.remove(self.overload_name)
+                # self.arguments.remove(self.overload_name)
                 self.optional_arguments.append(self.overload_name)
-            #else:
+            # else:
             #    if self.overload_name == "padding":
             #        print("Re")
             #    self.arguments.append(self.overload_name)
@@ -104,8 +101,9 @@ class TorchSchema:
 
 # Create TorchSchema object directory of all aten schemas
 def get_all_aten_forward_schemas():
-    torch_schemas = [TorchSchema(s) for s in torch._C._jit_get_all_schemas()]
-    torch_schemas = sorted(torch_schemas, key=lambda x : x.name)
+    from torch._C import _jit_get_all_schemas
+    torch_schemas = [TorchSchema(s) for s in _jit_get_all_schemas()]
+    torch_schemas = sorted(torch_schemas, key=lambda x: x.name)
     aten_schemas = [s for s in torch_schemas if s.is_aten() and not s.is_backward()]
     return aten_schemas
 
@@ -114,6 +112,7 @@ def get_all_aten_forward_schemas():
 # get_registered_op(opname, domain, version):
 for i in range(7, 16):
     register_version("", i)
+
 
 def get_symbolic_argument_count(func):
     params = []
@@ -126,19 +125,21 @@ def get_symbolic_argument_count(func):
                 has_var = True
             elif name == "_outputs" or name == "g":
                 continue
-            elif p.default != inspect._empty:
+            elif p.default != _empty:
                 optional_params.append(p)
             else:
                 params.append(str(p))
-    except:
+    except Exception:
         pass
     return params
 
+
 def get_all_symbolics_schemas():
-    symbolics_schemas = dict()
+    symbolics_schemas: Dict[str, TorchSchema] = dict()
+
     for domain, version in _registry:
         for opname, sym_func in _registry[(domain, version)].items():
-            symbolics_schema = TorchSchema("aten::"+opname, symbolic=True)
+            symbolics_schema = TorchSchema("aten::" + opname, symbolic=True)
             symbolics_schema.arguments = get_symbolic_argument_count(sym_func)
             if symbolics_schema in symbolics_schemas.values():
                 symbolics_schemas[opname].opsets.append(version)
@@ -146,6 +147,7 @@ def get_all_symbolics_schemas():
                 symbolics_schema.opsets = [version]
                 symbolics_schemas[opname] = symbolics_schema
     return symbolics_schemas
+
 
 def get_onnx_supported_ops():
     aten_schemas = get_all_aten_forward_schemas()
@@ -160,5 +162,5 @@ def get_onnx_supported_ops():
                 onnx_supported_ops.append((opname, " ".join([str(o) for o in opsets])))
         else:
             unsupported_ops.append(schema)
-    onnx_supported_ops = sorted(onnx_supported_ops, key=lambda x : x[0])
+    onnx_supported_ops = sorted(onnx_supported_ops, key=lambda x: x[0])
     return onnx_supported_ops
