@@ -315,6 +315,9 @@ class TestSparse(TestCase):
             self.assertEqual(res, dense_x)
             self.assertEqual(res, safe_dense_x)
 
+            if x.dtype != torch.float64:
+                return
+
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
