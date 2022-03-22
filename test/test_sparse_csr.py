@@ -1044,34 +1044,19 @@ class TestSparseCSR(TestCase):
                     test(is_sparse=True)
 
     @dtypes(torch.float, torch.double)
-    def test_binary(self, device, dtype):
+    def test_mul(self, device, dtype):
         def _test_spadd_shape(fn, nnz, shape):
-            print("fn: ", fn, " nnz: ", nnz)
             x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
-            y = torch.randn(*shape, dtype=dtype, device=device)
+            y = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
 
             res = fn(y, x)
-            expected = fn(y, x.to_dense())
+            expected = fn(y.to_dense(), x.to_dense()).to_sparse_csr()
             self.assertEqual(res, expected)
 
-            # Non contiguous dense tensor
-            s = list(shape)
-            s[0] = shape[-1]
-            s[-1] = shape[0]
-            y = torch.randn(*s, dtype=torch.double, device=device)
-            y.transpose_(0, len(s) - 1)
-
-            res = fn(y, x)
-            expected = fn(y, x.to_dense())
-
-            self.assertEqual(res, expected)
-
-        r = random.random()
-        for fn in [lambda x, y: torch.add(x, y, alpha=r), torch.mul]:
-            _test_spadd_shape(fn, 10, [100, 100])
-            _test_spadd_shape(fn, 0, [100, 100])
-            _test_spadd_shape(fn, 10, [100, 1])
-            _test_spadd_shape(fn, 10, [1, 100])
+        _test_spadd_shape(torch.mul, 100, [100, 100])
+        _test_spadd_shape(torch.mul, 0, [100, 100])
+        _test_spadd_shape(torch.mul, 100, [100, 1])
+        _test_spadd_shape(torch.mul, 100, [1, 100])
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)

@@ -710,13 +710,11 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
   // // TODO: Use a specialized CSR kernel for performance if needed
-  // TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
-  // // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
-  // TORCH_CHECK(t_.is_sparse_csr() && !t_.is_sparse(), "Expects first input to be either strided or CSR.");
-  // // TODO: Use is_strided check to avoid explicit enumeration of all possible layouts.
-  // TORCH_CHECK(src_.is_sparse_csr() && !src_.is_sparse(), "Expects second input to be either strided or CSR.");
-  Tensor t = t_.is_sparse_csr() ? t_.to_sparse() : t;
-  Tensor src = src_.is_sparse_csr() ? src_.to_sparse() : src_;
+  TORCH_CHECK(t_.is_sparse_csr(), "mul(dense, sparse) is not supported");
+  TORCH_CHECK(src_.is_sparse_csr(), "mul(sparse, dense) is not supported");
+  TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
+  Tensor t = t_.to_sparse();
+  Tensor src = src_.to_sparse();
   Tensor tmp_result = t.mul(src);
   auto r_sparse_csr = tmp_result.to_sparse_csr();
   r.resize_as_sparse_(r_sparse_csr);
