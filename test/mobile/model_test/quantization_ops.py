@@ -17,6 +17,9 @@ class GeneralQuantModule(torch.nn.Module):
     def forward(self):
         a = torch.quantize_per_tensor(torch.tensor([3.0]), 1.0, 0, torch.qint32)
         b = torch.quantize_per_tensor(torch.tensor(4.0), 1.0, 0, torch.qint32)
+        c = torch.quantize_per_tensor(
+            torch.tensor([3.0]), torch.tensor(1.0), torch.tensor(0), torch.qint32
+        )
         input1 = torch.randn(1, 16, 4)
         input2 = torch.randn(1, 16, 4, 4)
         input3 = torch.randn(1, 16, 4, 4, 4)
@@ -38,6 +41,7 @@ class GeneralQuantModule(torch.nn.Module):
                     input2, scale=1.0, zero_point=0, dtype=torch.quint8
                 )
             ),
+            c,
             # self.conv3(torch.quantize_per_tensor(input3, scale=1.0, zero_point=0, dtype=torch.quint8)), # failed on iOS
         )
 
