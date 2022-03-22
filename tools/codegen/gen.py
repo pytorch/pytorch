@@ -161,7 +161,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
             rs.add(name)
     return rs
 
-@functools.lru_cache
+@functools.lru_cache(maxsize=None)
 def parse_tags_yaml(path: str) -> Set[str]:
     # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     with open(path, 'r') as f:
