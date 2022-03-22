@@ -32,7 +32,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         function_list = [
             'prepare',
             'convert',
-            'Fuser',
+            'fuse',
         ]
         self._test_function_import('fx', function_list)
 
@@ -155,9 +155,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
         self._test_package_import('fx.fuse')
 
     def test_function_import_fx_fuse(self):
-        function_list = [
-            'Fuser'
-        ]
+        function_list = ['fuse']
         self._test_function_import('fx.fuse', function_list)
 
     def test_package_import_fx_fusion_patterns(self):
@@ -199,7 +197,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             'create_qparam_nodes',
             'all_node_args_have_no_tensors',
             'node_return_type_is_int',
-            'node_bool_tensor_arg_indexes',
+            'get_non_observable_arg_indexes_and_types',
             'is_get_tensor_info_node',
             'maybe_get_next_module'
         ]

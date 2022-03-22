@@ -189,6 +189,8 @@ option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
     BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
     "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
+cmake_dependent_option(
+     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -202,15 +204,12 @@ cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
     "USE_CUDA;BUILD_TEST" OFF)
 cmake_dependent_option(
-  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
-    "USE_STATIC_CUDNN" OFF)
-cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_BREAKPAD "Use breakpad crash dump library" ON)
-option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
+option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -305,6 +304,7 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
     "USE_MKLDNN" OFF)
+option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -436,8 +436,14 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(STATIC_DISPATCH_BACKEND "" CACHE STRING
-    "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+    STATIC_DISPATCH_BACKEND
+    "Name of the backend for which static dispatch code is generated, e.g.: CPU."
+    "")
+option(USE_LIGHTWEIGHT_DISPATCH "Enable codegen unboxing for ATen ops, need to work with static dispatch in order to work properly." OFF)
+if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
+  message(FATAL_ERROR "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
+endif()
 option(
   TRACING_BASED
   "Master flag to build Lite Interpreter with tracing build option"

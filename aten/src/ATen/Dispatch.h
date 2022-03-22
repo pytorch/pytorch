@@ -20,8 +20,8 @@ namespace at {
  * included in this file when code-gen is ready.
  */
 inline constexpr bool should_include_kernel_dtype(
-  const char *kernel_tag_str,
-  at::ScalarType scalar_type
+  const char* /*kernel_tag_str*/,
+  at::ScalarType /*scalar_type*/
 ) {
   return true;
 }
@@ -508,6 +508,22 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
           NAME, at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)   \
       AT_QINT_PRIVATE_CASE_TYPE(                                            \
           NAME, at::kQInt32, at::qint32, at::kInt, int, __VA_ARGS__)        \
+      default:                                                              \
+        AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");     \
+    }                                                                       \
+  }()
+
+#define AT_DISPATCH_QINT_BYTE_TYPES(TYPE, NAME, ...)                        \
+  [&] {                                                                     \
+    const auto& the_type = TYPE;                                            \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
+    RECORD_KERNEL_FUNCTION_DTYPE(NAME, _st);                                \
+    switch (_st) {                                                          \
+      AT_QINT_PRIVATE_CASE_TYPE(                                            \
+          NAME, at::kQInt8, at::qint8, at::kChar, int8_t, __VA_ARGS__)      \
+      AT_QINT_PRIVATE_CASE_TYPE(                                            \
+          NAME, at::kQUInt8, at::quint8, at::kByte, uint8_t, __VA_ARGS__)   \
       default:                                                              \
         AT_ERROR(#NAME, " not implemented for '", toString(TYPE), "'");     \
     }                                                                       \
