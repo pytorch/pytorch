@@ -126,8 +126,8 @@ covered_ops = production_ops.intersection(all_generated_ops)
 uncovered_ops = production_ops - covered_ops
 coverage = 100 * len(covered_ops) / len(production_ops)
 print(
-    f"\nGenerated {len(all_generated_ops)} ops and covered
-    {len(covered_ops)}/{len(production_ops)} ({round(coverage, 2)}%) production ops. \n"
+    f"\nGenerated {len(all_generated_ops)} ops and covered " +
+    f"{len(covered_ops)}/{len(production_ops)} ({round(coverage, 2)}%) production ops. \n"
 )
 with open(coverage_out_path, "w") as f:
     yaml.safe_dump(
