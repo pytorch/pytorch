@@ -3,7 +3,7 @@ from enum import Enum
 from typing import List
 
 import torch
-from ..metadata import ShardMetadata
+from torch.distributed._shard.metadata import ShardMetadata
 
 
 class MEM_FORMAT_ENCODING(Enum):

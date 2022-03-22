@@ -182,7 +182,7 @@ jobs:
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
-    timeout-minutes: !{{ common.timeout_minutes }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
