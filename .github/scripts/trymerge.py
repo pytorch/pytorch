@@ -463,7 +463,7 @@ class GitHubPR:
             msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
-    def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
+    def merge_into(self, repo: GitRepo, *, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
         if self.has_internal_changes():
@@ -546,7 +546,7 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
