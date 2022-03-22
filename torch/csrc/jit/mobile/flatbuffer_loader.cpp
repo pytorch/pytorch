@@ -226,7 +226,24 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   }
 
   std::unordered_set<std::string> unsupported_op_names;
-  const int64_t model_version = 0x6L;
+  /* const*/ int32_t model_version = module_->version();
+  // TODO(@pavithran) remove this when all models are regenerated with valid
+  // bytecode version
+  if (model_version == 0) {
+    // the model file was generated without bytecode_version
+    // the default value is zero, so we hardcode it to
+    // 0x6L for now
+    model_version = 0x6L;
+  }
+  TORCH_CHECK(
+      caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
+      "The version number can only be between ",
+      caffe2::serialize::kMinSupportedBytecodeVersion,
+      " and ",
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      " cannot be: ",
+      model_version);
   for (const auto* op : *method->operators()) {
     c10::optional<int> num_args = c10::nullopt;
     if (op->num_args_serialized() > -1) {
@@ -616,7 +633,11 @@ std::tuple<std::shared_ptr<char>, size_t> get_stream_content(std::istream& in) {
   // NOLINT make sure buffer size is multiple of alignment
   size_t buffer_size =
       (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
-#ifdef _WIN32
+#if defined(__ANDROID__)
+  std::shared_ptr<char> data(
+      static_cast<char*>(memalign(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free);
+#elif defined(_WIN32)
   std::shared_ptr<char> data(
       static_cast<char*>(
           _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
@@ -673,6 +694,28 @@ mobile::Module load_mobile_module_from_file(
   size_t size = 0;
   std::tie(data, size) = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(std::move(data), size, device);
+}
+
+uint64_t get_bytecode_version(std::istream& in) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  return flatbuffer_module->version();
+}
+
+uint64_t get_bytecode_version(const std::string& filename) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
+  return flatbuffer_module->version();
 }
 
 } // namespace jit
