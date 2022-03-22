@@ -345,7 +345,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name == 'prod':
         return torch.tensor(1, dtype=dtype, device=device)
-    elif op_name in {'amax', 'logsumexp'}:
+    elif op_name in {'amax', 'logsumexp', 'logaddexp'}:
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
@@ -568,6 +568,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     if callable(op):
         is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var', 'logsumexp'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
+        is_binary = op.__name__ in {'logaddexp'}
         if is_reduction:
             if op.__name__ == 'norm':
                 if args:
@@ -577,7 +578,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
             keepdim = kwargs.get('keepdim', False)
             dim_ = _canonical_dim(dim, input.ndim)
             return _any(outmask, dim_, bool(keepdim))
-        elif is_normalization:
+        elif is_normalization or is_binary:
             return _input_mask(input, *args, **kwargs)
         else:
             raise ValueError(f'_output_mask expected masked operation (got callable {op.__module__}.{op.__name__})')
@@ -862,16 +863,15 @@ def logaddexp(input: Tensor,
               other: Tensor,
               *,
               dtype: Optional[DType] = None,
-              input_mask: Optional[Tensor] = None,
-              other_mask: Optional[Tensor] = None) -> Tensor:
+              mask: Optional[Tensor] = None) -> Tensor:
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided and other.layout == torch.strided:
+        # same identity as logsumexp
         fill = input.new_full([], _reduction_identity('logsumexp', input))
-        input_inmask = _input_mask(input, mask=input_mask)
-        other_inmask = _input_mask(other, mask=other_mask)
-        mask_input = torch.where(input_inmask, input, fill)
-        mask_other = torch.where(other_inmask, other, fill)
+        inmask = _input_mask(input, mask=mask)
+        mask_input = torch.where(inmask, input, fill)
+        mask_other = torch.where(inmask, other, fill)
         return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
     else:
         raise ValueError(f'masked logaddexp expects strided tensor (got {input.layout} tensor for input, {other.layout} for other)')

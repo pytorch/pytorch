@@ -6397,15 +6397,14 @@ def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwar
     """
     inputs: List[SampleInput] = []
     shapes = [(S,), (S, S), (S, M, S)]
-    input_mask_lists = [list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes]
-    other_mask_lists = [list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes]
+    masks_list = [list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes]
 
-    for shape, input_masks, other_masks in zip(shapes, input_mask_lists, other_mask_lists):
-        for input_mask, other_mask in zip(input_masks, other_masks):
+    for shape, masks in zip(shapes, masks_list):
+        for mask in masks:
             input = make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
             other = make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
             inputs.append(SampleInput(input, args=(other,),
-                                      kwargs=dict(input_mask=input_mask, other_mask=other_mask)))
+                                      kwargs=dict(mask=mask)))
 
     return inputs
 
@@ -8358,22 +8357,6 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     mask = kwargs.get('mask')
     if mask is not None:
         output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
-        output = torch.where(output_mask, output, output.new_zeros([]))
-    return output
-
-
-def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
-    """Gradcheck wrapper for masked pointwise operations. Assumes that if either
-    tensor is masked at a specific index, then the result will be maxed
-    When mask is specified, replaces masked-out elements with zeros.
-    Use for operations that produce non-finite masked-out elements,
-    for instance, for minimum and maximum reductions.
-    """
-    output = op(input, *args, **kwargs)
-    input_mask = kwargs.get('input_mask')
-    other_mask = kwargs.get('other_mask')
-    if input_mask is not None or other_mask is not None:
-        output_mask = torch.logical_and(input_mask, output_mask)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
@@ -15570,7 +15553,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         sample_inputs_func=sample_inputs_masked_logaddexp,
-        gradcheck_wrapper=gradcheck_wrapper_masked_pointwise_operation
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
         '_masked.logsumexp',
