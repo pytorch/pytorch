@@ -9,7 +9,7 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
-from torch.distributed._shard import (
+from torch.distributed._shard.api import (
     shard_parameter,
     sharded_tensor,
     _shard_tensor,

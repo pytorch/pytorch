@@ -237,7 +237,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
-    "test_multiprocessing",
     "test_jit_legacy",
     "test_type_hints",
     "test_openmp",

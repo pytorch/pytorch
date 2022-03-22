@@ -5,7 +5,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard import (
+from torch.distributed._shard.api import (
     shard_parameter,
     _collect_local_shard,
     _reshard_output,
