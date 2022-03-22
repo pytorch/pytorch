@@ -680,14 +680,22 @@ void InitLtcModuleBindings(py::module m) {
           auto post_order = Util::ComputePostOrder(roots);
           std::vector<int64_t> tensor_ids;
           std::vector<at::IValue> ivalues;
+
+          std::unordered_set<BackendData::Handle> data_handles_;
           for (auto nodeptr : post_order) {
             if (nodeptr->op() == *torch::lazy::ltc_device_data) {
               const auto* device_data_node = torch::lazy::NodeCast<torch::lazy::DeviceData>(nodeptr, *torch::lazy::ltc_device_data);
+
               auto infoptr = device_data_node->data()->info();
               auto deviceDataInfoPtr = (torch::lazy::LazyGraphExecutor::DeviceDataInfo*) infoptr;
-              tensor_ids.push_back(deviceDataInfoPtr->tensor_id);
-
               auto* tsDataPtr = (torch_lazy_tensors::compiler::TSData*) device_data_node->data().get();
+
+              // dedup DeviceData by handle
+              auto handle = tsDataPtr->GetHandle();
+              if (!data_handles_.insert(handle).second) {
+                continue;
+              }
+              tensor_ids.push_back(deviceDataInfoPtr->tensor_id);
               /*
                * If the TSData contains a tensor, then the tensor id will uniquely identify the tensor.
                * We use that tensor id to find the tensor in other places: e.g. in the python forward method parameters.
