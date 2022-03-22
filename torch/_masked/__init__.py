@@ -642,7 +642,7 @@ elements, have ``nan`` values.
         inmask = _input_mask(input, mask=mask)
         mask_input = torch.where(inmask, input, fill)
         output = torch.nanmedian(mask_input, dim_, keepdim=keepdim).values
-        if is_float: 
+        if is_float:
             return output
         elif not is_float and not torch.isnan(output).any():
             return output.to(dtype=dtype)
