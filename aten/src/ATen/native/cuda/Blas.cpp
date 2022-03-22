@@ -1,8 +1,31 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/MaybeOwned.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/baddbmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/dot_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#include <ATen/ops/vdot_native.h>
+#endif
 
 namespace at { namespace native {
 
@@ -102,9 +125,27 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
+  bool useLtInterface = false;
+  at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
-    self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11040 && !defined(_MSC_VER)
+    // Strangely, if mat2 has only 1 row or column, we get
+    // CUBLAS_STATUS_INVALID_VALUE error from cublasLtMatmulAlgoGetHeuristic.
+    // self.dim() == 1 && result.dim() == 2 && self.sizes()[0] == mat2_sizes[1]
+    // is to use lt interface only when self is bias.
+    useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
+        result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
+        self.is_contiguous() &&
+        (scalar_type == at::ScalarType::Double ||
+         scalar_type == at::ScalarType::Float ||
+         scalar_type == at::ScalarType::Half ||
+         scalar_type == at::ScalarType::BFloat16) &&
+        mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
+#endif
+    if (!useLtInterface) {
+      self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
+    }
     self__sizes = self_->sizes();
   } else {
     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
@@ -115,8 +156,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
   if (&result != &self) {
-    at::native::resize_output(result, self__sizes);
-    if (beta.toComplexDouble() != 0.0) {
+    at::native::resize_output(result, {mat1_sizes[0], mat2_sizes[1]});
+    if (beta.toComplexDouble() != 0.0 && !useLtInterface) {
       at::native::copy_(result, *self_);
     }
   }
@@ -147,7 +188,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   int64_t mat1_ld = mat1_->stride((transpose_mat1 == transpose_result) ? 1 : 0);
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
-  at::ScalarType scalar_type = self_->scalar_type();
 
   if (mat1.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
@@ -170,24 +210,61 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    using opmath_t = at::opmath_type<scalar_t>;
-    opmath_t alpha_val = alpha.to<opmath_t>();
-    opmath_t beta_val = beta.to<opmath_t>();
-    scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-    scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-    at::cuda::blas::gemm<scalar_t>(
-      transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
-      transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
-      m, n, k,
-      alpha_val,
-      mat1_ptr, mat1_ld,
-      mat2_ptr, mat2_ld,
-      beta_val,
-      result_ptr, result_ld
-    );
-  });
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+  if (useLtInterface) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        scalar_type,
+        "addmm_cuda_lt",
+        [&] {
+          at::cuda::blas::gemm_and_bias<scalar_t>(
+              transpose_mat1,
+              transpose_mat2,
+              m,
+              n,
+              k,
+              alpha.to<at::opmath_type<scalar_t>>(),
+              mat1_->data_ptr<scalar_t>(),
+              mat1_ld,
+              mat2_->data_ptr<scalar_t>(),
+              mat2_ld,
+              self.data_ptr<scalar_t>(),
+              result_->data_ptr<scalar_t>(),
+              result_ld);
+        });
+  } else
+#endif
+  {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        scalar_type,
+        "addmm_cuda",
+        [&] {
+          using opmath_t = at::opmath_type<scalar_t>;
+          opmath_t alpha_val = alpha.to<opmath_t>();
+          opmath_t beta_val = beta.to<opmath_t>();
+          scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
+          scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
+          scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+          at::cuda::blas::gemm<scalar_t>(
+              transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+              transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
+              m,
+              n,
+              k,
+              alpha_val,
+              mat1_ptr,
+              mat1_ld,
+              mat2_ptr,
+              mat2_ld,
+              beta_val,
+              result_ptr,
+              result_ld);
+        });
+  }
+
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }

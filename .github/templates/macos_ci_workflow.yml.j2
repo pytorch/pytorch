@@ -6,29 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default -%}
-  pull_request:
-{%- endif -%}
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  push:
-    branches:
-      - master
-      - release/*
-{%- endif %}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(is_default, is_scheduled, ciflow_config.labels) }}
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
@@ -45,6 +23,7 @@ env:
 jobs:
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}
@@ -89,11 +68,13 @@ jobs:
 {% block test +%}
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: !{{ test_job.config }}
       SHARD_NUMBER: !{{ test_job.shard }}

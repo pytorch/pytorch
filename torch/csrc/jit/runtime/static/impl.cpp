@@ -164,7 +164,6 @@ void OptimizeGraph(
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
-    EnableStaticRuntimeLayerNorm(graph);
 #endif
   }
 
@@ -561,7 +560,7 @@ StaticModule::StaticModule(
   value_buffer_size_ +=
       prepareBlockInfo(graph_->block(), values_index_offset, value_to_index);
 
-  prepareProcessedNodes(graph_->block(), value_to_index, alias_db);
+  prepareStaticNodeInfos(graph_->block(), value_to_index, alias_db);
 
   for (auto& block_and_info : block_infos_) {
     auto& block_info = block_and_info.second;
@@ -646,7 +645,7 @@ void StaticModule::prepareFunctionsAndConstants(
   }
 }
 
-size_t StaticModule::prepareProcessedNodes(
+size_t StaticModule::prepareStaticNodeInfos(
     Block* block,
     const FastMap<const Value*, uint32_t>& value_to_index,
     const AliasDb& alias_db,
@@ -654,7 +653,7 @@ size_t StaticModule::prepareProcessedNodes(
   const auto node_start = node_idx;
 
   auto& block_info = block_infos_.at(block);
-  std::vector<ProcessedNode> nodes;
+  std::vector<StaticNodeInfo> nodes;
   FastMap<Node*, bool> node_has_out_variant;
 
   for (auto* node : block->nodes()) {
@@ -664,7 +663,7 @@ size_t StaticModule::prepareProcessedNodes(
 
     for (auto* sub_block : node->blocks()) {
       node_idx +=
-          prepareProcessedNodes(sub_block, value_to_index, alias_db, node_idx);
+          prepareStaticNodeInfos(sub_block, value_to_index, alias_db, node_idx);
     }
     ProcessedNodeInputs input_indices(node->inputs().size());
     for (const auto input_idx : c10::irange(node->inputs().size())) {
@@ -699,7 +698,7 @@ size_t StaticModule::prepareProcessedNodes(
 }
 
 void BlockInfo::set_nodes(
-    std::vector<ProcessedNode> nodes,
+    std::vector<StaticNodeInfo> nodes,
     const FastMap<Node*, bool>& node_has_out_variant) {
   nodes_ = std::move(nodes);
 
@@ -723,7 +722,7 @@ void BlockInfo::prepare_for_memory_planner(
       block_.outputs().begin(), block_.outputs().end());
 
   // collect register indices of outputs of ops with out variant
-  for (ProcessedNode& pnode : nodes_) {
+  for (StaticNodeInfo& pnode : nodes_) {
     if (!pnode.has_out_variant()) {
       continue;
     }
@@ -820,10 +819,11 @@ BlockRunner::BlockRunner(
       // TODO(T108633124): Turn on manage output tensors for sub-blocks.
       manage_output_tensors_enabled_(
           is_root_block_ && sm.opts().manage_output_tensors),
-      values_(values),
-      nodes_(block_info_.nodes()) {
-  for (auto& n : nodes_) {
-    n.set_values(values_.data());
+      values_(values) {
+  nodes_.reserve(block_info_.nodes().size());
+  IValue* values_data = values_.data();
+  for (auto& pre_pnode : block_info_.nodes()) {
+    nodes_.emplace_back(pre_pnode, values_data);
   }
 
   for (auto index : block_info_.block_output_indices()) {
@@ -882,10 +882,6 @@ template <typename IValueList>
 void BlockRunner::set_inputs(
     IValueList&& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
-  const auto total_num_inputs =
-      args.size() + kwargs.size() + first_input_is_self_;
-  TORCH_CHECK(total_num_inputs == block_info_.num_inputs());
-
   const auto& schema = static_module_.schema();
   if (first_input_is_self_) {
     Input(0) = static_module_.module()._ivalue();
@@ -894,6 +890,10 @@ void BlockRunner::set_inputs(
   if (!is_root_block_ || C10_UNLIKELY(!schema)) {
     TORCH_CHECK(
         kwargs.empty(), "Schema is not available, but BlockRunner got kwargs.");
+
+    const auto total_num_inputs = args.size() + first_input_is_self_;
+    TORCH_CHECK(total_num_inputs == block_info_.num_inputs());
+
     for (size_t i = 0; i < args.size(); ++i) {
       set_arg(i, std::forward<IValueList>(args));
     }
@@ -903,7 +903,9 @@ void BlockRunner::set_inputs(
   const auto& schema_args = schema->arguments();
   size_t consumed_kwargs = 0;
   DCHECK(schema_args.size() > 0);
-
+  TORCH_CHECK(
+      args.size() < schema_args.size(),
+      "Static runtime got too many arguments");
   for (size_t i = 0; i < schema_args.size() - 1; ++i) {
     // Start at 1 since the schema always contains `self`.
     const auto& schema_arg = schema_args[i + 1];
@@ -931,9 +933,7 @@ void BlockRunner::set_inputs(
     TORCH_CHECK(
         false, "Static runtime is missing required kwarg ", schema_arg.name());
   }
-  TORCH_CHECK(
-      consumed_kwargs == kwargs.size() &&
-      args.size() + consumed_kwargs == schema_args.size() - 1);
+  TORCH_CHECK(consumed_kwargs == kwargs.size());
 }
 
 void BlockRunner::create_memory_planner() {
@@ -1817,7 +1817,7 @@ ProcessedFunction::ProcessedFunction(
   }
 }
 
-ProcessedNode::ProcessedNode(
+StaticNodeInfo::StaticNodeInfo(
     Node* node,
     ProcessedFunction* fn,
     ProcessedNodeInputs inputs,
@@ -1880,12 +1880,13 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 6> special_case_ops = {
+  const static std::array<c10::Symbol, 7> special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("prim::IfThenElse"),
       fromQualString("static_runtime::select_tensor"),
       fromQualString("static_runtime::VarTupleUnpack"),
       fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::fused_split_and_squeeze"),
       fromQualString("static_runtime::create_owned_ref")};
   if (!force_check &&
       std::find(

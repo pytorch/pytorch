@@ -107,8 +107,14 @@ def plural(n: int) -> str:
 
 
 def get_base_commit(sha1: str) -> str:
+    default_branch = os.environ.get('GIT_DEFAULT_BRANCH')
+    # capture None and "" cases
+    if not default_branch:
+        default_branch = "master"
+
+    default_remote = f"origin/{default_branch}"
     return subprocess.check_output(
-        ["git", "merge-base", sha1, "origin/master"],
+        ["git", "merge-base", sha1, default_remote],
         encoding="ascii",
     ).strip()
 
@@ -206,7 +212,7 @@ def analyze(
     base_reports: Dict[Commit, List[SimplerReport]],
 ) -> List[SuiteDiff]:
     nonempty_shas = [sha for sha, reports in base_reports.items() if reports]
-    # most recent master ancestor with at least one S3 report,
+    # most recent main ancestor with at least one S3 report,
     # or empty list if there are none (will show all tests as added)
     base_report = base_reports[nonempty_shas[0]] if nonempty_shas else []
 
@@ -525,7 +531,7 @@ def regression_info(
     and its test times. Since Python dicts maintain insertion order
     (guaranteed as part of the language spec since 3.7), the
     base_reports argument must list the head's several most recent
-    master commits, from newest to oldest (so the merge-base is
+    main commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
     simpler_head = simplify(head_report)
@@ -790,6 +796,7 @@ def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict
         # write to S3 to go to Rockset as well
         import uuid
         for flaky_test in flaky_tests:
+            flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
             flaky_test["workflow_id"] = workflow_id
             key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
             obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
@@ -887,7 +894,6 @@ def assemble_s3_object(
 def send_report_to_s3(head_report: Version2Report) -> None:
     job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
     sha1 = os.environ.get('SHA1', os.environ.get('CIRCLE_SHA1', ''))
-    branch = os.environ.get('BRANCH', os.environ.get('CIRCLE_BRANCH', ''))
     now = datetime.datetime.utcnow().isoformat()
 
     # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
@@ -895,12 +901,7 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     test_config = os.environ.get('TEST_CONFIG')
 
     job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
-
-    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        pr = os.environ.get('PR_NUMBER', os.environ.get('CIRCLE_PR_NUMBER', 'unknown'))
-        key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
-    else:
-        key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
+    key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
@@ -949,7 +950,7 @@ def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
         encoding="ascii",
     ))
 
-    # if current commit is already on master, we need to exclude it from
+    # if current commit is already on main, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],

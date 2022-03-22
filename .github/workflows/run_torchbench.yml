@@ -37,9 +37,12 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
+          # install ffmpeg-4.4.1
+          # torchvision doesn't compile on ffmpeg-5: https://github.com/pytorch/vision/issues/5616
+          conda install -y ffmpeg=4.4.1
       - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
@@ -53,7 +56,7 @@ jobs:
         with:
           repository: pytorch/benchmark
           path: benchmark
-          lfs: true
+          lfs: false
           ref: ${{ env.TORCHBENCH_BRANCH }}
       - name: Run TorchBench
         run: |

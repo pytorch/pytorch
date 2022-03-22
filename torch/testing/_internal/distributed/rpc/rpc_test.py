@@ -17,7 +17,7 @@ import torch.nn as nn
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
-from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
+from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info, WorkerInfo
 from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
@@ -107,7 +107,7 @@ class StubRpcAgent:
 
     def get_worker_infos(self):
         return {
-            rpc.WorkerInfo(name=worker_name(rank), id=rank)
+            WorkerInfo(name=worker_name(rank), id=rank)
             for rank in range(self.world_size)
         }
 
@@ -276,6 +276,9 @@ def delayed_add(a, b, seconds=0.05):
     time.sleep(seconds)
     return a + b
 
+
+def identity(a):
+    return a
 
 def no_result():
     print("do nothing")
@@ -1377,7 +1380,6 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @dist_init(setup_rpc=False)
     def test_invalid_names(self):
-        from torch.distributed.rpc import WorkerInfo
 
         worker_id = 0
         with self.assertRaisesRegex(RuntimeError, "Worker name must match"):
@@ -1393,6 +1395,14 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # value of MAX_NAME_LEN in RPC WorkerInfo has changed.
         with self.assertRaisesRegex(RuntimeError, "shorter than 128"):
             info = WorkerInfo("".join(["a" for i in range(500)]), worker_id)
+
+    # Test that WorkerInfo can be pickled and sent in RPC call
+    @dist_init
+    def test_worker_info_pickle(self):
+        dst_rank = (self.rank + 1) % self.world_size
+        worker_info = rpc.api.get_worker_info()
+        ret = rpc.rpc_sync(worker_name(dst_rank), identity, args=(worker_info,))
+        self.assertEqual(ret, worker_info)
 
     @dist_init
     def test_add(self):
@@ -2368,6 +2378,24 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         RuntimeError, "can only be called once."
                     ):
                         rf._call_end_callbacks_on_future(fut)
+                fut.wait()
+
+    @dist_init
+    def test_async_record_function_double_end_callbacks_new_signatures(self):
+        # Test the new _record_function ops work
+        # Note: Remove once record_function uses these directly
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            with _profile() as pf:
+                try:
+                    record = torch.ops.profiler._record_function_enter_new("foo", None)
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+                finally:
+                    torch.ops.profiler._record_function_exit(record)
+
                 fut.wait()
 
     @dist_init
@@ -4860,7 +4888,9 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_tensorpipe_set_default_timeout(self):
-        timeout = 0.5
+        # Set a high timeout since it doesn't affect test runtime and ensures
+        # the test doesn't erroneously timeout due to slow machines.
+        timeout = 100
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
             init_method=self.rpc_backend_options.init_method,
             num_worker_threads=self.rpc_backend_options.num_worker_threads,
