@@ -44,7 +44,7 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Download PyTorch Build Artifacts
-        uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        uses: seemethere/download-artifact-s3@v3
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results

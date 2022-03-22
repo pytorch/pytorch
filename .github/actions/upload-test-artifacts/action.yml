@@ -55,7 +55,7 @@ runs:
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3
-      uses: seemethere/upload-artifact-s3@v3
+      uses: seemethere/upload-artifact-s3@v4
       if: ${{ !inputs.use-gha }}
       with:
         retention-days: 14
@@ -63,7 +63,7 @@ runs:
         path: test-jsons-*.zip
 
     - name: Store Test Reports on S3
-      uses: seemethere/upload-artifact-s3@v3
+      uses: seemethere/upload-artifact-s3@v4
       if: ${{ !inputs.use-gha }}
       with:
         retention-days: 14

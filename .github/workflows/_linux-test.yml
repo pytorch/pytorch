@@ -148,7 +148,7 @@ jobs:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
 
       - name: Store Core dumps on S3
-        uses: seemethere/upload-artifact-s3@v3
+        uses: seemethere/upload-artifact-s3@v4
         if: failure()
         with:
           name: coredumps-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}

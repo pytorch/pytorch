@@ -208,7 +208,7 @@ jobs:
             -u jenkins -i "${ID_X86_32}" bash) 2>&1
 
       - name: Store PyTorch Android Build Artifacts on S3
-        uses: seemethere/upload-artifact-s3@v3
+        uses: seemethere/upload-artifact-s3@v4
         with:
           name: ${{ inputs.build-environment }}
           retention-days: 14

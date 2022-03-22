@@ -75,7 +75,7 @@ jobs:
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
-        uses: seemethere/upload-artifact-s3@v3
+        uses: seemethere/upload-artifact-s3@v4
         with:
           retention-days: 14
           if-no-files-found: error
