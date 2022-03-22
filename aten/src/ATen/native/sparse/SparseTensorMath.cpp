@@ -721,7 +721,6 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
   return r;
 }
 
-
 Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
   TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
@@ -729,11 +728,11 @@ Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   auto result_options = self.options().dtype(commonDtype);
   // CSR is 2d!
   Tensor result = at::empty({0, 0}, result_options);
-  return at::mul_out(result, self, other);  // redispatch!
+  return at::mul_out(result, self, other); // redispatch!
 }
 
 Tensor& mul_sparse_csr_(Tensor& self, const Tensor& other) {
-  return at::mul_out(self, self, other);  // redispatch!
+  return at::mul_out(self, self, other); // redispatch!
 }
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
