@@ -15415,10 +15415,12 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.median',
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),  # row may be masked out so need floating type for nan's
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16),
         method_variant=None,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        gradcheck_fast_mode=False,
         skips=(
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
