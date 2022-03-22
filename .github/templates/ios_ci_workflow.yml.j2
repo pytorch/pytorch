@@ -173,7 +173,7 @@ jobs:
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
               fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
             else
-              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
             fi
           else
             fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
