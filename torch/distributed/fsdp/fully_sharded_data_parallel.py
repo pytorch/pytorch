@@ -1875,6 +1875,13 @@ class FullyShardedDataParallel(nn.Module):
                     self.world_size == 1
                 ), "Currently the only way for _is_sharded to be False is \
                     world_size == 1"
+                if self.mixed_precision is not None:
+                    # Cast gradients back to the full parameter precision so that
+                    # optimizer.step() happens in full precision.
+                    orig_param_grad_data = param.grad.data
+                    param.grad.data = param.grad.data.to(dtype=param.data.dtype)
+                    # Don't let this memory get reused until after the transfer.
+                    orig_param_grad_data.record_stream(torch.cuda.current_stream())
 
             # Regardless of sharding or not, offload the grad to CPU if we are
             # offloading params. This is so param and grad reside on same device
