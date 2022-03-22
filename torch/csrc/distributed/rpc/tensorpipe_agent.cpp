@@ -363,28 +363,31 @@ void TensorPipeAgent::prepareNames(bool isStaticGroup) {
 void TensorPipeAgent::checkAndSetStaticGroup(
     const c10::intrusive_ptr<::c10d::Store>& store) {
   std::string isStaticGroupKey("rpcIsStaticGroup");
+
+  std::string isStaticGroupStr = isStaticGroup_ ? "true" : "false";
+  std::vector<uint8_t> isStaticGroupVec(
+      (uint8_t*)isStaticGroupStr.c_str(),
+      (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
+  std::vector<uint8_t> returnedVec;
   bool isStaticGroupKeyExists =
       store->check(std::vector<std::string>{isStaticGroupKey});
   if (isStaticGroupKeyExists) {
-    std::vector<uint8_t> isStaticGroupVector = store->get(isStaticGroupKey);
-    bool storeIsStaticGroup = false;
-    std::istringstream(std::string(
-        (char*)isStaticGroupVector.data(), isStaticGroupVector.size())) >>
-        std::boolalpha >> storeIsStaticGroup;
-    TORCH_CHECK(
-        isStaticGroup_ == storeIsStaticGroup,
-        fmt::format(
-            "RPC group behavior is different than expected. isStaticGroup_ is initialized with {} while store is {}",
-            isStaticGroup_,
-            storeIsStaticGroup))
+    returnedVec =
+        store->compareSet(isStaticGroupKey, isStaticGroupVec, isStaticGroupVec);
   } else {
-    std::string isStaticGroupStr;
-    isStaticGroupStr = isStaticGroup_ ? "true" : "false";
-    std::vector<uint8_t> isStaticGroupVec(
-        (uint8_t*)isStaticGroupStr.c_str(),
-        (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
-    store->set(isStaticGroupKey, isStaticGroupVec);
+    returnedVec = store->compareSet(
+        isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
   }
+  std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
+  // In both cases, the returned value should be the value of isStaticGroupStr,
+  // otherwise there is a discrepency with initialization among one of the
+  // members
+  TORCH_CHECK(
+      returnedVal == isStaticGroupStr,
+      fmt::format(
+          "RPC group behavior is different than expected. isStaticGroup_ is initialized with {} while in store it is {}",
+          isStaticGroup_,
+          returnedVal));
 }
 
 TensorPipeAgent::TensorPipeAgent(
@@ -409,12 +412,10 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      shutdownStore_("shutdown", store) {
-  if (worldSize.has_value()) {
+      shutdownStore_("shutdown", store),
+      isStaticGroup_(worldSize.has_value()) {
+  if (isStaticGroup_) {
     worldSize_ = worldSize.value();
-    isStaticGroup_ = true;
-  } else {
-    isStaticGroup_ = false;
   }
 
   // check the static group attribute against store

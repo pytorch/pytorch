@@ -53,8 +53,8 @@ def register_rendezvous_handler(scheme, handler):
 # Query will have format "rank=0&world_size=1" and is
 # converted into {"rank": 0, "world_size": 1}
 def _query_to_dict(query):
-    query_dict: Dict[str, Union[int, str]] = dict(
-        cast(Tuple[str, Union[int, str]], pair.split("=")) for pair in cast(Iterable[str], filter(None, query.split("&")))
+    query_dict: Dict[str, str] = dict(
+        cast(Tuple[str, str], pair.split("=")) for pair in cast(Iterable[str], filter(None, query.split("&")))
     )
     return query_dict
 
@@ -100,11 +100,12 @@ def _create_store_from_options(backend_options, rank):
     world_size = -1
     if result.scheme == "env":
         rank = os.environ.get("RANK", rank)
-        # world_size default set to -1
-        # if the world_size env variable is not present then it is a dynamic group
+        # Here, the world_size has already beeen initialized to -1 in init_rpc
+        # If the world_size env variable is also not present then it is a dynamic group
         world_size = int(os.environ.get("WORLD_SIZE", world_size))
 
     query_dict = _query_to_dict(result.query)
+    # if rank is -1 then intentionally exclude rank for the query, error will be thrown later
     if rank != -1:
         query_dict["rank"] = rank
     query_dict["world_size"] = world_size
@@ -180,10 +181,6 @@ def _create_c10d_store(hostname, port, rank, world_size, timeout) -> Store:
     # check if port is uint16_t
     if not 0 <= port < 2**16:
         raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
-
-    # if world_size is None then there is a non-fixed number of members
-    if not world_size:
-        world_size = -1
 
     if _torchelastic_use_agent_store():
         attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]

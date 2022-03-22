@@ -18,7 +18,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info, WorkerInfo
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
+from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all, rpc_sync
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
@@ -4330,7 +4330,49 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        # TODO: shutdown is ungraceful, not yet fully implemented
+        # TODO: Need to sync before shutdown since ungraceful shutdown is not fully implemented
+        # Using process_group initialization as sync (could also use store based barrier)
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+        rpc.shutdown(graceful=False)
+
+    # Dynamic RPC new ranks communicate with existing ranks
+    @dist_init(setup_rpc=False)
+    def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
+        # TODO: Using process group for synchronization to ensure rank 0 is created first
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            result = rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # TODO: Sync before shutdown since graceful shutdown is not yet implemented
+        dist.barrier()
         rpc.shutdown(graceful=False)
 
     @dist_init(setup_rpc=False)

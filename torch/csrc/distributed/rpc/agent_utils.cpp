@@ -49,10 +49,10 @@ std::vector<std::string> splitString(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t end;
   while ((end = s.find(delim, start)) != std::string::npos) {
-    tokens.push_back(s.substr(start, end - start));
+    tokens.emplace_back(s.substr(start, end - start));
     start = end + delim.length();
   }
-  tokens.push_back(s.substr(start));
+  tokens.emplace_back(s.substr(start));
   return tokens;
 }
 
@@ -63,6 +63,20 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
   std::vector<uint8_t> selfNameVector(
       (uint8_t*)selfName.c_str(),
       (uint8_t*)selfName.c_str() + selfName.length());
+
+  // Check that ID does not already exist and set {ID : NAME}
+  std::vector<uint8_t> resultVector = store.compareSet(
+      c10::to_string(selfId), std::vector<uint8_t>(), selfNameVector);
+  TORCH_CHECK(
+      resultVector == selfNameVector,
+      "RPC worker id ",
+      selfId,
+      " is not unique. Worker ",
+      resultVector,
+      " and already has ID and ",
+      selfNameVector,
+      " cannot be added.");
+
   store.set(c10::to_string(selfId), selfNameVector);
 
   std::unordered_map<std::string, worker_id_t> nameToId;
