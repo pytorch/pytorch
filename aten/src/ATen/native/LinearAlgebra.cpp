@@ -2720,7 +2720,8 @@ Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRe
   Tensor self_ = opt_dtype.has_value() ? self.to(opt_dtype.value()) : self;
 
   // These _out functions need to be called since some of the tests expect the result to be of a particular dtype,
-  // which the non-out functions don't support. While *_out functions are generally incompatible with autograd,
+  // which the non-out functions don't support. Even though these look like _out variants, they are in fact composite
+  // operations. While this is odd, it's fine to call them here, as they make linalg_norm still a composite operation.
   // nuclear_norm_out() functions are composite functions and are usable with autograd.
   if (opt_dim.has_value()) {
     at::nuclear_norm_out(result, self_, opt_dim.value(), keepdim);
