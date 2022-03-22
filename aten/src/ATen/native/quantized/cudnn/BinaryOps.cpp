@@ -17,15 +17,13 @@
 
 #include <unordered_map>
 
-
+// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+namespace {
 struct CacheKey {
   uint8_t input_a_alignment;
   uint8_t input_b_alignment;
   uint8_t output_alignment;
 };
-
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-namespace {
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 
