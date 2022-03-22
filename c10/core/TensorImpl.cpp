@@ -415,7 +415,7 @@ void TensorImpl::throw_storage_access_error() const {
 bool TensorImpl::is_contiguous_nondefault_policy_impl(
     at::MemoryFormat memory_format) const {
   if (has_contiguity_ ==
-      static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
+      static_cast<uint8_t>(CustomizableMethodPolicy::ContiguityNotSupported)) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "Tensors of type ",
@@ -424,7 +424,7 @@ bool TensorImpl::is_contiguous_nondefault_policy_impl(
   } else {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         has_contiguity_ ==
-        static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
+        static_cast<uint8_t>(CustomizableMethodPolicy::CustomBehavior));
     return is_contiguous_custom(memory_format);
   }
 }
@@ -434,6 +434,22 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
       false,
       "TensorImpl::is_contiguous_custom should never be called; did you "
       "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+}
+
+IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {
+  if (sizes_customization_policy_ ==
+      static_cast<uint8_t>(CustomizableMethodPolicy::NotSupported)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Tensors of type ",
+        tensorimpl_type_name(),
+        " do not have sizes");
+  } else {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "custom behavior for sizes() is not supported; please add it or file "
+        "an issue.")
+  }
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -567,6 +583,8 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->sizes_customization_policy_ =
+      src_impl->sizes_customization_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {

@@ -7,7 +7,7 @@ namespace autograd {
 namespace utils {
 
 // Helper functions to enforce the "Gradient Layout Contract" described in
-// torch/csrc/autograd/AccumulateGrad.h.
+// torch/csrc/autograd/functions/accumulate_grad.h.
 
 // Checks if grad obeys the contract with variable.
 inline bool obeys_layout_contract(const at::Tensor& grad, const at::Tensor& variable) {

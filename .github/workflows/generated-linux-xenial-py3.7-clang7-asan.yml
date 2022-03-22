@@ -14,6 +14,7 @@ on:
       - 'ciflow/trunk/*'
     branches:
       - master
+      - main
       - release/*
   workflow_dispatch:
 
@@ -43,6 +44,7 @@ concurrency:
 jobs:
 
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: 240
     env:
@@ -65,6 +67,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -160,8 +170,9 @@ jobs:
           }
           retry docker pull "${DOCKER_IMAGE}"
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Build
         env:
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
@@ -251,11 +262,13 @@ jobs:
           docker system prune -af
 
   test_default_1_3:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 1, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
       TEST_CONFIG: default
@@ -276,6 +289,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -346,14 +367,15 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
+        # Time out the test phase after 300 minutes
+        timeout-minutes: 300
         run: |
           set -x
 
@@ -464,20 +486,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-1
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -497,11 +533,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_2_3:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 2, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
       TEST_CONFIG: default
@@ -522,6 +560,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -592,14 +638,15 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
+        # Time out the test phase after 300 minutes
+        timeout-minutes: 300
         run: |
           set -x
 
@@ -710,20 +757,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-2
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -743,11 +804,13 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   test_default_3_3:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: test (default, 3, 3, linux.2xlarge)
     needs: build
     runs-on: linux.2xlarge
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
       TEST_CONFIG: default
@@ -768,6 +831,14 @@ jobs:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
+      - name: Start docker if docker deamon is not running
+        run: |
+          if systemctl is-active --quiet docker; then
+              echo "Docker daemon is running...";
+          else
+              echo "Starting docker deamon..." && sudo systemctl start docker;
+          fi
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
@@ -838,14 +909,15 @@ jobs:
         run: |
           sudo df -H
       - name: Parse ref
+        shell: bash
         id: parse-ref
-        run: .github/scripts/parse_ref.py
+        run: ./.github/scripts/parse_ref.py
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
+        # Time out the test phase after 300 minutes
+        timeout-minutes: 300
         run: |
           set -x
 
@@ -956,20 +1028,34 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Core dumps on S3
+        if: failure()
+        with:
+          name: coredumps-default-3
+          retention-days: 14
+          if-no-files-found: ignore
+          path:
+            ./**/core.[1-9]*
       - name: Upload test statistics
         if: always()
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: linux-xenial-py3.7-clang7-asan-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions

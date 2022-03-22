@@ -105,6 +105,11 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_TimeoutError, msg);                      \
       retstmnt;                                                      \
+    }                                                                \
+    catch (const c10d::C10dError& e) {                               \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_RuntimeError, msg);                      \
+      retstmnt;                                                      \
     }
 #else
 #define CATCH_C10D_ERRORS(retstmnt)

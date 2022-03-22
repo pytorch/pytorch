@@ -162,6 +162,11 @@ def main() -> None:
         help='force it to generate schema-only registrations for ops that are not'
         'listed on --selected-op-list'
     )
+    parser.add_argument(
+        '--gen_lazy_ts_backend',
+        action='store_true',
+        help='Enable generation of the torch::lazy TorchScript backend'
+    )
     options = parser.parse_args()
 
     generate_code(
@@ -175,6 +180,28 @@ def main() -> None:
         # options.selected_op_list
         operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
     )
+
+    if options.gen_lazy_ts_backend:
+        aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
+        ts_backend_yaml = os.path.join(aten_path, 'native/ts_native_functions.yaml')
+
+        if options.install_dir is None:
+            options.install_dir = "torch/csrc"
+        lazy_install_dir = os.path.join(options.install_dir, "lazy/generated")
+        if not os.path.exists(lazy_install_dir):
+            os.makedirs(lazy_install_dir)
+
+        assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
+        run_gen_lazy_tensor(aten_path=aten_path,
+                            source_yaml=ts_backend_yaml,
+                            output_dir=lazy_install_dir,
+                            dry_run=False,
+                            # TODO(whc) reimplement checking of hand-implemented nativefunc file after landing it
+                            impl_path=None,
+                            gen_ts_lowerings=True,
+                            node_base="TsNode",
+                            node_base_hdr="torch/csrc/lazy/ts_backend/ts_node.h")
 
 
 if __name__ == "__main__":

@@ -1,12 +1,9 @@
 from collections import defaultdict
 
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from torch.utils.data.datapipes.utils.common import DILL_AVAILABLE, check_lambda_fn
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
+from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
-
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
 
 T_co = TypeVar('T_co', covariant=True)
 
@@ -214,6 +211,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         check_lambda_fn(group_key_fn)
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
+
         self.buffer_size = buffer_size
         self.group_size = group_size
         self.guaranteed_group_size = None
@@ -269,36 +267,3 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             res = buffer_elements.pop(key)
             buffer_size -= len(res)
             yield self.wrapper_class(res)
-
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
-        if DILL_AVAILABLE:
-            dill_function = dill.dumps(self.group_key_fn)
-        else:
-            dill_function = self.group_key_fn
-        state = (
-            self.datapipe,
-            dill_function,
-            self.buffer_size,
-            self.group_size,
-            self.guaranteed_group_size,
-            self.drop_remaining,
-        )
-        return state
-
-    def __setstate__(self, state):
-        (
-            self.datapipe,
-            dill_function,
-            self.buffer_size,
-            self.group_size,
-            self.guaranteed_group_size,
-            self.drop_remaining,
-        ) = state
-        if DILL_AVAILABLE:
-            self.group_key_fn = dill.loads(dill_function)  # type: ignore[assignment]
-        else:
-            self.group_key_fn = dill_function  # type: ignore[assignment]
-        self.wrapper_class = DataChunk
