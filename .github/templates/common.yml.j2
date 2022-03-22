@@ -5,7 +5,6 @@
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
 {%- set timeout_minutes = 240 -%}
-{%- set win_test_timeout_minutes = 300 -%}
 
 # NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
 #       the binary builds will check out
@@ -37,6 +36,7 @@ concurrency:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+          echo "system info $(uname -a)"
 {%- endmacro -%}
 
 {%- macro parse_ref(pytorch_directory="") -%}
@@ -88,6 +88,11 @@ concurrency:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+      - name: Enable long paths on Windows
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}

@@ -753,19 +753,61 @@ namespace {
     }
   }
 
-  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input) {
+  inline bool use_rnn_persist_small_h(const RNNDescriptorParams& rnn,
+                                            const TensorDescriptorListParams& tensors,
+                                            bool forward) {
+#if CUDNN_VERSION >= 8201 // 8.2.1
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major < 6) return false;
+
+    if (forward) {
+      if (rnn.mode == CUDNN_RNN_RELU || rnn.mode == CUDNN_RNN_TANH) {
+        return rnn.hidden_size <= 384;
+      }
+      if (rnn.mode == CUDNN_LSTM || rnn.mode == CUDNN_GRU) {
+        return rnn.hidden_size <= 192;
+      }
+    } else /* backward */ {
+      if (rnn.mode == CUDNN_RNN_RELU || rnn.mode == CUDNN_RNN_TANH) {
+        return rnn.hidden_size <= 256;
+      }
+      if (rnn.mode == CUDNN_LSTM || rnn.mode == CUDNN_GRU) {
+        return rnn.hidden_size <= 128;
+      }
+    }
+
+    return false;
+#else
+    return false;
+#endif
+  }
+
+  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input, bool forward) {
     // LSTM with projections only works with standard algorithm
     if (rnn.proj_size != 0) {
       return CUDNN_RNN_ALGO_STANDARD;
     }
 
-    if (getCudnnDataType(input) == CUDNN_DATA_HALF &&
-        !tensors.is_input_packed()) {
-      if (use_persist_common_heuristics(rnn, tensors) &&
-          use_persist_device_heuristics(rnn, tensors)) {
-        return CUDNN_RNN_ALGO_PERSIST_STATIC;
+    // Persistent algos typically don't work for packed inputs with sequence lengths that vary
+    // across batch elements, and will return CUDNN_STATUS_NOT_SUPPORTED if attempted. See
+    // https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#features-of-rnn-functions
+    if (!tensors.is_input_packed()) {
+      auto cudnnDataType = getCudnnDataType(input);
+#if CUDNN_VERSION >= 8201 // 8.2.1
+      if (cudnnDataType != CUDNN_DATA_DOUBLE) {
+        if (use_rnn_persist_small_h(rnn, tensors, forward)) {
+          return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
+        }
+      }
+#endif
+      if (cudnnDataType == CUDNN_DATA_HALF) {
+        if (use_persist_common_heuristics(rnn, tensors) &&
+            use_persist_device_heuristics(rnn, tensors)) {
+          return CUDNN_RNN_ALGO_PERSIST_STATIC;
+        }
       }
     }
+
     return CUDNN_RNN_ALGO_STANDARD;
   }
 
@@ -971,7 +1013,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto y = output;
 
   auto handle = getCudnnHandle();
-  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input);
+  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input, true);
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
@@ -1133,7 +1175,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   TORCH_CHECK(dhy.is_cuda() && dy.is_cuda() && (!dcy.defined() || dcy.is_cuda()),
            "Gradients aren't CUDA tensors");
 
-  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input);
+  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input, false);
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 
@@ -1237,7 +1279,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   const auto& y = output;
   auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
-  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input);
+  cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input, false);
   fn.rnn.set_algo(algo);
   RNNDescriptors descs(fn, handle, x, y, hx, cx);
 

@@ -1181,6 +1181,8 @@ class Tensor(torch._C._TensorBase):
             else:
                 return _convert(ret, cls)
 
+    __torch_dispatch__ = _C._disabled_torch_dispatch_impl
+
     def __dlpack__(self, stream=None):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
