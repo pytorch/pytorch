@@ -2,7 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/IList.h>
+#include <ATen/core/IListRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
@@ -352,14 +352,14 @@ namespace impl {
   };
 
   template<bool AllowDeprecatedTypes>
-  struct ivalue_to_arg<at::ITensorList, AllowDeprecatedTypes> final {
+  struct ivalue_to_arg<at::ITensorListRef, AllowDeprecatedTypes> final {
     static List<at::Tensor> call(IValue& v) {
       return v.toTensorList();
     }
   };
 
   template<bool AllowDeprecatedTypes>
-  struct ivalue_to_arg<at::IOptTensorRefList, AllowDeprecatedTypes> final {
+  struct ivalue_to_arg<at::IOptTensorListRef, AllowDeprecatedTypes> final {
     static List<optional<at::Tensor>> call(IValue& v) {
       return toTypedList<optional<at::Tensor>>(v.toList());
     }
