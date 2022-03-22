@@ -1,0 +1,120 @@
+name: win-test
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with, "cpu" for none.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+
+env:
+  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
+  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  test:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    steps:
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          no-sudo: true
+
+      - name: Setup Windows
+        uses: pytorch/pytorch/.github/actions/setup-win@master
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+          cuda-version: ${{ inputs.cuda-version }}
+
+      - name: Download PyTorch Build Artifacts
+        uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          path: C:\${{ github.run_id }}\build-results
+
+      - name: Check build-results folder
+        shell: powershell
+        run: |
+          tree /F C:\$Env:GITHUB_RUN_ID\build-results
+
+      - name: Test
+        shell: bash
+        env:
+          USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
+          INSTALL_WINDOWS_SDK: 1
+          PYTHON_VERSION: 3.8
+          PYTORCH_RETRY_TEST_CASES: 1
+          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          VS_VERSION: "16.8.6"
+          VC_YEAR: "2019"
+          AWS_DEFAULT_REGION: us-east-1
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          CUDA_VERSION: ${{ inputs.cuda-version }}
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          TEST_CONFIG: ${{ matrix.config }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          PR_BODY: ${{ github.event.pull_request.body }}
+          TORCH_CUDA_ARCH_LIST: "7.0"
+        run: |
+          .jenkins/pytorch/win-test.sh
+
+      - name: Upload test artifacts
+        uses: pytorch/pytorch/.github/actions/upload-test-artifacts@master
+        if: always()
+        with:
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Upload test statistics
+        if: always()
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: ${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -x
+          python3 -m pip install -r requirements.txt
+          python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+
+      - name: Teardown Windows
+        uses: pytorch/pytorch/.github/actions/teardown-win@master
+        if: always()
+        timeout-minutes: 120

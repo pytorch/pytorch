@@ -97,11 +97,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin SciPy because of failing distribution tests (see #60347)
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
   as_jenkins pip install --progress-bar off pytest \
     scipy==1.6.3 \
     scikit-image \
     psutil \
-    unittest-xml-reporting \
+    "unittest-xml-reporting<=3.2.0,>=2.0.0" \
     boto3==1.16.34 \
     hypothesis==4.53.2 \
     expecttest==0.1.3 \

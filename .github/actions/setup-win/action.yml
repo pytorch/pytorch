@@ -1,0 +1,62 @@
+name: Setup Windows
+
+description: Set up for windows jobs
+
+inputs:
+  github-secret:
+    description: GitHub token
+    required: true
+  cuda-version:
+    description: which cuda version to install, 'cpu' for none
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Display EC2 information
+      shell: bash
+      run: |
+        set -euo pipefail
+        function get_ec2_metadata() {
+          # Pulled from instance metadata endpoint for EC2
+          # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+          category=$1
+          curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+        }
+        echo "ami-id: $(get_ec2_metadata ami-id)"
+        echo "instance-id: $(get_ec2_metadata instance-id)"
+        echo "instance-type: $(get_ec2_metadata instance-type)"
+        echo "system info $(uname -a)"
+
+    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+      uses: seemethere/add-github-ssh-key@v1
+      with:
+        GITHUB_TOKEN: ${{ inputs.github-secret }}
+
+    # Needed for binary builds, see: https://github.com/pytorch/pytorch/issues/73339#issuecomment-1058981560
+    - name: Enable long paths on Windows
+      shell: powershell
+      run: |
+        Set-ItemProperty -Path "HKLM:\\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1
+
+    - name: Install Visual Studio 2019 toolchain
+      shell: powershell
+      env:
+        VS_VERSION: "16.8.6"
+        INSTALL_WINDOWS_SDK: "1"
+      run: |
+        .\.circleci\scripts\vs_install.ps1
+
+    - name: Install CUDA and CUDNN
+      shell: bash
+      if: inputs.cuda-version != 'cpu'
+      env:
+        CUDA_VERSION: ${{ inputs.cuda-version }}
+      run: |
+        .circleci/scripts/windows_cuda_install.sh
+        .circleci/scripts/windows_cudnn_install.sh
+
+    - name: Setup Python3
+      uses: actions/setup-python@v2
+      with:
+        python-version: "3.x"

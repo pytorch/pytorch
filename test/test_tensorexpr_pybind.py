@@ -391,6 +391,31 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_stack(self):
+        def f(a, b):
+            return torch.stack((a, b), dim=1)
+
+        device = "cpu"
+        x = torch.rand((3, 5), device=device)
+        y = torch.rand((3, 5), device=device)
+        graph_str = """
+graph(%x.1 : Float(3, 5, strides=[5, 1], requires_grad=0, device=cpu),
+      %y.1 : Float(3, 5, strides=[5, 1], requires_grad=0, device=cpu)):
+  %1 : int = prim::Constant[value=1]()
+  %5 : Tensor[] = prim::ListConstruct(%x.1, %y.1)
+  %z.2 : Float(3, 2, 5, strides=[10, 5, 1], requires_grad=0, device=cpu) = aten::stack(%5, %1) # local/stack.py:39:12
+  return (%z.2)
+  """
+        graph = torch._C.parse_ir(graph_str)
+
+        kernel = te.TensorExprKernel(graph)
+        res1 = kernel.run((x,y))
+        res2 = kernel.fallback((x, y))
+        correct = f(x, y)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_alloc_in_loop(self):
         a, tmp, b = [
             te.BufHandle(name, [1], torch.float32) for name in ["a", "tmp", "b"]

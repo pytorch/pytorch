@@ -965,8 +965,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (n->matches(torch::schema("aten::len.t(t[] a) -> int")) ||
           n->matches(torch::schema("aten::len.any(Any[] a) -> int"))) {
         return [](ProcessedNode* pnode) {
-          c10::List<IValue> a = pnode->Input(0).to<c10::List<IValue>>();
-          const int64_t size = a.size();
+          const auto list = pnode->Input(0).toListRef();
+          const int64_t size = list.size();
           pnode->Output(0) = size;
         };
       }
