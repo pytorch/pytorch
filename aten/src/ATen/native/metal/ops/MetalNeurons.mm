@@ -85,9 +85,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::relu"), TORCH_FN(relu));
   m.impl(TORCH_SELECTIVE_NAME("aten::relu_"), TORCH_FN(relu_));
   m.impl(TORCH_SELECTIVE_NAME("aten::sigmoid"), TORCH_FN(sigmoid));
-  if (@available(iOS 11.0, *)) {
-    m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), TORCH_FN(hardsigmoid_));
-  }
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), TORCH_FN(hardsigmoid_));
 };
 
 }

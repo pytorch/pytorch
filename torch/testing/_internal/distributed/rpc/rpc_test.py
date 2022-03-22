@@ -574,13 +574,15 @@ def async_cuda_nested_add(to, x, y, z):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor", "lock", "event")
+    __slots__ = ("tensor", "lock", "event", "thread")
 
     def __init__(self, t):
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
         self.event = torch.cuda.Event(enable_timing=True)
+        self.thread = threading.Thread()
+        self.thread.start()
 
     def increase(self, v):
         with self.lock:
@@ -2378,6 +2380,24 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                         RuntimeError, "can only be called once."
                     ):
                         rf._call_end_callbacks_on_future(fut)
+                fut.wait()
+
+    @dist_init
+    def test_async_record_function_double_end_callbacks_new_signatures(self):
+        # Test the new _record_function ops work
+        # Note: Remove once record_function uses these directly
+        num_sleep_seconds = 1
+        if self.rank == 1:
+            with _profile() as pf:
+                try:
+                    record = torch.ops.profiler._record_function_enter_new("foo", None)
+                    fut = rpc.rpc_async(
+                        worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
+                    )
+                    torch.ops.profiler._call_end_callbacks_on_jit_fut(record, fut)
+                finally:
+                    torch.ops.profiler._record_function_exit(record)
+
                 fut.wait()
 
     @dist_init

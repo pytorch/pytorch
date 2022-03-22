@@ -958,5 +958,51 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::len,
+    aten_len,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema("aten::len.t(t[] a) -> int")) ||
+          n->matches(torch::schema("aten::len.any(Any[] a) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto list = pnode->Input(0).toListRef();
+          const int64_t size = list.size();
+          pnode->Output(0) = size;
+        };
+      }
+      if (n->matches(torch::schema("aten::len.Tensor(Tensor t) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& t = pnode->Input(0).toTensor();
+          TORCH_CHECK(t.dim() > 0);
+          pnode->Output(0) = t.sizes()[0];
+        };
+      }
+      if (n->matches(torch::schema("aten::len.str(str s) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& string = pnode->Input(0).toStringRef();
+          pnode->Output(0) = static_cast<int64_t>(string.size());
+        };
+      }
+      if (n->matches(
+              torch::schema("aten::len.Dict_str(Dict(str, t) self) -> int")) ||
+          n->matches(
+              torch::schema("aten::len.Dict_int(Dict(int, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_bool(Dict(bool, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_float(Dict(float, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_complex(Dict(complex, t) self) -> int")) ||
+          n->matches(torch::schema(
+              "aten::len.Dict_Tensor(Dict(Tensor, t) self) -> int"))) {
+        return [](ProcessedNode* pnode) {
+          const auto& dict = pnode->Input(0).toGenericDict();
+          pnode->Output(0) = static_cast<int64_t>(dict.size());
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
 } // namespace jit
 } // namespace torch

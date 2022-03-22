@@ -11,13 +11,17 @@
                              bias:(float*)b
                      neuronFilter:(NeuronType)t
     API_AVAILABLE(ios(11.0), macos(10.13)) {
-  MPSCNNNeuron* neuron = neuronType(t);
+  MPSCNNNeuron* neuron = at::native::metal::neuron(t);
   MPSCNNConvolutionDescriptor* desc = [MPSCNNConvolutionDescriptor
       cnnConvolutionDescriptorWithKernelWidth:params.KW
                                  kernelHeight:params.KH
                          inputFeatureChannels:params.IC
                         outputFeatureChannels:params.OC];
+#if TARGET_OS_MACCATALYST
+  desc.fusedNeuronDescriptor = at::native::metal::neuronDescriptor(t);
+#else
   desc.neuron = neuron;
+#endif
   desc.strideInPixelsX = 1;
   desc.strideInPixelsY = 1;
 
@@ -31,9 +35,9 @@
         initWithDevice:[MetalContext sharedInstance].device
                weights:ds];
   } else {
-      TORCH_CHECK(
-          false,
-          "MPSCNNFullyConnectedOp is only available on iOS 11.0 and above");
+    TORCH_CHECK(
+        false,
+        "MPSCNNFullyConnectedOp is only available on iOS 11.0 and above");
   }
   [fc setClipRect:MTLRegionMake3D(0, 0, 0, 1, 1, params.N)];
   [fc setOffset:{.x = static_cast<NSInteger>(params.W / 2),
