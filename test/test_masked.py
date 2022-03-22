@@ -278,7 +278,7 @@ class TestMasked(TestCase):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
-            if (op_name in {'var', 'std'}) and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
+            if (op_name in ['var', 'std']) and not (t_inp.dtype.is_floating_point or t_inp.dtype.is_complex):
                 # torch.var/torch.std does not support integer inputs
                 continue
             actual = op.op(t_inp, *t_args, **t_kwargs)
