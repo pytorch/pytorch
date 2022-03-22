@@ -428,11 +428,10 @@ def _match_static_pattern(
     # (2) There must be at least one dequantize node
     matched_dequantize = False
     for arg in ref_node.args:
-        if isinstance(arg, Node):
-            if arg.target == "dequantize":
-                matched_dequantize = True
-            elif arg.op != "get_attr":
-                return skip_lowering_value
+        if is_dequantize_node(arg):
+            matched_dequantize = True
+        elif isinstance(arg, Node) and arg.op != "get_attr":
+            return skip_lowering_value
     if not matched_dequantize:
         return skip_lowering_value
 
@@ -626,7 +625,7 @@ def _lower_static_weighted_ref_functional(
         # Move func_node after output_zp_node in the graph
         output_zp_node.append(func_node)
 
-        # Clean up: Remove dequantize and quantize nodes and the old func node
+        # Clean up: Remove dequantize and quantize nodes, and the relu node if it exists
         for dqn in [input_dq_node, weight_dq_node]:
             dqn_input = dqn.args[0]
             dqn.replace_all_uses_with(dqn_input)
@@ -738,7 +737,7 @@ def _lower_dynamic_weighted_ref_functional(
         if relu_node is not None:
             relu_node.replace_all_uses_with(func_node)
 
-        # Step 4: Remove dequantize and quantize nodes and the old func node
+        # Step 4: Remove dequantize and quantize nodes, and the relu node if it exists
         for dqn in [input_dq_node, weight_dq_node]:
             dqn_input = dqn.args[0]
             dqn.replace_all_uses_with(dqn_input)
@@ -774,18 +773,16 @@ def _lower_quantized_binary_op(
         (_, scale_node, zero_point_node, _) = q_node.args
 
         # Step 1: Remove dequant nodes
-        if len(bop_node.args) != 2:
-            continue
-        (arg0, arg1) = bop_node.args
-        dq_node0 = arg0 if is_dequantize_node(arg0) else None
-        dq_node1 = arg1 if is_dequantize_node(arg1) else None
-        for dq_node in [dq_node0, dq_node1]:
-            if dq_node is None:
+        num_dq_nodes = 0
+        for arg in bop_node.args:
+            if not is_dequantize_node(arg):
                 continue
-            assert(isinstance(dq_node, Node))
+            num_dq_nodes += 1
+            dq_node = arg
             dn_input = dq_node.args[0]
             dq_node.replace_all_uses_with(dn_input)
             model.graph.erase_node(dq_node)
+        assert(num_dq_nodes > 0)
 
         # Step 2: Swap binary op to quantized binary op
         assert bop_node.target in qbin_op_mapping
@@ -796,7 +793,7 @@ def _lower_quantized_binary_op(
         qop_node_args = list(bop_node.args)
         # (x, y, scale, zero_point)
         # add scale and zero_point arguments for Tensor - Tensor operation
-        if dq_node0 is not None and dq_node1 is not None:
+        if num_dq_nodes == 2:
             qop_node_args.extend([scale_node, zero_point_node])
         # insert a call to quantized binary op and remove the original binary op
         with model.graph.inserting_after(q_node):
