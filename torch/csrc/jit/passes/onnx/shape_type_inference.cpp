@@ -1275,17 +1275,11 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Gather: {
-      if (ConstantValueMap::HasRank(n->input(0)->debugName()) &&
-          ConstantValueMap::HasRank(n->input(1)->debugName())) {
-        auto rank_0 =
-            ConstantValueMap::GetRank(n->input(0)->debugName()).value();
-        auto rank_1 =
-            ConstantValueMap::GetRank(n->input(1)->debugName()).value();
-        only_rank_available = true;
-        rank = rank_0 + rank_1 - 1;
-      }
       if (ConstantValueMap::HasShapeValue(n->input(0)->debugName()) &&
           ConstantValueMap::HasValue(n->input(1)->debugName())) {
+        // Special case for pattern Shape -> Gather, to propagate shape value.
+        // Gather input 0 is 1d tensor, Gather input 1 is scalar.
+        // Gather output will be scalar.
         auto shape_value =
             ConstantValueMap::GetShapeValue(n->input(0)->debugName()).value();
         auto idx_value =
