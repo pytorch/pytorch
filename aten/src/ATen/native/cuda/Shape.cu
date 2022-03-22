@@ -172,7 +172,7 @@ __global__ void CatArrayBatchedCopy(
 }
 
 template <typename scalar_t>
-void hip_parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
+void hip_parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                       int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
@@ -229,15 +229,15 @@ void hip_parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
         int64_t dimSize = 0;
         // There is a legacy case where a 1-D empty tensor can be concat with
         // high-dimensional tensor
-        if (inputs[i+batchCounter].numel() > 0) {
+        if (inputs[i+batchCounter].get().numel() > 0) {
           dimSize = at::native::size(inputs[i+batchCounter], dimension);
         }
 
         stackInputs[batchCounter].input =
-          inputs[i+batchCounter].data_ptr<scalar_t>();
+          inputs[i+batchCounter].get().data_ptr<scalar_t>();
         stackInputs[batchCounter].offset = offset;
         stackInputs[batchCounter].dimSize = dimSize;
-        stackInputs[batchCounter].nElements = inputs[i+batchCounter].numel();
+        stackInputs[batchCounter].nElements = inputs[i+batchCounter].get().numel();
 
         // update offset
         offset += dimSize;
@@ -293,7 +293,7 @@ void hip_parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
 }
 
 template <typename scalar_t, int batch_size, int stride_size>
-void parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
+void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
@@ -335,16 +335,16 @@ void parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
       int64_t dimSize = 0;
       // There is a legacy case where a 1-D empty tensor can be concat with
       // high-dimensional tensor
-      if (inputs[i+batchCounter].numel() > 0) {
+      if (inputs[i+batchCounter].get().numel() > 0) {
         dimSize = at::native::size(inputs[i+batchCounter], dimension);
       }
-      catMetaData.input[batchCounter] = inputs[i+batchCounter].data_ptr<scalar_t>();
+      catMetaData.input[batchCounter] = inputs[i+batchCounter].get().data_ptr<scalar_t>();
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
-      catMetaData.nElements[batchCounter] = inputs[i+batchCounter].numel();
+      catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
       if (stride_size > 1) {
-        auto strides = inputs[i+batchCounter].strides();
-        auto sizes = inputs[i+batchCounter].sizes();
+        auto strides = inputs[i+batchCounter].get().strides();
+        auto sizes = inputs[i+batchCounter].get().sizes();
         for(int j = 0; j < nDims; j++){
           catMetaData.tensorStride[batchCounter].tensorSize[j] = sizes[j];
           catMetaData.tensorStride[batchCounter].tensorStride[j] = strides[j];
@@ -404,7 +404,7 @@ void parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
 } // namespace
 
 TORCH_IMPL_FUNC(cat_out_cuda)
-(ITensorList tensors,
+(ITensorListRef tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -416,6 +416,8 @@ TORCH_IMPL_FUNC(cat_out_cuda)
     return;
   }
 
+  auto materialized = tensors.materialize();
+
   // We parallelize the copy if all 6 conditions pass:
   //
   // 1. There is more than one input tensor
@@ -424,15 +426,15 @@ TORCH_IMPL_FUNC(cat_out_cuda)
   // 4. All input tensors are contiguous (output tensor may be non-contig)
   // 5. All input tensors can use 32-bit indexing
 
-  const bool all32BitIndexable = std::all_of(tensors.begin(), tensors.end(),
+  const bool all32BitIndexable = std::all_of(materialized.begin(), materialized.end(),
     [] (const Tensor& t) {
       return at::cuda::detail::canUse32BitIndexMath(t);
     });
 
-  int nDims = tensors[valid].dim();
+  int nDims = materialized[valid].get().dim();
 
 #if defined(USE_ROCM)
-  if (tensors.size() > 1 &&
+  if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(result) &&
       all_contiguous &&
@@ -441,7 +443,7 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
           result.scalar_type(), "cat_cuda", [&]() {
-        hip_parallel_cat<scalar_t>(result, tensors, dim, nDims, memory_format);
+        hip_parallel_cat<scalar_t>(result, materialized, dim, nDims, memory_format);
       });
 #else
   // We support the contiguous inputs and non-contiguous input (<=4 dims) in different ways
@@ -449,7 +451,7 @@ TORCH_IMPL_FUNC(cat_out_cuda)
   // memory. Therefore, we could pass more inputs to cuda threads.
   // For non-contiguous, we reduce the number of inputs passed to cuda kernel due to the limitation
   // of constant memory.
-  if (tensors.size() > 1 &&
+  if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(result) &&
       all_contiguous &&
@@ -458,9 +460,9 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
           result.scalar_type(), "cat_cuda", [&]() {
-        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE, 1>(result, tensors, dim, nDims, memory_format);
+        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
       });
-  } else if (tensors.size() > 1 &&
+  } else if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(result) &&
       nDims <= CAT_ARRAY_MAX_INPUT_DIMS &&
@@ -470,16 +472,16 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
           result.scalar_type(), "cat_cuda", [&]() {
-        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, tensors, dim, nDims, memory_format);
+        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
       });
 #endif
   } else {
     int64_t offset = 0;
-    for (int j = 0; j < tensors.size(); j++) {
-      if (cat_should_skip_tensor(tensors[j])) continue;
-      int64_t dimSize = at::native::size(tensors[j], dim);
+    for (const Tensor& t : materialized) {
+      if (cat_should_skip_tensor(t)) continue;
+      int64_t dimSize = at::native::size(t, dim);
       Tensor nt = at::narrow(result, dim, offset, dimSize);
-      copy_(nt, tensors[j]);
+      copy_(nt, t);
       offset += dimSize;
     }
   }
