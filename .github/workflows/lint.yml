@@ -343,7 +343,7 @@ jobs:
       - name: Add annotations
         # Don't run on forked pull requests
         if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: pytorch/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -437,7 +437,7 @@ jobs:
       - name: Add annotations
         # Don't run on forked pull requests
         if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
-        uses: pytorch/add-annotations-github-action@master
+        uses: pytorch/add-annotations-github-action
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

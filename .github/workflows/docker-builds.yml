@@ -56,26 +56,26 @@ jobs:
           submodules: recursive
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        uses: pytorch/pytorch/.github/actions/setup-linux
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build docker image
         id: build-docker-image
-        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
+        uses: pytorch/pytorch/.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
 
       - name: Pull docker image
-        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
+        uses: pytorch/pytorch/.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
       - name: Chown workspace
-        uses: pytorch/pytorch/.github/actions/chown-workspace@master
+        uses: pytorch/pytorch/.github/actions/chown-workspace
         if: always()
 
       - name: Teardown Linux
-        uses: pytorch/pytorch/.github/actions/teardown-linux@master
+        uses: pytorch/pytorch/.github/actions/teardown-linux
         if: always()

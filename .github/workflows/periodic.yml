@@ -16,14 +16,14 @@ concurrency:
 jobs:
   linux-bionic-cuda11_5-py3_7-gcc7-build:
     name: linux-bionic-cuda11.5-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda11.5-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
 
   linux-bionic-cuda11_5-py3_7-gcc7-test:
     name: linux-bionic-cuda11.5-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda11_5-py3_7-gcc7-build
     with:
       build-environment: linux-bionic-cuda11.5-py3.7-gcc7
@@ -36,7 +36,7 @@ jobs:
 
   libtorch-linux-bionic-cuda11_5-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.5-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-bionic-cuda11.5-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
@@ -44,14 +44,14 @@ jobs:
 
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
 
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-test:
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml
     needs: linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build
     with:
       build-environment: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
@@ -64,7 +64,7 @@ jobs:
 
   linux-xenial-cuda11_3-py3_7-gcc7-debug-build:
     name: linux-xenial-cuda11.3-py3.7-gcc7-debug
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-debug
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
@@ -72,7 +72,7 @@ jobs:
 
   linux-xenial-cuda11_3-py3_7-gcc7-debug-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-debug
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml
     needs: linux-xenial-cuda11_3-py3_7-gcc7-debug-build
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-debug
@@ -85,14 +85,14 @@ jobs:
 
   win-vs2019-cuda11_5-py3-build:
     name: win-vs2019-cuda11.5-py3
-    uses: pytorch/pytorch/.github/workflows/_win-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.5-py3
       cuda-version: "11.5"
 
   win-vs2019-cuda11_5-py3-test:
     name: win-vs2019-cuda11.5-py3
-    uses: pytorch/pytorch/.github/workflows/_win-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_win-test.yml
     needs: win-vs2019-cuda11_5-py3-build
     with:
       build-environment: win-vs2019-cuda11.5-py3
@@ -106,7 +106,7 @@ jobs:
 
   ios-12-5-1-arm64:
     name: ios-12-5-1-arm64
-    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64
       ios-platform: OS
@@ -119,7 +119,7 @@ jobs:
 
   ios-12-5-1-arm64-coreml:
     name: ios-12-5-1-arm64-coreml
-    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-coreml
       ios-platform: OS
@@ -132,7 +132,7 @@ jobs:
 
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
-    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-custom-ops
       ios-platform: OS
@@ -145,7 +145,7 @@ jobs:
 
   ios-12-5-1-arm64-metal:
     name: ios-12-5-1-arm64-metal
-    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-arm64-metal
       ios-platform: OS

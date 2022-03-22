@@ -18,14 +18,14 @@ concurrency:
 jobs:
   parallelnative-linux-xenial-py3_7-gcc5_4-build:
     name: parallelnative-linux-xenial-py3.7-gcc5.4
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: parallelnative-linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
 
   parallelnative-linux-xenial-py3_7-gcc5_4-test:
     name: parallelnative-linux-xenial-py3.7-gcc5.4
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml
     needs: parallelnative-linux-xenial-py3_7-gcc5_4-build
     with:
       build-environment: parallelnative-linux-xenial-py3.7-gcc5.4
@@ -39,21 +39,21 @@ jobs:
   # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-xenial-py3_7-gcc5_4-build:
     name: caffe2-linux-xenial-py3.7-gcc5.4
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: caffe2-linux-xenial-py3.7-gcc5.4
       docker-image-name: pytorch-linux-xenial-py3.7-gcc5.4
 
   linux-bionic-cuda10_2-py3_9-gcc7-build:
     name: linux-bionic-cuda10.2-py3.9-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
 
   linux-bionic-cuda10_2-py3_9-gcc7-test:
     name: linux-bionic-cuda10.2-py3.9-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda10_2-py3_9-gcc7-build
     with:
       build-environment: linux-bionic-cuda10.2-py3.9-gcc7
@@ -72,7 +72,7 @@ jobs:
 
   libtorch-linux-xenial-cuda10_2-py3_7-gcc7-build:
     name: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
@@ -80,7 +80,7 @@ jobs:
 
   libtorch-linux-xenial-cuda11_3-py3_7-gcc7-build:
     name: libtorch-linux-xenial-cuda11.3-py3.7-gcc7
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-xenial-cuda11.3-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
@@ -89,21 +89,21 @@ jobs:
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
   linux-xenial-cuda11_3-py3_7-gcc7-no-ops-build:
     name: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
   linux-bionic-rocm4_5-py3_7-distributed-build:
     name: linux-bionic-rocm4.5-py3.7-distributed
-    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-rocm4.5-py3.7
       docker-image-name: pytorch-linux-bionic-rocm4.5-py3.7
 
   linux-bionic-rocm4_5-py3_7-distributed-test:
     name: linux-bionic-rocm4.5-py3.7-distributed
-    uses: pytorch/pytorch/.github/workflows/_rocm-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_rocm-test.yml
     needs: linux-bionic-rocm4_5-py3_7-distributed-build
     with:
       build-environment: linux-bionic-rocm4.5-py3.7
@@ -116,7 +116,7 @@ jobs:
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
     if: ${{ false }}
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
-    uses: pytorch/pytorch/.github/workflows/_android-full-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_android-full-build-test.yml
     with:
       build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
@@ -129,7 +129,7 @@ jobs:
 
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64
-    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-x86-64
       ios-platform: SIMULATOR
@@ -142,7 +142,7 @@ jobs:
 
   ios-12-5-1-x86-64-coreml:
     name: ios-12-5-1-x86-64-coreml
-    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-12-5-1-x86-64-coreml
       ios-platform: SIMULATOR
@@ -155,7 +155,7 @@ jobs:
 
   macos-11-py3-x86-64-build:
     name: macos-11-py3-x86-64
-    uses: pytorch/pytorch/.github/workflows/_mac-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_mac-build.yml
     with:
       build-environment: macos-11-py3-x86-64
       xcode-version: "12.4"
@@ -167,7 +167,7 @@ jobs:
 
   macos-11-py3-x86-64-test:
     name: macos-11-py3-x86-64
-    uses: pytorch/pytorch/.github/workflows/_mac-test.yml@master
+    uses: pytorch/pytorch/.github/workflows/_mac-test.yml
     needs: macos-11-py3-x86-64-build
     with:
       build-environment: macos-11-py3-x86-64
@@ -182,7 +182,7 @@ jobs:
 
   macos-10-15-py3-lite-interpreter-x86-64:
     name: macos-10-15-py3-lite-interpreter-x86-64
-    uses: pytorch/pytorch/.github/workflows/_mac-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_mac-build.yml
     with:
       build-environment: macos-10-15-py3-lite-interpreter-x86-64
       xcode-version: "12"
@@ -194,7 +194,7 @@ jobs:
 
   macos-10-15-py3-arm64:
     name: macos-10-15-py3-arm64
-    uses: pytorch/pytorch/.github/workflows/_mac-build.yml@master
+    uses: pytorch/pytorch/.github/workflows/_mac-build.yml
     with:
       build-environment: macos-10-15-py3-arm64
       runner-type: macos-10.15
