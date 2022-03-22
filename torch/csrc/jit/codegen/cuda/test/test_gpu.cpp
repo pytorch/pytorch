@@ -27,9 +27,9 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
+#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
-#include <torch/csrc/jit/codegen/cuda/test/test_gpu_validator.h>
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
