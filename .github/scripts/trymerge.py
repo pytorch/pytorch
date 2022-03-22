@@ -247,6 +247,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--revert", action="store_true")
+    parser.add_argument("--force", action="store_true")
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -433,7 +434,7 @@ class GitHubPR:
             return False
         return checks[checkrun_name] != "SUCCESS"
 
-    def merge_ghstack_into(self, repo: GitRepo) -> None:
+    def merge_ghstack_into(self, repo: GitRepo, force: bool) -> None:
         assert self.is_ghstack_pr()
         approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
@@ -454,7 +455,7 @@ class GitHubPR:
                     continue
                 approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
-                find_matching_merge_rule(pr, repo)
+                find_matching_merge_rule(pr, repo, force=force)
 
             # Adding the url here makes it clickable within the Github UI
             approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
@@ -463,9 +464,9 @@ class GitHubPR:
             msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
-    def merge_into(self, repo: GitRepo, *, dry_run: bool = False) -> None:
+    def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(self, repo)
+        find_matching_merge_rule(self, repo, force=force)
         if self.has_internal_changes():
             raise RuntimeError("This PR must be landed via phabricator")
         if repo.current_branch() != self.default_branch():
@@ -481,7 +482,7 @@ class GitHubPR:
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
         else:
-            self.merge_ghstack_into(repo)
+            self.merge_ghstack_into(repo, force)
 
         repo.push(self.default_branch(), dry_run)
 
@@ -506,7 +507,7 @@ def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
 
 
 
-def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
+def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
@@ -523,7 +524,8 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
         if rule.mandatory_checks_name is not None:
             pass_checks = True
             checks = pr.get_checkrun_conclusions()
-            for checkname in rule.mandatory_checks_name:
+            # HACK: We don't want to skip CLA check, even when forced
+            for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
                 if checkname not in checks or checks[checkname] != "SUCCESS":
                     if checkname not in checks:
                         print(f"Skipping rule {rule_name} as mandatory check {checkname} is not in {checks.keys()}")
@@ -563,8 +565,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
     if author_association != expected_association and author_association != "OWNER":
         return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
 
-    # Raises exception if matching rule is not found
-    find_matching_merge_rule(pr, repo)
+    # Raises exception if matching rule is not found, but ignores all status checks
+    find_matching_merge_rule(pr, repo, force=True)
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
