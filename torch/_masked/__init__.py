@@ -169,6 +169,7 @@ Example::
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        logsumexp=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         normalize=(('ord__required', 'dim__as_int',), ('eps=1e-12', 'dtype=None', 'mask=None')),
     )
 
@@ -228,7 +229,8 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         amin='minimum',
         mean='mean',
         norm='norm',
-        var='variance')
+        var='variance',
+        logsumexp='logsumexp')
 
     normalization_names = dict(
         softmax='softmax',
@@ -343,7 +345,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
         return torch.tensor(0, dtype=dtype, device=device)
     elif op_name == 'prod':
         return torch.tensor(1, dtype=dtype, device=device)
-    elif op_name == 'amax':
+    elif op_name in {'amax', 'logsumexp'}:
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
@@ -564,7 +566,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var', 'logsumexp'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -850,6 +852,46 @@ def softmin(input: Tensor,
         inmask = _input_mask(input, mask=mask)
         mask_input = torch.where(inmask, input, fill)
         return torch.nn.functional.softmin(mask_input, dim_, dtype=dtype)
+    else:
+        raise ValueError(f'masked softmin expects strided tensor (got {input.layout} tensor)')
+
+
+# TODO: Add docstring; currently they're only set up for reductions and normalizations
+# @_apply_docstring_templates
+def logaddexp(input: Tensor,
+              other: Tensor,
+              *,
+              dtype: Optional[DType] = None,
+              input_mask: Optional[Tensor] = None,
+              other_mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    if input.layout == torch.strided and other.layout == torch.strided:
+        fill = input.new_full([], _reduction_identity('logsumexp', input))
+        input_inmask = _input_mask(input, mask=input_mask)
+        other_inmask = _input_mask(other, mask=other_mask)
+        mask_input = torch.where(input_inmask, input, fill)
+        mask_other = torch.where(other_inmask, other, fill)
+        return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked logaddexp expects strided tensor (got {input.layout} tensor for input, {other.layout} for other)')
+
+
+@_apply_docstring_templates
+def logsumexp(input: Tensor,
+              dim: int,
+              *,
+              keepdim: Optional[bool] = False,
+              dtype: Optional[DType] = None,
+              mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    if input.layout == torch.strided:
+        fill = input.new_full([], _reduction_identity('logsumexp', input))
+        inmask = _input_mask(input, mask=mask)
+        mask_input = torch.where(inmask, input, fill)
+        return torch.logsumexp(mask_input, dim_, keepdim=keepdim).to(dtype=dtype)
     else:
         raise ValueError(f'masked softmin expects strided tensor (got {input.layout} tensor)')
 
