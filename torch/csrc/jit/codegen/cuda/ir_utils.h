@@ -12,6 +12,11 @@ namespace fuser {
 namespace cuda {
 namespace ir_utils {
 
+// Replace values in fusion using ValReplacementMutator
+void replaceValue(
+    Fusion*,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 template <typename FilterType, typename Iterator>
 class FilterIterator {
  public:

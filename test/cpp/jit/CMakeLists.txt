@@ -98,6 +98,7 @@ if(USE_CUDA)
   list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu_fused_reduction.cpp)
   list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu_shift.cpp)
   list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu_tensorcore.cpp)
+  list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu_view.cpp)
 endif()
 
 add_executable(test_jit
