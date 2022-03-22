@@ -139,18 +139,10 @@ def make_tensor(
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
 
     if noncontiguous and result.numel() > 1:
-        if result.is_meta:
-            # TODO: repeat_interleave is a bad composite for meta
-            # see https://github.com/pytorch/pytorch/issues/74300
-            result_size = list(result.size())
-            result_size[-1] = result_size[-1] * 2
-            result = result.new_empty(result_size)
-            result = result[..., ::2]
-        else:
-            result = torch.repeat_interleave(result, 2, dim=-1)
-            result = result[..., ::2]
+        result = torch.repeat_interleave(result, 2, dim=-1)
+        result = result[..., ::2]
 
-    if exclude_zero and not result.is_meta:
+    if exclude_zero:
         if dtype in _integral_types or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in _floating_types:

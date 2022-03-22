@@ -3086,10 +3086,10 @@
 
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: amin
+  structured_delegate: amin.out
 
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: amin_out
 
@@ -4162,7 +4162,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: squeeze
+    CPU, CUDA: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
 
 - func: squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)
@@ -4170,7 +4170,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: squeeze
+    CPU, CUDA: squeeze
     QuantizedCPU, QuantizedCUDA: squeeze_quantized
 
 - func: squeeze.dimname(Tensor(a) self, Dimname dim) -> Tensor(a)
@@ -4694,7 +4694,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta: unsqueeze
+    CPU, CUDA: unsqueeze
     SparseCPU, SparseCUDA: unsqueeze_sparse
     QuantizedCPU, QuantizedCUDA: unsqueeze_quantized
 
@@ -4777,6 +4777,11 @@
   variants: function, method
   dispatch:
     CPU, CUDA: where
+
+- func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: where_self_out
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
