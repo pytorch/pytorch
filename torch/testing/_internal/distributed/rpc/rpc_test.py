@@ -18,7 +18,7 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info, WorkerInfo
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all, rpc_sync
+from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
@@ -4368,7 +4368,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 rank=self.rank,
                 rpc_backend_options=self.rpc_backend_options,
             )
-            result = rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
             self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
 
         # TODO: Sync before shutdown since graceful shutdown is not yet implemented
