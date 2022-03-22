@@ -92,6 +92,6 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive https://github.com/pytorch/xla.git
+    git clone --recursive -b lazy-tensor-device --single-branch https://github.com/pytorch/xla.git
   fi
 }
