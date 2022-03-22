@@ -70,9 +70,15 @@ class TestGitHubPR(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_checksuites_pagination(self, mocked_gql: Any) -> None:
-        "Tests that PR with lots of checksuits can be fetch"
+        "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
         self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_comments_pagination(self, mocked_gql: Any) -> None:
+        "Tests that PR with 100+ comments can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 68111)
+        self.assertGreater(len(pr.get_comments()), 50)
 
 
 if __name__ == "__main__":

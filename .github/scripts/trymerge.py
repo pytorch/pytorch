@@ -98,7 +98,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
         totalCount
       }
-      comments(last: 1) {
+      comments(last: 5) {
         nodes {
           bodyText
           author {
@@ -108,9 +108,17 @@ query ($owner: String!, $name: String!, $number: Int!) {
           editor {
             login
           }
+          databaseId
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
         }
       }
     }
+  }
+  rateLimit {
+    cost
   }
 }
 """
@@ -129,6 +137,9 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         }
       }
     }
+  }
+  rateLimit {
+    cost
   }
 }
 """
@@ -173,6 +184,38 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
         }
       }
     }
+  }
+  rateLimit {
+    cost
+  }
+}
+"""
+
+GH_GET_PR_PREV_COMMENTS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      comments(last: 100, before: $cursor) {
+        nodes {
+          databaseId
+          bodyText
+          author {
+            login
+          }
+          authorAssociation
+          editor {
+            login
+          }
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
+        }
+      }
+    }
+  }
+  rateLimit {
+    cost
   }
 }
 """
@@ -258,6 +301,7 @@ class GitHubComment:
     author_login: str
     author_association: str
     editor_login: Optional[str]
+    database_id: int
 
 
 class GitHubPR:
@@ -269,6 +313,7 @@ class GitHubPR:
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, str]] = None
+        self.comments: Optional[List[GitHubComment]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -416,10 +461,42 @@ class GitHubPR:
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
+                             database_id=node["databaseId"]
                              )
+
+    def get_comments(self) -> List[GitHubComment]:
+        if self.comments is not None:
+            return self.comments
+        self.comments = []
+        info = self.info["comments"]
+        # Do not try to fetch more than 10K comments
+        for _ in range(100):
+            self.comments = [self._comment_from_node(node) for node in info["nodes"]] + self.comments
+            if not info["pageInfo"]["hasPreviousPage"]:
+                break
+            rc = gh_graphql(GH_GET_PR_PREV_COMMENTS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=info["pageInfo"]["startCursor"])
+            info = rc["data"]["repository"]["pullRequest"]["comments"]
+        return self.comments
 
     def get_last_comment(self) -> GitHubComment:
         return self._comment_from_node(self.info["comments"]["nodes"][-1])
+
+    def get_comment_by_id(self, database_id: int) -> GitHubComment:
+        if self.comments is None:
+            # Fastpath - try searching in partial prefetched comments
+            for node in self.info["comments"]["nodes"]:
+               comment = self._comment_from_node(node)
+               if comment.database_id == database_id:
+                   return comment
+
+        for comment in self.get_comments():
+            if comment.database_id == database_id:
+                return comment
+        raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
         rc = RE_DIFF_REV.search(self.get_body())
