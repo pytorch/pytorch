@@ -2033,7 +2033,7 @@ class TestCase(expecttest.TestCase):
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        self.assertEqual(actual, expected, exact_device=False)
+        self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -2487,6 +2487,8 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
     assert rank <= l
     A = torch.randn(l, l, dtype=dtype, device=device)
     u, s, vh = torch.linalg.svd(A, full_matrices=False)
+    # For meta tensors, not necessary to modify entries to get the desired
+    # rank, there's no data
     if not s.is_meta:
         for i in range(l):
             if i >= rank:
