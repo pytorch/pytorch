@@ -253,14 +253,16 @@ class TestSparseCSR(TestCase):
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_clone(self, device, dtype):
-        x = torch.sparse_csr_tensor([0, 2, 4],
-                                    [0, 1, 0, 1],
-                                    [1, 2, 3, 4],
-                                    dtype=dtype,
-                                    device=device)
-        y = x.clone()
-
-        self.assertEqual(x, y)
+        from operator import mul
+        from functools import reduce
+        for batch_shape in ((), (2,), (2, 3)):
+            prod = reduce(mul, batch_shape, 1)
+            crow_indices = torch.tensor([0, 2, 4], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
+            col_indices = torch.tensor([0, 1, 0, 1], device=device).repeat(prod, 1).reshape(*batch_shape, -1)
+            values = torch.tensor([1, 2, 3, 4], device=device, dtype=dtype).repeat(prod, 1).reshape(*batch_shape, -1)
+            sparse = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
+            cloned_sparse = sparse.clone()
+            self.assertEqual(sparse, cloned_sparse)
 
     @skipMeta
     @dtypes(*get_all_dtypes())
