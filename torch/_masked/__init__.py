@@ -161,6 +161,8 @@ Example::
         # be removed in the final documentation string.
         sum=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         prod=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        cumsum=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        cumprod=(('dim__as_int',), ('dtype=None', 'mask=None')),
         amin=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
@@ -219,7 +221,15 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''',
         normalize='''\
 Let ``x`` be a sequence of unmasked elements of one-dimensional slice
 of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
-defined as ``x[i]/max(norm(x, p), eps)``.''')
+defined as ``x[i]/max(norm(x, p), eps)``.''',
+        cumsum='''\
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+defined as ``sum(x[:i])``.''',
+        cumprod='''\
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+defined as ``prod(x[:i])``.''')
 
     reduction_names = dict(
         sum='sum',
@@ -234,7 +244,9 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         softmax='softmax',
         log_softmax='log_softmax',
         softmin='softmin',
-        normalize='normalize')
+        normalize='normalize',
+        cumsum='cumulative_sum',
+        cumprod='cumulative_prod')
 
     operation_names = dict()
     operation_names.update(reduction_names)
@@ -339,9 +351,9 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     dtype: DType = input.dtype
     device = input.device
     op_name = op_name.rsplit('.', 1)[-1]  # lstrip module name when present
-    if op_name == 'sum':
+    if op_name in {'sum', 'cumsum'}:
         return torch.tensor(0, dtype=dtype, device=device)
-    elif op_name == 'prod':
+    elif op_name in {'prod', 'cumprod'}:
         return torch.tensor(1, dtype=dtype, device=device)
     elif op_name == 'amax':
         if torch.is_floating_point(input):
@@ -565,7 +577,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """
     if callable(op):
         is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var'}
-        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
+        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize', 'cumsum', 'cumprod'}
         if is_reduction:
             if op.__name__ == 'norm':
                 if args:
@@ -625,6 +637,42 @@ def prod(input: Tensor,
         return result
     else:
         raise ValueError(f'masked prod expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def cumsum(input: Tensor,
+           dim: int,
+           *,
+           dtype: Optional[DType] = None,
+           mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    if input.layout == torch.strided:
+        identity = input.new_full([], _reduction_identity('cumsum', input))
+        inmask = _input_mask(input, mask=mask)
+        mask_input = torch.where(inmask, input, identity)
+        return torch.cumsum(mask_input, dim_, dtype=dtype)
+    else:
+        raise ValueError(f'masked cumsum expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def cumprod(input: Tensor,
+            dim: int,
+            *,
+            dtype: Optional[DType] = None,
+            mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    if input.layout == torch.strided:
+        identity = input.new_full([], _reduction_identity('cumprod', input))
+        inmask = _input_mask(input, mask=mask)
+        mask_input = torch.where(inmask, input, identity)
+        return torch.cumprod(mask_input, dim_, dtype=dtype)
+    else:
+        raise ValueError(f'masked cumprod expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
