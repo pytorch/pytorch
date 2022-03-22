@@ -43,6 +43,12 @@ from tensor_ops import (
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
+from quantization_ops import (
+    GeneralQuantModule,
+    DynamicQuantModule,
+    StaticQuantModule,
+    FusedQuantModule,
+)
 
 output_path = "ios/TestApp/models/"
 production_ops_path = "test/mobile/model_test/model_ops.yaml"
