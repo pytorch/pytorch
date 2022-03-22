@@ -1030,5 +1030,22 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::select,
+    aten_select,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::select(Tensor(a) self, int dim, int index) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto dim = pnode->Input(1).toInt();
+        const auto index = pnode->Input(2).toInt();
+        pnode->Output(0) = at::native::select(self, dim, index);
+      };
+    });
+
 } // namespace jit
 } // namespace torch
