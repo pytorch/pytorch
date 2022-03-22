@@ -5630,24 +5630,14 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(OnesModel(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
-    def test_zeros_with_tensorinput(self):
-        class Zero_(torch.nn.Module):
+    @disableScriptTest()  # torch.zeros/torch.ones with size tensor of dim != 0 not torchScript compatible.
+    def test_zeros_ones_with_tensor_input(self):
+        class ZeroAndOnes(torch.nn.Module):
             def forward(self, x):
-                return x, torch.zeros(x, 1)
+                return torch.zeros(x, 1), torch.ones(x, 1)
 
         x = torch.tensor([2])
-        self.run_test(Zero_(), (x, ))
-
-    @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
-    def test_ones_with_tensorinput(self):
-        class Ones_(torch.nn.Module):
-            def forward(self, x):
-                return x, torch.ones(x, 1)
-
-        x = torch.tensor([2])
-        self.run_test(Ones_(), (x, ))
+        self.run_test(ZeroAndOnes(), (x, ))
 
     @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)

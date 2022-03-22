@@ -186,7 +186,10 @@ Node* transformToONNXConcatNode(
   for (auto* input : lc_node->inputs()) {
     auto new_input =
         need_new_input ? g->addInput()->copyMetadata(input) : input;
-    // Skip unsqueeze for input node if input dim is already 1 or more
+    // ONNX Concat requires tensor inputs with rank > axis(=0). Certain inputs from
+    // ListConstruct Int[] output case are scalars and require an unsqueeze node
+    // to convert them to a tensor. For inputs that are already tensors, we skip
+    // the step of creating a corresponding unsqueeze node
     if (auto type = new_input->type()->cast<TensorType>()) {
       if (type->dim() && type->dim() > 0) {
         unsqueezed.emplace_back(new_input);
