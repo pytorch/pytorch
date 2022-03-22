@@ -935,5 +935,20 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
                 r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
             dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
 
+    def test_quantized_structured_not_implemented(self):
+        x = torch.zeros([1, 1, 1])
+        y = torch.zeros([1, 1, 1])
+        scale, zero_point = 1.0, 0
+        dtype = torch.qint8
+        qx = torch.quantize_per_tensor(x, scale, zero_point, dtype)
+        qy = torch.quantize_per_tensor(y, scale, zero_point, dtype)
+        # If bmm gets quantized support you need to update this to something
+        # else that is not implemented
+        self.assertRaisesRegex(
+            NotImplementedError,
+            "Could not run 'aten::bmm.out' with arguments from the 'QuantizedCPU' backend.",
+            lambda: torch.bmm(qx, qy)
+        )
+
 if __name__ == '__main__':
     run_tests()
