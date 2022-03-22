@@ -281,6 +281,7 @@ class ComparisonOpsModule(torch.nn.Module):
             torch.msort(a),
         )
 
+
 class OtherMathOpsModule(torch.nn.Module):
     def __init__(self):
         super(OtherMathOpsModule, self).__init__()
