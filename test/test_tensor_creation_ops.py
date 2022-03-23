@@ -1598,6 +1598,10 @@ class TestTensorCreation(TestCase):
     def test_combinations(self, device):
         a = torch.tensor([1, 2, 3], device=device)
 
+        c = torch.combinations(a, r=0)
+        expected = torch.empty(0, dtype=a.dtype, device=device)
+        self.assertEqual(c, expected)
+
         c = torch.combinations(a, r=1)
         expected = torch.tensor(list(combinations(a, r=1)), device=device)
         self.assertEqual(c, expected)
