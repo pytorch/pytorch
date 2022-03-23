@@ -43,6 +43,16 @@ def register_math_op(op):
             assert isinstance(lhs, ShardedTensor)
             res = op(lhs.local_tensor(), rhs)
             return ShardedTensor._init_from_local_tensor(res, lhs.sharding_spec(), list(lhs.size()), process_group=pg)
+
+        elif isinstance(lhs, (int, float)):
+            assert isinstance(rhs, ShardedTensor)
+            res = op(lhs, rhs.local_tensor())
+            return ShardedTensor._init_from_local_tensor(res, rhs.sharding_spec(), list(rhs.size()), process_group=pg)
+
+        elif isinstance(rhs, (int, float)):
+            assert isinstance(lhs, ShardedTensor)
+            res = op(lhs.local_tensor(), rhs)
+            return ShardedTensor._init_from_local_tensor(res, lhs.sharding_spec(), list(lhs.size()), process_group=pg)
         else:
             raise RuntimeError(
                 f"torch function '{op.__name__}', with args: {args} and "
@@ -52,18 +62,21 @@ binary_ops = [
     # add
     torch.add,
     Tensor.add,
+    Tensor.__add__,
     # sub
     torch.sub,
     Tensor.sub,
+    Tensor.__sub__,
     Tensor.__rsub__,
     # mul
     torch.mul,
     Tensor.mul,
+    Tensor.__mul__,
     # div
     torch.div,
     Tensor.div,
+    Tensor.__div__,
     Tensor.__rdiv__,
-    # TODO: add magic methods overrides, i.e. ShardedTensor.__add__
 ]
 
 for op in binary_ops:

@@ -31,6 +31,9 @@ from .utils import (
     build_metadata_from_local_shards,
     build_global_metadata
 )
+from torch.overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+    handle_torch_function, get_default_nowrap_functions)
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -149,7 +152,7 @@ class ShardedTensor(object):
         dims = _flatten_tensor_size(size)
 
         if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(self._sharding_spec)}')
+            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
 
         self._sharding_spec = sharding_spec
 
@@ -789,6 +792,24 @@ class ShardedTensor(object):
 
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
+
+    def __add__(self, other):
+        return handle_torch_function(torch.Tensor.__add__, (self, other), self, other)
+
+    def __sub__(self, other):
+        return handle_torch_function(torch.Tensor.__sub__, (self, other), self, other)
+
+    def __rsub__(self, other):
+        return handle_torch_function(torch.Tensor.__rsub__, (self, other), self, other)
+
+    def __mul__(self, other):
+        return handle_torch_function(torch.Tensor.__mul__, (self, other), self, other)
+
+    def __div__(self, other):
+        return handle_torch_function(torch.Tensor.__div__, (self, other), self, other)
+
+    def __rdiv__(self, other):
+        return handle_torch_function(torch.Tensor.__rdiv__, (self, other), self, other)
 
     @dataclass
     class ProcessGroupState:

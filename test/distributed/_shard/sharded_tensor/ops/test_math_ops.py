@@ -25,11 +25,15 @@ class TestMathOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_basic_math_ops(self):
         import builtins
-        torch_ops = ["torch.add", "torch.sub", "torch.mul", "torch.div"]
+        ops = ["torch.add", "torch.sub", "torch.mul", "torch.div", "+", "-", "*"]
 
         def gen_code(python_op):
             src_lines = ['def f(lhs, rhs):']
-            src_lines.append(f'  return {python_op}(lhs, rhs)\n')
+            if "torch" in python_op:
+                src_lines.append(f'  return {python_op}(lhs, rhs)\n')
+            else:
+                src_lines.append(f'  return lhs {python_op} rhs\n')
+
             return '\n'.join(src_lines)
 
         spec = ChunkShardingSpec(
@@ -50,11 +54,13 @@ class TestMathOps(ShardedTensorTestBase):
         sharded_lhs.gather(dst=0, out=global_lhs)
         sharded_rhs.gather(dst=0, out=global_rhs)
 
-        for op in torch_ops:
+        res = sharded_lhs * 3
+        for op in ops:
             g = {'torch': torch}
             code = gen_code(op)
-
             builtins.exec(code, g)
+
+            # test basic math ops between ShardedTensors
             sharded_output = g["f"](sharded_lhs, sharded_rhs)
             output = torch.empty((12, 3)) if current_rank == 0 else None
             sharded_output.gather(dst=0, out=output)
@@ -63,6 +69,18 @@ class TestMathOps(ShardedTensorTestBase):
                 global_output = g["f"](global_lhs, global_rhs)
 
                 self.assertEqual(output, global_output)
+
+            # test basic math ops between ShardedTensor and scalar
+            sharded_output = g["f"](sharded_lhs, 3)
+            output = torch.empty((12, 3)) if current_rank == 0 else None
+            sharded_output.gather(dst=0, out=output)
+
+            if current_rank == 0:
+                global_output = g["f"](global_lhs, 3)
+
+                self.assertEqual(output, global_output)
+
+
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
