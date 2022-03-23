@@ -1556,7 +1556,6 @@ class TestSparseCSR(TestCase):
             # TODO: Remove detach once we have autograd support for CSR input
             sparse_input = sample.input.to_sparse_csr().detach()
 
-
             def fn(*args):
                 output = op.gradcheck_wrapper(op.get_op(), sparse_input, *args, **sample.kwargs)
                 if sample.output_process_fn_grad is not None:
