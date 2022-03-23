@@ -1550,23 +1550,34 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     };
 
     const auto get_selected_indices_large_nnz_small_size = [&]() -> std::tuple<Tensor, Tensor> {
-      auto dim_indices_counts = at::zeros({size}, index.options());
-      {
-        auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
-        auto* ptr_dim_indices_counts = dim_indices_counts.data_ptr<int64_t>();
-        for (const auto i : c10::irange(nnz)) {
-          ++ptr_dim_indices_counts[*ptr_dim_indices++];
-        }
-      }
+      const auto get_counts = [&](const Tensor& t, int64_t bins, bool is_sorted = false) -> Tensor {
+        auto counts = at::zeros({bins}, t.options());
+        auto* ptr_counts = counts.data_ptr<int64_t>();
+        const auto* ptr_vals = t.data_ptr<int64_t>();
 
-      auto index_counts = at::zeros({size}, index.options());
-      {
-        auto* ptr_index = index.data_ptr<int64_t>();
-        auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
-        for (const auto i : c10::irange(index_len)) {
-          ++ptr_index_counts[*ptr_index++];
+        if (is_sorted) {
+          at::parallel_for(0, t.numel(), at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+              auto* ptr_vals_start = ptr_vals + start;
+              for (const auto i : c10::irange(start, end)) {
+                ++ptr_counts[*ptr_vals_start++];
+              }
+          });
         }
-      }
+        else {
+          for (const auto i : c10::irange(t.numel())) {
+            ++ptr_counts[*ptr_vals++];
+          }
+        }
+
+        return counts;
+      };
+
+      auto dim_indices_counts = get_counts(indices[dim], /*bins=*/size,
+          // When self is coalesced and dim == 0, indices[dim] is sorted.
+          /*is_sorted=*/self.is_coalesced() && dim == 0);
+      auto index_counts = get_counts(index, /*bins=*/size,
+          // We cannot assume that index is always sorted.
+          /*is_sorted=*/false);
 
       const auto index_sorted = [&](void) -> Tensor {
         // TODO: find a better threshold based on actual runtime benchmarking.
