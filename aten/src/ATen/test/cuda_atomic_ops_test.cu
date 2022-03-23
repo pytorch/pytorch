@@ -98,6 +98,7 @@ void test_atomic_mul() {
 }
 
 TEST(TestAtomicOps, TestAtomicAdd) {
+  if (!at::cuda::is_available()) return;
   test_atomic_add<uint8_t>();
   test_atomic_add<int8_t>();
   test_atomic_add<int16_t>();
@@ -113,6 +114,7 @@ TEST(TestAtomicOps, TestAtomicAdd) {
 }
 
 TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicMul)) {
+  if (!at::cuda::is_available()) return;
   test_atomic_mul<at::BFloat16>();
   test_atomic_mul<at::Half>();
   test_atomic_mul<float>();
