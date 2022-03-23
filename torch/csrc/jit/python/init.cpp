@@ -624,10 +624,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
-            TORCH_WARN(
-                "Set profiling mode is deprecated and will invoke getGraphExecutorOptimize now. Please use `_get_graph_executor_optimize`");
-            auto oldState = getGraphExecutorOptimize();
-            setGraphExecutorOptimize(profiling_flag);
+            bool oldState = getProfilingMode();
+            getProfilingMode() = profiling_flag;
             return oldState;
           })
       .def(
