@@ -538,10 +538,11 @@ def convert_custom_module(
             # Before: quantize - dequantize - custom - module
             # After: quantize - custom - module
             #              \ - dequantize
-            #                  (may be dangling depending on how many users it has before)
-            # if the custom module node is the only user of dequantize node, then the
-            # dequantize node will be remove in the dead code elimination pass
             node.replace_input_with(prev_node, prev_node.args[0])
+
+            # Remove the dequantize node if it doesn't have other users
+            if len(prev_node.users) == 0:
+                graph.erase_node(prev_node)
 
         # absorb the following observer into the module conversion
         activation_post_process = maybe_get_observer_for_node(node, modules)
