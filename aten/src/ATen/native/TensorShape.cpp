@@ -1549,6 +1549,34 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       return std::make_tuple(selected_dim_indices, res_dim_indices);
     };
 
+    // Converts a 1d sorted idx to a compressed 1d compressed idx,
+    // aka crow in the CSR format. Useful to get a count table in
+    // a parallelized and no-sync manner.
+    // TODO: this function could be very useful as a separate util.
+    const auto sorted_idx_to_cidx = [](const Tensor& idx, int64_t len) -> Tensor {
+      auto cidx = at::empty({len + 1}, idx.options());
+
+      const auto* ptr_idx = idx.data_ptr<int64_t>();
+      auto* ptr_cidx = cidx.data_ptr<int64_t>();
+
+      const auto idx_len = idx.numel();
+      // We trust in zero_/fill_'s dispatch and AVX support
+      cidx.slice(0, 0, ptr_idx[0] + 1).zero_();
+      cidx.slice(0, ptr_idx[idx_len - 1] + 1, idx_len + 1).fill_(idx_len);
+
+      at::parallel_for(0, idx_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+          int64_t curr_idx = ptr_idx[start], next_idx;
+          for (int64_t i = start; i < std::min(end, idx_len - 1); ++i) {
+            next_idx = ptr_idx[i + 1];
+            for (; curr_idx < next_idx; ++curr_idx) {
+              ptr_cidx[curr_idx + 1] = i + 1;
+            }
+          }
+      });
+
+      return cidx;
+    };
+
     const auto get_selected_indices_large_nnz_small_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto get_counts = [&](const Tensor& t, int64_t bins, bool is_sorted = false) -> Tensor {
         auto counts = at::zeros({bins}, t.options());
@@ -1556,12 +1584,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto* ptr_vals = t.data_ptr<int64_t>();
 
         if (is_sorted) {
-          at::parallel_for(0, t.numel(), at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
-              auto* ptr_vals_start = ptr_vals + start;
-              for (const auto i : c10::irange(start, end)) {
-                ++ptr_counts[*ptr_vals_start++];
-              }
-          });
+          const auto cidx = sorted_idx_to_cidx(indices[dim], size);
+          auto counts = cidx.slice(0, 1, size + 1).sub(cidx.slice(0, 0, size));
+          return counts;
         }
         else {
           for (const auto i : c10::irange(t.numel())) {
