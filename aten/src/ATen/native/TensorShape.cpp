@@ -1355,22 +1355,26 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   if (dim < sparse_dim) {
     auto nneg_index = at::empty_like(index);
     {
+      // nneg_index = ((index < 0) * index + size) + (index >= 0) * index
       auto* ptr_index = index.data_ptr<int64_t>();
-      auto* ptr_index_end = ptr_index + index_len;
       auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
-      while (ptr_index != ptr_index_end) {
-        auto idx = *ptr_index++;
-        if (idx < -size || idx >= size) {
-          TORCH_CHECK_INDEX(false,
-              "index_select(): index contains ", idx, " that is out of range for tensor of size ",
-              self.sizes(), " at dimension ", dim
-          );
-        }
-        if (idx < 0) {
-          idx += size;
-        }
-        *ptr_nneg_index++ = idx;
-      }
+      at::parallel_for(0, index_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+          const auto* src = ptr_index + start;
+          auto* dst = ptr_nneg_index + start;
+          for (const auto i : c10::irange(start, end)) {
+            auto idx = *src++;
+            if (idx < -size || idx >= size) {
+              TORCH_CHECK_INDEX(false,
+                  "index_select(): index contains ", idx, " that is out of range for tensor of size ",
+                  self.sizes(), " at dimension ", dim
+              );
+            }
+            if (idx < 0) {
+              idx += size;
+            }
+            *dst++ = idx;
+          }
+      });
     }
 
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
@@ -1626,7 +1630,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     // A more precise decision could be of the form:
     // `nnz < C(nnz, size) * size`, but it requires heavy benchmarking.
     // We choose `nnz < size`, which measures theoretical complexity
-    // and does not reply on runtime performance.
+    // and does not rely on runtime performance.
     // TODO: perform this analysis and find better C(nnz, size).
     if (nnz < size) {
       std::tie(selected_dim_indices, res_dim_indices) = get_selected_indices_small_nnz_large_size();
