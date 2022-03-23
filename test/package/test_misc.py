@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: package/deploy"]
 
 import inspect
+import platform
 from io import BytesIO
 from textwrap import dedent
 
@@ -31,6 +32,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── python_version
                 │   └── version
                 ├── main
                 │   └── main
@@ -54,6 +56,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── python_version
                 │   └── version
                 ├── main
                 │   └── main
@@ -98,6 +101,25 @@ class TestMisc(PackageTestCase):
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             import_exclude,
         )
+
+    def test_python_version(self):
+        """
+        Tests that the current python version is stored in the package and is available
+        via PackageImporter's python_version() method.
+        """
+        buffer = BytesIO()
+
+        with PackageExporter(buffer) as he:
+            from package_a.test_module import SimpleTest
+
+            he.intern("**")
+            obj = SimpleTest()
+            he.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+
+        self.assertEqual(hi.python_version(), platform.python_version())
 
     def test_file_structure_has_file(self):
         """
