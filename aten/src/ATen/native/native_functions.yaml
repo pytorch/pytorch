@@ -3746,6 +3746,11 @@
     CPU: gelu_out_cpu
     CUDA: gelu_out_cuda
 
+- func: gelu_(Tensor(a!) self, *, str approximate='none') -> Tensor(a!)
+  structured_delegate: gelu.out
+  device_check: NoCheck   # TensorIterator
+  python_module: nn
+
 - func: gelu(Tensor self, *, str approximate='none') -> Tensor
   structured_delegate: gelu.out
   device_check: NoCheck   # TensorIterator
