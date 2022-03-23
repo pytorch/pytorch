@@ -850,9 +850,9 @@ class TestQuantizedOps(TestCase):
         scale_C = 12.9
         zero_point = 0
         qA = torch.quantize_per_tensor(A, scale=scale_A, zero_point=zero_point,
-                                        dtype=dtype)
+                                       dtype=dtype)
         qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
-                                        dtype=dtype)
+                                       dtype=dtype)
         # Add ground truth
         C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
         qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])

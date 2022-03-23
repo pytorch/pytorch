@@ -18,6 +18,9 @@
 
 #include <unordered_map>
 
+namespace at {
+namespace native {
+namespace {
 // FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
 namespace {
 struct CacheKey {
@@ -29,9 +32,6 @@ struct CacheKey {
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 
-namespace at {
-namespace native {
-namespace {
 // TODO: this is also in qadd.cpp and some other cpp files in quantized/cpu/. I think we should
 // move everything into a utilities file in quantized/ directory later.
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
@@ -47,6 +47,11 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 }
 
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized add
+// We implement relu ( (a_int8 + b_int8 * ( b_scale/a_scale) ) ) * ( a_scale / out_scale )
+// which requires 4 cudnn ops (2 multiplication, 1 addition, and 1 relu ops)
+// Multiplication ops: rhs_mult_op, requant_op
+// Addition op: add_op
+// Relu op: relu_op
 template <bool kReluFused = false>
 Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point) {
   if (qa.numel() == 0) {
