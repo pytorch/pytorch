@@ -39,6 +39,8 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::Int
     .build();
 }
 
+// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
+namespace {
 struct CacheKey {
   at::native::ConvolutionParams params;
   uint8_t input_alignment;
@@ -47,9 +49,6 @@ struct CacheKey {
   // default to -1 when no bias
   int8_t bias_alignment;
 };
-
-// FIXME: make this thread-safe by reusing the benchmark cache in Conv_v7.cpp
-namespace {
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
 // TODO: we can use cudnn_frontend::ExecutionPlanCache when it supports caching
