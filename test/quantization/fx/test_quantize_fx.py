@@ -1030,6 +1030,8 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
+        """ Tests fusion and quantization for "Conv - Bn" and "Conv - Bn - ReLU"
+        """
         convs = {
             1: nn.Conv1d,
             2: nn.Conv2d,
@@ -1070,8 +1072,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        # TODO: add 1d support
-        options = itertools.product([2, 3], [True, False], self.static_quant_types)
+        options = itertools.product([1, 2, 3], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
