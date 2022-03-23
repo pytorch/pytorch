@@ -194,37 +194,50 @@ class ChunkShardingSpec(ShardingSpec):
             memory_format=torch.contiguous_format,
             pin_memory=tensor.is_pinned()
         )
+        current_rank = dist.get_rank(process_group)
         tensor_meta = self.build_metadata(tensor.size(), tensor_properties)
         local_shards = []
-
-        current_rank = dist.get_rank(process_group)
-        # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
-        dist.broadcast(tensor, src=src_rank, group=process_group)
+        local_tensor = None
+        local_metadata = None
+        tensors_to_scatter = []
 
         for shard_meta in tensor_meta.shards_metadata:
             rank, device = _parse_and_validate_remote_device(process_group, shard_meta.placement)
-            if rank == current_rank:
-                shard_offsets = shard_meta.shard_offsets
-                shard_sizes = shard_meta.shard_sizes
-                local_tensor = tensor
+            shard_offsets = shard_meta.shard_offsets
+            shard_sizes = shard_meta.shard_sizes
+            if current_rank == src_rank:
+                narrowed_tensor = tensor
                 for idx, (offset, size) in enumerate(zip(shard_offsets, shard_sizes)):
                     if size < tensor.size(idx):
                         # Reshape to get shard for this rank and we don't want autograd
                         # recording here for the narrow op and 'local_shard' should be a
                         # leaf variable in the autograd graph.
-                        local_tensor = local_tensor.narrow(
+                        narrowed_tensor = narrowed_tensor.narrow(
                             idx,
                             shard_offsets[idx],
                             shard_sizes[idx]
                         ).clone().detach().contiguous()
-                # Sync requires_grad to local_shard.
-                local_tensor.requires_grad = tensor.requires_grad
-                local_shards.append(
-                    Shard(
-                        tensor=local_tensor,
-                        metadata=shard_meta
-                    )
-                )
+                tensors_to_scatter.append(narrowed_tensor)
+
+            if current_rank == rank:
+                local_tensor = torch.empty(
+                    shard_sizes, dtype=tensor.dtype, layout=tensor.layout, device=device)
+                local_metadata = shard_meta
+
+        # Scatter the shards to all ranks in the pg
+        dist.scatter(
+            local_tensor,
+            scatter_list=tensors_to_scatter if current_rank == src_rank else None,
+            src=src_rank,
+            group=process_group
+        )
+
+        assert local_tensor is not None
+        assert local_metadata is not None
+        # Sync requires_grad to local_shard.
+        local_tensor.requires_grad = tensor.requires_grad
+
+        local_shards.append(Shard(tensor=local_tensor, metadata=local_metadata))
 
         st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=process_group)
         # Manually set sharding_spec
