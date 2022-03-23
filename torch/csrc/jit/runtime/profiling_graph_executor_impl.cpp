@@ -609,8 +609,9 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     c10::optional<size_t> remaining_bailout_depth) {
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
+  // TODO: instantiate simple executor when getProfilingMode() is false
   // no opt mode
-  if (!getGraphExecutorOptimize()) {
+  if (!getGraphExecutorOptimize() || !getProfilingMode()) {
     if (!fallback_plan_) {
       auto copy = graph->copy();
       GRAPH_DEBUG(
