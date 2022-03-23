@@ -207,6 +207,7 @@ class PackageExporter:
             self.buffer = f
 
         self.zip_file = zip_file_reader_type(f)
+        assert isinstance(self.zip_file, TorchScriptPackageZipFileWriter)
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file.zip_file_writer)
         self.storage_context = self.script_module_serializer.storage_context()
 
