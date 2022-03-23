@@ -65,8 +65,11 @@ class _ConvNd(nn.modules.conv._ConvNd):
         return qat_conv
 
     def to_float(self):
+        """ This works for both single qat conv, and the qat conv - relu modules
+        to convert the qat module to a floating point module
+        """
         cls = type(self)
-        conv = cls._FLOAT_MODULE(  # type: ignore[attr-defined, operator]
+        conv = cls._FLOAT_CONV_MODULE(  # type: ignore[attr-defined, operator]
             self.in_channels,
             self.out_channels,
             self.kernel_size,  # type: ignore[arg-type]
@@ -91,7 +94,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
         else:
             return conv
 
-class Conv1d(_ConvNd):
+class Conv1d(_ConvNd, nn.Conv1d):
     r"""
     A Conv1d module attached with FakeQuantize modules for weight,
     used for quantization aware training.
@@ -143,7 +146,7 @@ class Conv1d(_ConvNd):
     def from_float(cls, mod):
         return super().from_float(cls, mod)
 
-class Conv2d(_ConvNd):
+class Conv2d(_ConvNd, nn.Conv2d):
     r"""
     A Conv2d module attached with FakeQuantize modules for weight,
     used for quantization aware training.
@@ -159,6 +162,7 @@ class Conv2d(_ConvNd):
         weight_fake_quant: fake quant module for weight
     """
     _FLOAT_MODULE = nn.Conv2d
+    _FLOAT_CONV_MODULE = nn.Conv2d
 
     def __init__(self,
                  in_channels: int,
@@ -193,11 +197,14 @@ class Conv2d(_ConvNd):
             device=device,
             dtype=dtype)
 
+    def forward(self, input):
+        return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
+
     @classmethod
     def from_float(cls, mod):
         return super().from_float(cls, mod)
 
-class Conv3d(_ConvNd):
+class Conv3d(_ConvNd, nn.Conv3d):
     r"""
     A Conv3d module attached with FakeQuantize modules for weight,
     used for quantization aware training.
@@ -213,6 +220,7 @@ class Conv3d(_ConvNd):
         weight_fake_quant: fake quant module for weight
     """
     _FLOAT_MODULE = nn.Conv3d
+    _FLOAT_CONV_MODULE = nn.Conv3d
 
     def __init__(self,
                  in_channels: int,
@@ -246,6 +254,9 @@ class Conv3d(_ConvNd):
             qconfig=qconfig,
             device=device,
             dtype=dtype)
+
+    def forward(self, input):
+        return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
 
     @classmethod
     def from_float(cls, mod):
