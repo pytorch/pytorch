@@ -53,13 +53,7 @@ inline void searchsorted_maybe_trim_input_tensors(
     state = at::native::update_result_type_state(raw_input, state);
     ScalarType common_stype = at::native::result_type(state);
 
-    TORCH_CHECK(
-      common_stype != ScalarType::Undefined,
-      "Common dtype is undefined for given input dtypes: ",
-      raw_input.scalar_type(),
-      ", ",
-      raw_boundaries.scalar_type());
-
+    TORCH_INTERNAL_ASSERT(common_stype != ScalarType::Undefined);
     if (common_stype != raw_input.scalar_type()) {
       trimmed_input = in_is_contiguous ? raw_input.to(common_stype) : trimmed_input.to(common_stype);
     }

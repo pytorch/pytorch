@@ -292,30 +292,16 @@ void TensorIteratorBase::reorder_dimensions() {
 // See the [Common Dtype Computation] note
 ScalarType TensorIteratorBase::compute_common_dtype() {
   at::native::ResultTypeState state = {};
-  std::ostringstream input_dtypes;
-
   for (const auto& op : operands_) {
     if (op.is_output) {
       continue;
-    }
-
-    // Get input dtypes for error reporting.
-    if (!op.is_output) {
-      if (input_dtypes.tellp() == 0) {
-        input_dtypes << op.current_dtype;
-      } else {
-        input_dtypes << ", " << op.current_dtype;
-      }
     }
 
     state = at::native::update_result_type_state(op.tensor(), state);
   }
 
   common_dtype_ = at::native::result_type(state);
-
-  TORCH_CHECK(
-    common_dtype_ != ScalarType::Undefined,
-    "Common dtype is undefined for given input dtypes: ", input_dtypes.str());
+  TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined);
 
   return common_dtype_;
 }
@@ -354,18 +340,8 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   bool has_different_input_dtypes = false;
   bool has_different_output_dtypes = false;
   bool has_undefined_outputs = false;
-  std::ostringstream input_dtypes;
 
   for (auto& op : operands_) {
-    // Get input dtypes for error reporting.
-    if (!op.is_output) {
-      if (input_dtypes.tellp() == 0) {
-        input_dtypes << op.current_dtype;
-      } else {
-        input_dtypes << ", " << op.current_dtype;
-      }
-    }
-
     // Validates that all inputs have type information, and that
     //   if an output is missing type information that we can infer
     //   the device it should be allocated on.
@@ -426,11 +402,9 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   }
 
   // Checks that either the computation type is computable or unneeded
-  TORCH_CHECK(
-    !(has_different_input_dtypes && !config.promote_inputs_to_common_dtype_ &&
-      (has_undefined_outputs || config.enforce_safe_casting_to_output_ ||
-       config.cast_common_dtype_to_outputs_)),
-    "Type promotion unsupported for given input dtypes: ", input_dtypes.str());
+  TORCH_INTERNAL_ASSERT(!(has_different_input_dtypes && !config.promote_inputs_to_common_dtype_ &&
+                        (has_undefined_outputs || config.enforce_safe_casting_to_output_ ||
+                        config.cast_common_dtype_to_outputs_)));
 
   // Checks that all inputs and defined outputs are the same dtype, if requested
   if (config.check_all_same_dtype_ &&
@@ -972,11 +946,22 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& out, const TensorBase& a,
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
+      .promote_inputs_to_common_dtype(true)
       .add_owned_output(out)
       .add_owned_input(a)
       .add_owned_input(b)
       .add_owned_input(c));
 }
+
+// This cannot be a function because TensorIteratorConfig is not
+// copyable or movable, so it can't be returned from the function.
+#define BINARY_OP_CONFIG()                              \
+  TensorIteratorConfig()                                \
+    .set_check_mem_overlap(true)                        \
+    .allow_cpu_scalars(true)                            \
+    .promote_inputs_to_common_dtype(true)               \
+    .cast_common_dtype_to_outputs(true)                 \
+    .enforce_safe_casting_to_output(true)               \
 
 void TensorIteratorBase::build_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b) {
   build(BINARY_OP_CONFIG()

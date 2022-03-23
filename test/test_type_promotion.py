@@ -809,78 +809,46 @@ class TestTypePromotion(TestCase):
             t.addcdiv_(t, t)
 
     def test_addcdiv_promotion(self, device):
-        arg1 = torch.rand([5, 5], device=device, dtype=torch.float64)
-        arg2 = torch.rand([5, 5], device=device, dtype=torch.float64)
-        arg3 = torch.rand([1, 5], device=device, dtype=torch.complex128)
-
-        res1 = torch.addcdiv(arg1, arg2, arg3)
-        res2 = arg1 + arg2 / arg3
-
-        self.assertEqual(res1.dtype, res2.dtype)
-        self.assertEqual(res1, res2)
-
-    def test_addcmul_promotion(self, device):
-        arg1 = torch.rand([5, 5], device=device, dtype=torch.float64)
-        arg2 = torch.rand([5, 5], device=device, dtype=torch.float64)
-        arg3 = torch.rand([1, 5], device=device, dtype=torch.complex128)
-
-        res1 = torch.addcmul(arg1, arg2, arg3)
-        res2 = arg1 + arg2 * arg3
-
-        self.assertEqual(res1.dtype, res2.dtype)
-        self.assertEqual(res1, res2)
-
-    def test_complex32_promotion(self, device):
-        ops = (
-            torch.ge,
-            torch.le,
-            torch.gt,
-            torch.lt,
-            torch.ne,
-            torch.eq,
-            torch.igamma,
-            torch.igammac,
-            torch.xlogy,
-            torch.logical_and,
-            torch.logical_or,
-            torch.logical_xor,
-            torch.bucketize,
-            torch.searchsorted,
-            torch.dist,
-            torch.ldexp,
-            torch.sub,
-            torch.add,
-            torch.mul,
-            torch.div,
-            torch.ger,
-            torch.outer,
-            torch.nextafter,
-            torch.copysign,
-            torch.pow,
+        types = (
+            (torch.float64, torch.float64, torch.complex128),
+            (torch.long, torch.bfloat16, torch.float32),
         )
 
-        for op in ops:
-            arg1 = torch.rand([1], device=device, dtype=torch.float64)
-            arg2 = torch.rand([1], device=device, dtype=torch.complex32)
-
-            if op == torch.searchsorted:
-                err = (
-                    "Common dtype is undefined for given input dtypes: "
-                    "ComplexHalf, Double")
-
-            elif op == torch.ldexp:
-                if device == "cpu":
-                    err = "\"copy_\" not implemented for 'ComplexHalf'"
-                else:  # cuda
-                    err = "\"pow_cuda\" not implemented for 'ComplexHalf'"
-
+        for type1, type2, type3 in types:
+            # Cannot use rand with long.
+            if type1 == torch.long:
+                arg1 = torch.randint(7, [5, 5], device=device, dtype=type1)
             else:
-                err = (
-                    "Common dtype is undefined for given input dtypes: "
-                    "Double, ComplexHalf")
+                arg1 = torch.rand([5, 5], device=device, dtype=type1)
+            arg2 = torch.rand([5, 5], device=device, dtype=type2)
+            arg3 = torch.rand([1, 5], device=device, dtype=type3)
 
-            with self.assertRaisesRegex(RuntimeError, err):
-                op(arg1, arg2)
+            res1 = torch.addcdiv(arg1, arg2, arg3)
+            res2 = arg1 + arg2 / arg3
+
+            self.assertEqual(res1.dtype, res2.dtype)
+            self.assertEqual(res1, res2)
+
+    def test_addcmul_promotion(self, device):
+        types = (
+            (torch.float64, torch.float64, torch.complex128),
+            (torch.long, torch.bfloat16, torch.float32),
+        )
+
+        for type1, type2, type3 in types:
+            # Cannot use rand with long.
+            if type1 == torch.long:
+                arg1 = torch.randint(7, [5, 5], device=device, dtype=type1)
+            else:
+                arg1 = torch.rand([5, 5], device=device, dtype=type1)
+            arg2 = torch.rand([5, 5], device=device, dtype=type2)
+            arg3 = torch.rand([1, 5], device=device, dtype=type3)
+
+            res1 = torch.addcmul(arg1, arg2, arg3)
+            res2 = arg1 + arg2 * arg3
+
+            self.assertEqual(res1.dtype, res2.dtype)
+            self.assertEqual(res1, res2)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype

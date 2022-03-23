@@ -16,13 +16,7 @@ TORCH_META_FUNC(addcmul)
  const Tensor& tensor1,
  const Tensor& tensor2,
  const Scalar& value) {
-  build(BINARY_OP_CONFIG()
-    .add_owned_output(maybe_get_output())
-    .add_owned_input(self)
-    .add_owned_input(tensor1)
-    .add_owned_input(tensor2));
-  // XXX: Should use this instead when it supports BINARY_OP_CONFIG.
-  // build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
+  build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
 }
 
 TORCH_META_FUNC(addcdiv)
@@ -43,13 +37,7 @@ TORCH_META_FUNC(addcdiv)
         "The future addcdiv behavior is just the latter implementation: ",
         "(input + value * tensor1 / tensor2), for all dtypes.");
   }
-  build(BINARY_OP_CONFIG()
-    .add_owned_output(maybe_get_output())
-    .add_owned_input(self)
-    .add_owned_input(tensor1)
-    .add_owned_input(tensor2));
-  // XXX: Should use this instead when it supports BINARY_OP_CONFIG.
-  // build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
+  build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
 }
 
 } // namespace meta

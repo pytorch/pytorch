@@ -75,16 +75,6 @@ using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
 namespace at {
 
-// This cannot be a function because TensorIteratorConfig is not
-// copyable or movable, so it can't be returned from the function.
-#define BINARY_OP_CONFIG()                              \
-  TensorIteratorConfig()                                \
-    .set_check_mem_overlap(true)                        \
-    .allow_cpu_scalars(true)                            \
-    .promote_inputs_to_common_dtype(true)               \
-    .cast_common_dtype_to_outputs(true)                 \
-    .enforce_safe_casting_to_output(true)               \
-
 namespace internal {
 // This parameter is heuristically chosen to determine the minimum number of
 // work that warrants parallelism. For example, when summing an array, it is
