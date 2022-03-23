@@ -7,6 +7,12 @@ class PackageZipFileReader(ABC):
     Class to allow PackageImporter to operate objects. To create a custom
     zip file reader for PackageImporter simply inherit this class.
     """
+
+    def __init__(self, file_name):
+        raise NotImplementedError(
+            f"init(self, name: str) is not implemented in {type(self)}"
+        )
+
     @abstractmethod
     def get_record(self, name: str):
         raise NotImplementedError(
@@ -36,6 +42,11 @@ class PackageZipFileWriter(ABC):
     Class to allow PackageExporter to operate objects. To create a custom
     zip file writer for PackageExporter simply inherit this class.
     """
+
+    def __init__(self, file_name):
+        raise NotImplementedError(
+            f"init(self, name: str) is not implemented in {type(self)}"
+        )
 
     @abstractmethod
     def write_record(self, file_name, str_or_bytes, size):
