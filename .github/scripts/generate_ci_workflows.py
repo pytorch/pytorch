@@ -1219,7 +1219,7 @@ def main() -> None:
 
 
     # check new pull workflow matches ciflow/default
-    with open(".github/workflows/pull.yml") as f:
+    with open(f"{GITHUB_DIR}/workflows/pull.yml") as f:
         y = yaml.load(f, Loader=Loader)
     new_pull = set([i["name"] for i in y["jobs"].values()])
 
@@ -1230,7 +1230,7 @@ def main() -> None:
     assert new_pull == old_pull_ex_binary
 
     # check new trunk workflow matches ciflow/trunk
-    with open(".github/workflows/trunk.yml") as f:
+    with open(f"{GITHUB_DIR}/workflows/trunk.yml") as f:
         y = yaml.load(f, Loader=Loader)
     new_trunk = set([i["name"] for i in y["jobs"].values()])
     old_trunk = ciflow_ruleset.label_rules[LABEL_CIFLOW_TRUNK] - ciflow_ruleset.label_rules[LABEL_CIFLOW_DEFAULT]
@@ -1239,7 +1239,7 @@ def main() -> None:
     old_trunk = old_trunk - {"docker-builds"}
     assert new_trunk == old_trunk
 
-    with open(".github/workflows/periodic.yml") as f:
+    with open(f"{GITHUB_DIR}/workflows/periodic.yml") as f:
         y = yaml.load(f, Loader=Loader)
     new_periodic = set([i["name"] for i in y["jobs"].values()])
     old_periodic_l = list(ciflow_ruleset.label_rules[LABEL_CIFLOW_SCHEDULED])
