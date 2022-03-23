@@ -61,7 +61,7 @@ class TestUnevenParamShard(FSDPTest):
         optim.step()
         optim.zero_grad()
 
-        with model._summon_full_params():
+        with model.summon_full_params():
             torch.cuda.synchronize()  # TODO: This is here because it was
             # originally part of get_full_params(), debug why it is needed here.
             weight_out = model.module.weight.T.clone()

@@ -400,7 +400,7 @@ class TestObserver(QuantizationTestCase):
             x = obs(x)
 
     def _test_memoryless(self, obs_class):
-        obs = obs_class(memoryless=True)
+        obs = obs_class(averaging_constant=1)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -411,10 +411,10 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(params, obs.calculate_qparams())
 
     def test_memoryless_minmaxobserver(self):
-        self._test_memoryless(MinMaxObserver)
+        self._test_memoryless(MovingAverageMinMaxObserver)
 
     def test_memoryless_perchannelminmaxobserver(self):
-        self._test_memoryless(PerChannelMinMaxObserver)
+        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
