@@ -97,6 +97,4 @@ TORCH_API TensorBase empty_strided_meta(
     IntArrayRef stride,
     const TensorOptions &options);
 
-TORCH_API at::Allocator* GetMetaAllocator();
-
 }}  // namespace at::detail

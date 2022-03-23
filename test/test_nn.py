@@ -11390,6 +11390,12 @@ class TestNN(NNTestCase):
         outd = loss_cpu(inputd, target)
         self.assertEqual(outf, outd, exact_dtype=False)
 
+    def test_cross_entropy_loss_zero_div(self):
+        # Test for issue #73165
+        input_1 = torch.rand([5, 0], dtype=torch.float32)
+        input_2 = torch.rand([5, 0], dtype=torch.float32)
+        torch.nn.CrossEntropyLoss()(input_1, input_2)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_convert_sync_batchnorm(self):
         module = torch.nn.Sequential(
