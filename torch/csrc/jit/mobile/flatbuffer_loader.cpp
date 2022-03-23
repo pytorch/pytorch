@@ -6,6 +6,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
@@ -589,20 +590,8 @@ std::tuple<std::shared_ptr<char>, size_t> get_file_content(
   // make sure buffer size is multiple of alignment
   size_t buffer_size =
       (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
-#if defined(__ANDROID__)
   std::shared_ptr<char> data(
-      static_cast<char*>(memalign(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
-      free);
-#elif defined(_WIN32)
-  std::shared_ptr<char> data(
-      static_cast<char*>(
-          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
-      _aligned_free); // NOLINT
-#else
-  std::shared_ptr<char> data(
-      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
-      free); // NOLINT
-#endif
+      static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);
   fread(data.get(), size, 1, f);
   fclose(f);
 #endif
@@ -620,20 +609,8 @@ std::tuple<std::shared_ptr<char>, size_t> get_stream_content(std::istream& in) {
   // NOLINT make sure buffer size is multiple of alignment
   size_t buffer_size =
       (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
-#if defined(__ANDROID__)
   std::shared_ptr<char> data(
-      static_cast<char*>(memalign(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
-      free);
-#elif defined(_WIN32)
-  std::shared_ptr<char> data(
-      static_cast<char*>(
-          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
-      _aligned_free); // NOLINT
-#else
-  std::shared_ptr<char> data(
-      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
-      free); // NOLINT
-#endif
+      static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);
   in.read(data.get(), size);
 
   // reset stream to original position
