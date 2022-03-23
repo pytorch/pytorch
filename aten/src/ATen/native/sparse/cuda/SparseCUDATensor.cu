@@ -144,8 +144,8 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) C10_WARP_SIZE*SZ));
     dim3 block(C10_WARP_SIZE, SZ);
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-      at::ScalarType::Half, at::ScalarType::BFloat16, values.scalar_type(), "coalesce_sparse_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
           uniqueOffsets.data_ptr<int64_t>(),
