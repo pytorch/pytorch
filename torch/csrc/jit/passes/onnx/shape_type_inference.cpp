@@ -1054,7 +1054,6 @@ void ProcessReshapeNode(Node* n, int opset_version) {
 
   if (ConstantValueMap::HasShapeValue(n->input(1)->debugName()) &&
       ConstantValueMap::HasShape(n->input(0)->debugName())) {
-        ConstantValueMap::PrintMaps();
     auto shape_vector_0 =
         ConstantValueMap::GetShape(n->input(0)->debugName()).value();
     auto shape_vector_1 =
