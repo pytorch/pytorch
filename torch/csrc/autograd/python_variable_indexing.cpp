@@ -32,7 +32,7 @@ namespace torch { namespace autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     py::object ret = py::reinterpret_steal<py::object>(handle_torch_function(self, "__len__"));
     Py_ssize_t length = PyLong_AsSsize_t(ret.ptr());
     if (PyErr_Occurred()) {
@@ -272,7 +272,7 @@ static inline THPObjectPtr wrapTuple(PyObject* index) {
 // indexing is needed, it calls C++ `at::indexing::dispatch_index`.
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
-  if (!THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (has_torch_function(self)) {
     return handle_torch_function_indexing(self, index);
   }
   const auto& self_ = THPVariable_Unpack(self);
@@ -359,8 +359,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   if (py_value == nullptr) {
     throw TypeError("Tensor does not support deleting items");
   }
-  if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
-      (!THPVariable_CheckExact(py_value) && check_has_torch_function(py_value))) {
+  if (has_torch_function({self, py_value})) {
     py::object ret = py::reinterpret_steal<py::object>(
       handle_torch_function_indexing(self, index, py_value)
     );

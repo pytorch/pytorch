@@ -1155,18 +1155,16 @@ class Tensor(torch._C._TensorBase):
 
         While not mandatory, we recommend making `__torch_function__` a classmethod.
         """
-        if kwargs is None:
-            kwargs = {}
-
         if not all(issubclass(cls, t) for t in types):
             return NotImplemented
 
-        with _C.DisableTorchFunction():
-            ret = func(*args, **kwargs)
-            if func in get_default_nowrap_functions():
-                return ret
-            else:
-                return _convert(ret, cls)
+        ret = torch._C._skip_one_hop_torch_function(
+            func, types, args, kwargs)
+
+        if func in get_default_nowrap_functions():
+            return ret
+
+        return _convert(ret, cls)
 
     __torch_dispatch__ = _C._disabled_torch_dispatch_impl
 
