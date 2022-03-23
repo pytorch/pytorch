@@ -10,6 +10,9 @@ import json
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Dict, Union, Optional
+from datetime import datetime
+
+from torch import monitor
 
 
 EventMetadataValue = Union[str, int, float, bool, None]
@@ -56,6 +59,23 @@ class Event:
 
     def serialize(self) -> str:
         return json.dumps(asdict(self))
+
+    def to_monitor_event(self) -> monitor.Event:
+        """
+        to_monitor_event converts this Event to a ``torch.monitor.Monitor`` event.
+        """
+        if self.timestamp:
+            timestamp = datetime.fromtimestamp(self.timestamp)
+        else:
+            timestamp = datetime.now()
+        data = {k: v for k, v in self.metadata.items() if v is not None}
+        data["name"] = self.name
+        data["source"] = self.source
+        return monitor.Event(
+            name="torch.distributed.elastic.Event",
+            timestamp=timestamp,
+            data=data,
+        )
 
 
 class NodeState(str, Enum):

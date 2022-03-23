@@ -27,6 +27,7 @@ import traceback
 from enum import Enum
 from typing import Dict, Optional
 
+from torch import monitor
 from torch.distributed.elastic.events.handlers import get_logging_handler
 
 from .api import (  # noqa: F401
@@ -69,6 +70,9 @@ def _get_or_create_logger(destination: str = "null") -> logging.Logger:
 
 def record(event: Event, destination: str = "null") -> None:
     _get_or_create_logger(destination).info(event.serialize())
+
+    if destination != "console" and isinstance(event, Event):
+        monitor.log_event(event.to_monitor_event())
 
 def record_rdzv_event(event: RdzvEvent) -> None:
     _get_or_create_logger("dynamic_rendezvous").info(event.serialize())

@@ -13,6 +13,7 @@ import unittest
 from dataclasses import asdict
 from unittest.mock import patch
 
+from torch import monitor
 from torch.distributed.elastic.events import (
     Event,
     EventSource,
@@ -20,6 +21,7 @@ from torch.distributed.elastic.events import (
     RdzvEvent,
     _get_or_create_logger,
     construct_and_record_rdzv_event,
+    record,
 )
 from torch.testing._internal.common_utils import run_tests
 
@@ -58,6 +60,51 @@ class EventLibTest(unittest.TestCase):
         json_event = event.serialize()
         deser_event = Event.deserialize(json_event)
         self.assert_event(event, deser_event)
+
+    def test_monitor(self):
+        event = Event(
+            name="test_event",
+            source=EventSource.AGENT,
+            metadata={"key1": "value1", "key2": 2, "key3": 1.0},
+            timestamp=1234,
+        )
+        monitor_event = event.to_monitor_event()
+        self.assertEqual(
+            monitor_event.data,
+            {
+                "name": "test_event",
+                "key1": "value1",
+                "key2": 2,
+                "key3": 1.0,
+                "source": "AGENT",
+            },
+        )
+        self.assertEqual(monitor_event.name, "torch.distributed.elastic.Event")
+        self.assertEqual(monitor_event.timestamp.timestamp(), 1234)
+
+    @patch("torch.distributed.elastic.events._get_or_create_logger")
+    def test_monitor_record(self, get_logging_handler):
+        event = Event(
+            name="test_event",
+            source=EventSource.AGENT,
+            metadata={"key1": "value1", "key2": 2, "key3": 1.0},
+        )
+        events = []
+
+        def handler(e: monitor.Event) -> None:
+            events.append(e)
+
+        handle = monitor.register_event_handler(handler)
+
+        try:
+            record(event)
+        finally:
+            monitor.unregister_event_handler(handle)
+
+        self.assertEqual(get_logging_handler.call_count, 1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].data["name"], "test_event")
+
 
 class RdzvEventLibTest(unittest.TestCase):
     @patch("torch.distributed.elastic.events.record_rdzv_event")
