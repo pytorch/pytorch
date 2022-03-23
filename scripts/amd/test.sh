@@ -24,18 +24,22 @@ LOG_DIR="${1:-$DEFAULT_LOG_DIR}"
 
 # bash scripts/amd/copy.sh
 
-# export PYTORCH_TEST_WITH_ROCM=1
+export PYTORCH_TEST_WITH_ROCM=1
 
 # PYTORCH_DIR="/var/lib/jenkins/pytorch"
-PYTORCH_DIR="/tmp/pytorch"
+# PYTORCH_DIR="/tmp/pytorch"
+PYTORCH_DIR="/dockerx/pytorch"
 # PYTORCH_DIR=$(pwd)
 
 cd $PYTORCH_DIR/test
 # ls
+pwd
 
 # tests
-# python test_fx.py --verbose
-# python test_ops.py --verbose TestMathBitsCUDA.test_conj_view_fft_fft2_cuda_complex64 2>&1 | tee $LOG_DIR/TestMathBitsCUDA.log
+# python test_spectral_ops.py --verbose | tee $LOG_DIR/test_spectral_ops.log
+# python test_ops.py --verbose | tee $LOG_DIR/test_ops.log
 
-pip3 install pandas openpyxl
-python3 /dockerx/pytorch/scripts/amd/run_fft_test.py
+# pip3 install pandas openpyxl
+# python3 /dockerx/pytorch/scripts/amd/run_fft_test.py
+
+python test_spectral_ops.py --verbose  TestFFTCUDA.test_empty_fft_fft_fft2_cuda_complex128 | tee $LOG_DIR/test_empty_fft_fft_fft2_cuda_complex128.log
