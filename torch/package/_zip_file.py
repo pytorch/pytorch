@@ -86,7 +86,7 @@ class DefaultPackageZipFileReader(zipfile.ZipFile, PackageZipFileReader):
         else:
             self.prefix = "/".join(file_name.strip("/").split('/')[1:])
         for record in prefixed_records:
-            self.records.append(record[len(self.prefix)+1:])
+            self.records.append(record[len(self.prefix) + 1:])
 
 
     def get_record(self, name):

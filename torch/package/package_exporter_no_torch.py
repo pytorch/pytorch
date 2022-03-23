@@ -10,7 +10,6 @@ from enum import Enum
 from pathlib import Path
 from typing import (
     Any,
-    cast,
     BinaryIO,
     Callable,
     Dict,
@@ -185,6 +184,7 @@ class PackageExporter:
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
         """
 
+        self.setup_zipfile(f)
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
@@ -215,13 +215,13 @@ class PackageExporter:
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
 
-    def setup_zipfile(self, f, zip_file_reader_type):
+    def setup_zipfile(self, f):
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None
         else:  # is a byte buffer
             self.buffer = f
-        self.zip_file = zip_file_reader_type(f)
+        self.zip_file = DefaultPackageZipFileWriter(f)
 
 
     def save_source_file(
@@ -846,7 +846,7 @@ class PackageExporter:
         return None
 
     def _persistent_id(self, obj):
-        ret = self.persistent_id()
+        ret = self.persistent_id(obj)
         if ret is not None:
             return ret
 

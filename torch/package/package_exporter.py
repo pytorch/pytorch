@@ -2,9 +2,17 @@ import torch
 from torch.types import Storage
 from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
 from torch.serialization import location_tag, normalize_storage_type
-from .package_exporter_no_torch import PackageExporter
+from .package_exporter_no_torch import PackageExporter as DefaultPackageExporter
+from .importer import sys_importer, Importer
+from typing import (
+    cast,
+    BinaryIO,
+    Sequence,
+    Union,
+)
+from pathlib import Path
 
-class PackageExporter(PackageExporter):
+class PackageExporter(DefaultPackageExporter):
 
     def __init__(
         self,
@@ -13,21 +21,16 @@ class PackageExporter(PackageExporter):
     ):
 
         super(PackageExporter, self).__init__(f, importer)
-        self.setup_zipfile(f, TorchScriptPackageZipFileWriter)
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file.zip_file_writer)
         self.storage_context = self.script_module_serializer.storage_context()
 
-    def close(self):
-        """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
-        It is preferable to use resource guard syntax instead::
-
-            with PackageExporter("file.zip") as e:
-                ...
-        """
-        self._execute_dependency_graph()
-        if self.torch_is_available:
-            self.script_module_serializer.write_files()
-        self._finalize_zip()
+    def setup_zipfile(self, f):
+        if isinstance(f, (Path, str)):
+            f = str(f)
+            self.buffer: Optional[BinaryIO] = None
+        else:  # is a byte buffer
+            self.buffer = f
+        self.zip_file = TorchScriptPackageZipFileWriter(f)
 
     def closing_function(self):
         self.script_module_serializer.write_files()

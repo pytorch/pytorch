@@ -6,7 +6,7 @@ from io import BytesIO
 from textwrap import dedent
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
-from torch.package.package_exporter import PackagingError
+from torch.package.package_exporter_no_torch import PackagingError
 from torch.testing._internal.common_utils import run_tests
 
 try:

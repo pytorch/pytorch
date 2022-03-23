@@ -5,9 +5,8 @@ import io
 import linecache
 import os.path
 import types
-from contextlib import contextmanager
 from pathlib import Path
-from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union, Type
+from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
 
 from ._directory_reader import DirectoryReader
@@ -76,7 +75,7 @@ class PackageImporter(Importer):
         self,
         file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
-        ):
+    ):
         # meant to be overwritten, it is ran at the end of the constructor
         pass
 
@@ -214,7 +213,7 @@ class PackageImporter(Importer):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
-            module = self.persistent_load(type_name, data)
+            module = self.persistent_load(typename, data)
             if module is not None:
                 return module
             if typename == "reduce_package":

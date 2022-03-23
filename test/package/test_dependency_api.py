@@ -7,7 +7,7 @@ from textwrap import dedent
 from unittest import skipIf
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
-from torch.package.package_exporter import PackagingError
+from torch.package.package_exporter_no_torch import PackagingError
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:
