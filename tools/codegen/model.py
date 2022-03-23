@@ -278,7 +278,6 @@ class Tag(Enum):
                 return v
         raise AssertionError(f'unknown tag {value}')
 
-# view ops can have potentially have an aliasing, non-aliasing, inplace or out variant.
 ViewSchemaKind = Enum('ViewSchemaKind', ('aliasing', 'inplace', 'out', 'non_aliasing'))
 
 # The basic input to the code generation is native_functions.yaml.
