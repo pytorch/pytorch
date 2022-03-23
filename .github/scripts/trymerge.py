@@ -251,6 +251,14 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
+@dataclass
+class GitHubComment:
+    body_text: str
+    author_login: str
+    author_association: str
+    editor_login: Optional[str]
+
+
 class GitHubPR:
     def __init__(self, org: str, project: str, pr_num: int) -> None:
         assert isinstance(pr_num, int)
@@ -400,18 +408,17 @@ class GitHubPR:
     def get_pr_url(self) -> str:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
 
-    def get_comment_body(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["bodyText"])
+    @staticmethod
+    def _comment_from_node(node: Any) -> GitHubComment:
+        editor = node["editor"]
+        return GitHubComment(body_text=node["bodyText"],
+                             author_login=node["author"]["login"],
+                             author_association=node["authorAssociation"],
+                             editor_login=editor["login"] if editor else None,
+                             )
 
-    def get_comment_author_login(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["author"]["login"])
-
-    def get_comment_editor_login(self, num: int = -1) -> Optional[str]:
-        rc = self.info["comments"]["nodes"][num]["editor"]
-        return rc["login"] if rc is not None else None
-
-    def get_comment_author_association(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
+    def get_last_comment(self) -> GitHubComment:
+        return self._comment_from_node(self.info["comments"]["nodes"][-1])
 
     def get_diff_revision(self) -> Optional[str]:
         rc = RE_DIFF_REV.search(self.get_body())
@@ -456,7 +463,7 @@ class GitHubPR:
             msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
-    def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
+    def merge_into(self, repo: GitRepo, *, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
         if self.has_internal_changes():
@@ -539,17 +546,18 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
-    if not RE_REVERT_CMD.match(pr.get_comment_body()):
-        raise RuntimeError(f"Comment {pr.get_comment_body()} does not seem to be a valid revert command")
-    if pr.get_comment_editor_login() is not None:
+    comment = pr.get_last_comment()
+    if not RE_REVERT_CMD.match(comment.body_text):
+        raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
+    if comment.editor_login is not None:
         return post_comment("Don't want to revert based on edited command")
-    author_association = pr.get_comment_author_association()
-    author_login = pr.get_comment_author_login()
+    author_association = comment.author_association
+    author_login = comment.author_login
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
     if author_association != expected_association and author_association != "OWNER":
