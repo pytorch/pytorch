@@ -536,12 +536,14 @@ class FullyShardedDataParallel(nn.Module):
         with torch.no_grad():
             p.data = p.to(cpu_device)
 
-    def _cast_inputs_to_precision(self, dtype: torch.dtype, *args: Any, **kwargs: Any) -> Tuple[Any, Any]:
+    def _cast_fp_inputs_to_precision(self, dtype: torch.dtype, *args: Any, **kwargs: Any) -> Tuple[Any, Any]:
         """
-        Casts tensors in args and kwargs to precision given by dtype.
+        Casts floating point tensors in args and kwargs to precision given by dtype.
         requires_grad field is respected.
         """
         def cast_fn(x: torch.Tensor) -> torch.Tensor:
+            if not torch.is_floating_point(x):
+                return x
             y = x.to(dtype)
             # Explicitly copy over requires_grad context since this is happening
             # within torch.no_grad.
@@ -580,13 +582,12 @@ class FullyShardedDataParallel(nn.Module):
         torch.cuda.current_stream().wait_stream(self._streams["mixed_precision_params"])
 
     @torch.no_grad()
-    def _free_mp_shard(self, params=None):
+    def _free_mp_shard(self, params: List[FlatParameter]):
         """
         Deallocate storage for parameter's mixed precision shard.
         """
         assert self.mixed_precision is not None
         current_stream = torch.cuda.current_stream()
-        params = params if params is not None else self.params
         for p in params:
             # mp_shard should always be allocated.
             assert p._mp_shard is not None
@@ -1335,7 +1336,9 @@ class FullyShardedDataParallel(nn.Module):
         # Cast inputs to their mixed precision type.
         if self._is_root and self.mixed_precision is not None:
             input_dtype = self.mixed_precision.param_dtype
-            args, kwargs = self._cast_inputs_to_precision(input_dtype, *args, **kwargs)
+            args, kwargs = self._cast_fp_inputs_to_precision(
+                input_dtype, *args, **kwargs
+            )
 
         # All-gather full parameters, moving them to compute_device if
         # necessary.
@@ -1356,7 +1359,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.reshard_after_forward:
             self._free_full_params()
             if self.mixed_precision is not None:
-                self._free_mp_shard()
+                self._free_mp_shard(self.params)
         # Switch to original local shards of params. We maintain this invariant throughout
         # the code, i.e., ``p.data == p._local_shard`` after each function. This
         # also ensures that after the first forward, the optimizer state will be
@@ -1768,7 +1771,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.mixed_precision:
             # Noop if reshard_after_forward=True because we'd free the param
             # shard when rebuilding the full params in the pre_beckward_hook.
-            self._free_mp_shard([param])
+            self._free_mp_shard(cast(List[FlatParameter], [param]))
 
         # Switch to local shard after backward. Note that
         # when CPU offload is enabled, _use_param_local_shard implicitly
@@ -2045,8 +2048,7 @@ class FullyShardedDataParallel(nn.Module):
                 )
                 if mixed_precision_cast_ran:
                     self._cast_param_shards_to_dtype()
-
-                if mixed_precision_cast_ran:
+                    # TODO: remove below
                     for p in self.params:
                         assert p.dtype == self.mixed_precision.param_dtype
                 # We can skip moving params to GPU if mixed precision, as p.data
@@ -2065,7 +2067,7 @@ class FullyShardedDataParallel(nn.Module):
                         # p.data should be the same type as p._mp_shard, and it
                         # is safe to free.
                         assert p.data.dtype == p._mp_shard.dtype
-                        # Safe to free because p.data points to the fp16 shard.
+                        # Safe to free because p.data points to the mp shard.
                         output_tensors.append((p.data, True))
                     else:
                         # p.data points to the unsharded parameter, so not safe to
@@ -2082,7 +2084,7 @@ class FullyShardedDataParallel(nn.Module):
                     if mixed_precision_cast_ran:
                         if p._full_param_padded.dtype != self.mixed_precision.param_dtype:
                             raise ValueError(
-                                "rebuild_full_param: Expected full param to be "
+                                "_rebuild_full_params: Expected full param to be "
                                 f"of type {self.mixed_precision.param_dtype}, "
                                 f"but got {p._full_param_padded.dtype}!"
                             )
@@ -2131,7 +2133,7 @@ class FullyShardedDataParallel(nn.Module):
                     # We can free the reduced precision shard as we have the
                     # full precision parameter.
                     if self.mixed_precision is not None:
-                        self._free_mp_shard([p])
+                        self._free_mp_shard(cast(List[FlatParameter], [p]))
         return output_tensors
 
     @torch.no_grad()
@@ -2176,7 +2178,7 @@ class FullyShardedDataParallel(nn.Module):
             # e.g., world_size == 1
             if not p._is_sharded:  # type: ignore[attr-defined]
                 if self.mixed_precision is not None:
-                    self._free_mp_shard([p])
+                    self._free_mp_shard(cast(List[FlatParameter], [p]))
                 continue
             # Don't let PyTorch reuse this memory until all work in the current
             # stream is complete.

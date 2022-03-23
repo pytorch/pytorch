@@ -17,6 +17,7 @@ from torch.distributed.fsdp import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
+    TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -329,6 +330,25 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             full_precision_param_dtype,
             ShardingStrategy.FULL_SHARD,
         )
+
+    def test_mixed_precision_embedding_table(self):
+        # Basic test to ensure int inputs are not casted which would break
+        # modules such as embedding tables.
+        mp_config = MixedPrecision()
+        model = self._get_wrapped_model(
+            group=torch.distributed.distributed_c10d._get_default_group(),
+            config={"mixed_precision": mp_config}
+        )
+        optim = torch.optim.SGD(model.parameters(), lr=0.1)
+        for _ in range(6):
+            inp = model.module.get_input(torch.device("cuda"))
+            # This would fail if we casted integer module inputs such as for
+            # embedding tables.
+            output = model(*inp)
+            loss = model.module.get_loss(inp, output).cuda()
+            self.assertEqual(loss.dtype, mp_config.param_dtype)
+            model.module.run_backward(loss)
+            optim.step()
 
 class TestFSDPMixedPrecisionNoShard(TestFSDPMixedPrecision):
     """

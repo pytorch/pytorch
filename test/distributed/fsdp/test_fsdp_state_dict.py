@@ -167,7 +167,7 @@ class TestFSDPStateDict(FSDPTest):
         _zero_model(model)
 
         # Ensure checkpointed params have the full param dtype
-        for _, tensor in state_dict.items():
+        for tensor in state_dict.values():
             self.assertEqual(tensor.dtype, torch.float32)
 
         # Load state_dict into zeroed model
