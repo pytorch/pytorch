@@ -1402,6 +1402,57 @@ else:
 
         backward_func(self, device)
 
+    def test_invalid_shapes_grid_sampler(self, device):
+        make_arg = partial(
+            make_tensor, device=device, dtype=torch.float64, requires_grad=True)
+
+        inputs = (
+            # input, grid
+            ((5, 5, 5, 5, 5,), (1, 1, 1, 4, 4,)),  # 3d
+            ((5, 5, 5, 5,), (1, 1, 4, 4,)),  # 2d
+        )
+
+        interpolation_mode = 0
+        padding_mode = 0
+        align_corners = True
+
+        err = "expected grid and input to have same batch size"
+
+        for input, grid in inputs:
+            input = make_arg(input)
+            grid = make_arg(grid, low=-1, high=1)
+
+            # Wrapper for the 2d, 3d, and cuDNN functions listed below.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler_2d(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 3d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch.grid_sampler_3d(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input.
+            with self.assertRaisesRegex(RuntimeError, err):
+                torch._grid_sampler_2d_cpu_fallback(
+                    input, grid, interpolation_mode, padding_mode,
+                    align_corners)
+
+            # Expects 2d input, on CUDA.
+            # Note: not using == "cuda" here to test meta and possibly other
+            # backends.
+            if device != "cpu":
+                with self.assertRaisesRegex(RuntimeError, err):
+                    torch.cudnn_grid_sampler(input, grid)
+
     def test_embedding_scalar_weight_error(self, device):
         indices = torch.rand(2, 2, device=device).long()
         weights = [

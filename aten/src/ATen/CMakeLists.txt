@@ -117,6 +117,7 @@ file(GLOB native_cpu_h "native/cpu/*.h")
 
 file(GLOB native_cuda_cu "native/cuda/*.cu")
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
+file(GLOB native_grid_sampler_utils_cpp "native/GridSamplerUtils.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
@@ -205,6 +206,7 @@ if(USE_CUDA)
   list(APPEND ATen_CUDA_CPP_SRCS
     ${cuda_cpp}
     ${native_cuda_cpp}
+    ${native_grid_sampler_utils_cpp}
     ${native_cudnn_cpp}
     ${native_miopen_cpp}
     ${native_quantized_cuda_cpp}
