@@ -374,7 +374,8 @@ def _match_static_pattern(
     node: Node,
     modules: Dict[str, nn.Module],
     qconfig_map: Dict[str, QConfigAny],
-    matching_modules_or_ops: List[Callable]
+    matching_modules_or_ops: List[Callable],
+    dequantize_node_arg_indices: List[int]
 ) -> Union[Tuple[Node, Node, Node], Tuple[None, None, None]]:
     """
     Match the pattern (dequantize - ref node - quantize) against the node provided.
@@ -386,18 +387,20 @@ def _match_static_pattern(
     Otherwise, if there is no match, return a 3-tuple of (None, None, None).
 
     Parameters:
-      node: the `torch.fx.Node` to match against.
-      modules: a mapping from node names to modules in the model graph, used for module lookup.
-      qconfig_map: a mapping from node names to the qconfigs associated with the nodes.
-          If the corresponding qconfig for a node is None, then return no match.
-      matching_modules_or_ops: either a list of functions or a list of `torch.nn.Module`s.
+      node: The `torch.fx.Node` to match against.
+      modules: A mapping from node names to modules in the model graph, used for module lookup.
+      qconfig_map: A mapping from node names to the qconfigs associated with the nodes.
+          If the corresponding qconfig for the reference node is None, then return no match.
+      matching_modules_or_ops: Either a list of functions or a list of `torch.nn.Module`s.
           If the reference node is not in this list, then return no match.
+      dequantize_node_arg_indices: A list of indices in the reference node args where dequantize
+          nodes may be present. An empty list means skipping the check for dequantize nodes.
     """
-    skip_lowering_value = (None, None, None)
+    SKIP_LOWERING_VALUE = (None, None, None)
 
     # Match quantize node
     if node.op != "call_function" or node.target != torch.quantize_per_tensor:
-        return skip_lowering_value
+        return SKIP_LOWERING_VALUE
     q_node = node
     ref_node = q_node.args[0]
     assert(isinstance(ref_node, Node))
@@ -411,7 +414,7 @@ def _match_static_pattern(
     else:
         relu_node = None
     if should_skip_lowering(ref_node, qconfig_map):
-        return skip_lowering_value
+        return SKIP_LOWERING_VALUE
 
     # Match reference module or functional
     if isinstance(matching_modules_or_ops[0], type) and issubclass(matching_modules_or_ops[0], nn.Module):
@@ -421,19 +424,22 @@ def _match_static_pattern(
         expected_op = "call_function"
         match_key = ref_node.target
     if ref_node.op != expected_op or match_key not in matching_modules_or_ops:
-        return skip_lowering_value
+        return SKIP_LOWERING_VALUE
 
     # Match dequantize node(s). Both of the following conditions must pass:
-    # (1) All `torch.fx.Node`s must be a dequantize node or a get_attr node (for bias)
+    # (1) All `torch.fx.Node`s at the matching indices must be a dequantize node
     # (2) There must be at least one dequantize node
     matched_dequantize = False
-    for arg in ref_node.args:
+    for i in dequantize_node_arg_indices:
+        if i >= len(ref_node.args):
+            raise ValueError("Dequantize index %s exceeded reference node's arg length %s" % (i, len(ref_node.args)))
+        arg = ref_node.args[i]
         if is_dequantize_node(arg):
             matched_dequantize = True
-        elif isinstance(arg, Node) and arg.op != "get_attr":
-            return skip_lowering_value
+        elif isinstance(arg, Node):
+            return SKIP_LOWERING_VALUE
     if not matched_dequantize:
-        return skip_lowering_value
+        return SKIP_LOWERING_VALUE
 
     return (q_node, relu_node, ref_node)
 
@@ -449,7 +455,8 @@ def _lower_static_weighted_ref_module(
     for n in model.graph.nodes:
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
         matching_modules = list(STATIC_LOWER_MODULE_MAP.keys()) + list(STATIC_LOWER_FUSED_MODULE_MAP.keys())
-        (q_node, relu_node, ref_node) = _match_static_pattern(n, modules, qconfig_map, matching_modules)  # type: ignore[arg-type]
+        (q_node, relu_node, ref_node) = _match_static_pattern(
+            n, modules, qconfig_map, matching_modules, dequantize_node_arg_indices=[0])  # type: ignore[arg-type]
         if q_node is None:
             continue
         assert(ref_node is not None)
@@ -461,8 +468,6 @@ def _lower_static_weighted_ref_module(
         assert(issubclass(ref_class, nn.Module))
 
         # Step 1: Change this pattern to use the corresponding quantized module
-        output_scale = getattr(model, scale_node.target)
-        output_zero_point = getattr(model, zero_point_node.target)
         # For fused modules, we also check whether the inner module is a reference module
         # If so, we replace the entire fused module with the corresponding quantized module
         if ref_class in STATIC_LOWER_FUSED_MODULE_MAP:
@@ -471,7 +476,8 @@ def _lower_static_weighted_ref_module(
                 continue
         else:
             q_class = STATIC_LOWER_MODULE_MAP[ref_class]
-        assert issubclass(q_class, WeightedQuantizedModule)  # suppress mypy warnings
+        output_scale = getattr(model, scale_node.target)
+        output_zero_point = getattr(model, zero_point_node.target)
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
         # replace reference module with quantized module
         parent_name, module_name = _parent_name(ref_node.target)
@@ -581,7 +587,8 @@ def _lower_static_weighted_ref_functional(
     for n in model.graph.nodes:
         # Step 0: Find nodes that match this pattern (dequantize - functional op - quantize)
         matching_ops = list(STATIC_LOWER_FUNCTIONAL_MAP.keys())
-        (q_node, relu_node, func_node) = _match_static_pattern(n, modules, qconfig_map, matching_ops)
+        (q_node, relu_node, func_node) = _match_static_pattern(
+            n, modules, qconfig_map, matching_ops, dequantize_node_arg_indices=[0, 1])
         if q_node is None:
             continue
         assert(func_node is not None)
@@ -766,7 +773,8 @@ def _lower_quantized_binary_op(
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         # Step 0: Find nodes that match this pattern (dequantize - ref module - quantize)
-        (q_node, relu_node, bop_node) = _match_static_pattern(n, modules, qconfig_map, binary_ops_to_lower)
+        (q_node, relu_node, bop_node) = _match_static_pattern(
+            n, modules, qconfig_map, binary_ops_to_lower, dequantize_node_arg_indices=[0, 1])
         if q_node is None:
             continue
         assert(bop_node is not None)
