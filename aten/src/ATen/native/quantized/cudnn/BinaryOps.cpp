@@ -13,6 +13,7 @@
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
 #include <c10/core/QScheme.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
 #include <unordered_map>
@@ -23,6 +24,7 @@ struct CacheKey {
   uint8_t input_a_alignment;
   uint8_t input_b_alignment;
   uint8_t output_alignment;
+  bool kReluFused;
 };
 std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native::ParamsHash<CacheKey>, at::native::ParamsEqual<CacheKey>> execution_plan_cache;
 }
@@ -47,28 +49,27 @@ inline void check_inputs(const Tensor& qa, const Tensor& qb) {
 // currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized add
 template <bool kReluFused = false>
 Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point) {
-  std::cout << "cuda add" << std::endl;
   if (qa.numel() == 0) {
     return Tensor{};
   }
   // TODO: add shape checking? I think this is contingent on whether we support broadcasting in qadd, so maybe leave this out for now?
   check_inputs(qa, qb);
 
-  // cudnn expects tensors to be at least 3D. So we will append dummy dimensions if the input tensors are not at least 3D
+  // cudnn expects tensors to be at least 3D. So we will prepend dummy dimensions if the input tensors are not at least 3D
+  auto orig_sizes = qa.sizes().vec();
   if (qa.dim() < 3) {
-    std::vector<int64_t> new_sizes{qa.sizes().vec()};
+    std::vector<int64_t> new_sizes{orig_sizes};
     while (new_sizes.size() < 3) {
       new_sizes.emplace_back(1);
     }
     // I think cudnn expects leading dimensions to be the dummy dimensions
     std::swap(new_sizes.front(), new_sizes.back());
-    qa.view(new_sizes);
-    qb.view(new_sizes);
+    qa = qa.view(new_sizes);
+    qb = qb.view(new_sizes);
   }
 
-
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  auto requantize_multiplier = qa.q_scale() * qb.q_scale() / output_scale;
+  at::Tensor qa_scaled = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   at::Tensor quantized_output = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
@@ -76,13 +77,15 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       output_zero_point);
   // TODO: When cudnn enables support for broadcasting, we can remove this tensor
   at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  requantize_multiplier_tensor.fill_(requantize_multiplier);
+  requantize_multiplier_tensor.fill_(qa.q_scale() / output_scale);
+  at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
+  rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
   cudnnHandle_t handle = at::native::getCudnnHandle();
   CacheKey key;
   bool deterministic{true};
   bool allow_tf32{false};
-
+  key.kReluFused = kReluFused;
   key.input_a_alignment = cudnn_utils::getAlignment(qa);
   key.input_b_alignment = cudnn_utils::getAlignment(qb);
   key.output_alignment = cudnn_utils::getAlignment(add_output);
@@ -92,12 +95,12 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     auto workspace = at::empty({workspace_size}, qa.options().dtype(at::kByte));
     std::vector<void *> data_ptrs;
     std::vector<int64_t> uids;
-    data_ptrs.reserve(10);
-    uids.reserve(10);
-    data_ptrs = {reinterpret_cast<int8_t*>(qa.data_ptr()), reinterpret_cast<int8_t*>(qb.data_ptr()),
-                                           add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
-                                           reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
-    uids = {'a', 'b', 'c', 'r', 'q'};
+    data_ptrs.reserve(8);
+    uids.reserve(8);
+    data_ptrs = {reinterpret_cast<int8_t*>(qb.data_ptr()), rhs_multiplier_tensor.data_ptr(), add_output.data_ptr(),
+                 reinterpret_cast<int8_t*>(qa.data_ptr()), add_output.data_ptr(), requantize_multiplier_tensor.data_ptr(),
+                 reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
+    uids = {'b', 'm', 'c', 'a', 'p', 'r', 'q'};
     if (kReluFused) {
         data_ptrs.emplace_back(add_output.data_ptr()),
         uids.emplace_back('f');
@@ -116,20 +119,28 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   if (search != execution_plan_cache.end()) {
     cudnn_frontend::ManagedOpaqueDescriptor plan_desc = search->second;
     run(plan_desc);
-    return quantized_output;
+    return quantized_output.view(orig_sizes);
   }
 
-  // add_op computes qa + qb  (both inputs are int8)
+  // computes qb_int8 * ( qb_scale/qa_scale )
+  auto rhs_mult_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
+      .setxDesc(cudnn_utils::getTensorDescriptor(qb.sizes(), qb.strides(), CUDNN_DATA_INT8, 'b', key.input_b_alignment))
+      .setbDesc(cudnn_utils::getTensorDescriptor(rhs_multiplier_tensor, 'm', cudnn_utils::getAlignment(rhs_multiplier_tensor)))
+      .setyDesc(cudnn_utils::getTensorDescriptor(add_output, 'c', key.output_alignment))
+      .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(add_output)))
+      .build();
+
+  // add_op computes (qa_int8 + qb_int8 * ( qb_scale/qa_scale ) )
   // add_output is a fp32 tensor for accumulation purposes
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-      .setxDesc(cudnn_utils::getTensorDescriptor(qa.sizes(), qa.strides(), CUDNN_DATA_INT8, 'a', key.input_a_alignment))
-      .setbDesc(cudnn_utils::getTensorDescriptor(qb.sizes(), qb.strides(), CUDNN_DATA_INT8, 'b', key.input_b_alignment))
-      .setyDesc(cudnn_utils::getTensorDescriptor(add_output, 'c', key.output_alignment))
+      .setxDesc(rhs_mult_op.getOutputTensor())
+      .setbDesc(cudnn_utils::getTensorDescriptor(qa.sizes(), qa.strides(), CUDNN_DATA_INT8, 'a', key.input_a_alignment))
+      .setyDesc(cudnn_utils::getTensorDescriptor(add_output, 'p', key.output_alignment))
       .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(add_output)))
       .build();
 
   // relu_op computes
-  // relu( (qa + qb) * (qa_scale * qb_scale) / out_scale )
+  // relu( (qa_int8 + qb_int8 * ( qb_scale/qa_scale ) )  )
   // output is a fp32 tensor
   c10::optional<cudnn_frontend::Operation> relu_op;
   if (kReluFused) {
@@ -142,8 +153,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   }
 
   // requant_op computes
-  // (qa_int8 + qb_int8) * (qa_scale * qb_scale) / out_scale
-  // where requantize_multiplier = (qa_scale * qb_scale) / out_scale
+  // (a_int8 + b_int8 * ( b_scale/a_scale) ) * a_scale / out_scale
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : add_op.getOutputTensor())
     .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 'r', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
@@ -151,7 +161,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
 
-  std::vector<cudnn_frontend::Operation const *> ops{&add_op};
+  std::vector<cudnn_frontend::Operation const *> ops{&rhs_mult_op, &add_op};
   if (kReluFused) {
     ops.emplace_back(&(relu_op.value()));
   }
@@ -179,7 +189,6 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   cudnn_utils::filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
   cudnn_utils::filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
   for (auto &cfg : engine_configs) {
-    std::cout << "cfg" << std::endl;
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
         .setHandle(handle)
@@ -188,8 +197,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       auto plan_desc = plan.get_desc();
       run(plan_desc);
       execution_plan_cache[key] = plan_desc;
-      std::cout << "here" << std::endl;
-      return quantized_output;
+      return quantized_output.view(orig_sizes);
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
