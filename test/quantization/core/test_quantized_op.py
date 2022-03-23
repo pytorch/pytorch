@@ -830,11 +830,11 @@ class TestQuantizedOps(TestCase):
                              msg="AddReLU.out failed")
 
     """Tests the correctness of the cudnn add and add_relu op
-    (Similar to test_qadd_relu_same_qparams, will probably merge in the future)"""
+    (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    # @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
-    #                "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
-    #                "after it is built by default")
+    @unittest.skip("Local only - currently the qconv2d_cudnn op is bulid "
+                   "with USE_EXPERIMENTAL_CUDNN_V8_API, we can enable the test "
+                   "after it is built by default")
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
@@ -854,7 +854,7 @@ class TestQuantizedOps(TestCase):
         qB = torch.quantize_per_tensor(B, scale=scale_B, zero_point=zero_point,
                                         dtype=dtype)
         # Add ground truth
-        C = (qA.dequantize() + qB.dequantize()).cpu().numpy()
+        C = (qA.dequantize() + qB.dequantize()).to(device="cpu").numpy()
         qC = _quantize(C, scale_C, zero_point, dtype=np_dtype[dtype])
         qC_hat = add(qA, qB, scale=scale_C, zero_point=zero_point).to(device="cpu")
         np.testing.assert_equal(qC, qC_hat.int_repr(),

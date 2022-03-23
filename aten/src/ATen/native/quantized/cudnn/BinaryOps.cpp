@@ -62,14 +62,13 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
     while (new_sizes.size() < 3) {
       new_sizes.emplace_back(1);
     }
-    // I think cudnn expects leading dimensions to be the dummy dimensions
+    // I think cudnn expects leading dimensions to be the dummy dimensions, so we need to swap
     std::swap(new_sizes.front(), new_sizes.back());
     qa = qa.view(new_sizes);
     qb = qb.view(new_sizes);
   }
 
   at::Tensor add_output = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
-  at::Tensor qa_scaled = at::empty(qa.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   at::Tensor quantized_output = at::_empty_affine_quantized(
       qa.sizes(),
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
