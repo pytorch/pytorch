@@ -4146,6 +4146,20 @@ Example::
            size=(3, 3), nnz=1, layout=torch.sparse_coo)
 """)
 
+add_docstr_all('to_sparse_csr',
+               r"""
+to_sparse_csr() -> Tensor
+Convert a tensor to compressed row storage format. Only works with 2D tensors.
+
+Example::
+
+    >>> dense = torch.randn(5, 5)
+    >>> sparse = dense.to_sparse_csr()
+    >>> sparse._nnz()
+    25
+
+""")
+
 add_docstr_all('to_mkldnn',
                r"""
 to_mkldnn() -> Tensor
@@ -5044,13 +5058,6 @@ are freshly created instead of aliasing the input.
 add_docstr_all("expand_copy",
                r"""
 Performs the same operation as :func:`torch.Tensor.expand`, but all output tensors
-are freshly created instead of aliasing the input.
-""")
-
-
-add_docstr_all("narrow_copy",
-               r"""
-Performs the same operation as :func:`torch.Tensor.narrow`, but all output tensors
 are freshly created instead of aliasing the input.
 """)
 

@@ -5491,6 +5491,13 @@
     CPU, CUDA: dense_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
 
+- func: to_sparse_csr(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: dense_to_sparse_csr
+    SparseCPU, SparseCUDA: coo_to_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csr
+
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
