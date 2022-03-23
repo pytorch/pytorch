@@ -47,6 +47,8 @@ class QuantizeHandler(ABC):
         # the last node of the matched pattern
         self.last_node = node
 
+    # TODO: can remove after the is_dynamic flag is defined, so that we can
+    # move embedding op to backend_config_dict
     def input_output_observed(self) -> bool:
         """
         Returns True if the pattern matched to this qhandler could be
@@ -58,20 +60,16 @@ class QuantizeHandler(ABC):
         """
         Returns True if the operator works for both floating point and
         quantized input, and does some computation based on the input Tensor,
+        or the ops that only re-arranges the Tensor values or query some metadata
+        about the Tensor
         so we need to insert observer/fake_quant for the output of the
-        operator since the distribution of values is different for input and output
-        Tensors (for HistogramObserver)
-        while they share the same quantization parameters
-        Example: avgpool2d
-        """
-        return False
-
-    def is_general_tensor_shape_op(self) -> bool:
-        """ Similar to is_general_tensor_value_op, this is a check
-        for ops that works for both floating point and quantized input,
-        that only re-arranges the Tensor values or query some metadata about the Tensor
-        We don't insert observer/fake_quant for the output of these operators
-        Example: reshape, transpose, maxpool2d
+        operator (same observer instance as input)
+        since the distribution of values is different for input and output
+        Tensors (for HistogramObserver) while they share the same quantization
+        parameters
+        Example operator: avgpool2d, reshape, transpose, maxpool2d
+        Example observed operator:
+        observer_0 - avgpool2d - observer_0 (same observer instance as input)
         """
         return False
 
@@ -102,6 +100,8 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
+    # This can be removed after we move all the ops using flag to backend_config_dict
+    # since now we are doing this check in the prepare
     def is_output_quantized(self, qconfig):
         """ Returns true if the output node of convert is quantized
         when is_reference is False, we would return float node when a certain dtype
@@ -504,7 +504,7 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     e.g. size, and we do not insert extra observer/fake_quant
     for the output of the operator.
     """
-    def is_general_tensor_shape_op(self) -> bool:
+    def is_general_tensor_value_op(self) -> bool:
         return True
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
