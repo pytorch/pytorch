@@ -628,6 +628,13 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
             assert os.path.exists(os.path.join(tmpdir, 'ailzhang_torchhub_example_master'))
 
+        # Test that set_dir properly calls expanduser()
+        # non-regression test for https://github.com/pytorch/pytorch/issues/69761
+        new_dir = os.path.join("~", "hub")
+        torch.hub.set_dir(new_dir)
+        self.assertEqual(torch.hub.get_dir(), os.path.expanduser(new_dir))
+
+
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
@@ -666,14 +673,6 @@ class TestHub(TestCase):
     def test_load_zip_1_6_checkpoint(self):
         hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', pretrained=True, verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
-
-    def test_hub_dir_expand(self):
-        with tempfile.TemporaryDirectory('cur_dir') as dirname:
-            home_dir = os.path.join("~", "hub")
-            torch.hub.set_dir(home_dir)
-            # This doesn't actually ensure that the directories will be created downstream in the proper place at ~/hub/,
-            #  but that would kind of defeat the purpose of using a tempdir
-            self.assertEqual(torch.hub.get_dir(), os.path.expanduser(home_dir))  # Should not be dirname/~/hub
 
     @retry(Exception, tries=3)
     def test_hub_parse_repo_info(self):
