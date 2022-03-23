@@ -1304,7 +1304,7 @@ TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1
     at::NoNamesGuard guard;
     addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
     if (use_gelu) {
-      at::gelu_out(const_cast<Tensor&>(result), result);
+      at::gelu_(const_cast<Tensor&>(result));
     } else {
       at::relu_(const_cast<Tensor&>(result));
     }
