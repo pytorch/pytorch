@@ -173,6 +173,11 @@ def main() -> None:
         action='store_true',
         help='Enable generation of the torch::lazy TorchScript backend'
     )
+    parser.add_argument(
+        '--per_operator_headers',
+        action='store_true',
+        help='Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built'
+    )
     options = parser.parse_args()
 
     generate_code(
@@ -208,7 +213,8 @@ def main() -> None:
                             impl_path=None,
                             gen_ts_lowerings=True,
                             node_base="TsNode",
-                            node_base_hdr="torch/csrc/lazy/ts_backend/ts_node.h")
+                            node_base_hdr="torch/csrc/lazy/ts_backend/ts_node.h",
+                            per_operator_headers=options.per_operator_headers)
 
 
 if __name__ == "__main__":
