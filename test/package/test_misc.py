@@ -4,11 +4,13 @@
 import inspect
 import platform
 from io import BytesIO
+from pathlib import Path
 from textwrap import dedent
+from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
 from torch.package.package_exporter import PackagingError
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE, run_tests
 
 try:
     from .common import PackageTestCase
@@ -120,6 +122,15 @@ class TestMisc(PackageTestCase):
         hi = PackageImporter(buffer)
 
         self.assertEqual(hi.python_version(), platform.python_version())
+
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
+    def test_load_python_version_from_package(self):
+        """Tests loading a package with a python version embdded"""
+        importer1 = PackageImporter(f"{Path(__file__).parent}/package_e/test_nn_module.pt")
+        self.assertEqual(importer1.python_version(), "3.9.7")
 
     def test_file_structure_has_file(self):
         """
