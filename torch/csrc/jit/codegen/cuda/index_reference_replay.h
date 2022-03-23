@@ -37,6 +37,10 @@ class IndexReferenceReplay : public OptInDispatch {
   // Return the concrete entry of the non-reference id
   IterDomain* toConcrete(IterDomain* id);
 
+  //! Remove mappings of reference IDs that do not end up being used
+  //! in the final reference domain
+  void cleanUpMappingsOfUnusedDomains(TensorDomain* reference_domain);
+
   using OptInDispatch::handle;
 
   void handle(Split* split) override;

@@ -213,16 +213,16 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     ref_id->parallelize(loop_id->getParallelType());
   }
 
+  TensorDomain* domain = nullptr;
   // If no domains were replayed to make the reference, just return the root
   // domain.
   if (std::none_of(
           loops_replayed_domain.begin(),
           loops_replayed_domain.end(),
           [](IterDomain* id) { return id->definition() != nullptr; })) {
-    auto domain = SimplifyingIrBuilder::create<TensorDomain>(
+    domain = SimplifyingIrBuilder::create<TensorDomain>(
         // If there was no replay only return a domain with a root domain.
         loops_replayed_domain);
-    return domain;
   } else {
     // Construct the root domain as the inputs of the replayed domain
     auto loops_replayed_domain_vals =
@@ -254,11 +254,48 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
     }
 
     // Create and return the reference.
-    auto domain = SimplifyingIrBuilder::create<TensorDomain>(
+    domain = SimplifyingIrBuilder::create<TensorDomain>(
         std::vector<IterDomain*>(
             root_domain_ids.begin(), root_domain_ids.end()),
         loops_replayed_domain);
-    return domain;
+  }
+
+  cleanUpMappingsOfUnusedDomains(domain);
+  return domain;
+}
+
+void IndexReferenceReplay::cleanUpMappingsOfUnusedDomains(
+    TensorDomain* ref_domain) {
+  // The ref-to-concrete and concrete-to-ref maps can have mappings of
+  // domains that do not end up being used in the final reference
+  // domain. Drop them as they are not really part of reference
+  // tensor.
+
+  const auto all_vals = DependencyCheck::getAllValsBetween(
+      {ref_domain->getRootDomain().begin(), ref_domain->getRootDomain().end()},
+      {ref_domain->domain().begin(), ref_domain->domain().end()});
+
+  const std::unordered_set<IterDomain*> all_id_set(
+      ir_utils::filterByType<IterDomain>(all_vals).begin(),
+      ir_utils::filterByType<IterDomain>(all_vals).end());
+  for (auto it = ref_id_to_concrete_.begin();
+       it != ref_id_to_concrete_.end();) {
+    IterDomain* ref_id = it->first;
+    if (all_id_set.find(ref_id) == all_id_set.end()) {
+      it = ref_id_to_concrete_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  for (auto it = concrete_to_ref_id_.begin();
+       it != concrete_to_ref_id_.end();) {
+    IterDomain* ref_id = it->second;
+    if (all_id_set.find(ref_id) == all_id_set.end()) {
+      it = concrete_to_ref_id_.erase(it);
+    } else {
+      ++it;
+    }
   }
 }
 
