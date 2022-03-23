@@ -806,7 +806,9 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
   });
 
-  GRAPH_DUMP(" forward graph: ", &graph);
+  std::stringstream ss;
+  ss << " forward graph (" << (void*) &graph << "):";
+  GRAPH_DEBUG(ss.str(), &graph);
   GRAPH_DEBUG(" backward graph: ", *(reverse_block->owningNode()));
   // reverse_node was just to hold onto reverse_block in a debuggable way
   // we can remove it now.

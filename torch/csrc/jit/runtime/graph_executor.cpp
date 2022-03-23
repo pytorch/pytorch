@@ -277,14 +277,18 @@ struct DifferentiableGraphBackward : public autograd::Node {
     variable_list outputs;
     outputs.reserve(num_outputs());
     size_t output_index = 0;
+    GRAPH_DEBUG((void*) this, " expecting ", num_outputs());
     for (IValue& v : stack) {
       if (v.isTensorList()) {
+        GRAPH_DEBUG((void*) this, " apply: tensor list of size ", v.toTensorList().size());
         for (at::Tensor tensor : v.toTensorList()) {
           produceOutput(output_index++, std::move(tensor), outputs);
         }
       } else if (v.isTensor()) {
+        GRAPH_DEBUG((void*) this, " apply: tensor");
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
       } else {
+        GRAPH_DEBUG((void*) this, " apply: other");
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(v.isNone());
         output_index++;
         // Input grad can also be None even if it requires grad
@@ -292,6 +296,7 @@ struct DifferentiableGraphBackward : public autograd::Node {
         outputs.emplace_back();
       }
     }
+    GRAPH_DEBUG("Got the expected number of outputs? ", num_outputs() == outputs.size());
     return outputs;
   }
 
@@ -307,12 +312,16 @@ struct DifferentiableGraphBackward : public autograd::Node {
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
+      GRAPH_DEBUG((void*) this, " add output for ivalue, tensor list with ", value.toTensorList().size(), " elements");
       for (const at::Tensor tensor : value.toTensorList()) {
+        std::cerr << ".";
         addOutputForTensor(tensor);
       }
     } else if (value.isTensor()) {
+      GRAPH_DEBUG((void*) this, " add output for ivalue, tensor");
       addOutputForTensor(value.toTensor());
     } else {
+      GRAPH_DEBUG((void*) this, " add output for ivalue, other");
       // We could have None passed here via `Optional[Tensor]`
       add_next_edge(autograd::Edge{});
     }
@@ -395,6 +404,8 @@ struct DifferentiableGraphOp {
         grad.df_input_vjps.size(),
         grad.df_input_captured_inputs.size() +
             grad.df_input_captured_outputs.size());
+
+    GRAPH_DEBUG("DifferentiableGraphBackward ", (void*) &*grad_fn, " uses autodiff forward graph ", (void*) &*grad.f);
 
     {
       auto inputs = last(stack, num_inputs);
