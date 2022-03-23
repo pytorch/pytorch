@@ -13,7 +13,10 @@ from typing import (
 from pathlib import Path
 
 class PackageExporter(DefaultPackageExporter):
-
+    """
+    A package exporter for specialized functionality for torch. Specifically it uses the optimizations
+    of torch's storage in order to not duplicate tensors.
+    """
     def __init__(
         self,
         f: Union[str, Path, BinaryIO],
@@ -25,6 +28,7 @@ class PackageExporter(DefaultPackageExporter):
         self.storage_context = self.script_module_serializer.storage_context()
 
     def setup_zipfile(self, f):
+        # uses zipfile which is designed for torch models
         if isinstance(f, (Path, str)):
             f = str(f)
             self.buffer: Optional[BinaryIO] = None
@@ -33,9 +37,11 @@ class PackageExporter(DefaultPackageExporter):
         self.zip_file = TorchScriptPackageZipFileWriter(f)
 
     def closing_function(self):
+        # write torchscript files when close is called
         self.script_module_serializer.write_files()
 
     def persistent_id(self, obj):
+        # needed for 'storage' typename which is a way in which torch models are saved
         if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
             if isinstance(obj, torch.storage._TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
