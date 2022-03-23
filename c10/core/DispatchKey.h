@@ -124,7 +124,7 @@ enum class DispatchKey : uint8_t {
   // DispatchKey]
   // To see some example about how to use this, check out ORT
   PrivateUse1,
-  // PrivateUse2,
+  // PrivateUse2,  // TEMPORARILY DISABLED UNTIL gh-72827 LANDS
   PrivateUse3,
 
   // Define an alias key to represent end of backend dispatch keys.
