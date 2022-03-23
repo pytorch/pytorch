@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/ScalarType.h>
+#include <cstdint>
 
 namespace at { namespace native {
 

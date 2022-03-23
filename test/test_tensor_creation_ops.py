@@ -1600,6 +1600,10 @@ class TestTensorCreation(TestCase):
     def test_combinations(self, device):
         a = torch.tensor([1, 2, 3], device=device)
 
+        c = torch.combinations(a, r=0)
+        expected = torch.empty(0, dtype=a.dtype, device=device)
+        self.assertEqual(c, expected)
+
         c = torch.combinations(a, r=1)
         expected = torch.tensor(list(combinations(a, r=1)), device=device)
         self.assertEqual(c, expected)
@@ -2832,8 +2836,6 @@ class TestTensorCreation(TestCase):
         self._test_signal_window_functions(window, dtype, device)
 
     @onlyNativeDeviceTypes
-    # See https://github.com/pytorch/pytorch/issues/72630
-    @skipMeta
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)
@@ -3360,7 +3362,7 @@ class TestRandomTensorCreation(TestCase):
         std = torch.tensor(-1, dtype=torch.float32, device=device)
 
         for input in [0, a]:
-            with self.assertRaisesRegex(RuntimeError, r'normal_ expects std >= 0.0'):
+            with self.assertRaisesRegex(RuntimeError, r'normal expects std >= 0.0, but found std'):
                 torch.normal(input, -1, (10,))
 
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):

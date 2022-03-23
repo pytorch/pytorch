@@ -122,17 +122,6 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
-  pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7)
-    CUDA_VERSION=11.1
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    CMAKE_VERSION=3.10.3
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    ;;
   pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
@@ -232,16 +221,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    ;;
-  pytorch-linux-bionic-cuda11.0-cudnn8-py3.7-gcc9)
-    CUDA_VERSION=11.0
-    CUDNN_VERSION=8
-    ANACONDA_PYTHON_VERSION=3.7
-    GCC_VERSION=9
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ROCM_VERSION=3.9
     ;;
   pytorch-linux-bionic-rocm4.3.1-py3.7)
     ANACONDA_PYTHON_VERSION=3.7

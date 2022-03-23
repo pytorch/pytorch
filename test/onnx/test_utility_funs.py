@@ -11,8 +11,11 @@ from torch.onnx import (utils,
                         unregister_custom_op_symbolic)
 from torch.onnx.symbolic_helper import (_set_opset_version,
                                         _set_operator_export_type,
-                                        _set_onnx_shape_inference)
+                                        _set_onnx_shape_inference,
+                                        _unpack_list,
+                                        parse_args)
 import torch.utils.cpp_extension
+from autograd_helper import CustomFunction as CustomFunction2
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
 from verify import verify
@@ -704,11 +707,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         celu_funcs = [f for f in funcs if f.name == "CELU"]
         self.assertEqual(len(celu_funcs), 1)
         self.assertEqual(celu_funcs[0].domain, "torch.nn.modules.activation")
-        self.assertEqual(len(celu_funcs[0].attribute), 1)
+        self.assertEqual(len(celu_funcs[0].attribute), 3)
         ln_funcs = [f for f in funcs if f.name == "LayerNorm"]
         self.assertEqual(len(ln_funcs), 1)
         self.assertEqual(ln_funcs[0].domain, "torch.nn.modules.normalization")
-        self.assertEqual(len(ln_funcs[0].attribute), 1)
+        self.assertEqual(len(ln_funcs[0].attribute), 3)
 
         # Check local function nodes
         nodes = onnx_model.graph.node
@@ -716,10 +719,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         ln_ns = [n for n in nodes if n.op_type == "LayerNorm"]
         self.assertEqual(len(celu_ns), 2)
         self.assertEqual(celu_ns[0].domain, "torch.nn.modules.activation")
-        self.assertEqual(len(celu_ns[0].attribute), 1)
+        self.assertEqual(len(celu_ns[0].attribute), 3)
         self.assertEqual(len(ln_ns), 3)
         self.assertEqual(ln_ns[0].domain, "torch.nn.modules.normalization")
-        self.assertEqual(len(ln_ns[0].attribute), 1)
+        self.assertEqual(len(ln_ns[0].attribute), 3)
 
         # Export specified modules.
         f = io.BytesIO()
@@ -801,6 +804,48 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
         self.assertIn("M", [f.name for f in funcs])
+
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_local_function_predefined_attributes(self):
+        class M(torch.nn.Module):
+            num_layers: int
+
+            def __init__(self, num_layers):
+                super().__init__()
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList([torch.nn.LayerNorm(3, eps=1e-4) for _ in range(num_layers)])
+
+            def forward(self, x):
+                for ln in self.lns:
+                    x = ln(x)
+                return x
+
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        model = M(3)
+        torch.onnx.export(model, (x, ), f, export_modules_as_functions=True,
+                          opset_version=self.opset_version)
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        m_funcs = [fn for fn in funcs if fn.name == "M"]
+        self.assertEqual(m_funcs[0].attribute, ["num_layers"])
+        ln_funcs = [fn for fn in funcs if fn.name == "LayerNorm"]
+        self.assertEqual(ln_funcs[0].attribute, ["eps", "elementwise_affine"])
+
+        from onnx import helper
+        m_node = [n for n in onnx_model.graph.node if n.op_type == "M"]
+        self.assertEqual(m_node[0].attribute[0],
+                         helper.make_attribute("num_layers", model.num_layers))
+
+        ln_nodes = [n for n in m_funcs[0].node if n.op_type == "LayerNorm"]
+        expected_ln_attrs = [
+            helper.make_attribute("elementwise_affine", model.lns[0].elementwise_affine),
+            helper.make_attribute("eps", model.lns[0].eps)
+        ]
+        for ln_node in ln_nodes:
+            self.assertIn(ln_node.attribute[0], expected_ln_attrs)
+            self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -912,7 +957,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         # Test aten export of op with symbolic for aten
         x = torch.randn(100, 128)
         y = torch.randn(100, 128)
-        model = torch.nn.CosineSimilarity(dim=1, eps=1e-6)
+        model = torch.nn.PairwiseDistance(p=2, eps=1e-6)
 
         graph, _, __ = self._model_to_graph(model, (x, y),
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
@@ -921,7 +966,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "aten::cosine_similarity")
+        self.assertEqual(next(iter).kind(), "onnx::Constant")
+        self.assertEqual(next(iter).kind(), "aten::pairwise_distance")
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
     @skipIfUnsupportedMaxOpsetVersion(10)
@@ -993,6 +1039,36 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                            input_names=["batch"], dynamic_axes={"batch": [0, 1]})
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "prim::PythonOp")
+
+    def test_autograd_module_name(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                ctx.save_for_backward(input)
+                return input.clamp(min=0)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                input, = ctx.saved_tensors
+                grad_input = grad_output.clone()
+                grad_input[input < 0] = 0
+                return grad_input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input) + CustomFunction2.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = self._model_to_graph(model, batch,
+                                           input_names=["batch"], dynamic_axes={"batch": [0, 1]})
+        iter = graph.nodes()
+        autograd1 = next(iter)
+        autograd2 = next(iter)
+        self.assertEqual(autograd1.kind(), "prim::PythonOp")
+        self.assertEqual(autograd2.kind(), "prim::PythonOp")
+        self.assertNotEqual(autograd1.s("module"), autograd2.s("module"))
 
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
@@ -1208,6 +1284,13 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph = onnx.load(io.BytesIO(f.getvalue()))
         self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
 
+        model.train()
+        f = io.BytesIO()
+        torch.onnx.export(model, (x,), f, training=TrainingMode.PRESERVE,
+                          opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertSetEqual(set([i.name for i in graph.graph.initializer]), param_name_set)
+
         # Test eval mode.
         model.eval()
         f = io.BytesIO()
@@ -1269,6 +1352,32 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[2].op_type, "Identity")
         self.assertEqual(graph.graph.node[3].op_type, "Gemm")
         self.assertEqual(graph.graph.node[4].op_type, "Identity")
+
+    def test_bad_symbolic_registration(self):
+        _onnx_opset_version = 9
+
+        @parse_args("v")
+        def cat(g, tensor_list, dim):
+            tensors = _unpack_list(tensor_list)
+            return g.op("Concat", *tensors, axis_i=dim)
+
+        register_custom_op_symbolic('::cat', cat, _onnx_opset_version)
+
+        class CatModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat((x, x, x), 0)
+
+        model = CatModel()
+        x = torch.randn(2, 3)
+        f = io.BytesIO()
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: torch.onnx.export(model, (x,), f, opset_version=_onnx_opset_version),
+            ("A mismatch between the number of arguments (2) and their descriptors (1) was found at symbolic function "
+             "'cat'. If you believe this is not due to custom symbolic implementation within your code or an external "
+             "library, please file an issue at https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml to "
+             "report this bug."))
+        unregister_custom_op_symbolic('::cat', _onnx_opset_version)
 
 
 class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
