@@ -40,14 +40,18 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 # unwraps all tensor-like arguments, returning:
 # (1) a string containing all of the logic that does the unwrapping
 # (2) a context, to be used by translate(), with all of the relevant bindings.
-def unwrap_tensor_args(sig: DispatcherSignature, *, include_sync: bool) -> Tuple[str, List[Binding]]:
+def unwrap_tensor_args(sig: DispatcherSignature, *, is_view_op: bool) -> Tuple[str, List[Binding]]:
     context: List[Binding] = []
     unwrapped_tensor_args: List[str] = []
     for arg in sig.arguments():
         if is_tensor_like(arg.argument):
             # for tensor inputs, we want to unwrap them before passing them into the redispatch calls.
             unwrapped_name = f'{arg.name}_'
-            maybe_sync_input = '' if not include_sync else f'at::functionalization::impl::sync({arg.name});'
+            # For most ops, the functionalization needs to sync any pending updates on the input tensors
+            # before calling the operator, since otherwise the operator will act on stale data.
+            # For view ops though, we can continue to defer syncing until the tensor is used by
+            # a non-view operator.
+            maybe_sync_input = '' if is_view_op else f'at::functionalization::impl::sync({arg.name});'
             unwrapped_tensor_args.append(f"""
       {arg.nctype.remove_const_ref().cpp_type()} {unwrapped_name};
       if (at::functionalization::impl::isFunctionalTensor({arg.name})) {{
@@ -138,8 +142,7 @@ def emit_view_functionalization_body(
 
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
 
-    # For view ops, we're not using the data from the input tensors so we don't need to sync inputs.
-    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig, include_sync=False)
+    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig, is_view_op=True)
     view_redispatch_args = [e.expr for e in translate(unwrapped_args_ctx, call_sig.arguments(), method=False)]
 
     forward_lambda = FunctionalizationLambda.from_func(f, functional_op=functional_op, is_reverse=False)
@@ -212,8 +215,7 @@ def emit_inplace_functionalization_body(
 
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
 
-    # We need to sync any pending updates on the input tensors before using them in any computation
-    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig, include_sync=True)
+    unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig, is_view_op=False)
 
     maybe_return = '' if len(f.func.returns) == 0 else 'return '
 
