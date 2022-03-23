@@ -75,7 +75,7 @@ Attribute.__doc__ = """
     This method is a pass-through function that returns `value`, mostly
     used to indicate to the TorchScript compiler that the left-hand side
     expression is a class instance attribute with type of `type`. Note that
-    `torch.jit.Attribute` should only be used in `__init__` method of `nn.Module`
+    `torch.jit.Attribute` should only be used in `__init__` method of `jit.ScriptModule`
     subclasses.
 
     Though TorchScript can infer correct type for most Python expressions, there are some cases where
@@ -95,9 +95,9 @@ Attribute.__doc__ = """
         import torch
         from typing import Dict
 
-        class AttributeModule(torch.nn.Module):
+        class AttributeModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(M, self).__init__()
+                super(AttributeModule, self).__init__()
                 self.foo = torch.jit.Attribute(0.1, float)
 
                 # we should be able to use self.foo as a float here
