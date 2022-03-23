@@ -12,10 +12,6 @@ from ..utils import (
     activation_dtype,
 )
 
-from torch.ao.quantization.quantize import (
-    is_activation_post_process,
-)
-
 from .pattern_utils import (
     register_quant_pattern,
     get_default_output_activation_post_process_map,
@@ -24,8 +20,6 @@ from .pattern_utils import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-
-from ..qconfig import QConfigAny
 
 from abc import ABC
 import operator
@@ -52,21 +46,6 @@ class QuantizeHandler(ABC):
         self.all_node_args_are_tensors = True
         # the last node of the matched pattern
         self.last_node = node
-
-    def _maybe_get_last_node_only_observer(
-        self,
-        modules: Dict[str, torch.nn.Module]
-    ) -> Optional[torch.nn.Module]:
-        """
-        If the last node of the pattern is observed, return the observer
-        instance. Otherwise, return None.
-        """
-        for maybe_obs_node, _ in self.last_node.users.items():
-            if maybe_obs_node.op == 'call_module':
-                maybe_obs = modules[str(maybe_obs_node.target)]
-                if is_activation_post_process(maybe_obs):
-                    return maybe_obs
-        return None
 
     def input_output_observed(self) -> bool:
         """
@@ -109,16 +88,6 @@ class QuantizeHandler(ABC):
         # TODO(future PR): potentially clean up and deduplicate these
         # mappings.
         return self.all_node_args_are_tensors and self.input_output_observed()
-
-    def should_mark_output_quantized_from_input_quantized_status(
-        self,
-        qconfig: QConfigAny
-    ) -> bool:
-        """
-        Returns true if after convert, the output of the matched pattern is
-        quantized iff the first input is also quantized.
-        """
-        return False
 
     def get_activation_ctr(
         self,
@@ -489,13 +458,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         super().__init__(node, modules)
         self.node = node
 
-    def should_mark_output_quantized_from_input_quantized_status(
-        self,
-        qconfig: QConfigAny
-    ) -> bool:
-        # FixQParamOps are the same as CopyNode in int8 quantization
-        return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
-
     # some qhandlers override the activations constructor
     def get_activation_ctr(self, qconfig, pattern, is_training) -> Optional[Callable]:
         act_dtype = activation_dtype(qconfig)
@@ -547,12 +509,6 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
     insert extra observer/fake_quant for the output of these operators.
     TODO: maybe rename this to TensorValueOpQuantizeHandler
     """
-    def should_mark_output_quantized_from_input_quantized_status(
-        self,
-        qconfig: QConfigAny
-    ) -> bool:
-        return True
-
     def is_general_tensor_value_op(self) -> bool:
         return True
 
@@ -591,12 +547,6 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     for the output of the operator.
     """
     def is_general_tensor_shape_op(self) -> bool:
-        return True
-
-    def should_mark_output_quantized_from_input_quantized_status(
-        self,
-        qconfig: QConfigAny
-    ) -> bool:
         return True
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
