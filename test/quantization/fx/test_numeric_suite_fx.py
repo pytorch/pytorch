@@ -663,9 +663,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 # RNNDynamicQuantizeHandler
                 pass
             elif qhandler_cls == qp.DefaultNodeQuantizeHandler:
-                # torch.sum does not have quantized equivalents
-                if base_op == torch.sum:
-                    continue
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
@@ -680,9 +677,15 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
-            elif not _op_in_base_sets_of_related_ops(base_op):
-                raise AssertionError(
-                    f"handing for {qhandler_cls} for op {base_op} not implemented")
+            else:
+                # torch.sum does not have quantized equivalents
+                if base_op == torch.sum:
+                    continue
+                # didn't match explicit quantize handler class, we can check if the
+                # operator is in the related op set directly
+                if not _op_in_base_sets_of_related_ops(base_op):
+                    raise AssertionError(
+                        f"handing for {qhandler_cls} for op {base_op} not implemented")
 
     @skipIfNoFBGEMM
     def test_user_defined_function(self):
