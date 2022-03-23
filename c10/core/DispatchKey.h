@@ -283,7 +283,8 @@ enum class DispatchKey : uint8_t {
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher
   // This kernel assumes it is the top-most non-functorch-related DispatchKey.
-  // If you add a key above, make sure to update the fallback implementation for this.
+  // If you add a key above, make sure to update the fallback implementation for
+  // this.
   PythonTLSSnapshot,
 
   // This key should be at the very top of the dispatcher
