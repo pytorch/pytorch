@@ -3378,13 +3378,13 @@ add_docstr_all('scatter_reduce_', r"""
 scatter_reduce_(dim, index, src, reduce, *, include_self=True) -> Tensor
 
 Reduces all values from the :attr:`src` tensor to the indices specified in
-the :attr:`index` tensor in the :attr:`input` tensor using the applied
-reduction defined via the :attr:`reduce` argument (:obj:`"sum"`, :obj:`"prod"`,
-:obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`). For each value in :attr:`src`,
-it is reduced to an index in :attr:`self` which is specified by its index in
-:attr:`src` for ``dimension != dim`` and by the corresponding value in
-:attr:`index` for ``dimension = dim``. If :obj:`include_input="True"`, the
-values in the :attr:`input` tensor are included in the reduction.
+the :attr:`index` tensor in the :attr:`self` tensor using the applied reduction
+defined via the :attr:`reduce` argument (:obj:`"sum"`, :obj:`"prod"`, :obj:`"mean"`,
+:obj:`"amax"`, :obj:`"amin"`). For each value in :attr:`src`, it is reduced to an
+index in :attr:`self` which is specified by its index in :attr:`src` for
+``dimension != dim`` and by the corresponding value in :attr:`index` for
+``dimension = dim``. If :obj:`include_self="True"`, the values in the :attr:`self`
+tensor are included in the reduction.
 
 :attr:`self`, :attr:`index` and :attr:`src` should all have
 the same number of dimensions. It is also required that
@@ -3395,9 +3395,9 @@ Note that ``index`` and ``src`` do not broadcast.
 For a 3-D tensor with :obj:`reduce="sum"` and :obj:`include_self=True` the
 output is given as::
 
-    input[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
-    input[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
-    input[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
+    self[index[i][j][k]][j][k] += src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] += src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] += src[i][j][k]  # if dim == 2
 
 Note:
     {forward_reproducibility_note}
@@ -4807,7 +4807,7 @@ Out-of-place version of :meth:`torch.Tensor.scatter_add_`
 
 add_docstr_all('scatter_reduce',
                r"""
-scatter_reduce(dim, index, src, reduce, *, include_input=True) -> Tensor
+scatter_reduce(dim, index, src, reduce, *, include_self=True) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_reduce_`
 """)

@@ -110,7 +110,7 @@ class TestScatterGather(TestCase):
                     else:
                         # method may be 'scatter_', 'scatter', 'scatter_reduce'
                         # or 'scatter_reduce_', the former two might have a reduction argument
-                        # while the latter 2 always do
+                        # while the latter two always do
                         value = src if is_scalar else src[i, j, k]
 
                         if ((not include_self) and counts[tuple(ii)] == 0):
