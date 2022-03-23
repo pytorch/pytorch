@@ -5329,6 +5329,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method('dequantize')
         ]
+        # TODO: change these to use backend_config_dict
         additional_patterns = {torch.nn.GELU: DefaultNodeQuantizeHandler,
                                torch.nn.functional.gelu: DefaultNodeQuantizeHandler}
         self._test_default_node_quant_handler_ops(
