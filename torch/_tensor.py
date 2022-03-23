@@ -202,11 +202,7 @@ class Tensor(torch._C._TensorBase):
         if self.dtype not in torch.storage._dtype_to_storage_type_map():
             raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
-        storage = self._storage()
-        storage_name = torch.storage._dtype_to_storage_type_map()[self.dtype]
-        storage_class = eval(type(storage).__module__ + '.' + storage_name)
-        storage = storage_class(wrap_storage=storage)
-        return storage
+        return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -866,10 +862,7 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
-        # NB: this returns old fashioned _TypedStorage, e.g., FloatStorage, as it
-        # would be pretty pointless otherwise (it would always return
-        # _UntypedStorage)
-        return type(self.storage())
+        return self.storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
@@ -1067,20 +1060,7 @@ class Tensor(torch._C._TensorBase):
             25
 
        """
-        if self.is_sparse:
-            return self
-        if self.is_sparse_csr:
-            crow_indices = self.crow_indices()
-            col_indices = self.col_indices()
-            indices = torch._convert_indices_from_csr_to_coo(crow_indices, col_indices,
-                                                             out_int32=crow_indices.dtype == torch.int32)
-            return torch.sparse_coo_tensor(indices,
-                                           self.values(),
-                                           size=self.shape,
-                                           dtype=self.dtype,
-                                           device=self.device)
-        else:
-            return self.to_sparse()
+        return self.to_sparse()
 
     def to_sparse_csr(self):
         """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
