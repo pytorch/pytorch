@@ -609,6 +609,38 @@ std::tuple<std::shared_ptr<char>, size_t> get_file_content(
   return std::make_tuple(data, size);
 }
 
+std::tuple<std::shared_ptr<char>, size_t> get_stream_content(std::istream& in) {
+  // get size of the stream and reset to orig
+  std::streampos orig_pos = in.tellg();
+  in.seekg(orig_pos, std::ios::end);
+  const long size = in.tellg();
+  in.seekg(orig_pos, in.beg);
+
+  // read stream
+  // NOLINT make sure buffer size is multiple of alignment
+  size_t buffer_size =
+      (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
+#if defined(__ANDROID__)
+  std::shared_ptr<char> data(
+      static_cast<char*>(memalign(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free);
+#elif defined(_WIN32)
+  std::shared_ptr<char> data(
+      static_cast<char*>(
+          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
+      _aligned_free); // NOLINT
+#else
+  std::shared_ptr<char> data(
+      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free); // NOLINT
+#endif
+  in.read(data.get(), size);
+
+  // reset stream to original position
+  in.seekg(orig_pos, in.beg);
+  return std::make_tuple(data, size);
+}
+
 void FlatbufferLoader::extractJitSourceAndConstants(
     ExtraFilesMap* jit_sources,
     std::vector<IValue>* constants) {
@@ -626,6 +658,9 @@ mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
     size_t,
     c10::optional<at::Device>) {
+  TORCH_CHECK(
+      mobile::serialization::ModuleBufferHasIdentifier(data.get()),
+      "Format error");
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   mobile::Module m = FlatbufferLoader().parseModule(flatbuffer_module);
   m.set_delete_memory(std::move(data));
