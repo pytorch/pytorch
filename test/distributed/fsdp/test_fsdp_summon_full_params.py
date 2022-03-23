@@ -41,8 +41,6 @@ def _run_test_summon_full_param_writeback(cls, writeback, cpu_offload, modify_ou
     lin1 = FSDP(nn.Linear(5, 5, bias=False).cuda(cls.rank), cpu_offload=cpu_offload)
     lin2 = nn.Linear(5, 3, bias=False).cuda(cls.rank)
     model = FSDP(nn.Sequential(lin1, lin2), cpu_offload=cpu_offload)
-    if not cpu_offload:
-        model = model.cuda(cls.rank)
 
     # set the value
     outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
