@@ -76,7 +76,7 @@ TORCH_META_FUNC(_upsample_bilinear2d_aa_backward) (
       grad_output.dim() == 4,
       "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
 
-  for (int i = 0; i < 4; ++i) {
+  for (const auto i : c10::irange(4)) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],
         "Expected grad_output to have the same shape as output;",

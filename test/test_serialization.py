@@ -97,7 +97,7 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
         self.assertEqual(c[4].dtype, torch.float)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
@@ -370,7 +370,7 @@ class SerializationMixin(object):
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
         self.assertTrue(isinstance(c[2], torch.FloatTensor))
         self.assertTrue(isinstance(c[3], torch.FloatTensor))
-        self.assertTrue(isinstance(c[4], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(c[4], torch.storage._TypedStorage))
         self.assertEqual(c[4].dtype, torch.float32)
         c[0].fill_(10)
         self.assertEqual(c[0], c[2], atol=0, rtol=0)
@@ -414,7 +414,7 @@ class SerializationMixin(object):
         with warnings.catch_warnings(record=True) as warns:
             with tempfile.NamedTemporaryFile() as checkpoint:
                 x = torch.save(torch.nn.Linear(2, 3), checkpoint)
-                self.assertEquals(len(warns), 0)
+                self.assertEqual(len(warns), 0)
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -620,7 +620,7 @@ class SerializationMixin(object):
             a = torch.tensor([], dtype=dtype, device=device)
 
             for other_dtype in get_all_dtypes():
-                s = torch.TypedStorage(
+                s = torch._TypedStorage(
                     wrap_storage=a.storage()._untyped(),
                     dtype=other_dtype)
                 save_load_check(a, s)
@@ -652,7 +652,7 @@ class SerializationMixin(object):
                 torch.save([a.storage(), a.imag.storage()], f)
 
             a = torch.randn(10, device=device)
-            s_bytes = torch.TypedStorage(
+            s_bytes = torch._TypedStorage(
                 wrap_storage=a.storage()._untyped(),
                 dtype=torch.uint8)
 
@@ -726,7 +726,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEquals(len(w), 0)
+                    self.assertEqual(len(w), 0)
 
             # Replace the module with different source
             fname = get_file_path_2(os.path.dirname(os.path.dirname(torch.__file__)), 'torch', 'testing',
@@ -737,7 +737,7 @@ class TestOldSerialization(TestCase, SerializationMixin):
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
                 if can_retrieve_source:
-                    self.assertEquals(len(w), 1)
+                    self.assertEqual(len(w), 1)
                     self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
@@ -868,6 +868,9 @@ class TestWrapperSubclass(torch.Tensor):
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         return r
+
+    def clone(self):
+        return type(self)(self.elem.clone())
 
 
 class TestGetStateSubclass(torch.Tensor):

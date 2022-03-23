@@ -1602,7 +1602,7 @@ Tensor lowerNanToNum(
   auto input_buf = c10::get<BufHandle>(inputs[0]);
   auto e = Compute(
       "custom_nan_to_num",
-      c10::fmap<DimArg>(outputShape),
+      outputShape,
       [&](const std::vector<VarHandle>& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
         auto load = input_buf.load(indices);

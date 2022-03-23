@@ -55,13 +55,14 @@ at::native::ResultTypeState updateResultTypeState(
   TORCH_INTERNAL_ASSERT(
       !c10::isComplexType(scalar),
       "NvFuser does not support complex data types.");
+
   at::native::ResultTypeState new_state = in_state;
   c10::ScalarType current = scalar;
   if (c10::isFloatingType(scalar)) {
     current = c10::typeMetaToScalarType(at::get_default_dtype());
   }
   new_state.wrappedResult =
-      promoteTypesSkipUndefined(in_state.wrappedResult, scalar);
+      promoteTypesSkipUndefined(in_state.wrappedResult, current);
   return new_state;
 }
 
@@ -195,11 +196,16 @@ std::vector<Val*> promoteValues(
 
 Val* optionalCast(DataType dtype, Val* v) {
   TORCH_INTERNAL_ASSERT(v->getDataType().has_value());
+  // Avoid casting Float/Int scalar to any corresponding FloatingPoint/Integral
+  // type in fusion. Instead, we cast them directly. The exception is Bool,
+  // which is always casted to the desired type.
   const bool kSameDtype = v->getDataType().value() == dtype;
   const bool kIsScalarFloat =
       !v->isA<TensorView>() && isFloatingPointType(dtype);
+  const bool kIsScalarInt = !v->isA<TensorView>() && isIntegralType(dtype);
   if (kSameDtype ||
-      (kIsScalarFloat && isFloatingPointType(v->getDataType().value()))) {
+      (kIsScalarFloat && isFloatingPointType(v->getDataType().value())) ||
+      (kIsScalarInt && isIntegralType(v->getDataType().value()))) {
     return v;
   } else {
     return castOp(dtype, v);

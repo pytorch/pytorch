@@ -63,6 +63,7 @@ from torch._six import string_classes
 from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.xnnpack
 from enum import Enum
 from statistics import mean
 import functools
@@ -645,6 +646,29 @@ def run_tests(argv=UNITTEST_ARGS):
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
+        from xmlrunner.result import _XMLTestResult  # type: ignore[import]
+
+        class XMLTestResultVerbose(_XMLTestResult):
+            """
+            Adding verbosity to test outputs:
+            by default test summary prints 'skip',
+            but we want to also print the skip reason.
+            GH issue: https://github.com/pytorch/pytorch/issues/69014
+
+            This works with unittest_xml_reporting<=3.2.0,>=2.0.0
+            (3.2.0 is latest at the moment)
+            """
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def addSkip(self, test, reason):
+                super().addSkip(test, reason)
+                for c in self.callback.__closure__:
+                    if isinstance(c.cell_contents, str) and c.cell_contents == 'skip':
+                        # this message is printed in test summary;
+                        # it stands for `verbose_str` captured in the closure
+                        c.cell_contents = f"skip: {reason}"
+
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
@@ -652,7 +676,10 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+            output=test_report_path,
+            verbosity=2 if verbose else 1,
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -978,6 +1005,14 @@ def _test_function(fn, device):
         return fn(self, device)
     return run_test_function
 
+def skipIfNoXNNPACK(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.backends.xnnpack.enabled:
+            raise unittest.SkipTest('XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNoLapack(fn):
     @wraps(fn)
@@ -1570,15 +1605,6 @@ class TensorOrArrayPair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    # TODO: As discussed in https://github.com/pytorch/pytorch/issues/68590#issuecomment-975333883,
-    #  this relaxation should only be temporary and this overwrite should be removed completely in the future.
-    def _equalize_attributes(self, actual, expected):
-        actual, expected = super()._equalize_attributes(actual, expected)
-        if not actual.is_sparse:
-            return actual, expected
-
-        return actual.coalesce(), expected.coalesce()
-
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
@@ -2033,7 +2059,7 @@ class TestCase(expecttest.TestCase):
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        self.assertEqual(actual, expected, exact_device=False)
+        self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -2133,7 +2159,7 @@ class TestCase(expecttest.TestCase):
             ),
             sequence_types=(
                 Sequence,
-                torch.storage.TypedStorage,
+                torch.storage._TypedStorage,
                 Sequential,
                 ModuleList,
                 ParameterList,

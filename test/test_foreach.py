@@ -11,7 +11,7 @@ from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db,
     foreach_reduce_op_db)
@@ -165,14 +165,6 @@ class TestForeach(TestCase):
         self._binary_test(
             dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True)
 
-    # note(mkozuki): Why ROCm?
-    # ROCm is supposed to compile slow path as in
-    # https://github.com/pytorch/pytorch/blob/7e032f18cf1405804c4f787b05ea2de5e08a091e/aten/src/ATen/native/ForeachUtils.h#L148-L164,  # noqa: E501
-    # Therefore `[torch.add(*args, alpha=alpha) for args in zip(tensors1, tensors2)]` and
-    # `torch._foreach_add(tensors1, tensors2, alpha=alpha)`
-    # are expected to return the same outputs, however, the outputs look unstable for torch.bfloat16 and torch.half.
-    # log: https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-linux-bionic-rocm4.2-py3.6-test1/2741/console
-    @skipCUDAIfRocm
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_tensorlists_fastpath(self, device, dtype, op):
@@ -194,7 +186,6 @@ class TestForeach(TestCase):
         self._binary_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False)
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
 
-    @skipCUDAIfRocm
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
@@ -233,7 +224,6 @@ class TestForeach(TestCase):
     # errors depending on the order of scalarlist. To keep actual unit test impl simple,
     # separating mixed scalarlist tests. By setting the first element of scalarlist to bool,
     # they are expected to throw bool sub error even in inplace test.
-    @skipCUDAIfRocm
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):

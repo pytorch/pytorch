@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
@@ -593,9 +594,10 @@ void spmm(
       result.scalar_type(),
       "spmm",
       [&] {
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
-        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto beta_ = beta.to<opmath_t>();
+        auto alpha_ = alpha.to<opmath_t>();
+        cudaDataType compute_type = at::cuda::getCudaDataType<opmath_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
 
         size_t buffer_size;
@@ -801,7 +803,8 @@ void addmm_out_sparse_csr(
   } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "Received unexpected tensor layouts as input.");
+    TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
+                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
 }
 

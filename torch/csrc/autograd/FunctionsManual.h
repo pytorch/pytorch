@@ -77,6 +77,7 @@ at::Tensor solve_backward_self(const at::Tensor & grad, const at::Tensor & self,
 at::Tensor solve_backward_A(const at::Tensor & grad, const at::Tensor & self, const at::Tensor & A, const at::Tensor & solution);
 at::Tensor cumsum_backward(const at::Tensor & grad, int64_t dim);
 at::Tensor logsumexp_backward(at::Tensor grad, const at::Tensor & self, at::Tensor result, at::IntArrayRef dim, bool keepdim);
+at::Tensor logsumexp_jvp(const at::Tensor& self_p, const at::Tensor& self_t, IntArrayRef dim, bool keepdim);
 at::Tensor logcumsumexp_backward(at::Tensor grad, const at::Tensor & self, at::Tensor result, int64_t dim);
 at::Tensor unbind_backward(const variable_list& grads, int64_t dim);
 at::Tensor unsqueeze_to(const at::Tensor & self, at::IntArrayRef sizes);
@@ -303,6 +304,11 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     const Tensor & grad_out,
     const Tensor & input_,
     const Tensor & weight_);
+Tensor gelu_double_backward(
+    const Tensor & ggI,
+    const Tensor & gO,
+    const Tensor & input,
+    c10::string_view approximate);
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset_);
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(

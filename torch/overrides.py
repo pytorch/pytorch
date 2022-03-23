@@ -218,6 +218,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__delattr__,
         Tensor.__setattr__,
         Tensor.__torch_function__,
+        Tensor.__torch_dispatch__,
         Tensor.__new__,
         Tensor.__class__,
         Tensor.__subclasshook__,
@@ -669,7 +670,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
         torch.native_dropout: lambda input, p, train: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
-        torch._native_multi_head_self_attention: lambda query, qkv_weight, qkv_bias, proj_weight, proj_bias, mask=None: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2: -1,
         torch.native_norm: lambda input, p=2: -1,
@@ -730,7 +730,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
             lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False,
             _random_samples=None: -1),
         torch.nn.functional.gaussian_nll_loss: lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1,
-        torch.nn.functional.gelu: lambda input: -1,
+        torch.nn.functional.gelu: lambda input, approximate='none': -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
         torch.nn.functional.grid_sample: lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1,
         torch.nn.functional.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1,
@@ -1072,6 +1072,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
         Tensor.is_mlc.__get__: lambda self: -1,
+        Tensor.is_nested.__get__: lambda self: -1,
         Tensor.is_ort.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
@@ -1370,7 +1371,7 @@ def handle_torch_function(
     Example
     -------
     >>> def func(a):
-    ...     if type(a) is not torch.Tensor:  # This will make func dispatchable by __torch_function__
+    ...     if has_torch_function_unary(a):
     ...         return handle_torch_function(func, (a,), a)
     ...     return a + 0
     """
@@ -1436,9 +1437,7 @@ has_torch_function_variadic = _add_docstr(
     _has_torch_function_variadic,
     r"""Special case of `has_torch_function` that skips tuple creation.
 
-    This uses the METH_FASTCALL protocol introduced in Python 3.7; for 3.6
-    and before it has roughly equivilent performance compared to
-    `has_torch_function`.
+    This uses the METH_FASTCALL protocol introduced in Python 3.7
 
     Instead of:
       `has_torch_function((a, b))`

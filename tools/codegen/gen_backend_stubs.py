@@ -5,7 +5,7 @@ import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
-from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml, NamespaceHelper
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -58,7 +58,7 @@ def parse_backend_yaml(
     assert isinstance(supported, list), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
     supported_autograd = yaml_values.pop('autograd', [])
-    assert isinstance(supported, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
+    assert isinstance(supported_autograd, list), f'expected "autograd" to be a list, but got: {supported_autograd}'
 
     # full_codegen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
     full_codegen = yaml_values.pop('full_codegen', [])
@@ -223,10 +223,12 @@ def gen_dispatchkey_nativefunc_headers(
         dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
         grouped_native_functions))))
 
+    ns_helper = NamespaceHelper(cpp_namespace)
     fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.h', 'DispatchKeyNativeFunctions.h', lambda: {
         'generated_comment': generated_comment,
-        'cpp_namespace': cpp_namespace,
+        'namespace_prologue': ns_helper.prologue,
         'class_name': class_name,
+        'namespace_epilogue': ns_helper.epilogue,
         'dispatch_declarations': backend_declarations + autograd_declarations,
     })
 
@@ -239,26 +241,28 @@ def gen_dispatcher_registrations(
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         backend_dispatch_key: DispatchKey,
         dispatch_key: DispatchKey,
-        selector: 'SelectiveBuilder') -> None:
+        selector: 'SelectiveBuilder',
+        # build_in_tree is true for lazy TS backend and affects include paths, not used for external backends
+        build_in_tree: bool = False,
+        per_operator_headers: bool = False) -> None:
+    headers = [
+        f"{output_dir}/{backend_dispatch_key}NativeFunctions.h",
+    ]
+    if build_in_tree:
+        external_backend_headers_str = "\n".join(f'#include <{h}>' for h in headers)
+    else:
+        external_backend_headers_str = "\n".join(f'#include "{h}"' for h in headers)
+
     backend_index = backend_indices[dispatch_key]
     fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
         'extra_cuda_headers': '',
-        'external_backend_headers': f'#include "{output_dir}/{backend_dispatch_key}NativeFunctions.h"',
-        'ops_headers': '#include <ATen/Functions.h>',
+        'external_backend_headers': external_backend_headers_str,
+        'ops_headers': '#include <ATen/Functions.h>' if not per_operator_headers else '',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
-        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False),
+        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=per_operator_headers, rocm=False),
         'dispatch_helpers': dest.gen_registration_helpers(backend_index),
-        'dispatch_namespaced_definitions': list(concatMap(
-            dest.RegisterDispatchKey(
-                backend_index,
-                Target.NAMESPACED_DEFINITION,
-                selector,
-                rocm=False,
-                cpp_namespace=cpp_namespace,
-                class_method_name=f'{backend_dispatch_key}NativeFunctions'),
-            grouped_native_functions
-        )),
+        'dispatch_namespaced_definitions': '',
         'dispatch_anonymous_definitions': list(concatMap(
             dest.RegisterDispatchKey(
                 backend_index,

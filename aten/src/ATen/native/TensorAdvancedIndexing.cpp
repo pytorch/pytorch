@@ -174,6 +174,65 @@ TORCH_META_FUNC(scatter_add)
   scatter_meta_impl(*this, self, dim, index, src, "add");
 }
 
+TORCH_PRECOMPUTE_META_FUNC(index_copy)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  const Tensor& result = maybe_get_output(0);
+
+  // Memory overlap checks need to be done after resizing (if required) is done.
+  // But it only makes sense to do these checks when result was defined, hence
+  // the boolean variable `check_result` here.
+  // For more details, see: https://github.com/pytorch/pytorch/pull/63312#discussion_r694794832
+  // and https://github.com/pytorch/pytorch/issues/63837
+  bool check_result = result.defined();
+  set_output(self.sizes(), self.options());
+  if (check_result) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, index);
+    at::assert_no_overlap(result, source);
+  }
+
+  TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
+
+  int64_t numIndices = index.numel();
+  if (source.dim() == 0 && numIndices != 1) {
+    TORCH_CHECK_INDEX(false, "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
+  } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
+    TORCH_CHECK_INDEX(false, "index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
+                   source.dim(), "), destination dimensionality (", self.dim(), ")");
+  }
+
+  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected a long tensor for index, but got ", index.scalar_type());
+  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "index_copy_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
+  TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
+      "index_copy_(): self, index and source expected to be in the same device, but got (self) ",
+      self.device(), ", (index) ", index.device(), ", and (source) ", source.device());
+
+  // Check that source and destination slices have the same size
+  auto selfSlicedSizes = self.sizes().vec();
+  if (selfSlicedSizes.size() > 0) {
+    selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
+  }
+  auto sourceSlicedSizes = source.sizes().vec();
+  if (sourceSlicedSizes.size() > 0) {
+    sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
+  }
+  if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
+      !std::equal(selfSlicedSizes.begin(), selfSlicedSizes.end(),
+                  sourceSlicedSizes.begin())) {
+    std::stringstream ss;
+    ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
+    ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
+    ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
+    TORCH_CHECK(false, ss.str());
+  }
+  TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
+          "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
+
+  return TORCH_PRECOMPUTE_STRUCT(index_copy)().set_dim(dim);
+}
+
 TORCH_PRECOMPUTE_META_FUNC(index_add)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
@@ -630,122 +689,74 @@ Tensor & index_put_(Tensor & self, const torch::List<c10::optional<Tensor>>& ind
   return at::_index_put_impl_(self, indices, value, accumulate, /*unsafe=*/false);
 }
 
-Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  dim = maybe_wrap_dim(dim, self.dim());
+TORCH_IMPL_FUNC(index_copy_out)
+(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Tensor& result) {
+    if (!result.is_same(self)) result.copy_(self);
 
-  TORCH_CHECK_INDEX(index.dim() < 2, "index_copy_(): Index should have dimension 1 or 0 (got ", index.dim(), ")");
-  at::assert_no_internal_overlap(self);
-  at::assert_no_overlap(self, index);
-  at::assert_no_overlap(self, source);
-
-  int64_t numIndices = index.numel();
-  if (source.dim() == 0 && numIndices != 1) {
-    TORCH_CHECK_INDEX(false, "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
-  } else if ((source.dim() != self.dim()) && (source.dim() != 0 && self.dim() != 0)) {
-    TORCH_CHECK_INDEX(false, "index_copy_(): When source and destination are not scalars, their dimensionality must match. Source dimensionality (",
-                   source.dim(), "), destination dimensionality (", self.dim(), ")");
-  }
-
-  TORCH_CHECK(index.scalar_type() == ScalarType::Long, "index_copy_(): Expected a long tensor for index, but got ", index.scalar_type())
-  TORCH_CHECK(self.scalar_type() == source.scalar_type(), "index_copy_(): self and source expected to have the same dtype, but got (self) ", self.scalar_type(), " and (source) ", source.scalar_type());
-  TORCH_CHECK(self.device() == source.device() && self.device() == index.device(),
-      "index_copy_(): self, index and source expected to be in the same device, but got (self) ",
-      self.device(), ", (index) ", index.device(), ", and (source) ", source.device());
-
-  // Check that source and destination slices have the same size
-  auto selfSlicedSizes = self.sizes().vec();
-  if (selfSlicedSizes.size() > 0) {
-    selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
-  }
-  auto sourceSlicedSizes = source.sizes().vec();
-  if (sourceSlicedSizes.size() > 0) {
-    sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
-  }
-  if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
-      !std::equal(selfSlicedSizes.begin(), selfSlicedSizes.end(),
-                  sourceSlicedSizes.begin())) {
-    std::stringstream ss;
-    ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
-    ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
-    ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
-    TORCH_CHECK(false, ss.str());
-  }
-  TORCH_CHECK_INDEX(source.dim() == 0 || numIndices == source.size(dim),
-          "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
-
-  // See Note [Enabling Deterministic Operations]
-  if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()){
-    torch::List<c10::optional<Tensor>> indices;
-    indices.reserve(dim + 1);
-    for (const auto i: c10::irange(dim)) {
-      (void)i;
-      indices.emplace_back();
+    // See Note [Enabling Deterministic Operations]
+    if (result.is_cuda() && globalContext().deterministicAlgorithms()){
+        torch::List<c10::optional<Tensor>> indices;
+        indices.reserve(dim + 1);
+        for (const auto i: c10::irange(dim)) {
+          (void)i;
+          indices.emplace_back();
+        }
+        indices.emplace_back(index);
+        result.index_put_(indices, source, false);
+        return;
     }
-    indices.emplace_back(index);
-    return self.index_put_(indices, source, false);
-  }
 
-  return at::_index_copy_(self, dim, index, source);
-}
+    // Handle the case when self / source is 0-dim
+    Tensor result_nonzero = result.dim() == 0 ? result.unsqueeze(0) : result;
+    Tensor source_nonzero = source.dim() == 0 ? source.unsqueeze(0) : source;
 
-Tensor & _index_copy_impl_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  // Handle the case when self / source is 0-dim
-  Tensor self_nonzero = self.dim() == 0 ? self.unsqueeze(0) : self;
-  Tensor source_nonzero = source.dim() == 0 ? source.unsqueeze(0) : source;
+    // The only difference between the following  tensor iterator and that of index_fill_ is that
+    // this one has also source as an input. We should refactor it when if constexpr is available (C++17)
 
-  // The only different between the following  tensor iterator and that of index_fill_ is that
-  // this one has also source as an input. We should refactor it when if constexpr is available (C++17)
+    // Prepare `index` for TensorIterator.
+    // It is restrided to be broadcastable over `self` in TensorIterator.
+    auto index_sizes = std::vector<int64_t>(result_nonzero.dim(), 1);
+    auto index_strides = std::vector<int64_t>(result_nonzero.dim(), 0);
+    index_sizes[dim] = index.numel();
+    index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
+    auto index_restrided = index.as_strided(
+      index_sizes, index_strides);
 
-  // Prepare `index` for TensorIterator.
-  // It is restrided to be broadcastable over `self` in TensorIterator.
-  auto index_sizes = std::vector<int64_t>(self_nonzero.dim(), 1);
-  auto index_strides = std::vector<int64_t>(self_nonzero.dim(), 0);
-  index_sizes[dim] = index.numel();
-  index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
-  auto index_restrided = index.as_strided(
-    index_sizes, index_strides);
+    // Prepare `result` for TensorIterator.
+    // Restride `result` to not advance in dimension `dim`.
+    // We do not use squash_dim here because `index` will
+    // need to advance in this dimension.
+    // Note that self_sizes[dim] is set to index.numel().
+    // This is done so that self_sizes[dim] and index_sizes[dim]
+    // match as required by TensorIterator (input shape should
+    // strictly broadcast over output shape, i.e.
+    // output.shape[i] >= input.shape[i] for i in range(dims)).
+    auto result_sizes = result_nonzero.sizes().vec();
+    auto result_strides = result_nonzero.strides().vec();
+    result_sizes[dim] = index.numel();
+    result_strides[dim] = 0;
+    auto result_restrided = result_nonzero.as_strided(result_sizes, result_strides);
 
-  // Prepare `self` for TensorIterator.
-  // Restride `self` to not advance in dimension `dim`.
-  // We do not use squash_dim here because `index` will
-  // need to advance in this dimension.
-  // Note that self_sizes[dim] is set to index.numel().
-  // This is done so that self_sizes[dim] and index_sizes[dim]
-  // match as required by TensorIterator (input shape should
-  // strictly broadcast over output shape, i.e.
-  // output.shape[i] >= input.shape[i] for i in range(dims)).
-  auto self_sizes = self_nonzero.sizes().vec();
-  auto self_strides = self_nonzero.strides().vec();
-  self_sizes[dim] = index.numel();
-  self_strides[dim] = 0;
-  auto self_restrided = self_nonzero.as_strided(self_sizes, self_strides);
+    auto iter = TensorIteratorConfig()
+      // We do not check for overlap because `result` is restrided
+      // with zero stride. Zero strides trigger memory overlap assert
+      // within TensorIterator.
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(result_restrided)
+      .add_input(index_restrided)
+      .add_input(source_nonzero)
+      .build();
 
-  auto iter = TensorIteratorConfig()
-    // We do not check for overlap because `self` is restrided
-    // with zero stride. Zero strides trigger memory overlap assert
-    // within TensorIterator.
-    .set_check_mem_overlap(false)
-    .check_all_same_dtype(false)
-    .resize_outputs(false)
-    .add_output(self_restrided)
-    .add_input(index_restrided)
-    .add_input(source_nonzero)
-    .build();
-
-  auto self_dim_size = self_nonzero.size(dim);
-  auto self_dim_stride = self_nonzero.stride(dim);
-  index_copy_stub(
-    iter.device_type(),
-    iter,
-    dim,
-    self_dim_size,
-    self_dim_stride);
-
-  return self;
-}
-
-Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
-  return self.clone(at::MemoryFormat::Preserve).index_copy_(dim, index, source);
+    auto result_dim_size = result_nonzero.size(dim);
+    auto result_dim_stride = result_nonzero.stride(dim);
+    index_copy_stub(
+      iter.device_type(),
+      iter,
+      dim,
+      result_dim_size,
+      result_dim_stride);
 }
 
 TORCH_IMPL_FUNC(index_add_cpu_out)
@@ -869,9 +880,6 @@ Tensor & index_select_out_cpu_dim1_(
 
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
             dst_floats[i] = src_floats[idx];
           }
         }
@@ -881,10 +889,6 @@ Tensor & index_select_out_cpu_dim1_(
         for (const auto batch : c10::irange(outer_dims_product)) {
           for (const auto i : c10::irange(N)) {
             auto idx = idxs[i];
-            if (idx < 0) {
-              idx = idx + src_indexing_axis_dim;
-            }
-
             auto src = src_base + batch * src_batch_bytesize + idx * block_bytesize;
             auto dst = out + batch * gathered_batch_bytesize + i * block_bytesize;
             memcpy(dst, src, block_bytesize);
@@ -1295,7 +1299,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
   TORCH_CHECK(self.dim() == index.dim(),
       "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
-  for (int64_t i = 0; i < self.dim(); i++) {
+  for (const auto i : c10::irange(self.dim())) {
     TORCH_CHECK(self.size(i) == index.size(i),
         "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
   }
@@ -1332,16 +1336,18 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
 
 
     int64_t offset1 = 1, offset2 = 1;
-    for (int64_t d = 0; d < dim; d++)
+    for (const auto d : c10::irange(dim)) {
       offset1 *= self.size(d);
-    for (int64_t d = dim + 1; d < self.dim(); d++)
+    }
+    for (int64_t d = dim + 1; d < self.dim(); d++) {
       offset2 *= self.size(d);
+    }
 
     scalar_t value;
     int64_t dim_index;
-    for (int64_t i = 0; i < offset1; i++) {
-      for (int64_t j = 0; j < self.size(dim); j++) {
-        for (int64_t k = 0; k < offset2; k++) {
+    for (const auto i : c10::irange(offset1)) {
+      for (const auto j : c10::irange(self.size(dim))) {
+        for (const auto k : c10::irange(offset2)) {
           value = self_data[i * self_cont.stride(dim) * self_cont.size(dim) + j * self_cont.stride(dim) + k];
           dim_index = index_data[i * index_cont.stride(dim) * index_cont.size(dim) + j * index_cont.stride(dim) + k];
           TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),

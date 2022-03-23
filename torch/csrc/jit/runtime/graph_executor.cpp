@@ -201,6 +201,9 @@ struct UnpackInstructions {
   void pushTensor() {
     insts_.emplace_back(PUSH_TENSOR);
   }
+  void pushNone() {
+    insts_.emplace_back(PUSH_NONE);
+  }
   void pushTensorList(size_t size) {
     insts_.emplace_back(PUSH_LIST);
     sizes_.push_back(size);
@@ -218,6 +221,9 @@ struct UnpackInstructions {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
           stack.emplace_back(lst);
         } break;
+        case PUSH_NONE: {
+          stack.emplace_back(IValue());
+        }
       }
     }
   }
@@ -226,6 +232,7 @@ struct UnpackInstructions {
   enum Inst : uint8_t {
     PUSH_TENSOR,
     PUSH_LIST, // consumes one size
+    PUSH_NONE,
   };
   std::vector<Inst> insts_;
   std::vector<size_t> sizes_;
@@ -315,7 +322,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.scalar_type())) {
+    if (at::isFloatingType(output.scalar_type()) ||
+        at::isComplexType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
@@ -333,6 +341,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
     } else if (v.isTensor()) {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
+    } else if (v.isNone()) {
+      input_instructions_.pushNone();
+      addInputVariable(Variable{});
     }
   }
 
