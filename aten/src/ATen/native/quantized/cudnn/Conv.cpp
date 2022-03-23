@@ -22,38 +22,9 @@
 
 #include <iostream>
 #include <unordered_map>
+#include <vector>
 
-uint8_t getAlignment(const at::Tensor &t) {
-  // alignment are in bytes
-  uint8_t alignment = 1;
-  uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  while (address % alignment == 0 && alignment < 16) alignment *= 2;
-  return alignment;
-}
-
-cudnn_frontend::Tensor getTensorDescriptor(const at::Tensor &t, int64_t id, uint8_t alignment) {
-  auto shape = t.sizes();
-  auto strides = t.strides();
-  return cudnn_frontend::TensorBuilder()
-    .setDim(shape.size(), shape.data())
-    .setStrides(strides.size(), strides.data())
-    .setId(id)
-    .setAlignment(alignment)
-    .setDataType(at::native::getCudnnDataType(t))
-    .build();
-}
-
-cudnn_frontend::Tensor getTensorDescriptor(const c10::IntArrayRef& shape, const c10::IntArrayRef& strides, cudnnDataType_t cudnn_dtype, int64_t id, uint8_t alignment) {
-  return cudnn_frontend::TensorBuilder()
-    .setDim(shape.size(), shape.data())
-    .setStrides(strides.size(), strides.data())
-    .setId(id)
-    .setAlignment(alignment)
-    .setDataType(cudnn_dtype)
-    .build();
-}
-
-// TODO: there is a table from input dtype and weight dtype to operator dtype,
+// TODO: there is a table from input dtype and weight dtype to operator qdtype,
 // we can derive the operator dtype based on input dtype
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::IntArrayRef padding, c10::IntArrayRef stride, c10::IntArrayRef dilation) {
   uint64_t convDim = stride.size();
@@ -66,87 +37,6 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::Int
     .setPostPadding(convDim, padding.data())
     .setDilation(convDim, dilation.data())
     .build();
-}
-
-// TODO: there is a table from input dtype to operator dtype, we can derive
-// the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseMulDescriptor(cudnnDataType_t dataType) {
-  return cudnn_frontend::PointWiseDescBuilder()
-    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_MUL)
-    .setMathPrecision(dataType)
-    .build();
-}
-
-// TODO: there is a table from input dtype to operator dtype, we can derive
-// the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseAddDescriptor(cudnnDataType_t dataType) {
-  return cudnn_frontend::PointWiseDescBuilder()
-    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_ADD)
-    .setMathPrecision(dataType)
-    .build();
-}
-
-// TODO: there is a table from input dtype to operator dtype, we can derive
-// the operator dtype based on input dtype
-cudnn_frontend::PointWiseDesc_v8 getPointWiseReluDescriptor(cudnnDataType_t dataType) {
-  return cudnn_frontend::PointWiseDescBuilder()
-    .setMode(cudnnPointwiseMode_t::CUDNN_POINTWISE_RELU_FWD)
-    .setMathPrecision(dataType)
-    .build();
-}
-
-void filterEngineConfigs(
-  cudnn_frontend::EngineConfigList &from,
-  cudnn_frontend::EngineConfigList &to,
-  bool deterministic, bool allow_tf32, c10::ScalarType scalar_type)
-{
-  auto filter = [=](cudnnBackendDescriptor_t c) {
-    if (deterministic) {
-      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(c)) return true;
-    }
-    if (scalar_type == at::kFloat || scalar_type == at::kChar || !allow_tf32) {
-      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(c)) return true;
-      if (cudnn_frontend::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(c)) return true;
-    }
-    return false;
-  };
-  cudnn_frontend::filter(from, to, filter);
-}
-
-cudnn_frontend::ExecutionPlan
-get_execplan_from_heuristics_else_fall_back(cudnn_frontend::OperationGraph&& opGraph, cudnnHandle_t handle_) {
-  auto heuristics = cudnn_frontend::EngineHeuristicsBuilder()
-    .setOperationGraph(opGraph)
-    .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
-    .build();
-
-  // std::cout << "Heuristic has " << heuristics.getEngineConfigCount() << " configurations " << std::endl;
-  auto& engine_config = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
-
-  // Try engine configs returned by the heuristics and pick up the first one that works.
-  for (auto& ecfg : engine_config) {
-    try {
-      auto plan = cudnn_frontend::ExecutionPlanBuilder()
-        .setHandle(handle_)
-        .setEngineConfig(ecfg, opGraph.getTag())
-        .build();
-      return plan;
-    } catch (cudnn_frontend::cudnnException& e) {
-      continue;
-    }
-  }
-
-  {
-    auto total_engines = opGraph.getEngineCount();
-    // std::cout << opGraph.describe() << " has " << total_engines << " engines." << std::endl;
-    auto engine = cudnn_frontend::EngineBuilder().setGlobalEngineIdx(0).setOperationGraph(opGraph).build();
-    // std::cout << engine.describe() << std::endl;
-
-    auto engine_config = cudnn_frontend::EngineConfigBuilder().setEngine(engine).build();
-    // std::cout << engine_config.describe() << std::endl;
-
-    return cudnn_frontend::ExecutionPlanBuilder().setHandle(handle_).setEngineConfig(engine_config).build();
-  }
 }
 
 struct CacheKey {
@@ -212,7 +102,6 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   requantize_multiplier_tensor.fill_(requantize_multiplier);
   c10::optional<at::Tensor> bias_multiplier_tensor;
   c10::optional<at::Tensor> broadcasted_bias;
-  auto weight = orig_weight_.int_repr();
   if (bias_.has_value()) {
     // the input bias is a 1-D tensor whose size is the same as the size of the second dimension of quantized_output.
     // we need to add trailing dimensions in order to properly broadcast bias, otherwise broadcast_to will fail.
@@ -240,11 +129,11 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // operator datatype needs to be int32 for int8 convolution, but we can
   // set the datatype for output tensor to int32 or fp32
   key.params.dataType = CUDNN_DATA_INT32;
-  key.input_alignment = getAlignment(input);
-  key.output_alignment = getAlignment(conv_output);
-  key.weight_alignment = getAlignment(orig_weight_);
+  key.input_alignment = cudnn_utils::getAlignment(input);
+  key.output_alignment = cudnn_utils::getAlignment(conv_output);
+  key.weight_alignment = cudnn_utils::getAlignment(orig_weight_);
   if (bias_.has_value()) {
-    key.bias_alignment = getAlignment(broadcasted_bias.value());
+    key.bias_alignment = cudnn_utils::getAlignment(broadcasted_bias.value());
   } else {
     key.bias_alignment = -1;
   }
@@ -294,9 +183,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // where act_fp32 and w_fp32 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
-      .setyDesc(getTensorDescriptor(conv_output, 'y', key.output_alignment))
-      .setwDesc(getTensorDescriptor(orig_weight_.sizes(), orig_weight_.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
+      .setxDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_INT8, 'x', key.input_alignment))
+      .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'y', key.output_alignment))
+      .setwDesc(cudnn_utils::getTensorDescriptor(orig_weight_.sizes(), orig_weight_.strides(), CUDNN_DATA_INT8, 'w', key.weight_alignment))
       .setcDesc(getConvDescriptor(key.params.dataType, padding_vec, stride_vec, dilation_vec))
       .build();
   // std::cout << "operator:" << conv_op.describe() << std::endl;
@@ -313,10 +202,10 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     // output is a fp32 tensor
     // we use inplace operation here where the output is assigned to the input
     bias_mult_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
-      .setxDesc(getTensorDescriptor(broadcasted_bias.value(), 'b', getAlignment(broadcasted_bias.value())))
-      .setbDesc(getTensorDescriptor(bias_multiplier_tensor.value(), 'c', getAlignment(bias_multiplier_tensor.value())))
-      .setyDesc(getTensorDescriptor(broadcasted_bias.value(), 'd', getAlignment(broadcasted_bias.value())))
-      .setpwDesc(getPointWiseMulDescriptor(at::native::getCudnnDataType(bias_multiplier_tensor.value())))
+      .setxDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'b', cudnn_utils::getAlignment(broadcasted_bias.value())))
+      .setbDesc(cudnn_utils::getTensorDescriptor(bias_multiplier_tensor.value(), 'c', cudnn_utils::getAlignment(bias_multiplier_tensor.value())))
+      .setyDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
+      .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(bias_multiplier_tensor.value())))
       .build());
 
     // computes (act_int8 * w_int8 + [bias_fp32/(act_scale * w_scale)])
@@ -325,9 +214,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     // we use inplace operation here where the output is assigned to the input
     sum_conv_bias_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(conv_op.getOutputTensor())
-      .setbDesc(getTensorDescriptor(broadcasted_bias.value(), 'd', getAlignment(broadcasted_bias.value())))
-      .setyDesc(getTensorDescriptor(conv_output, 'e', key.output_alignment))
-      .setpwDesc(getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
+      .setbDesc(cudnn_utils::getTensorDescriptor(broadcasted_bias.value(), 'd', cudnn_utils::getAlignment(broadcasted_bias.value())))
+      .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'e', key.output_alignment))
+      .setpwDesc(cudnn_utils::getPointWiseAddDescriptor(at::native::getCudnnDataType(broadcasted_bias.value())))
       .build());
   }
 
@@ -340,8 +229,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(tensor2requant_ptr)
-      .setyDesc(getTensorDescriptor(conv_output, 'f', key.output_alignment))
-      .setpwDesc(getPointWiseReluDescriptor(at::native::getCudnnDataType(conv_output)))
+      .setyDesc(cudnn_utils::getTensorDescriptor(conv_output, 'f', key.output_alignment))
+      .setpwDesc(cudnn_utils::getPointWiseReluDescriptor(at::native::getCudnnDataType(conv_output)))
       .build());
   }
 
@@ -350,9 +239,9 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   // output is a fp32 tensor
   auto requant_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
     .setxDesc(kReluFused ? relu_op.value().getOutputTensor() : tensor2requant_ptr)
-    .setbDesc(getTensorDescriptor(requantize_multiplier_tensor, 's', getAlignment(requantize_multiplier_tensor)))
-    .setyDesc(getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', getAlignment(quantized_output)))
-    .setpwDesc(getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
+    .setbDesc(cudnn_utils::getTensorDescriptor(requantize_multiplier_tensor, 's', cudnn_utils::getAlignment(requantize_multiplier_tensor)))
+    .setyDesc(cudnn_utils::getTensorDescriptor(quantized_output.sizes(), quantized_output.strides(), CUDNN_DATA_INT8, 'r', cudnn_utils::getAlignment(quantized_output)))
+    .setpwDesc(cudnn_utils::getPointWiseMulDescriptor(at::native::getCudnnDataType(requantize_multiplier_tensor)))
     .build();
   // std::cout << "operator:" << requant_op.describe() << std::endl;
 
@@ -385,10 +274,8 @@ void PackedConvWeightCudnn<kSpatialDim>::apply_impl_helper(const at::Tensor& qua
   auto& fallback_list = fallback.getFallbackList();
 
   cudnn_frontend::EngineConfigList filtered_configs;
-  // because we removed the int_repr call and now input is a quantized tensor, we will pass in
-  // at::kChar instead of input.scalar_type()
-  filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
-  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
+  cudnn_utils::filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, at::kChar);
+  cudnn_utils::filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, at::kChar);
 
   for (auto &cfg : engine_configs) {
     try {
