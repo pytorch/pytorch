@@ -716,6 +716,7 @@ class TestCompositeCompliance(TestCase):
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
             composite_compliance.check_with_mode(op, args, kwargs)
+            composite_compliance.check_all_permutations(op, args, kwargs)
 
 
 class TestMathBits(TestCase):
