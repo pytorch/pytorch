@@ -609,7 +609,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload('ailzhang/torchhub_example', force_reload=False)
+        local_dir = hub._get_cache_or_reload('ailzhang/torchhub_example')
         hub_model = hub.load(local_dir, 'mnist', source='local', pretrained=True, verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
@@ -632,7 +632,7 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
-        entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True, trust_repo=True)
+        entry_lists = hub.list('ailzhang/torchhub_example', trust_repo=True)
         self.assertObjectIn('mnist', entry_lists)
 
     @retry(Exception, tries=3)
@@ -690,7 +690,7 @@ class TestHub(TestCase):
     @retry(Exception, tries=3)
     def test_load_commit_from_forked_repo(self):
         with self.assertRaisesRegex(ValueError, 'If it\'s a commit from a forked repo'):
-            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+            torch.hub.load('pytorch/vision:4e2c216', 'resnet18')
     
     def _assert_trusted_list_is_empty(self):
         with open(self.trusted_list_path) as f:
@@ -705,50 +705,50 @@ class TestHub(TestCase):
     def test_trust_repo_false_emptystring(self, unused_patch_input):
         # patch sends the patched function as input, hence the extra arg
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
-            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=False)
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
         self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
     def test_trust_repo_false_no(self, unused_patch_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
-            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=False)
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
         self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
     def test_trusted_repo_false_yes(self, unused_patch_input):
-        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=False)
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=False)
         self._assert_in_trusted_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
     def test_trust_repo_check_no(self, unused_patch_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
-            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo="check")
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
         self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
     def test_trust_repo_check_yes(self, unused_patch_input):
-        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo="check")
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
         self._assert_in_trusted_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     def test_trust_repo_true(self):
-        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=True)
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=True)
         self._assert_in_allow_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     def test_trust_repo_builtin_trusted_owners(self):
-        torch.hub.load('pytorch/vision', 'resnet18', force_reload=True, trust_repo="check")
+        torch.hub.load('pytorch/vision', 'resnet18', trust_repo="check")
         self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     def test_trust_repo_none(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=None)
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=None)
             assert len(w) == 1
             assert issubclass(w[-1].category, UserWarning)
             assert "You are about to download and run code from an untrusted repository" in str(w[-1].message)
@@ -760,10 +760,10 @@ class TestHub(TestCase):
         # We first download a repo and then delete the allowlist file
         # Then we check that the repo is indeed trusted without a prompt,
         # because it was already downloaded in the past.
-        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=True)
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo=True)
         os.remove(self.trusted_list_path)
 
-        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo="check")
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', trust_repo="check")
 
         self._assert_trusted_list_is_empty()
 
