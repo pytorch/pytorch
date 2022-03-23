@@ -43,7 +43,9 @@ def gen_registration_headers(
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
-            "#include <ATen/ops/empty_strided.h>"]
+            "#include <ATen/ops/empty_strided.h>",
+            "#include <ATen/ops/_copy_from_and_resize.h>",
+            "#include <ATen/ops/_copy_from.h>"]
     else:
         headers.append("#include <ATen/Functions.h>")
 
