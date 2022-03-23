@@ -591,6 +591,7 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
+
     def setUp(self):
         self.previous_hub_dir = torch.hub.get_dir()
         self.tmpdir = tempfile.TemporaryDirectory('hub_dir')
@@ -598,60 +599,36 @@ class TestHub(TestCase):
         self.trusted_list_path = os.path.join(torch.hub.get_dir(), "trusted_list")
 
     def tearDown(self):
-        torch.hub.set_dir(self.previous_hub_dir)  # probably useless
+        torch.hub.set_dir(self.previous_hub_dir)  # probably not needed, but can't hurt
         self.tmpdir.cleanup()
 
     @retry(Exception, tries=3)
     def test_load_from_github(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            source='github',
-            pretrained=True,
-            verbose=False,
-            trust_repo=True)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example', 'mnist', source='github', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
-        local_dir = hub._get_cache_or_reload(
-            'ailzhang/torchhub_example', force_reload=False, trust_repo=True, calling_fn=None)
-        hub_model = hub.load(
-            local_dir,
-            'mnist',
-            source='local',
-            pretrained=True,
-            verbose=False,
-            trust_repo=True)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        local_dir = hub._get_cache_or_reload('ailzhang/torchhub_example', force_reload=False)
+        hub_model = hub.load(local_dir, 'mnist', source='local', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_load_from_branch(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example:ci/test_slash',
-            'mnist',
-            pretrained=True,
-            verbose=False,
-            trust_repo=True)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+        hub_model = hub.load('ailzhang/torchhub_example:ci/test_slash', 'mnist', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
-    def test_set_dir(self):
-        temp_dir = tempfile.gettempdir()
-        hub.set_dir(temp_dir)
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist',
-            pretrained=True,
-            verbose=False,
-            trust_repo=True)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-        assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
-        shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
+    def test_get_set_dir(self):
+        previous_hub_dir = torch.hub.get_dir()
+        with tempfile.TemporaryDirectory('hub_dir') as tmpdir:
+            torch.hub.set_dir(tmpdir)
+            self.assertEqual(torch.hub.get_dir(), tmpdir)
+            self.assertNotEqual(previous_hub_dir, tmpdir)
+
+            hub_model = hub.load('ailzhang/torchhub_example', 'mnist', pretrained=True, verbose=False)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            assert os.path.exists(os.path.join(tmpdir, 'ailzhang_torchhub_example_master'))
 
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
@@ -660,46 +637,37 @@ class TestHub(TestCase):
 
     @retry(Exception, tries=3)
     def test_download_url_to_file(self):
-        temp_file = os.path.join(tempfile.gettempdir(), 'temp')
-        hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
-        loaded_state = torch.load(temp_file)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            f = os.path.join(tmpdir, 'temp')
+            hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, f, progress=False)
+            loaded_state = torch.load(f)
+            self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
-        self.assertEqual(sum_of_state_dict(loaded_state),
-                         SUM_OF_HUB_EXAMPLE)
+        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
+
+        # with name
+        file_name = "the_file_name"
+        loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+        expected_file_path = os.path.join(torch.hub.get_dir(), 'checkpoints', file_name)
+        self.assertTrue(os.path.exists(expected_file_path))
+        self.assertEqual(sum_of_state_dict(loaded_state), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
-    def test_load_zip_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip',
-            pretrained=True,
-            verbose=False,
-            trust_repo=True)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
+    def test_load_legacy_zip_checkpoint(self):
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip', pretrained=True, verbose=False)
+            self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
+            assert any("will be deprecated in favor of default zipfile" in str(w) for w in ws)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
     @retry(Exception, tries=3)
     def test_load_zip_1_6_checkpoint(self):
-        hub_model = hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            pretrained=True,
-            verbose=False,
-            trust_repo=True)
-        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
-                         SUM_OF_HUB_EXAMPLE)
-
-
-    def test_hub_dir(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            self.assertEqual(torch.hub.get_dir(), dirname)
+        hub_model = hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', pretrained=True, verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
 
     @retry(Exception, tries=3)
     def test_hub_parse_repo_info(self):
@@ -720,148 +688,84 @@ class TestHub(TestCase):
         )
 
     @retry(Exception, tries=3)
-    def test_load_state_dict_from_url_with_name(self):
-        with tempfile.TemporaryDirectory('hub_dir') as dirname:
-            torch.hub.set_dir(dirname)
-            file_name = 'test_file'
-            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
-            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
-            self.assertEqual(sum_of_state_dict(loaded_state),
-                             SUM_OF_HUB_EXAMPLE)
-
-    @retry(Exception, tries=3)
     def test_load_commit_from_forked_repo(self):
-        with self.assertRaisesRegex(
-                ValueError,
-                'If it\'s a commit from a forked repo'):
-            model = torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True, trust_repo=True)
+        with self.assertRaisesRegex(ValueError, 'If it\'s a commit from a forked repo'):
+            torch.hub.load('pytorch/vision:4e2c216', 'resnet18', force_reload=True)
+    
+    def _assert_trusted_list_is_empty(self):
+        with open(self.trusted_list_path) as f:
+            assert not f.readlines()
+
+    def _assert_in_trusted_list(self, line):
+        with open(self.trusted_list_path) as f:
+            assert line in (l.strip() for l in f.readlines())
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='')
     def test_trust_repo_false_emptystring(self, unused_patch_input):
         # patch sends the patched function as input, hence the extra arg
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
-            torch.hub.load(
-                'ailzhang/torchhub_example',
-                'mnist_zip_1_6',
-                force_reload=True,
-                trust_repo=False
-            )
-        with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=False)
+        self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
     def test_trust_repo_false_no(self, unused_patch_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
-            torch.hub.load(
-                'ailzhang/torchhub_example',
-                'mnist_zip_1_6',
-                force_reload=True,
-                trust_repo=False
-            )
-
-        with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=False)
+        self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
     def test_trusted_repo_false_yes(self, unused_patch_input):
-        torch.hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            force_reload=True,
-            trust_repo=False
-        )
-        with open(self.trusted_list_path) as f:
-            assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=False)
+        self._assert_in_trusted_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='no')
     def test_trust_repo_check_no(self, unused_patch_input):
         with self.assertRaisesRegex(Exception, 'Untrusted repository.'):
-            torch.hub.load(
-                'ailzhang/torchhub_example',
-                'mnist_zip_1_6',
-                force_reload=True,
-                trust_repo="check"
-            )
-        with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo="check")
+        self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     @patch('builtins.input', return_value='y')
     def test_trust_repo_check_yes(self, unused_patch_input):
-        torch.hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            force_reload=True,
-            trust_repo="check"
-        )
-        with open(self.trusted_list_path) as f:
-            assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo="check")
+        self._assert_in_trusted_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     def test_trust_repo_true(self):
-        torch.hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            force_reload=True,
-            trust_repo=True
-        )
-        with open(self.trusted_list_path) as f:
-            assert "ailzhang_torchhub_example" in (l.strip() for l in f.readlines())
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=True)
+        self._assert_in_allow_list("ailzhang_torchhub_example")
 
     @retry(Exception, tries=3)
     def test_trust_repo_builtin_trusted_owners(self):
-        torch.hub.load(
-            'pytorch/vision',
-            'resnet18',
-            force_reload=True,
-            trust_repo="check"
-        )
-        with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+        torch.hub.load('pytorch/vision', 'resnet18', force_reload=True, trust_repo="check")
+        self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     def test_trust_repo_none(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            torch.hub.load(
-                'ailzhang/torchhub_example',
-                'mnist_zip_1_6',
-                force_reload=True,
-                trust_repo=None
-            )
+            torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=None)
             assert len(w) == 1
             assert issubclass(w[-1].category, UserWarning)
             assert "You are about to download and run code from an untrusted repository" in str(w[-1].message)
 
-        with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+        self._assert_trusted_list_is_empty()
 
     @retry(Exception, tries=3)
     def test_trust_repo_legacy(self):
         # We first download a repo and then delete the allowlist file
         # Then we check that the repo is indeed trusted without a prompt,
         # because it was already downloaded in the past.
-        torch.hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            force_reload=True,
-            trust_repo=True
-        )
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo=True)
         os.remove(self.trusted_list_path)
 
-        torch.hub.load(
-            'ailzhang/torchhub_example',
-            'mnist_zip_1_6',
-            force_reload=True,
-            trust_repo="check"
-        )
+        torch.hub.load('ailzhang/torchhub_example', 'mnist_zip_1_6', force_reload=True, trust_repo="check")
 
-        with open(self.trusted_list_path) as f:
-            assert not f.readlines()
+        self._assert_trusted_list_is_empty()
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
