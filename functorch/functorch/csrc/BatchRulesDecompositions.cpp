@@ -157,7 +157,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(det);
   OP_DECOMPOSE(diag_backward);
   OP_DECOMPOSE(diff);
-  OP_DECOMPOSE2(divide, Tensor );
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
   OP_DECOMPOSE(embedding_backward);
@@ -284,7 +283,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(trapezoid, dx);
   OP_DECOMPOSE2(trapz, x);
   OP_DECOMPOSE2(trapz, dx);
-  OP_DECOMPOSE2(true_divide, Tensor);
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
   OP_DECOMPOSE(var_mean);
@@ -310,6 +308,27 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   DECOMPOSE_FUNCTIONAL(diag_embed);
   DECOMPOSE_FUNCTIONAL(block_diag);
+
+  // divide, alias for div
+  OP_DECOMPOSE2(divide, Tensor);
+  OP_DECOMPOSE2(divide_, Tensor);
+  OP_DECOMPOSE2(divide, Scalar);
+  OP_DECOMPOSE2(divide, Tensor_mode);
+  OP_DECOMPOSE2(divide_, Tensor_mode);
+  OP_DECOMPOSE2(divide, Scalar_mode);
+  OP_DECOMPOSE2(divide_, Scalar_mode);
+
+  // divide, alias for div
+  OP_DECOMPOSE2(true_divide, Tensor);
+  OP_DECOMPOSE2(true_divide_, Tensor);
+  OP_DECOMPOSE2(true_divide, Scalar);
+  OP_DECOMPOSE2(true_divide_, Scalar);
+
+  // multiply, alias for mul
+  OP_DECOMPOSE2(multiply, Tensor)
+  OP_DECOMPOSE2(multiply_, Tensor)
+  OP_DECOMPOSE2(multiply, Scalar)
+  OP_DECOMPOSE2(multiply_, Scalar)
 }
 
 }}
