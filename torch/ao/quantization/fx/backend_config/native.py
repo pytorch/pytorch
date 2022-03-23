@@ -49,7 +49,7 @@ def _get_linear_configs():
         # the corresponding reference quantized module for the root module
         "reference_quantized_module_for_root": nnqr.Linear,
         "qat_module": nnqat.Linear,
-    })        
+    })
     # linear qat module
     linear_configs.append({
         "pattern": nnqat.Linear,
@@ -85,7 +85,7 @@ def _get_linear_configs():
     linear_configs.append({
         "pattern": (torch.nn.ReLU, torch.nn.Linear),
         "observation_type": observation_type,
-        "dtype_configs": dtype_configs, 
+        "dtype_configs": dtype_configs,
         "fuser_method": reverse_sequential_wrapper2(nni.LinearReLU),
     })
     # linear relu, linear module + functional relu
@@ -120,7 +120,7 @@ def _get_linear_configs():
     linear_configs.append({
         "pattern": nniqat.LinearBn1d,
         "observation_type": observation_type,
-        "dtype_configs": dtype_configs, 
+        "dtype_configs": dtype_configs,
         "root_module": torch.nn.Linear,
         "reference_quantized_module_for_root": nnqr.Linear,
     })
@@ -198,7 +198,7 @@ def _get_conv_configs():
         conv_configs.append({
             "pattern": convs.bn_relu_qat,
             "observation_type": observation_type,
-            "dtype_configs": dtype_configs, 
+            "dtype_configs": dtype_configs,
             "root_module": convs.root,
             "reference_quantized_module_for_root": convs.reference,
         })
