@@ -157,7 +157,7 @@ struct cuda_scatter_gather_base_kernel {
     const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
-    ReduceAdd& f
+    const ReduceAdd& f
   ) {
     at::assert_no_internal_overlap(self);
 
@@ -215,7 +215,7 @@ struct cuda_scatter_gather_base_kernel {
     const Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name,
-    TensorAssign& f
+    const TensorAssign& f
   ) {
     at::assert_no_internal_overlap(self);
 
@@ -328,66 +328,6 @@ struct cuda_scatter_gather_base_kernel {
     );
   }
 }; // struct cuda_scatter_gather_base_kernel
-
-
-// FIXME: this is the same as cuda_scatter_gather_base_kernel, with a different
-// dtype dispatch. Splitting out for now to ensure no regression to dtypes
-// supported by scatter/gather.
-struct cuda_scatter_reduce_two_base_kernel {
-  template <typename func_t>
-  void operator()(
-    const Tensor& self, int64_t dim,
-    const Tensor& index, const Tensor& src,
-    const std::string& method_name,
-    const func_t& f
-  ) {
-    at::assert_no_internal_overlap(self);
-
-    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
-    auto self_strides = ensure_nonempty_vec(self.strides().vec());
-    auto src_strides = ensure_nonempty_vec(src.strides().vec());
-
-    // restride self and src such that
-    // self.shape = src.shape = index.shape
-    //
-    // restride stride[dim] such that
-    // if (is_scatter_like) self.stride[dim] = 0
-    // else src.stride[dim] = 0
-    auto self_restrided = restride_dim(self, dim, index_sizes);
-    auto src_restrided = src.as_strided(index_sizes, src_strides);
-
-    auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)
-      .check_all_same_dtype(false)
-      .resize_outputs(false)
-      .add_output(self_restrided)
-      .add_input(src_restrided)
-      .add_input(index)
-      .build();
-
-    auto self_dim_stride = ensure_nonempty_stride(self, dim);
-    auto self_dim_size = ensure_nonempty_size(self, dim);
-
-    auto src_dim_stride = ensure_nonempty_stride(src, dim);
-    auto src_dim_size = ensure_nonempty_size(src, dim);
-
-    auto index_size = self_dim_size;
-    auto index_stride = self_dim_stride;
-
-
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half, ScalarType::BFloat16,
-      iter.dtype(),
-      "cuda_scatter_reduce_two_base_kernel_func", [&] {
-
-        _cuda_scatter_gather_internal_kernel<true, scalar_t>()(
-          iter, index_size, index_stride, f
-        );
-      }
-    );
-  }
-
-}; // struct cuda_scatter_reduce_two_base_kernel
 
 template <typename scalar_t>
 struct _cuda_scatter_fill_internal_kernel {
@@ -587,8 +527,13 @@ void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, co
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_multiply_", reduce_multiply);
     break;
+<<<<<<< HEAD
+  default :
+    break;
+=======
   default:
       break;
+>>>>>>> bbcef151d1... scatter_reduce CUDA support
   }
 }
 

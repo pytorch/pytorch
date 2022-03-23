@@ -196,7 +196,7 @@ TORCH_META_FUNC2(scatter_reduce, two)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
-  scatter_meta_impl</* use_new_options */true>(*this, self, dim, index, src, reduce);
+  scatter_meta_impl</*use_new_options=*/true>(*this, self, dim, index, src, reduce);
 }
 
 TORCH_PRECOMPUTE_META_FUNC(index_copy)
@@ -1307,16 +1307,16 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const Tensor& src,
  const c10::string_view reduce,
  const Tensor& out) {
-  scatter_impl</* use_new_options */true>(self, dim, index, src, out,
-                                          scatter_reduce_stub,
-                                          scatter_stub,
-                                          reduce);
+  scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
+                                         scatter_reduce_stub,
+                                         scatter_stub,
+                                         reduce);
 
   if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
     auto ones = at::ones_like(src);
     auto count = at::ones_like(out);
     count.scatter_add_(dim, index, ones);
-    if (out.is_floating_point() or out.is_complex()) {
+    if (out.is_floating_point() || out.is_complex()) {
       out.div_(count);
     } else {
       out.div_(count, "floor");

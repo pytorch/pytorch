@@ -15580,14 +15580,18 @@ op_db: List[OpInfo] = [
     OpInfo(
         'scatter_reduce',
         variant_test_name='sum',
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        # complex not added to dtypes as complex gradients are not properly handled
+        # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
     ),
     OpInfo(
         'scatter_reduce',
         variant_test_name='prod',
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        # complex not added to dtypes as complex gradients are not properly handled
+        # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
+        dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
@@ -15595,7 +15599,9 @@ op_db: List[OpInfo] = [
     OpInfo(
         'scatter_reduce',
         variant_test_name='mean',
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        # complex not added to dtypes as complex gradients are not properly handled
+        # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
         supports_out=False,
