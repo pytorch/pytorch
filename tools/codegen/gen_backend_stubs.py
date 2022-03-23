@@ -242,11 +242,21 @@ def gen_dispatcher_registrations(
         backend_dispatch_key: DispatchKey,
         dispatch_key: DispatchKey,
         selector: 'SelectiveBuilder',
+        # build_in_tree is true for lazy TS backend and affects include paths, not used for external backends
+        build_in_tree: bool = False,
         per_operator_headers: bool = False) -> None:
+    headers = [
+        f"{output_dir}/{backend_dispatch_key}NativeFunctions.h",
+    ]
+    if build_in_tree:
+        external_backend_headers_str = "\n".join(f'#include <{h}>' for h in headers)
+    else:
+        external_backend_headers_str = "\n".join(f'#include "{h}"' for h in headers)
+
     backend_index = backend_indices[dispatch_key]
     fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
         'extra_cuda_headers': '',
-        'external_backend_headers': f'#include "{output_dir}/{backend_dispatch_key}NativeFunctions.h"',
+        'external_backend_headers': external_backend_headers_str,
         'ops_headers': '#include <ATen/Functions.h>' if not per_operator_headers else '',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
