@@ -18,8 +18,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  is_generic_dispatch_key,
                                  is_ufunc_dispatch_key,
                                  NativeFunctionsViewGroup,
-                                 gen_copy_variant_of_view_op,
-                                 gets_generated_view_copy, ViewSchemaKind,
+                                 ViewSchemaKind,
                                  Tag, BaseOperatorName)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
@@ -1012,13 +1011,9 @@ def get_grouped_by_view_native_functions(
         funcs: List[Union[NativeFunction, NativeFunctionsViewGroup]] = []
         if ViewSchemaKind.aliasing not in d:
             # Case 1: this op / op group is not aliasing, so we don't create a view group.
-            # We end up grouping inplace and out-of-place ops together in this mapping, so we need to return both of them.
-            if ViewSchemaKind.non_aliasing in d:
-                funcs.append(d[ViewSchemaKind.non_aliasing])
-            if ViewSchemaKind.inplace in d:
-                funcs.append(d[ViewSchemaKind.inplace])
-            if ViewSchemaKind.out in d:
-                funcs.append(d[ViewSchemaKind.out])
+            # return the original (ungrouped) native functions instead.
+            for func in d.values():
+                funcs.append(func)
         else:
             # Case 2: this op group contains an aliasing op, so we create a ViewGroup for it.
             # The handling for out= ops here is unfortunate.
@@ -1027,7 +1022,7 @@ def get_grouped_by_view_native_functions(
             # It shouldn't be part of a view group, so we explicitly don't group it.
             # There currently aren't any out= view ops (and there probably shouldn't be).
             # We also expect that when we hit this case, the `non_aliasing` op in the dict
-            # *must* be a view_copy op (but this is asserted in the NativeFunctionsViewGroup constructor)
+            # *must* be a view_copy op (this is asserted in the NativeFunctionsViewGroup constructor)
             if ViewSchemaKind.out in d:
                 funcs.append(d[ViewSchemaKind.out])
 
@@ -1045,17 +1040,6 @@ def get_grouped_by_view_native_functions(
         grouped_by_views[schema][f.view_schema_kind] = f
 
     return list(concatMap(maybe_create_view_group, grouped_by_views.values()))
-
-    def flatten_pre_group(d: Dict[SchemaKind, NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
-        r = NativeFunctionsGroup.from_dict(d)
-        if r is None:
-            return list(d.values())
-        else:
-            return [r]
-
-    # TODO: how come ValuesView isn't a Sequence lol
-    pre_grouped_native_functions = pre_group_native_functions(native_functions)
-    return list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
 
 def get_grouped_native_functions(
         native_functions: Sequence[NativeFunction]) -> Sequence[Union[NativeFunction, NativeFunctionsGroup]]:
@@ -1404,7 +1388,6 @@ def gen_source_files(
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         structured_native_functions: Sequence[NativeFunctionsGroup],
         native_functions_with_view_groups: Sequence[Union[NativeFunction, NativeFunctionsViewGroup]],
-        static_dispatch_idx: Optional[BackendIndex],
         selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
         core_fm: FileManager,
@@ -1610,7 +1593,7 @@ def gen_source_files(
             if not needs_functionalization(selector, g):
                 return []
             if isinstance(g, NativeFunctionsViewGroup):
-                # view ops always get a functinalization kernel
+                # view ops always get a functionalization kernel
                 headers = [
                     f"#include <ATen/ops/{g.view.root_name}_native.h>",
                     f"#include <ATen/ops/{g.view.root_name}_ops.h>",
@@ -1818,7 +1801,6 @@ def main() -> None:
             grouped_native_functions=grouped_native_functions,
             structured_native_functions=structured_native_functions,
             native_functions_with_view_groups=native_functions_with_view_groups,
-            static_dispatch_idx=static_dispatch_idx,
             selector=selector,
             backend_indices=backend_indices,
             core_fm=core_fm,

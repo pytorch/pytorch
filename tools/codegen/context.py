@@ -35,8 +35,7 @@ def native_function_manager(g: Union[NativeFunctionsGroup, NativeFunctionsViewGr
         # native_function_manager again on the inside
         f = g.out
     elif isinstance(g, NativeFunctionsViewGroup):
-        # We associate errors with the view operator, since the view_copy operator
-        # is generated (and doesn't exist in native_functions.yaml)
+        # We associate errors with the view operator
         f = g.view
     else:
         f = g

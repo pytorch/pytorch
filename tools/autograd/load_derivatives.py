@@ -25,6 +25,8 @@ from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader, conc
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 # This function directly adds derivative entries for {view}_copy variants of each view op.
+# Since every {view} and {view}_copy op shares the same derivative formula,
+# we generate them here instead of duplicating them in the yaml.
 # See Note [Codegen'd {view}_copy Operators]
 def add_view_copy_derivatives(
     infos: List[DifferentiabilityInfo],
