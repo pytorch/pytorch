@@ -1249,6 +1249,10 @@ struct TORCH_API SymIntType : public Type {
   std::string str() const override {
     return "SymInt";
   }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    // TODO: will become a Union[SymbolicIntNode|int] in the near future
+    return "int";
+  }
   static const TypeKind Kind = TypeKind::SymIntType;
   // global singleton
   static SymIntTypePtr get();
