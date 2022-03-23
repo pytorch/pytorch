@@ -2,11 +2,13 @@
 
 import os
 import sys
+import unittest
 
 from typing import Any, List
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase, make_global
+from torch.testing._internal.jit_utils import JitTestCase, make_global, RUN_CUDA
+from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
 
 # Make the helper files in test/ importable
@@ -632,3 +634,56 @@ class TestWith(JitTestCase):
         # Nested record function should have child "aten::add"
         nested_child_events = nested_function_event.cpu_children
         self.assertTrue("aten::add" in (child.name for child in nested_child_events))
+
+    def test_fuser_context_manager_no_fuser(self):
+        names = ['none', 'no_fuser']
+
+        for name in names:
+            with torch.jit.fuser(name):
+                # torch._C._jit_can_fuse_on_(cpu|gpu) also depends on backend availability
+                self.assertEqual(False, torch._C._jit_texpr_fuser_enabled())
+                self.assertEqual(False, torch._C._jit_nvfuser_enabled())
+
+    def test_fuser_context_manager_legacy(self):
+        names = ['fuser0', 'legacy']
+
+        for name in names:
+            with torch.jit.fuser(name):
+                self.assertEqual(False, torch._C._jit_texpr_fuser_enabled())
+                self.assertEqual(False, torch._C._jit_nvfuser_enabled())
+
+    def test_fuser_context_manager_nnc(self):
+        names = ['fuser1', 'nnc', 'tensorexpr']
+
+        def get_profiling_mode():
+            mode = torch._C._jit_set_profiling_mode(True)
+            torch._C._jit_set_profiling_executor(mode)
+            return mode
+
+        def get_profiling_executor():
+            executor = torch._C._jit_set_profiling_executor(True)
+            torch._C._jit_set_profiling_executor(executor)
+            return executor
+
+        for name in names:
+            mode = torch._C._jit_set_profiling_mode(False)
+            executor = torch._C._jit_set_profiling_executor(False)
+            with torch.jit.fuser(name):
+                self.assertEqual(True, torch._C._jit_texpr_fuser_enabled())
+                self.assertEqual(False, torch._C._jit_nvfuser_enabled())
+                self.assertEqual(True, get_profiling_mode())
+                self.assertEqual(True, get_profiling_executor())
+            self.assertEqual(False, get_profiling_mode())
+            self.assertEqual(False, get_profiling_executor())
+            torch._C._jit_set_profiling_mode(mode)
+            torch._C._jit_set_profiling_executor(executor)
+
+    @unittest.skipIf(not RUN_CUDA, "needs CUDA")
+    @unittest.skipIf(TEST_WITH_ROCM, "NVFuser doesn't work with ROCM")
+    def test_fuser_context_manager_nvfuser(self):
+        names = ['fuser2', 'nvfuser']
+
+        for name in names:
+            with torch.jit.fuser(name):
+                self.assertEqual(False, torch._C._jit_texpr_fuser_enabled())
+                self.assertEqual(True, torch._C._jit_nvfuser_enabled())
