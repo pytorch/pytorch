@@ -743,10 +743,12 @@ inline Layout dispatchKeyToLayout(DispatchKey dispatch_key) {
     case DispatchKey::SparseHIP:
     case DispatchKey::SparseVE:
     case DispatchKey::SparseXPU:
-    case DispatchKey::SparseCsrCPU: // why not map SparseCsrCPU/CUDA to
-                                    // Layout::SparseCsr?
-    case DispatchKey::SparseCsrCUDA:
       return Layout::Sparse;
+    case DispatchKey::SparseCsrCPU:
+    case DispatchKey::SparseCsrCUDA:
+      // warning: existence of Layout::SparseCsc makes the
+      // dispatchKeyToLayout function a multi-valued mapping
+      return Layout::SparseCsr;
     case DispatchKey::MkldnnCPU:
       return Layout::Mkldnn;
     default:

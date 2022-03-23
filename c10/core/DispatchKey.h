@@ -124,7 +124,7 @@ enum class DispatchKey : uint8_t {
   // DispatchKey]
   // To see some example about how to use this, check out ORT
   PrivateUse1,
-  PrivateUse2,
+  // PrivateUse2,
   PrivateUse3,
 
   // Define an alias key to represent end of backend dispatch keys.
@@ -167,6 +167,11 @@ enum class DispatchKey : uint8_t {
   Negative,
 
   ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
+
+  // The CsrTranspose dispatch key is set for any SparseCsr tensor
+  // that is a sparse CSC tensor. Temporarily using PrivateUse1 until
+  // gh-72827 lands.
+  CsrTranspose,
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -329,10 +334,6 @@ enum class DispatchKey : uint8_t {
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
   EndOfAliasKeys = CompositeExplicitAutograd, //
-
-  // The CsrTranspose dispatch key is set for any SparseCsr tensor that
-  // is a sparse CSC tensor
-  CsrTranspose,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // The aliases exist for backwards compatibility reasons, they shouldn't

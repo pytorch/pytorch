@@ -75,11 +75,12 @@ class DispatchKey(Enum):
     SparseXPU = auto()
     NestedTensor = auto()
     PrivateUse1 = auto()
-    PrivateUse2 = auto()
+    # PrivateUse2 = auto() # TEMPORARILY DISABLED UNTIL gh-72827 LANDS
     PrivateUse3 = auto()
     EndOfBackendKeys = PrivateUse3
 
     ZeroTensor = auto()
+    CsrTranspose = auto()
     Meta = auto()
     BackendSelect = auto()
     Named = auto()

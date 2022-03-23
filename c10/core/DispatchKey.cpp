@@ -72,8 +72,10 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
+      /* TEMPORARILY DISABLED UNTIL gh-72827 LANDS
     case DispatchKey::PrivateUse2:
       return "PrivateUse2";
+      */
     case DispatchKey::PrivateUse3:
       return "PrivateUse3";
 
@@ -116,6 +118,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::ZeroTensor:
       return "ZeroTensor";
+    case DispatchKey::CsrTranspose:
+      return "CsrTranspose";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Named:
@@ -206,8 +210,9 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradNestedTensor;
     case DispatchKey::PrivateUse1:
       return DispatchKey::AutogradPrivateUse1;
+      /* TEMPORARILY DISABLED UNTIL gh-72827 LANDS
     case DispatchKey::PrivateUse2:
-      return DispatchKey::AutogradPrivateUse2;
+    return DispatchKey::AutogradPrivateUse2; */
     case DispatchKey::PrivateUse3:
       return DispatchKey::AutogradPrivateUse3;
     default:
@@ -246,7 +251,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
       {"NestedTensor", c10::DispatchKey::NestedTensor},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
-      {"PrivateUse2", c10::DispatchKey::PrivateUse2},
+      //{"PrivateUse2", c10::DispatchKey::PrivateUse2},  // TEMPORARILY DISABLED UNTIL gh-72827 LANDS
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
@@ -255,6 +260,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Conjugate", c10::DispatchKey::Conjugate},
       {"Negative", c10::DispatchKey::Negative},
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},
+      {"CsrTranspose", c10::DispatchKey::CsrTranspose},
       {"FuncTorchDynamicLayerBackMode",
        c10::DispatchKey::FuncTorchDynamicLayerBackMode},
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},

@@ -15,7 +15,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::Lazy,
         DispatchKey::XPU,
         DispatchKey::PrivateUse1,
-        DispatchKey::PrivateUse2,
+        // DispatchKey::PrivateUse2,  // TEMPORARILY DISABLED UNTIL gh-72827 LANDS
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
         DispatchKey::HPU,
@@ -85,8 +85,9 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::XPU);
     case DispatchKey::AutogradPrivateUse1:
       return DispatchKeySet(DispatchKey::PrivateUse1);
+      /* TEMPORARILY DISABLED UNTIL gh-72827 LANDS
     case DispatchKey::AutogradPrivateUse2:
-      return DispatchKeySet(DispatchKey::PrivateUse2);
+    return DispatchKeySet(DispatchKey::PrivateUse2); */
     case DispatchKey::AutogradPrivateUse3:
       return DispatchKeySet(DispatchKey::PrivateUse3);
     case DispatchKey::AutogradOther:

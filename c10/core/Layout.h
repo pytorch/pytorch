@@ -10,8 +10,8 @@ enum class Layout : int8_t {
   Strided,
   Sparse,
   SparseCsr,
-  SparseCsc,
   Mkldnn,
+  SparseCsc,
   NumOptions
 };
 
