@@ -8,6 +8,8 @@ from textwrap import dedent
 from torch.package import PackageExporter, PackageImporter, is_from_package
 from torch.package.package_exporter_no_torch import PackagingError
 from torch.testing._internal.common_utils import run_tests
+from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
+from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -18,6 +20,11 @@ except ImportError:
 
 class TestMisc(PackageTestCase):
     """Tests for one-off or random functionality. Try not to add to this!"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporter
+        self.PackageExporter = PackageExporter
 
     def test_file_structure(self):
         """
@@ -66,7 +73,7 @@ class TestMisc(PackageTestCase):
             """
         )
 
-        with PackageExporter(buffer) as he:
+        with self.PackageExporter(buffer) as he:
             import module_a
             import package_a
             import package_a.subpackage
@@ -79,7 +86,7 @@ class TestMisc(PackageTestCase):
             he.save_text("main", "main", "my string")
 
         buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = self.PackageImporter(buffer)
 
         file_structure = hi.file_structure()
         # remove first line from testing because WINDOW/iOS/Unix treat the buffer differently
@@ -104,7 +111,7 @@ class TestMisc(PackageTestCase):
         Test Directory's has_file() method.
         """
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with self.PackageExporter(buffer) as he:
             import package_a.subpackage
 
             he.intern("**")
@@ -113,7 +120,7 @@ class TestMisc(PackageTestCase):
 
         buffer.seek(0)
 
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
         file_structure = importer.file_structure()
         self.assertTrue(file_structure.has_file("package_a/subpackage.py"))
         self.assertFalse(file_structure.has_file("package_a/subpackage"))
@@ -123,7 +130,7 @@ class TestMisc(PackageTestCase):
         Test content list API for PackageExporter's contained modules.
         """
 
-        with PackageExporter(BytesIO()) as he:
+        with self.PackageExporter(BytesIO()) as he:
             import package_b
 
             he.extern("package_b.subpackage_1")
@@ -139,7 +146,7 @@ class TestMisc(PackageTestCase):
             self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
 
         with self.assertRaises(PackagingError) as e:
-            with PackageExporter(BytesIO()) as he:
+            with self.PackageExporter(BytesIO()) as he:
                 import package_b
 
                 he.deny("package_b")
@@ -153,12 +160,12 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
-        pi = PackageImporter(buffer)
+        pi = self.PackageImporter(buffer)
         mod = pi.import_module("package_a.subpackage")
         loaded_obj = pi.load_pickle("obj", "obj.pkl")
 
@@ -175,12 +182,12 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
-        pi = PackageImporter(buffer)
+        pi = self.PackageImporter(buffer)
         packaged_class = pi.import_module(
             "package_a.subpackage"
         ).PackageASubpackageObject
@@ -199,12 +206,12 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
         buffer.seek(0)
-        pi = PackageImporter(buffer)
+        pi = self.PackageImporter(buffer)
         mod = pi.import_module("package_a.subpackage")
         self.assertTrue(hasattr(mod, "__torch_package__"))
 
@@ -218,12 +225,12 @@ class TestMisc(PackageTestCase):
 
         buffer = BytesIO()
 
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_module(mod.__name__)
 
         buffer.seek(0)
-        pi = PackageImporter(buffer)
+        pi = self.PackageImporter(buffer)
         imported_mod = pi.import_module(mod.__name__)
         self.assertTrue(imported_mod.is_from_package())
         self.assertFalse(mod.is_from_package())
@@ -239,15 +246,20 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         mod = package_a.std_sys_module_hacks.Module()
 
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", mod)
 
         buffer.seek(0)
-        pi = PackageImporter(buffer)
+        pi = self.PackageImporter(buffer)
         mod = pi.load_pickle("obj", "obj.pkl")
         mod()
 
+class TestMiscNoTorch(TestMisc):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporterNoTorch
+        self.PackageExporter = PackageExporterNoTorch
 
 if __name__ == "__main__":
     run_tests()

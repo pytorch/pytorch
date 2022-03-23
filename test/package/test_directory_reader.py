@@ -267,6 +267,10 @@ class DirectoryReaderTest(PackageTestCase):
         Test basic saving and loading of a ScriptModule in a directory.
         Currently not supported.
         """
+
+        if self.PackageExporter != PackageExporter:
+            return
+
         from package_a.test_module import ModWithTensor
 
         scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
@@ -284,7 +288,7 @@ class DirectoryReaderTest(PackageTestCase):
         ):
             with TemporaryDirectory() as temp_dir:
                 zip_file.extractall(path=temp_dir)
-                dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name      )
+                dir_importer = self.PackageImporter(Path(temp_dir) / Path(filename).name)
                 dir_mod = dir_importer.load_pickle("res", "mod.pkl")
 
 class DirectoryReaderTestNoTorch(DirectoryReaderTest):
