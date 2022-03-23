@@ -993,7 +993,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   std::istringstream iss(oss.str());
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
-  ASSERT_TRUE(iss.tellg() == std::ios::beg);
+  ASSERT_TRUE(iss.tellg() == iss.beg);
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 
@@ -1006,8 +1006,8 @@ TEST(LiteInterpreterTest, ExtraFiles) {
       loaded_extra_files[file_name.substr(6)] = "";
     }
   }
-  iss.seekg(0, std::ios::beg);
-  ASSERT_TRUE(iss.tellg() == std::ios::beg);
+  iss.seekg(0, iss.beg);
+  ASSERT_TRUE(iss.tellg() == iss.beg);
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
