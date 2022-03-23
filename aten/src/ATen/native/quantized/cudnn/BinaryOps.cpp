@@ -80,8 +80,10 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
       output_scale,
       output_zero_point);
   // TODO: When cudnn enables support for broadcasting, we can remove this tensor
-  at::Tensor requantize_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
+  std::vector<int64_t> broadcast_sizes(quantized_output.dim(), 1);
+  at::Tensor requantize_multiplier_tensor = at::empty(broadcast_sizes, at::device(at::kCUDA).dtype(at::kFloat));
   requantize_multiplier_tensor.fill_(qa.q_scale() / output_scale);
+  // !!! Broadcasting not working if I use broadcast_sizes instad of quantized_output.sizes() for rhs_multiplier_tensor
   at::Tensor rhs_multiplier_tensor = at::empty(quantized_output.sizes(), at::device(at::kCUDA).dtype(at::kFloat));
   rhs_multiplier_tensor.fill_(qb.q_scale() / qa.q_scale());
 
@@ -127,6 +129,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   }
 
   // computes qb_int8 * ( qb_scale/qa_scale )
+  // !!! This op doesn't work if rhs_multiplier_tensor is a broadcasted tensor (length of all dimensions = 1)
   auto rhs_mult_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
       .setxDesc(cudnn_utils::getTensorDescriptor(qb.sizes(), qb.strides(), CUDNN_DATA_INT8, 'b', key.input_b_alignment))
       .setbDesc(cudnn_utils::getTensorDescriptor(rhs_multiplier_tensor, 'm', cudnn_utils::getAlignment(rhs_multiplier_tensor)))
