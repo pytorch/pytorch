@@ -326,7 +326,7 @@ bool isFunctionalTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
 }
 
-TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t) {
+bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   if (t.has_value()) {
     return isFunctionalTensor(*t);
   } else {
@@ -334,7 +334,7 @@ TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
-TORCH_API bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
+bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
   if (t_list.size() == 0) return false;
   bool any_functional = isFunctionalTensor(t_list[0]);
   for (const auto i : c10::irange(1, t_list.size())) {
@@ -342,12 +342,12 @@ TORCH_API bool isFunctionalTensor(const c10::List<Tensor>& t_list) {
     TORCH_INTERNAL_ASSERT(
          curr_functional == any_functional,
         "Functionalization encountered a list of tensors where some are functional",
-        "and some are not, which is unsupported.");
+        "and some are not, which is not currently unsupported.");
   }
   return any_functional;
 }
 
-TORCH_API bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
+bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
   if (t_list.size() == 0) return false;
   bool any_functional = isFunctionalTensor(t_list[0]);
   for (const auto i : c10::irange(1, t_list.size())) {
@@ -355,12 +355,12 @@ TORCH_API bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list
     TORCH_INTERNAL_ASSERT(
          curr_functional == any_functional,
         "Functionalization encountered a list of tensors where some are functional",
-        "and some are not, which is unsupported.");
+        "and some are not, which is not currently unsupported.");
   }
   return any_functional;
 }
 
-TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
+bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
   if (t_list.size() == 0) return false;
   bool any_functional = isFunctionalTensor(t_list[0]);
   for (const auto i : c10::irange(1, t_list.size())) {
@@ -368,7 +368,7 @@ TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list) {
     TORCH_INTERNAL_ASSERT(
          curr_functional == any_functional,
         "Functionalization encountered a list of tensors where some are functional",
-        "and some are not, which is unsupported.");
+        "and some are not, which is not currently unsupported.");
   }
   return any_functional;
 }
