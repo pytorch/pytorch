@@ -1090,6 +1090,26 @@ class LSTMwithHiddenDynamicModel(torch.nn.Module):
         x, hid = self.lstm(x, hid)
         return x, hid
 
+class GRUwithHiddenDynamicModel(torch.nn.Module):
+    def __init__(self, qengine='fbgemm'):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.gru = torch.nn.GRU(2, 2).to(dtype=torch.float)
+
+    def forward(self, x, hid):
+        x, hid = self.gru(x, hid)
+        return x, hid
+
+class MultiheadAttentionwithHiddenDynamicModel(torch.nn.Module):
+    def __init__(self, qengine='fbgemm'):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.mha = torch.nn.MultiheadAttention(2, 2).to(dtype=torch.float)
+
+    def forward(self, x, hid):
+        x, hid = self.mha(x, hid)
+        return x, hid
+
 class ConvModel(torch.nn.Module):
     def __init__(self):
         super().__init__()

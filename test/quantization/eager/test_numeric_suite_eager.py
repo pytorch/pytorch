@@ -26,6 +26,8 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvTransposeModel,
     AnnotatedSingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
+    MultiheadAttentionwithHiddenDynamicModel,
+    GRUwithHiddenDynamicModel,
     AnnotatedTwoLayerLinearModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
@@ -174,6 +176,54 @@ class TestNumericSuiteEager(QuantizationTestCase):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
+        for model in model_list:
+            model.eval()
+            if hasattr(model, "fuse_model"):
+                model.fuse_model()
+            q_model = quantize_dynamic(model)
+            compare_and_validate_results(model, q_model)
+
+    @override_qengines
+    def test_compare_weights_gru_dynamic(self):
+        r"""Compare the weights of float and dynamic quantized LSTM layer"""
+
+        qengine = torch.backends.quantized.engine
+
+        def compare_and_validate_results(float_model, q_model):
+            weight_dict = compare_weights(
+                float_model.state_dict(), q_model.state_dict()
+            )
+            self.assertEqual(len(weight_dict), 1)
+            for k, v in weight_dict.items():
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+
+        model_list = [GRUwithHiddenDynamicModel(qengine)]
+        for model in model_list:
+            model.eval()
+            if hasattr(model, "fuse_model"):
+                model.fuse_model()
+            q_model = quantize_dynamic(model)
+            compare_and_validate_results(model, q_model)
+
+    @override_qengines
+    def test_compare_weights_mha_dynamic(self):
+        r"""Compare the weights of float and dynamic quantized LSTM layer"""
+
+        qengine = torch.backends.quantized.engine
+
+        def compare_and_validate_results(float_model, q_model):
+            weight_dict = compare_weights(
+                float_model.state_dict(), q_model.state_dict()
+            )
+            self.assertEqual(len(weight_dict), 1)
+            for k, v in weight_dict.items():
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+
+        model_list = [MultiheadAttentionwithHiddenDynamicModel(qengine)]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
