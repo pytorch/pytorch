@@ -32,6 +32,8 @@ from .observer import (
     default_per_channel_weight_observer,
     default_placeholder_observer,
     default_weight_observer,
+    weight_observer_range_neg_127_to_127,
+    per_channel_weight_observer_range_neg_127_to_127,
     default_reuse_input_observer,
 )
 import warnings
@@ -207,6 +209,42 @@ def get_default_qconfig(backend='fbgemm', version=0):
                              " in get_default_qconfig is not supported. Version number must be 0")
 
     return qconfig
+
+"""
+Default, symmetric PTQ qconfig for the specified backend. And a per_channel
+variant of the same.
+
+Symmetric here applies to signed weights with zero point = 0, and additional
+value restrictions. The activations are also signed 8-bit integers with this
+qconfig.
+
+    * Once this change is merged [as of 3/17/22], with backend or qengine =
+    'qnnpack', some quantized operators with this symmetric qconfig may use
+    operators from xnnpack library.
+
+        ** Support to use xnnpack ops with `qnnpack` backed for asymmetric
+        qconfig (returned by get_default_qconfig()) is not available yet.
+
+    * This qconfig uses signed activations and weights. Weights have added
+    restrictions such as zero point is forced to be 0, making the weights
+    symmetric, hence the name. And the 8-bit quantized values are
+    restricting to to [-127, +127], excluding -128.
+
+    * xnnpack has a requantization scale value restriction, 0x1p-32 <=
+    requantization_scale < 256.0 where, `requantization_scale = (input_scale
+    * kernel_scale) / (output_scale)`. Using this eps (w/ assumed max value
+    of 256) is to prevent requantization_scale to go below xnnpack lower
+    threshold.
+"""
+default_symmetric_qnnpack_qconfig = QConfig(activation=HistogramObserver.with_args(dtype=torch.qint8,
+                                                                                   reduce_range=False,
+                                                                                   eps=2 ** -12),
+                                            weight=weight_observer_range_neg_127_to_127)
+
+default_per_channel_symmetric_qnnpack_qconfig = QConfig(activation=HistogramObserver.with_args(dtype=torch.qint8,
+                                                                                               reduce_range=False,
+                                                                                               eps=2 ** -12),
+                                                        weight=per_channel_weight_observer_range_neg_127_to_127)
 
 default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                         weight=default_embedding_fake_quant)

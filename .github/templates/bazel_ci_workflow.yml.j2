@@ -15,6 +15,7 @@ name: !{{ build_environment }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
@@ -82,6 +83,7 @@ name: !{{ build_environment }}
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
+            -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
             -e IN_CI \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \
