@@ -537,6 +537,8 @@ class GitHubPR:
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
+            if self.base_ref() != self.default_branch():
+                raise RuntimeError("Not a pull request into default branch.")
             # Adding the url here makes it clickable within the Github UI
             approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
             msg = self.get_title() + "\n\n" + self.get_body()
