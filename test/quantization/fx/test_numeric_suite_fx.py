@@ -542,9 +542,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1p, m2p)
 
-
-    @unittest.skip("Temporarily disable this while we refactor the frontend part of fx"
-                   " graph mode quantization")
     def test_op_relationship_mapping(self):
         """
         Tests that the mapping of op relationships is complete.
@@ -683,9 +680,9 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 self.assertTrue(
                     _op_in_base_sets_of_related_ops(base_op),
                     f"{base_op} not in sets of related ops")
-            else:
+            elif not _op_in_base_sets_of_related_ops(base_op):
                 raise AssertionError(
-                    f"handing for {qhandler_cls} not implemented")
+                    f"handing for {qhandler_cls} for op {base_op} not implemented")
 
     @skipIfNoFBGEMM
     def test_user_defined_function(self):
