@@ -4369,6 +4369,38 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
                 rpc_backend_options=rpc_backend_options,
             )
 
+    @dist_init(setup_rpc=False)
+    def test_init_dynamic_and_static_rpc_group(self):
+        # Initialize a static rpc group with size = self.world_size - 1
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        world_size_minus_one = self.world_size - 1
+        if self.rank < world_size_minus_one:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                world_size=world_size_minus_one,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        dist.barrier()
+
+        # Attempt to add an additional dynamic group member
+        if self.rank == world_size_minus_one:
+            with self.assertRaisesRegex(RuntimeError, "RPC group mixes statically and dynamically\
+ initialized members which is not supported."):
+                rpc.init_rpc(
+                    name=worker_name(self.rank),
+                    backend=self.rpc_backend,
+                    rank=self.rank,
+                    rpc_backend_options=self.rpc_backend_options,
+                )
+
     def test_wrong_types(self):
         with self.assertRaisesRegex(
             TypeError,
