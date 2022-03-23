@@ -42,6 +42,13 @@ GENERATED_CPP = [
     "autograd/generated/python_variable_methods.cpp",
 ]
 
+# This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
+GENERATED_LAZY_TS_CPP = [
+    "lazy/generated/LazyNativeFunctions.cpp",
+    "lazy/generated/RegisterAutogradLazy.cpp",
+    "lazy/generated/RegisterLazy.cpp",
+]
+
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
@@ -434,6 +441,9 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/unsqueeze.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
+    # We should better segment the sources, but for now there are actually dependencies
+    # from some core files on some of these ts_backend files
+    # so we continue to build these parts of ts_backend in all build configs
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/cast.cpp",
@@ -442,6 +452,20 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
+]
+
+# We can't build all of the ts backend under certain build configurations, e.g. mobile,
+# since it depends on things like autograd, meta functions, which may be disabled
+lazy_tensor_ts_sources = [
+    "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
+    "torch/csrc/lazy/ts_backend/ts_backend_impl.cpp",
+    "torch/csrc/lazy/ts_backend/ts_lowering_context.cpp",
+    "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node_lowering.cpp",
+    "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ts_eager_fallback.cpp",
 ]
 
 lazy_tensor_core_python_sources = [
@@ -1199,6 +1223,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/fake_quant_per_tensor_affine.cpp",
     "aten/src/ATen/native/quantized/library.cpp",
     "aten/src/ATen/native/quantized/cpu/xnnpack_utils.cpp",
+    "aten/src/ATen/native/quantized/qlinear_unpack.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
     "aten/src/ATen/native/Activation.cpp",
