@@ -237,7 +237,6 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     for idx, input_size in enumerate(input_sizes):
         if input_size is None:
             output_sizes[idx], input_sizes[idx] = 0, -1
-    print(output_sizes, input_sizes)
 
     cond_dynamic_repeats = (repeats_dim == 1 and repeats_sizes[0] is None)
     # If input size is dynamic or repeats vector is dynamic
