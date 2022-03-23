@@ -15,7 +15,7 @@ def _get_default_op_backend_config(op, dtype_config):
 def get_native_backend_config_dict():
     """ Get backend for PyTorch Native backend_config_dict (fbgemm/qnnpack)
     """
-    ############### START dtype configs ##################
+    # START dtype configs
 
     # weighted op int8 config
     # activation: quint8, weight: qint8, bias: float
@@ -46,7 +46,7 @@ def get_native_backend_config_dict():
         # optional, output activation dtype
         "output_dtype": torch.float16,
     }
-    ############### END dtype configs ##################
+    # END dtype configs
 
     # operator (module/functional/torch ops) configs
     linear_module_config = {
