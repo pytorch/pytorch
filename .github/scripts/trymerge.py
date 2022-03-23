@@ -133,6 +133,50 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
+GH_GET_PR_NEXT_CHECK_RUNS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 100, after: $cursor) {
+              nodes {
+                app {
+                  name
+                  databaseId
+                }
+                workflowRun {
+                  workflow {
+                    name
+                  }
+                }
+                checkRuns(first: 10) {
+                  nodes {
+                    name
+                    conclusion
+                  }
+                  pageInfo {
+                    endCursor
+                    hasNextPage
+                  }
+                }
+                conclusion
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -207,6 +251,14 @@ def parse_args() -> Any:
     return parser.parse_args()
 
 
+@dataclass
+class GitHubComment:
+    body_text: str
+    author_login: str
+    author_association: str
+    editor_login: Optional[str]
+
+
 class GitHubPR:
     def __init__(self, org: str, project: str, pr_num: int) -> None:
         assert isinstance(pr_num, int)
@@ -215,6 +267,7 @@ class GitHubPR:
         self.pr_num = pr_num
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
+        self.conclusions: Optional[Dict[str, str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -296,22 +349,38 @@ class GitHubPR:
 
     def get_checkrun_conclusions(self) -> Dict[str, str]:
         """ Returns list of checkrun / conclusions """
-        last_commit = self.info["commits"]["nodes"][-1]["commit"]
-        checksuites = last_commit["checkSuites"]
-        # TODO: Implement pagination
-        if bool(checksuites["pageInfo"]["hasNextPage"]):
-            raise RuntimeError("Too many checksuites for commit")
-        rc = {}
-        for node in checksuites["nodes"]:
-            workflow_run = node["workflowRun"]
-            checkruns = node["checkRuns"]
-            if workflow_run is not None:
-                rc[workflow_run["workflow"]["name"]] = node["conclusion"]
-                continue
-            if checkruns is not None:
-                for checkrun_node in checkruns["nodes"]:
-                    rc[checkrun_node["name"]] = checkrun_node["conclusion"]
-        return rc
+        if self.conclusions is not None:
+            return self.conclusions
+        orig_last_commit = self.info["commits"]["nodes"][-1]["commit"]
+        checksuites = orig_last_commit["checkSuites"]
+        conclusions = {}
+
+        def add_conclusions(nodes: List[Dict[str, Any]]) -> None:
+            for node in nodes:
+                workflow_run = node["workflowRun"]
+                checkruns = node["checkRuns"]
+                if workflow_run is not None:
+                    conclusions[workflow_run["workflow"]["name"]] = node["conclusion"]
+                    continue
+                if checkruns is not None:
+                    for checkrun_node in checkruns["nodes"]:
+                        conclusions[checkrun_node["name"]] = checkrun_node["conclusion"]
+
+        add_conclusions(checksuites["nodes"])
+        while bool(checksuites["pageInfo"]["hasNextPage"]):
+            rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=checksuites["pageInfo"]["endCursor"])
+            info = rc["data"]["repository"]["pullRequest"]
+            last_commit = info["commits"]["nodes"][-1]["commit"]
+            if last_commit["oid"] != orig_last_commit["oid"]:
+                raise RuntimeError("Last commit changed on PR")
+            checksuites = last_commit["checkSuites"]
+            add_conclusions(checksuites["nodes"])
+        self.conclusions = conclusions
+        return conclusions
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
@@ -339,18 +408,30 @@ class GitHubPR:
     def get_pr_url(self) -> str:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
 
-    def get_comment_body(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["bodyText"])
+    @staticmethod
+    def _comment_from_node(node: Any) -> GitHubComment:
+        editor = node["editor"]
+        return GitHubComment(body_text=node["bodyText"],
+                             author_login=node["author"]["login"],
+                             author_association=node["authorAssociation"],
+                             editor_login=editor["login"] if editor else None,
+                             )
 
-    def get_comment_author_login(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["author"]["login"])
+    def get_last_comment(self) -> GitHubComment:
+        return self._comment_from_node(self.info["comments"]["nodes"][-1])
 
-    def get_comment_editor_login(self, num: int = -1) -> Optional[str]:
-        rc = self.info["comments"]["nodes"][num]["editor"]
-        return rc["login"] if rc is not None else None
+    def get_diff_revision(self) -> Optional[str]:
+        rc = RE_DIFF_REV.search(self.get_body())
+        return rc.group(1) if rc is not None else None
 
-    def get_comment_author_association(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
+    def has_internal_changes(self) -> bool:
+        checkrun_name = "Meta Internal-Only Changes Check"
+        if self.get_diff_revision() is None:
+            return False
+        checks = self.get_checkrun_conclusions()
+        if checks is None or checkrun_name not in checks:
+            return False
+        return checks[checkrun_name] != "SUCCESS"
 
     def merge_ghstack_into(self, repo: GitRepo) -> None:
         assert self.is_ghstack_pr()
@@ -382,9 +463,11 @@ class GitHubPR:
             msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
-    def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
+    def merge_into(self, repo: GitRepo, *, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo)
+        if self.has_internal_changes():
+            raise RuntimeError("This PR must be landed via phabricator")
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -457,21 +540,24 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
             print(f"Skipping rule {rule_name} due to non-matching files: {non_matching_files}")
             continue
         print(f"Matched rule {rule_name} for {pr.pr_num}")
+        if pr.has_internal_changes():
+            raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
         return rule
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
-    if not RE_REVERT_CMD.match(pr.get_comment_body()):
-        raise RuntimeError(f"Comment {pr.get_comment_body()} does not seem to be a valid revert command")
-    if pr.get_comment_editor_login() is not None:
+    comment = pr.get_last_comment()
+    if not RE_REVERT_CMD.match(comment.body_text):
+        raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
+    if comment.editor_login is not None:
         return post_comment("Don't want to revert based on edited command")
-    author_association = pr.get_comment_author_association()
-    author_login = pr.get_comment_author_login()
+    author_association = comment.author_association
+    author_login = comment.author_login
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
     if author_association != expected_association and author_association != "OWNER":
