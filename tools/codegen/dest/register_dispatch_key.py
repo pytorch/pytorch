@@ -23,45 +23,74 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
+def gen_registration_headers(
+        backend_index: BackendIndex,
+        per_operator_headers: bool,
+        rocm: bool,
+) -> List[str]:
+    if per_operator_headers:
+        headers = ["#include <ATen/ops/as_strided_native.h>"]
+    else:
+        headers = ["#include <ATen/NativeFunctions.h>"]
+
+    if backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.Meta):
+        headers.append("#include <ATen/EmptyTensor.h>")
+    elif backend_index.dispatch_key == DispatchKey.CUDA:
+        if rocm:
+            headers.append("#include <ATen/hip/EmptyTensor.h>")
+        else:
+            headers.append("#include <ATen/cuda/EmptyTensor.h>")
+    elif per_operator_headers:
+        headers += [
+            "#include <ATen/ops/empty.h>",
+            "#include <ATen/ops/empty_strided.h>",
+            "#include <ATen/ops/_copy_from_and_resize.h>",
+            "#include <ATen/ops/_copy_from.h>"]
+    else:
+        headers.append("#include <ATen/Functions.h>")
+
+    return headers
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if backend_index.dispatch_key == DispatchKey.Meta:
-        # TODO: dedupe this with below
-        core = """
-if (strides.empty()) {
-    return at::empty(sizes, options.device(at::kMeta));
-} else {
-    return at::empty_strided(sizes, strides, options.device(at::kMeta));
-}
-"""
+        empty_options = "options.device(at::kMeta)"
     else:
-        expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
-            "options.device_opt(), options.pinned_memory_opt()"
-        empty_init = ""
-        if backend_index.dispatch_key == DispatchKey.CPU:
-            empty_impl = "at::native::empty_cpu"
-            empty_strided_impl = "at::native::empty_strided_cpu"
-        elif backend_index.dispatch_key == DispatchKey.CUDA:
-            empty_init = "globalContext().lazyInitCUDA();"
-            empty_impl = "at::native::empty_cuda"
-            empty_strided_impl = "at::native::empty_strided_cuda"
-        elif backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
-            empty_impl = "at::empty"
-            empty_strided_impl = "at::empty_strided"
-        else:
-            return []
-        core = f"""
-  {empty_init}
-  if (strides.empty()) {{
-      return {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
-  }} else {{
-      // TODO: assert options.memory_format_opt() is nullopt (debug only?)
-      return {empty_strided_impl}(sizes, strides, {expanded_topts});
+        empty_options = "options"
+
+    if backend_index.dispatch_key in (
+            DispatchKey.Meta, DispatchKey.CPU, DispatchKey.CUDA):
+        dispatch = str(backend_index.dispatch_key).lower()
+        empty_impl = f"at::detail::empty_{dispatch}"
+        empty_strided_impl = f"at::detail::empty_strided_{dispatch}"
+        runtime_empty_supported_check = ""
+    elif backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
+        empty_impl = "at::empty"
+        empty_strided_impl = "at::empty_strided"
+        runtime_empty_supported_check = """\
+  if (!c10::detail::backend_supports_empty_operator(options)) {{
+    // The main purpose of this CompositeExplicitAutograd kernel is to provide
+    // a "free" implementation of out-of-place operators.
+    // If a backend hasn't implemented an out-of-place op but has implemented
+    // the out= variant, then this kernel will call their out= variant.
+    // It does that by using at::empty() to create the tensor to pass to the out= variant though,
+    // so this "default" kernel doesn't actually handle backends that don't support at::empty
+    // (e.g. quantized backends).
+    // Returning an undefined tensor here allows us to reach the out= kernel and give a better error.
+    // Longer term, this could be better fixed by https://github.com/pytorch/pytorch/issues/52680
+    return at::Tensor();
   }}
 """
+    else:
+        return []
+
     return [f"""
 Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
-{core}
+  {runtime_empty_supported_check}
+  if (strides.empty()) {{
+      return {empty_impl}(sizes, {empty_options});
+  }} else {{
+      return {empty_strided_impl}(sizes, strides, {empty_options});
+  }}
 }}
 """]
 
@@ -339,7 +368,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 args_exprs_str = ', '.join(a.name for a in args)
 
                 device_check = '  // No device check\n'
-                if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                # Backends that require device guards presumably also require device checks.
+                if self.backend_index.device_guard:
                     device_check_args = itertools.chain(
                         f.func.arguments.out,
                         f.func.arguments.flat_positional
@@ -347,12 +377,16 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
                 device_guard = "// DeviceGuard omitted"  # default
-                if f.device_guard and is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                if f.device_guard and self.backend_index.device_guard:
                     has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                     if has_tensor_options:
                         # kernel is creating a tensor
-                        device_guard = """globalContext().lazyInitCUDA();
+                        device_guard = """
   const DeviceGuard device_guard(device_or_default(device));"""
+
+                        # CUDA requires special handling
+                        if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                            device_guard = f"globalContext().lazyInitCUDA();\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -583,7 +617,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"
 
-            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+            if self.backend_index.device_guard:
                 device_check_args = itertools.chain(
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
@@ -617,7 +651,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # Put all of the contents of the precompute struct into the context
                 # so that translate will be able to return the correct args for the
                 # call to the impl.
-                for precomputed_elems in self.g.out.precomputed.replace.values():
+                precomputed_values = [*self.g.out.precomputed.replace.values(), self.g.out.precomputed.add]
+                for precomputed_elems in precomputed_values:
                     for arg in precomputed_elems:
                         context.append(Expr(
                             expr=f"precompute.{arg.name}",

@@ -90,7 +90,6 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
         # certain parameters replaced with precomputed counterparts
         # as specified in native_functions.yaml.
         non_out_args_replaced: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
-
         for a in g.out.func.arguments.non_out:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
@@ -102,6 +101,9 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
                 non_out_args_replaced.append(a)
 
         args.extend(non_out_args_replaced)
+        # g.out.precomputed.add is the list of parameters that are added
+        # without replacement after the non out args and just before the out args
+        args.extend(g.out.precomputed.add)
     else:
         args.extend(g.out.func.arguments.non_out)
 

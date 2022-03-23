@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
@@ -67,7 +68,9 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
   subgraph->inputs().at(0)->setType(x_type);
   subgraph->inputs().at(1)->setType(y_type);
   subgraph->inputs().at(2)->setType(z_type);
+  subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
+  subgraph->outputs().at(0)->setType(TensorType::create(at::rand({14, 5})));
   output->node()->addInput(x_inp);
   output->node()->addInput(y_inp);
   output->node()->addInput(z_inp);
@@ -82,7 +85,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
       ->check("TensorExprGroup")
       ->check_same("symbolic_shape_inputs")
       ->check("block1")
-      ->check("FallbackGraph")
+      ->check("aten::cat")
       ->run(*g);
 
   // clang-format off
@@ -104,6 +107,7 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
       %3 : Tensor = prim::TensorExprGroup_0[symbolic_shape_inputs=[-5, -4, -3, -2]](%x_inp, %y_inp, %z_inp, %cat_dim_size.48, %elem.11, %elem.5, %elem.3)
       -> (%3)
     block1():
+      // FallbackGraph is inlined
       %14 : Tensor = prim::FallbackGraph_1(%x_inp, %y_inp, %z_inp)
       -> (%14)
   return ()
@@ -244,6 +248,48 @@ TEST(ShapeAnalysisTest, DynamicShapesFusion) {
       TORCH_INTERNAL_ASSERT(false);
     }
   }
+}
+
+TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
+  std::shared_ptr<Graph> subgraph = std::make_shared<Graph>();
+  const auto graph_string = R"IR(
+      graph(%x.1 : Tensor):
+        %none : NoneType = prim::Constant()
+        %size1 : int = prim::Constant[value=1]()
+        %size10 : int = prim::Constant[value=10]()
+        %sizes : int[] = prim::ListConstruct(%size10, %size1)
+        %device : Device = prim::Constant[value="cpu"]()
+        %10 : Tensor = aten::ones(%sizes, %none, %none, %device, %none)
+        %3 : Tensor = aten::tanh(%x.1)
+        %29 : Tensor = aten::mul(%3, %10)
+        return (%29))IR";
+  torch::jit::parseIR(graph_string, subgraph.get());
+  ConstantPropagation(subgraph);
+
+  std::shared_ptr<Graph> g = std::make_shared<Graph>();
+  auto x_inp = g->addInput("x_inp");
+  auto x_type = TensorType::create(at::rand({10, 5}));
+  x_inp->setType(x_type);
+  subgraph->inputs().at(0)->setType(x_type);
+  subgraph->outputs().at(0)->setType(x_type);
+  auto output = g->insertNode(g->create(prim::TensorExprGroup))->output();
+  output->node()->addInput(x_inp);
+  output->node()->g_(attr::Subgraph, subgraph);
+
+  auto success = GenerateGuard(output->node());
+  TORCH_INTERNAL_ASSERT(success);
+
+  // Check that the constants have been moved out of the fused graph.
+  // This should result in not have any conditionals other than the one
+  // checking the result of TensorExprDynamicGuard.
+  testing::FileCheck()
+      .check("TensorExprDynamicGuard")
+      ->check_next("prim::If")
+      ->check_not("prim::If") // no other IFs due to constants.
+      ->check("TensorExprGroup")
+      ->check("block1")
+      ->check("FallbackGraph")
+      ->run(*g);
 }
 
 } // namespace jit

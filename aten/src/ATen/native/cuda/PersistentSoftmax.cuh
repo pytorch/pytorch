@@ -59,13 +59,14 @@ __device__ __forceinline__ void warp_reduce(acc_t* sum) {
 // The template can be instantiated with any floating point type for the type arguments input_t, output_t and acc_t.
 // This allows SoftMax to be fused with a cast immediately following the SoftMax.
 // The mask should have the same shape as input, with a boolean indicate if the value is masked.
+// The head_chunk_size is only used for transformer mask softmax, equals to H * D * D.
 // For instance:
 // input_t=half,  acc_t=float, output_t=half  => read half tensor, float accumulators, write half tensor.
 // input_t=half,  acc_t=float, output_t=float => read half tensor, float accumulators, write float tensor.
 // input_t_float, acc_t=float, output_t=half  => read float tensor, float accumulators, write half tensor.
 
-template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax, bool is_masked = false>
-__global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count, const bool *mask = nullptr)
+template <typename input_t, typename output_t, typename acc_t, int log2_elements, bool is_log_softmax, bool is_masked>
+__global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batch_size, int stride, int element_count, const bool *mask = nullptr, const int head_chunk_size = -1, bool is_transformer_mask = false)
 {
     // WARP_SIZE and WARP_BATCH must match the return values batches_per_warp and warp_size of method warp_softmax_forward_kernel.
     constexpr int next_power_of_two = 1 << log2_elements;
@@ -83,11 +84,15 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
 
     // there might be multiple batches per warp. compute the index within the batch
     int local_idx = threadIdx.x;
+    int idx_offset = first_batch * stride + local_idx;
 
-    src += first_batch * stride + local_idx;
-    dst += first_batch * stride + local_idx;
-    if (is_masked) {
-        mask += first_batch * stride + local_idx;
+    src += idx_offset;
+    dst += idx_offset;
+
+    if (is_transformer_mask) {
+        mask += (idx_offset / head_chunk_size) * stride + local_idx;
+    } else {
+        mask += idx_offset;
     }
     // The nested loops over WARP_BATCH and then WARP_ITERATIONS can be simplified to one loop,
     // but I think doing so would obfuscate the logic of the algorithm, thus I chose to keep
@@ -117,7 +122,11 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
         #pragma unroll
         for (int it = 0;  it < WARP_ITERATIONS;  ++it) {
             if (is_masked) {
-                if (mask[i*element_count+it*WARP_SIZE]) {
+                int idx = it*WARP_SIZE;
+                if (!is_transformer_mask) {
+                    idx += i*element_count;
+                }
+                if (mask[idx]) {
                     max_value[i] = (is_meaningful_max && max_value[i] > elements[i][it]) ? max_value[i] : elements[i][it];
                     is_meaningful_max = true;
                 }
@@ -146,7 +155,12 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
                     sum[i] += elements[i][it];
                 }
             } else {
-                if (mask[i*element_count+it*WARP_SIZE]) {
+                int idx = it*WARP_SIZE;
+                if (!is_transformer_mask) {
+                    idx += i*element_count;
+                }
+
+                if (mask[idx]) {
                     if (is_log_softmax) {
                         sum[i] += std::exp(elements[i][it] - max_value[i]);
                     } else {
@@ -170,7 +184,11 @@ __global__ void softmax_warp_forward(output_t *dst, const input_t *src, int batc
             int element_index = local_idx + it * WARP_SIZE;
             if (element_index < element_count) {
                 if (is_masked) {
-                    if (!mask[i*element_count+it*WARP_SIZE]) {
+                    int idx = it*WARP_SIZE;
+                    if (!is_transformer_mask) {
+                        idx += i*element_count;
+                    }
+                    if (!mask[idx]) {
                         dst[i*element_count+it*WARP_SIZE] = 0;
                         continue;
                     }
@@ -268,8 +286,8 @@ __global__ void softmax_warp_backward(output_t *gradInput, const input_t *grad, 
 
 } // end of anonymous namespace
 
-template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, bool is_masked = false>
-void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count, const bool *mask = nullptr)
+template<typename input_t, typename output_t, typename acc_t, bool is_log_softmax, bool is_masked>
+void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_elements, int softmax_elements_stride, int batch_count, const bool *mask = nullptr, int chunk_size = -1, bool is_transformer_mask = false)
 {
     TORCH_INTERNAL_ASSERT( softmax_elements >= 0 && softmax_elements <= 1024 );
     if (softmax_elements == 0) {
@@ -279,7 +297,8 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
         const int next_power_of_two = 1 << log2_elements;
 
         // This value must match the WARP_SIZE constexpr value computed inside softmax_warp_forward.
-        int warp_size = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+        int warp_size = at::cuda::warp_size();
+        warp_size = (next_power_of_two < warp_size) ? next_power_of_two : warp_size;
 
         // This value must match the WARP_BATCH constexpr value computed inside softmax_warp_forward.
         int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;
@@ -296,7 +315,7 @@ void dispatch_softmax_forward(output_t *dst, const input_t *src, int softmax_ele
             #define LAUNCH_SOFTMAX_WARP_FORWARD(L2E) case L2E:                    \
             softmax_warp_forward<input_t, output_t, acc_t, L2E, is_log_softmax, is_masked>   \
                 <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(dst,   \
-                    src, batch_count, softmax_elements_stride, softmax_elements, mask); \
+                    src, batch_count, softmax_elements_stride, softmax_elements, mask, chunk_size, is_transformer_mask); \
             C10_CUDA_KERNEL_LAUNCH_CHECK();                                       \
             break;
 
@@ -328,7 +347,8 @@ void dispatch_softmax_backward(output_t *grad_input, const input_t *grad, const 
         const int next_power_of_two = 1 << log2_elements;
 
         // This value must match the WARP_SIZE constexpr value computed inside softmax_warp_backward.
-        int warp_size = (next_power_of_two < C10_WARP_SIZE) ? next_power_of_two : C10_WARP_SIZE;
+        int warp_size = at::cuda::warp_size();
+        warp_size = (next_power_of_two < warp_size) ? next_power_of_two : warp_size;
 
         // This value must match the WARP_BATCH constexpr value computed inside softmax_warp_backward.
         int batches_per_warp = (next_power_of_two <= 128) ? 2 : 1;

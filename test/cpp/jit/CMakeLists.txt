@@ -39,9 +39,13 @@ endif()
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
+  ${JIT_TEST_ROOT}/test_add_if_then_else.cpp
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
+  ${JIT_TEST_ROOT}/test_load_upgraders.cpp
+  ${JIT_TEST_ROOT}/test_op_replacement.cpp
+  ${JIT_TEST_ROOT}/test_upgrader_utils.cpp
   ${JIT_TEST_ROOT}/test_backend.cpp
   ${JIT_TEST_ROOT}/test_class_import.cpp
   ${JIT_TEST_ROOT}/test_class_parser.cpp
@@ -86,6 +90,8 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_script_profile.cpp
   ${JIT_TEST_ROOT}/test_shape_analysis.cpp
   ${JIT_TEST_ROOT}/test_jit_logging_levels.cpp
+  ${JIT_TEST_ROOT}/test_file_format.cpp
+  ${JIT_TEST_ROOT}/test_flatbuffer.cpp
 )
 
 if(USE_CUDA)
@@ -98,30 +104,8 @@ add_executable(test_jit
   ${JIT_TEST_SRCS}
 )
 
-set(schema ${TORCH_SRC_DIR}/csrc/jit/serialization/mobile_bytecode.fbs)
-set(generated_include
-"${TORCH_ROOT}/build2/torch/csrc/jit/serialization/mobile_bytecode_generated.h")
-## cann add--reflect-names
-add_custom_command(
-  OUTPUT ${generated_include}
-  COMMAND bash ${TORCH_ROOT}/scripts/gen_flatbuffer.sh
-  DEPENDS ${schema}
-  WORKING_DIRECTORY "${TORCH_ROOT}"
-  COMMENT "Generating mobile_bytecode_generated.h"
-)
-add_library(mobile_bytecode_generated_h_test INTERFACE)
-target_sources(
-  mobile_bytecode_generated_h_test
-  INTERFACE ${generated_include}
-)
-add_dependencies(mobile_bytecode_generated_h_test flatc ${generated_include})
-target_include_directories(
-  mobile_bytecode_generated_h_test
-  INTERFACE ${TORCH_ROOT}/build)
-
-add_dependencies(test_jit mobile_bytecode_generated_h_test)
 target_link_libraries(
-  test_jit PRIVATE mobile_bytecode_generated_h_test flatbuffers)
+  test_jit PRIVATE flatbuffers)
 
 
 # TODO temporary until we can delete the old gtest polyfills.

@@ -1,10 +1,11 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_container.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <unordered_map>
@@ -69,14 +70,16 @@ class TORCH_CUDA_CU_API FusionGuard {
 
 //! Fusion is mutable but unique. Nodes cannot be copied in any way from one
 //! Fusion to another. If anything like that is desired, it would require
-//! duplicating all associated values and exprs. Fusion is considered to SSA,
+//! duplicating all associated values and exprs. Fusion is considered to be SSA,
 //! though this could also change in the future if there is a good reason to do
 //! so.
 //!
 //! The Fusion owns the whole IR graph (Vals and Exprs)
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API Fusion final {
+class TORCH_CUDA_CU_API Fusion : public IrContainer {
+  typedef std::unordered_map<int, std::vector<int64_t>> PermutationMap;
+
  public:
   Fusion() = default;
 
@@ -94,44 +97,29 @@ class TORCH_CUDA_CU_API Fusion final {
 
   //! Break dependency chains associated with Expr, remove references to expr
   //! delete expr
-  void removeExpr(Expr* expr);
+  void removeExpr(Expr* expr) override;
 
   //! Completely remove val from the fusion, break all dependencies associated
   //! with it
-  void removeVal(Val* val);
+  void removeVal(Val* val) override;
 
   //! Register input as an input of the fusion
-  // TODO: Rename to register
   void addInput(Val* input);
 
   //! Register output as an output of the fusion
-  // TODO: Rename to register
   void addOutput(Val* output);
 
   //! Register output as an output of the fusion
-  // TODO: Rename to register
   void addOutput(WelfordResult& output);
 
   //! Deregister input as an input of the fusion
-  // TODO: Rename to register
   void removeInput(Val* input);
 
   //! Deregister output as an output of the fusion
-  // TODO: Rename to register
   void removeOutput(Val* output);
 
   //! Replace output with another value
   void replaceOutput(Val* output, Val* replacement);
-
-  //! Clear Expr's from TV uses that are not required to produce outputs from
-  //! inputs
-  void resetTvUses();
-
-  //! Check if stmt is properly registered with this fusion
-  bool inFusion(const Statement* stmt) const;
-
-  //! Throw an error if stmt is not in this fusion
-  void assertInFusion(const Statement* stmt, const std::string& msg = "") const;
 
   //! Assert that all leaves found from outputs are registered as an input
   void validateInputs();
@@ -149,29 +137,12 @@ class TORCH_CUDA_CU_API Fusion final {
   //! Lower the fusion and print a kernel
   void printKernel();
 
-  //! Register the Val with this fusion
-  StmtNameType registerVal(Val* val);
-
-  //! Register expr with this fusion.
-  //! When we register an expression, we want to update the dependency tracking
-  //! of Vals. We add expr to our general expr_set_,
-  StmtNameType registerExpr(Expr* expr);
-
-  //! Register stmt with this fusion
-  StmtNameType registerStatement(Statement* stmt);
-
   //! Return a list of topologically sorted expressions. This only includes
   //! exprs required to genereate registered outputs.
   std::vector<Expr*> exprs();
 
   //! Return a vector of fusion inputs that feed this Val
   std::vector<Val*> inputsOf(Val* val);
-
-  //! Return the set of Vals registered with this fusion
-  const std::unordered_set<Val*>& vals() const noexcept;
-
-  //! Return in insertion order
-  const std::deque<Val*>& deterministic_vals() const noexcept;
 
   //! Return all Vals in math expressions that cannot be eliminated.
   //!
@@ -181,11 +152,6 @@ class TORCH_CUDA_CU_API Fusion final {
   //! also included as they must show up in the final code.
   std::vector<Val*> usedMathVals();
 
-  //! Return the set of Exprs registered with this fusion. Warning: This will
-  //! return exprs outside inputs/outputs, so can be unsafe for use with
-  //! segmented fusions.
-  const std::unordered_set<Expr*>& unordered_exprs() const noexcept;
-
   //! Return all Exprs that use val
   std::unordered_set<Expr*> unordered_uses(Val* val) const;
 
@@ -194,12 +160,6 @@ class TORCH_CUDA_CU_API Fusion final {
 
   //! Indicate to kernel to set itself up to generate random numbers
   bool isStochastic();
-
-  //! Indicate that the fusion contains reduction operations
-  bool hasReduction();
-
-  //! Indicate that the fusion contains welford operations
-  bool hasWelford();
 
   //! Run fusion segmentation algorithm to create a segmented fusion
   std::unique_ptr<SegmentedFusion> segment(
@@ -215,9 +175,6 @@ class TORCH_CUDA_CU_API Fusion final {
 
   std::vector<Val*> getTerminatingOutputs();
 
-  bool hasInput(const Val* val) const;
-  bool hasOutput(const Val* val) const;
-
   // Aliasing output to input value, this is a WAR to allow inplace update on
   // input tensor.
   // Note: this is not always safe and should be used with extra caution.
@@ -226,29 +183,30 @@ class TORCH_CUDA_CU_API Fusion final {
   // TODO: alias should be made aware to segmentation, so we'll always include
   // the input tensor to the section where output is produced.
   void aliasOutputToInput(Val* output, Val* input);
+  Val* getOutputAlias(Val* output);
   std::unordered_set<int> getOutputAliasIndices() const;
   std::vector<std::pair<int, int>> getInputAliasIndices() const;
 
-  // mark input at index to be in channels last format
-  void setChannelsLastOnInput(int index) {
-    c_last_input_indices_.insert(index);
+  // mark input at index to be permuted by permutation
+  void setPermutationOnInput(int index, std::vector<int64_t> permutation) {
+    permuted_input_map_.insert({index, permutation});
   }
 
-  // mark output at index to be in channels last format
-  void setChannelsLastOutputIndices(int index) {
-    c_last_output_indices_.insert(index);
+  // mark output at index to be restored by permutation
+  void setPermutationOnOutput(int index, std::vector<int64_t> permutation) {
+    permuted_output_map_.insert({index, permutation});
   }
 
-  // return a set of indices that marks all input tensors in channels last
-  // format
-  const std::unordered_set<int>& getChannelsLastInputIndices() const {
-    return c_last_input_indices_;
+  // return a map of indices to permutation, which indicates all input tensors
+  // that needs to be permuted
+  const PermutationMap& getPermutationInputMap() const {
+    return permuted_input_map_;
   }
 
-  // return a set of indices that marks all output tensors in channels last
-  // format
-  const std::unordered_set<int>& getChannelsLastOutputIndices() const {
-    return c_last_output_indices_;
+  // return a map of indices to permutation, which indicates all output tensors
+  // that needs to be permuted
+  const PermutationMap& getPermutationOutputMap() const {
+    return permuted_output_map_;
   }
 
   bool isTVUseInfoValid() {
@@ -259,36 +217,40 @@ class TORCH_CUDA_CU_API Fusion final {
     return is_during_update_uses_;
   }
 
+  const auto& ioAlias() const {
+    return io_alias_;
+  }
+
  protected:
   friend SegmentCandidateFinder;
   friend SegmentedFusion;
   friend class TranslateApplicableWelford;
+  friend Val;
 
   static IrCloner copy(const Fusion* from, Fusion* to);
 
- private:
-  // Return an int that monotonically increases for each val/expr, some are
-  // explicitly incremented by type.
-  StmtNameType getValName(ValType vtype);
-  StmtNameType getExprName();
+  //! Register the Val with this fusion
+  virtual void registerVal(Val* val) override;
 
+  //! Register expr with this fusion.
+  //! When we register an expression, we want to update the dependency tracking
+  //! of Vals. If this container is a not a Kernel, it will remove previous
+  //! definitions of outputs and register this Expr as the definition. Otherwise
+  //! will update definition if not previously set, but will not remove old
+  //! definitions.
+  virtual void registerExpr(Expr* expr) override;
+
+  //! Clear Expr's from TV uses that are not required to produce outputs from
+  //! inputs. Only other place this is used (other than Fusion) is in
+  //! Val::uses()
+  void resetTvUses();
+
+ private:
   // Determine if the two values are compatible for aliasing
   // Same DataType, ValType, and number of dimensions
   bool isAliasCompatible(Val* left, Val* right);
 
  private:
-  // Sets of all Vals/Exprs registered with this fusion
-  // (val_deque_ is not owning the objects)
-  std::unordered_set<Val*> val_set_;
-  std::deque<Val*> val_deque_;
-  std::unordered_set<Expr*> expr_set_;
-
-  // Values names counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
-
-  // Expression names counter
-  StmtNameType expr_name_counter_ = 0;
-
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
@@ -296,11 +258,11 @@ class TORCH_CUDA_CU_API Fusion final {
   // io alias pointing from output to input
   std::unordered_map<Val*, Val*> io_alias_;
 
-  // See Note [ Channels Last support in nvfuser ]
-  // indices of input tensor view that is permuted to channels last
-  std::unordered_set<int> c_last_input_indices_;
-  // indices of output tensor view that is permuted to channels last
-  std::unordered_set<int> c_last_output_indices_;
+  // See Note [ Permutation support in nvfuser ]
+  // map from indices of input tensor to permutation
+  PermutationMap permuted_input_map_;
+  // map from indices of output tensor to permutation
+  PermutationMap permuted_output_map_;
 
   // Records if the current use data in the IR nodes are valid
   //  the states are either all valid or all invalid

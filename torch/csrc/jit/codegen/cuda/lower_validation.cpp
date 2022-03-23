@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -319,7 +318,7 @@ class VectorizeValidator : public OptInDispatch {
         vector_size,
         " however, vector sizes only upto and including 16 bytes are supported.");
 
-    auto replay_exprs = ExprSort::getExprs(fusion, {v_id});
+    auto replay_exprs = StmtSort::getExprs(fusion, {v_id}, false);
 
     VectorizeValidator validator(v_id);
 
@@ -463,6 +462,14 @@ void validateParallelizationOfTensor(TensorView* tv) {
       continue;
     }
 
+    // It doesn't matter if this axis is a non-concretized broadcast
+    // TODO: merging broadcast and non-broadcast
+    if (axis->isBroadcast() &&
+        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+            axis)) {
+      continue;
+    }
+
     TORCH_INTERNAL_ASSERT(
         !pt_map.get(ptype),
         "Multiple use of ",
@@ -489,7 +496,7 @@ void validateParallelizationOfTensor(TensorView* tv) {
       ". The tensor is parallelized with ",
       predicated_parallel_types.toString(),
       ", but it's invalid to use the types as the tensor is also predicated with them.",
-      ", thread prd: ",
+      ", thread pred: ",
       thread_pred.limited_types.toString());
 }
 
@@ -503,10 +510,10 @@ void validateParallelize(Fusion* fusion) {
   const auto& loop_map = GpuLower::current()->caLoopMap();
   const auto& pred_map = GpuLower::current()->threadPredMap();
 
-  auto exprs = ExprSort::getExprs(fusion);
+  auto exprs = StmtSort::getExprs(fusion);
 
   for (auto expr : exprs) {
-    if (!ir_utils::isTVOp(expr)) {
+    if (!ir_utils::isTvOp(expr)) {
       continue;
     }
     // Validate parallelization of each consumer by itself
@@ -630,7 +637,7 @@ namespace {
 // each tensor that needs to be computed.
 std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets(
     Fusion* fusion) {
-  auto exprs = ExprSort::getExprs(fusion);
+  auto exprs = StmtSort::getExprs(fusion);
 
   std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> map;
 
@@ -760,7 +767,9 @@ void validatePartialSplit(Fusion* fusion) {
   auto range_info = getLiveRangeOffsets(fusion);
 
   for (auto tv : ir_utils::allTvs(fusion)) {
-    auto exprs = ir_utils::historyOf(tv);
+    auto exprs = StmtSort::getExprs(
+        tv->fusion(),
+        {tv->domain()->domain().begin(), tv->domain()->domain().end()});
     for (auto split : ir_utils::filterByType<Split>(exprs)) {
       // When the start and stop offsets are not zero, make sure the
       // range defined by the split includes the required range to
@@ -788,39 +797,6 @@ void validatePartialSplit(Fusion* fusion) {
       if (!split->stopOffset()->isZeroInt()) {
         validateSplit(
             split->stopOffset(), valid_range.second, err_msg_prefix.str());
-      }
-    }
-  }
-}
-
-void validateThreadPredicates(Fusion* fusion) {
-  for (auto tv : ir_utils::allTvs(fusion)) {
-    if (tv->definition() == nullptr) {
-      continue;
-    }
-    const auto src_info =
-        GpuLower::current()->threadPredMap().getPredicateInfo(tv).source_map;
-    const TensorView* known_src_tensor = nullptr;
-    for (const auto& kv : src_info) {
-      ParallelType pt = kv.first;
-      if (!isParallelTypeBlockDim(pt)) {
-        continue;
-      }
-      for (auto src_tv : kv.second) {
-        if (known_src_tensor == nullptr) {
-          known_src_tensor = src_tv;
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              known_src_tensor == src_tv,
-              "Tensor t",
-              tv->name(),
-              " is invalid as it is predicated by ",
-              "t",
-              known_src_tensor->name(),
-              " and t",
-              src_tv->name(),
-              ".");
-        }
       }
     }
   }

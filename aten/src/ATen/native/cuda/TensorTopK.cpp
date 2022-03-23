@@ -26,7 +26,7 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
   int64_t slice_size = self.size(dim);
   if (slice_size == 0) return false;
   int64_t num_slices = self.numel() / slice_size;
-  return num_slices <= 16 && slice_size >= 100000;
+  return num_slices <= 10 && slice_size >= 100000;
 }
 
 TORCH_IMPL_FUNC(topk_out_cuda)
@@ -49,7 +49,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     return;
   }
 
-  launch_gather_topk_kernel(self, k, dim, largest, sorted, values, indices);
+  launch_gather_topk_kernel(self, k, dim, largest, values, indices);
 
   // Sort the results if the user wants them sorted, since our
   // selection routine does not ensure sorting

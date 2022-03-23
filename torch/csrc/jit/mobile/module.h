@@ -40,6 +40,7 @@ class CompilationUnit {
     return methods_;
   }
   Function* find_function(const c10::QualifiedName& qn);
+  const Function* find_function(const c10::QualifiedName& qn) const;
 
  private:
   std::vector<std::unique_ptr<Function>> methods_;

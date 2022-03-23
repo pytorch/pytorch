@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
+#include <torch/csrc/jit/passes/common_expression_hoisting.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -200,6 +201,9 @@ struct UnpackInstructions {
   void pushTensor() {
     insts_.emplace_back(PUSH_TENSOR);
   }
+  void pushNone() {
+    insts_.emplace_back(PUSH_NONE);
+  }
   void pushTensorList(size_t size) {
     insts_.emplace_back(PUSH_LIST);
     sizes_.push_back(size);
@@ -217,6 +221,9 @@ struct UnpackInstructions {
           std::vector<at::Tensor> lst(input_it, input_it + *sizes_it++);
           stack.emplace_back(lst);
         } break;
+        case PUSH_NONE: {
+          stack.emplace_back(IValue());
+        }
       }
     }
   }
@@ -225,6 +232,7 @@ struct UnpackInstructions {
   enum Inst : uint8_t {
     PUSH_TENSOR,
     PUSH_LIST, // consumes one size
+    PUSH_NONE,
   };
   std::vector<Inst> insts_;
   std::vector<size_t> sizes_;
@@ -314,7 +322,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.scalar_type())) {
+    if (at::isFloatingType(output.scalar_type()) ||
+        at::isComplexType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
@@ -332,6 +341,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
     } else if (v.isTensor()) {
       input_instructions_.pushTensor();
       addInputVariable(v.toTensor());
+    } else if (v.isNone()) {
+      input_instructions_.pushNone();
+      addInputVariable(Variable{});
     }
   }
 
@@ -396,7 +408,7 @@ struct DifferentiableGraphOp {
 
     detachVariables(stack);
     if (IsNewExecutorEnabled()) {
-      ExecutionPlan plan =
+      const ExecutionPlan& plan =
           f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
       InterpreterState(plan.code).run(stack);
     } else {
@@ -772,7 +784,7 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth().load() : 0;
+  return getProfilingMode() ? getBailoutDepth() : 0;
 }
 
 const ExecutionPlan& GraphExecutor::getPlanFor(
@@ -791,7 +803,7 @@ void GraphExecutor::debugFlushCompilationCache() {
     ppImpl->debugFlushCompilationCache();
   } else {
     // we are deprecating legacy executor
-    TORCH_INTERNAL_ASSERT("Not Implemented for Legacy Executor");
+    TORCH_INTERNAL_ASSERT(false, "Not Implemented for Legacy Executor");
   }
 }
 
@@ -891,7 +903,9 @@ void runNondiffOptimization(
   GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
   if (getProfilingMode()) {
     if (tensorExprFuserEnabled()) {
-      FuseTensorExprs(graph);
+      auto min_size = getFusionGroupInlining() ? 2 : 1;
+      auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
+      FuseTensorExprs(graph, min_size, /*composed_op*/ false, dyn_shapes);
     }
   } else {
     FuseGraph(graph, strict_fuser_check);
@@ -918,7 +932,7 @@ void runOptimization(
       "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before PeepholeOptimize\n", *graph);
+      "After EliminateCommonSubexpression , before PeepholeOptimize\n", *graph);
 
   PeepholeOptimize(graph);
   GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
@@ -957,10 +971,12 @@ void runOptimization(
 
   EliminateCommonSubexpression(graph);
   GRAPH_DEBUG(
-      "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
-
+      "After EliminateCommonSubexpression, before HoistCommonExpression\n",
+      *graph);
+  HoistCommonExpression(graph);
+  GRAPH_DEBUG("After HoistCommonExpression, before CheckInplace\n", *graph);
   CheckInplace(graph);
-  GRAPH_DEBUG("After CheckInplace (end of runOptimization)", *graph);
+  GRAPH_DEBUG("After CheckInplace (end of runOptimization)\n", *graph);
 }
 
 Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {

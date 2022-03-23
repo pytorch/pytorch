@@ -218,7 +218,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   // into the same shapes as X along the channel axis.
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   int64_t* axis_mask = (int64_t *) calloc(numDimensions, sizeof(int64_t));
-  for (int i = 0; i < numDimensions; ++i) {
+  for (const auto i : c10::irange(numDimensions)) {
     axis_mask[i] = (i == axis) ? X.size(axis) : 1;
   }
   auto X_shape = X.sizes();

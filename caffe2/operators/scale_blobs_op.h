@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -20,7 +21,7 @@ class ScaleBlobsOp final : public Operator<Context> {
   bool DoRunWithType() {
     int batchSize = InputSize();
 
-    for (int i = 0; i < batchSize; ++i) {
+    for (const auto i : c10::irange(batchSize)) {
       const auto& X = Input(i);
       auto* Y = Output(i, X.sizes(), at::dtype<T>());
       math::Scale<float, T, Context>(
@@ -34,7 +35,7 @@ class ScaleBlobsOp final : public Operator<Context> {
   }
 
   bool RunOnDevice() override {
-    for (int i = 0; i < InputSize(); ++i) {
+    for (const auto i : c10::irange(InputSize())) {
       auto& input = this->template Input<Tensor>(i, CPU);
       auto* output = this->template Output<Tensor>(i, CPU);
       output->ResizeLike(input);

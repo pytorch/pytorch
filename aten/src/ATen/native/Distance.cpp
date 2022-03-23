@@ -49,7 +49,7 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
 static Tensor cdist_impl(const Tensor& x1, const Tensor& x2, const double p, c10::optional<int64_t> compute_mode) {
   TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X1 got: ", x1.scalar_type());
   auto device1 = x1.device().type();
-  TORCH_CHECK(at::isFloatingType(x1.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
+  TORCH_CHECK(at::isFloatingType(x2.scalar_type()), "cdist only supports floating-point dtypes, X2 got: ", x2.scalar_type());
   auto device2 = x2.device().type();
   TORCH_CHECK(p >= 0, "cdist only supports non-negative p values");
   TORCH_CHECK(device1 == device2, "X1 and X2 must have the same device type. X1: ", device1, " X2: ", device2);
@@ -156,7 +156,7 @@ Tensor _cdist_forward(const Tensor& x1, const Tensor& x2, const double p, c10::o
   return result;
 }
 
-Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& cdist) {
+Tensor _cdist_backward(const Tensor& _grad, const Tensor& _x1, const Tensor& _x2, const double p, const Tensor& _cdist) {
   // Broadcasting might generate non-contiguous Tensors, so handle it before doing checks
   int64_t c1 = _x1.size(-1);
   int64_t c2 = _x2.size(-1);
@@ -182,17 +182,17 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2,
 
   Tensor x1 = _x1;
   if (tensor1_expand_size != x1.sizes()) {
-    x1 = x1.expand(tensor1_expand_size).contiguous();
+    x1 = x1.expand(tensor1_expand_size);
   }
   Tensor x2 = _x2;
   if (tensor2_expand_size != x2.sizes()) {
-    x2 = x2.expand(tensor2_expand_size).contiguous();
+    x2 = x2.expand(tensor2_expand_size);
   }
 
-  TORCH_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
-  TORCH_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
-  TORCH_CHECK(cdist.is_contiguous(), "_cdist_backward requires dist to be contiguous");
-  TORCH_CHECK(grad.is_contiguous(), "_cdist_backward requires grad to be contiguous");
+  x1 = x1.contiguous();
+  x2 = x2.contiguous();
+  auto cdist = _cdist.contiguous();
+  auto grad = _grad.contiguous();
   int64_t n = x1.size(-2);
   int64_t m = x1.size(-1);
   auto device1 = x1.device().type();

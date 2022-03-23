@@ -1,4 +1,5 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -10,8 +11,39 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#endif
+
 namespace at {
 namespace native {
+
+void neg_kernel_cuda(TensorIteratorBase &iter);
+void conj_kernel_cuda(TensorIteratorBase &iter);
+
+namespace {
+void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
+  ScalarType dtype = iter.dtype(0);
+  if (isQIntType(dtype)) {
+    AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
+          gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
+    });
+  }
+}
+
+void neg_conj_kernel_cuda(TensorIteratorBase &iter) {
+  AT_DISPATCH_COMPLEX_TYPES(iter.common_dtype(), "neg_conj_cuda", [&] {
+    gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -std::conj(x); });
+  });
+}
+}  // namespace (anonymous)
 
 using namespace at::cuda;
 
@@ -64,36 +96,17 @@ void copy_device_to_device(TensorIterator& iter, bool non_blocking) {
           copy_stream));
     }
   } else {
-    auto dtype = iter.dtype(0);
-    if (isQIntType(dtype)) {
-      AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
-        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-      });
-    } else {
-      if (same_neg) {
-        if (!same_conj && same_type) {
-          AT_DISPATCH_COMPLEX_TYPES(
-              dtype, "copy_conj_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(x); });
-              });
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
-              });
-        }
+    if (same_neg) {
+      if (!same_conj) {
+        conj_kernel_cuda(iter);
       } else {
-        if (!same_conj && same_type) {
-          AT_DISPATCH_COMPLEX_TYPES(
-              dtype, "copy_conj_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return std::conj(-x); });
-              });
-        } else {
-          AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-              kHalf, kBool, kBFloat16, dtype, "copy_", [&] {
-                gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return -x; });
-              });
-        }
+        direct_copy_kernel_cuda(iter);
+      }
+    } else {
+      if (!same_conj) {
+        neg_conj_kernel_cuda(iter);
+      } else {
+        neg_kernel_cuda(iter);
       }
     }
   }
@@ -217,8 +230,25 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    void* ptr = (dst_device == kCPU ? dst : src);
-    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ptr, stream));
+    // we use both the storage context and the tensor data pointer as the key
+    // for the caching host allocator. This allows us to better attribute the
+    // events to the original tensor allocation correctly. The cases we seek to
+    // handle are:
+
+    // 1: a user can pass a pinned memory tensor with an alternative
+    // context, for example if allocating memory directly from the pinned memory
+    // allocator and constructing a tensor with torch::from_blob.
+
+    // 2: a user can pass a tensor with a different base pointer to the original
+    // allocation (via slicing).
+    const auto& dst_tensor = iter.tensor(0);
+    const auto& src_tensor = iter.tensor(1);
+    const auto& host_tensor = (dst_device == kCPU ? dst_tensor : src_tensor);
+    auto* ptr = (dst_device == kCPU ? dst : src);
+    auto* ctx = host_tensor.storage().data_ptr().get_context();
+    // TODO: warn on the return value.
+    CachingHostAllocator_recordEvent(ptr, ctx, stream);
+
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }

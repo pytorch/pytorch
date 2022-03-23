@@ -2,21 +2,13 @@
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
-#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/torch.h>
 
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
-
-mobile::Module load_mobile_module(void* data, size_t) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  return initialize_mobile_module(flatbuffer_module);
-}
-
 TEST(BackendTest, ToBackend) {
   Module m("m");
   m.define(R"(
@@ -149,11 +141,6 @@ TEST(BackendTest, TestCompiler) {
   auto mlm = _load_for_mobile(ss);
   auto mres = mlm.forward(inputs);
   AT_ASSERT(mres.toTensor().equal(ref.toTensor()));
-
-  auto buff = save_mobile_module_to_bytes(mlm);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  auto mres2 = mlm2.forward(inputs);
-  AT_ASSERT(mres2.toTensor().equal(ref.toTensor()));
 }
 
 TEST(BackendTest, TestComposite) {
@@ -196,12 +183,29 @@ TEST(BackendTest, TestComposite) {
   c._save_for_mobile(ss);
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
-  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 
-  auto buff = save_mobile_module_to_bytes(mc);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  auto mres2 = mlm2.forward(inputs);
-  AT_ASSERT(mres2.toTensor().equal(res_jit.toTensor()));
+  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+}
+
+TEST(BackendTest, TestPrimDtype) {
+  Module c("name");
+  c.define(R"(
+    def forward(self, x, y):
+      c = y.dtype
+      return c
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(1.0 * torch::ones({}));
+  auto res_jit = c.forward(inputs);
+
+  std::stringstream ss;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+
+  ASSERT_EQ(res_jit.toInt(), res_mobile.toInt());
 }
 
 Module getCompositeModuleWithSameNameSubModules() {
@@ -258,11 +262,6 @@ TEST(BackendTest, TestCompositeWithSetStates) {
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
-
-  auto buff = save_mobile_module_to_bytes(mc);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  auto mres2 = mlm2.forward(inputs);
-  AT_ASSERT(mres2.toTensor().equal(res_jit.toTensor()));
 }
 
 TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
@@ -277,11 +276,6 @@ TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
   c._save_for_mobile(ss);
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
-
-  auto buff = save_mobile_module_to_bytes(mc);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  auto mres2 = mlm2.forward(inputs);
-  AT_ASSERT(mres2.toTensor().equal(res_mobile.toTensor()));
 
   // check if the methods names are always the same
   // by reloading the script module and saving it back as mobile
@@ -365,9 +359,15 @@ TEST(BackendTestDebugInfo, TestCompiler) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(m)::<unknown>.aten::add
+  Module hierarchy:top(m)::<unknown>.__loweredModule__(m)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in <unknown>
+  File "<string>", line 3, in <unknown>
+
+            def forward(self, x: Tensor, h: Tensor):
+                return self.__loweredModule__.forward(x, h)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, h, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -381,13 +381,6 @@ Traceback of TorchScript (most recent call last):
                ~~~~~ <--- HERE
   )";
   ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
-
-  /* TODO(add debug info to flatbuffer)
-  auto buff = save_mobile_module_to_bytes(mlm);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  mlm2.forward(inputs);
-  ASSERT_THROWS_WITH_MESSAGE(mlm2.forward(inputs), error_pattern);
-  */
 }
 
 TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
@@ -426,9 +419,15 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithModuleHierarchy) {
   lm._save_for_mobile(ss, ExtraFilesMap(), true);
   auto mlm = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.A0(A)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.__loweredModule__(C)::forward.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in <unknown>
+  File "<string>", line 3, in <unknown>
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -448,12 +447,6 @@ Traceback of TorchScript (most recent call last):
              ~~~~~ <--- HERE
   )";
   ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
-
-  /* TODO(add debug info to flatbuffer)
-  auto buff = save_mobile_module_to_bytes(mlm);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  ASSERT_THROWS_WITH_MESSAGE(mlm2.forward(inputs), error_pattern);
-  */
 }
 
 TEST(
@@ -525,9 +518,15 @@ TEST(
    *
    */
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.B0(B)::forward.A0(A)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.__loweredModule__(C)::forward.B0(B)::forward.A0(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
-  File "<string>", line 5, in <unknown>
+  File "<string>", line 3, in <unknown>
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
                 if self.__backend.is_available() :
                   _0, = self.__backend.execute(self.__handles["forward"], typed_inputs)
@@ -552,13 +551,7 @@ Traceback of TorchScript (most recent call last):
       return x + y
              ~~~~~ <--- HERE
   )";
-
   ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
-  /* TODO(add debug info to flatbuffer)
-  auto buff = save_mobile_module_to_bytes(mlm);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  ASSERT_THROWS_WITH_MESSAGE(mlm2.forward(inputs), error_pattern);
-  */
 }
 
 TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
@@ -618,13 +611,19 @@ TEST(BackendTestDebugInfo, TestExceptionStackForCompilerWithLoweredSubModule) {
   c._save_for_mobile(ss, ExtraFilesMap(), true);
   auto c_loaded = _load_for_mobile(ss);
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.A0(A)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.__loweredModule__(A)::forward.aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
              ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in forward
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
   File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
@@ -640,11 +639,6 @@ Traceback of TorchScript (most recent call last):
              ~~~~~ <--- HERE
   )";
   ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
-  /* TODO(add debug info to flatbuffer)
-  auto buff = save_mobile_module_to_bytes(c_loaded);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  ASSERT_THROWS_WITH_MESSAGE(mlm2.forward(inputs), error_pattern);
-  */
 }
 
 TEST(
@@ -744,13 +738,19 @@ TEST(
    *
    *  */
   std::string error_pattern = R"(
-  Module hierarchy:top(C)::<unknown>.A0(A)::forward.AA0(AA)::forward.aten::add
+  Module hierarchy:top(C)::<unknown>.A0(A)::forward.__loweredModule__(A)::forward.AA0(AA)::forward.aten::add
 Traceback of TorchScript (most recent call last):
   File "<string>", line 3, in <unknown>
 
     def forward(self, x, y):
       return self.A0.forward(x, y) + self.B0.forward(x)
              ~~~~~~~~~~~~~~~ <--- HERE
+
+  File "<string>", line 3, in forward
+
+            def forward(self, x: Tensor, y: Tensor):
+                return self.__loweredModule__.forward(x, y)
+                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 
   File "<string>", line 5, in forward
                 typed_inputs: List[Any] = [x, y, ]
@@ -772,11 +772,6 @@ Traceback of TorchScript (most recent call last):
              ~~~~~ <--- HERE
   )";
   ASSERT_THROWS_WITH_MESSAGE(c_loaded.forward(inputs), error_pattern);
-  /* TODO(add debug info to flatbuffer)
-  auto buff = save_mobile_module_to_bytes(c_loaded);
-  mobile::Module mlm2 = load_mobile_module(buff.data(), buff.size());
-  ASSERT_THROWS_WITH_MESSAGE(mlm2.forward(inputs), error_pattern);
-  */
 }
 
 } // namespace jit

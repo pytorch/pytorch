@@ -74,11 +74,11 @@ void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar li
 }
 
 
-void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min, const Scalar& max, const at::native::detail::ClampLimits minmax) {
-  launch_clamp_scalar(iter, min, max, minmax);
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min, const Scalar& max) {
+  launch_clamp_scalar(iter, min, max, at::native::detail::ClampLimits::MinMax);
 }
 
-void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min) {
+void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min) {
   launch_clamp_scalar(iter, min, min, at::native::detail::ClampLimits::Min);
 }
 
@@ -102,7 +102,7 @@ void clamp_min_kernel_impl(TensorIterator& iter) {
 }
 
 
-void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max) {
+void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max) {
   launch_clamp_scalar(iter, max, max, at::native::detail::ClampLimits::Max);
 }
 

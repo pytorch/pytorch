@@ -56,8 +56,6 @@ if [[ $PYLONG_API_CHECK == 0 ]]; then
 fi
 set -ex
 
-echo 'python %*' > /c/Windows/py.bat
-
 "$SCRIPT_HELPERS_DIR"/build_pytorch.bat
 
 assert_git_not_dirty

@@ -1,6 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 namespace torch {
@@ -11,13 +12,6 @@ using namespace ::c10::onnx;
 }
 
 namespace {
-class ScalarTypeHashFunction {
- public:
-  size_t operator()(const c10::ScalarType& type) const {
-    return static_cast<size_t>(type);
-  }
-};
-
 const int ONNX_OPSET_14 = 14;
 
 static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
@@ -31,6 +25,10 @@ static const std::unordered_map<c10::ScalarType, int, ScalarTypeHashFunction>
         {c10::kBool, 9},
         {c10::kHalf, 10},
         {c10::kDouble, 11},
+        {c10::kQInt8, 12},
+        {c10::kQUInt8, 13},
+        {c10::kQInt32, 14},
+        {c10::kBFloat16, 15},
 };
 
 static int64_t ScalarTypeToONNXType(const c10::ScalarType& st) {
@@ -52,6 +50,7 @@ static const std::unordered_set<NodeKind> standardOps = {
     onnx::Gemm,
     onnx::Pow,
     onnx::Mod,
+    onnx::Concat,
 };
 
 // For these operators, all inputs share the same scalar type.

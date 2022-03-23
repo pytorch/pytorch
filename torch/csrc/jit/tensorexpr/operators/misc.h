@@ -38,6 +38,7 @@ std::vector<ExprHandle> valueShape(const ArgValue& v);
 ExprHandle tensorOrConstant(
     const ArgValue& v,
     const std::vector<ExprHandle>& axes);
+ExprHandle scalarOrConstant(const ArgValue& v);
 ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
 ExprHandle constant(const ArgValue& v);
 

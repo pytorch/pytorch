@@ -1,3 +1,4 @@
+jobs:
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
@@ -161,6 +162,7 @@
     <<: *binary_mac_params
     macos:
       xcode: "12.0"
+      resource_class: "large"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout

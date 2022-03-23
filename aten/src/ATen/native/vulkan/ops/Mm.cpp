@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Mm.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -47,8 +48,8 @@ vTensor pack_weights(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
-    for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+  for (const auto src_h : c10::irange(src_kh_sz)) {
+    for (const auto src_w : c10::irange(src_kw_sz)) {
       int64_t dst_plane = 2*(src_h%2) + (src_w%2);
       int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
       memcpy(
@@ -109,8 +110,8 @@ vTensor pack_biases(
     float* const dst_bias_ptr = v_bias_payload.get();
     memset(dst_bias_ptr, 0, v_bias.nbytes());
 
-    for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
-      for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+    for (const auto src_h : c10::irange(src_kh_sz)) {
+      for (const auto src_w : c10::irange(src_kw_sz)) {
         int64_t dst_plane = 2*(src_h%2) + (src_w%2);
         int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
         memcpy(

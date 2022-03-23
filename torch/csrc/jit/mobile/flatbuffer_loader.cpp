@@ -1,5 +1,8 @@
+#include <flatbuffers/base.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 
+#include <ATen/ATen.h>
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/core/CPUAllocator.h>
@@ -13,6 +16,7 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
@@ -26,12 +30,17 @@
 #include <unistd.h>
 #endif
 
+#ifdef _WIN32
+#include <malloc.h>
+#else
+#include <cstdlib>
+#endif
+
 #include <string>
 #include <vector>
 
 namespace torch {
 namespace jit {
-namespace {
 
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
@@ -42,56 +51,125 @@ static constexpr c10::string_view kCustomClassPrefix =
 static constexpr c10::string_view kTorchPrefix = "__torch__";
 static constexpr c10::string_view kJitPrefix = "torch.jit";
 
-class FlatbufferLoader {
- public:
-  FlatbufferLoader()
-      : mcu_(std::make_shared<mobile::CompilationUnit>()),
-        cu_(std::make_shared<CompilationUnit>()) {}
+template <typename T, typename U>
+std::vector<T> parseListNative(const U* list) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(list != nullptr);
+  return {list->items()->begin(), list->items()->end()};
+}
 
-  mobile::Module parseModule(mobile::serialization::Module* module);
+IValue parseList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseTensor(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseTuple(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseDict(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseObject(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseIntList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseDoubleList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseBoolList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseBasic(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
+IValue parseEnum(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue);
 
- private:
-  IValue parseIValue(const mobile::serialization::IValue* ivalue);
-  IValue parseList(const mobile::serialization::List* list);
-  at::Tensor parseTensor(const mobile::serialization::TensorMetadata* tensor);
-  IValue parseTuple(const mobile::serialization::Tuple* tuple);
-  IValue parseDict(const mobile::serialization::Dict* dict);
-  IValue parseObject(const mobile::serialization::Object* object);
-  std::unique_ptr<mobile::Function> parseFunction(
-      const mobile::serialization::Function* method);
-
-  IValue& getIValue(uint32_t pos) {
-    TORCH_CHECK(pos < all_ivalues_.size());
-    return all_ivalues_[pos];
+TypePtr resolveType(
+    const std::string& type_string,
+    std::shared_ptr<CompilationUnit> cu) {
+  TypePtr type;
+  c10::string_view type_str(type_string);
+  if (type_str.starts_with(kCustomClassPrefix)) {
+    type = getCustomClass(type_string);
+    TORCH_CHECK(
+        type, "The implementation of class ", type_string, " cannot be found.");
+  } else if (
+      type_str.starts_with(kTorchPrefix) || type_str.starts_with(kJitPrefix)) {
+    c10::QualifiedName qn(type_string);
+    if (cu->get_class(qn) == nullptr) {
+      auto classtype = ClassType::create(qn, cu, true);
+      cu->register_type(classtype);
+      type = classtype;
+    } else {
+      type = cu->get_class(qn);
+    }
+  } else {
+    type = c10::parseType(type_string);
   }
+  return type;
+}
 
-  mobile::Function* getFunction(uint32_t pos) {
-    return all_functions_[pos];
+FlatbufferLoader::FlatbufferLoader()
+    : mcu_(std::make_shared<mobile::CompilationUnit>()),
+      cu_(std::make_shared<CompilationUnit>()),
+      ivalue_parsers_{nullptr} {
+  registerIValueParser(mobile::serialization::IValueUnion::NONE, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::Int, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::Bool, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::Double, &parseBasic);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::ComplexDouble, &parseBasic);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::TensorMetadata, &parseTensor);
+  registerIValueParser(mobile::serialization::IValueUnion::String, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::List, &parseList);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::IntList, &parseIntList);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::DoubleList, &parseDoubleList);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::BoolList, &parseBoolList);
+  registerIValueParser(mobile::serialization::IValueUnion::Tuple, &parseTuple);
+  registerIValueParser(mobile::serialization::IValueUnion::Dict, &parseDict);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::Object, &parseObject);
+  registerIValueParser(mobile::serialization::IValueUnion::Device, &parseBasic);
+  registerIValueParser(
+      mobile::serialization::IValueUnion::EnumValue, &parseEnum);
+  internal_registerTypeResolver(&resolveType);
+}
+
+void FlatbufferLoader::registerIValueParser(
+    mobile::serialization::IValueUnion ivalue_type,
+    IValueParser parser) {
+  ivalue_parsers_[static_cast<uint8_t>(ivalue_type)] = parser;
+}
+
+void FlatbufferLoader::internal_registerTypeResolver(
+    TypeResolver type_resolver) {
+  type_resolver_ = type_resolver;
+}
+
+void parseExtraFilesFromVector(
+    const flatbuffers::Vector<flatbuffers::Offset<
+        torch::jit::mobile::serialization::ExtraFile>>* files,
+    ExtraFilesMap* extra_files) {
+  for (uint32_t i = 0; i < files->size(); ++i) {
+    const auto* extra_file = files->Get(i);
+    (*extra_files)[extra_file->name()->str()] = extra_file->content()->str();
   }
+}
 
-  ClassTypePtr getType(uint32_t pos) const {
-    TORCH_CHECK(pos < all_ivalues_.size());
-    return all_types_[pos];
-    // auto iter = all_types_.find(pos);
-    // AT_ASSERT(iter != all_types_.end(), "type not found at pos: ", pos);
-    // return iter->second;
-  }
-
-  c10::Storage getStorage(uint32_t index);
-  TypePtr getOrCreateTypeAnnotations(const flatbuffers::String* offset);
-
-  // fields
-  std::unordered_map<uint32_t, mobile::Function*> all_functions_;
-  std::vector<ClassTypePtr> all_types_;
-  std::unordered_set<uint32_t> initialized_types_;
-  std::unordered_map<const flatbuffers::String*, TypePtr> type_annotations_;
-  std::vector<bool> storage_loaded_;
-  std::vector<c10::Storage> storages_;
-  std::vector<IValue> all_ivalues_;
-  std::shared_ptr<mobile::CompilationUnit> mcu_;
-  std::shared_ptr<CompilationUnit> cu_;
-  mobile::serialization::Module* module_ = nullptr;
-};
+void parseExtraFiles(
+    mobile::serialization::Module* module,
+    ExtraFilesMap& extra_files) {
+  auto extra_files_offsets = module->extra_files();
+  parseExtraFilesFromVector(extra_files_offsets, &extra_files);
+}
 
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
@@ -100,6 +178,7 @@ mobile::Module FlatbufferLoader::parseModule(
   all_types_.clear();
   storages_.clear();
   storage_loaded_.clear();
+  module_parsed_ = false;
 
   const auto* ivalues = module->ivalues();
   all_ivalues_.resize(ivalues->size());
@@ -117,14 +196,17 @@ mobile::Module FlatbufferLoader::parseModule(
       all_ivalues_[i] = parseIValue(ival);
     }
   }
-
   IValue& module_ivalue = getIValue(module->state_obj());
-  // register function to class
-  // for (const auto& func: all_functions_) {
-  //   const auto* fb_func = ivalues->Get(func.first)->val_as_Function();
-  //   auto class_type = getType(fb_func->class_type());
-  //   class_type->addMethod(func.second);
-  // }
+
+  // register functions
+  for (const auto& f : all_functions_) {
+    uint32_t class_index =
+        ivalues->Get(f.first)->val_as_Function()->class_type();
+    ClassTypePtr class_type = all_types_[class_index];
+    class_type->addMethod(f.second);
+  }
+
+  module_parsed_ = true;
   return mobile::Module(module_ivalue.toObject(), mcu_);
 }
 
@@ -160,7 +242,10 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     }
   }
 
-  AT_ASSERT(unsupported_op_names.empty());
+  TORCH_CHECK(
+      unsupported_op_names.empty(),
+      "Unsupported ops: ",
+      c10::Join(", ", unsupported_op_names));
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
@@ -195,7 +280,55 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
   return function;
 }
 
-at::Tensor FlatbufferLoader::parseTensor(
+IValue parseEnum(
+    FlatbufferLoader& loader,
+    const mobile::serialization::IValue& ivalue) {
+  const auto* enum_val = ivalue.val_as_EnumValue();
+  auto enum_type = loader.getOrCreateTypeAnnotations(enum_val->type_name())
+                       ->cast<c10::EnumType>();
+  AT_ASSERT(
+      enum_type,
+      "Enum with type: " + enum_val->type_name()->str() + " not found.");
+  IValue val = loader.getIValue(enum_val->value());
+  for (const auto& p : enum_type->enumNamesValues()) {
+    if (p.second == val) {
+      auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+          enum_type, p.first, p.second);
+      return IValue(std::move(enum_holder));
+    }
+  }
+  AT_ASSERT(
+      false, "Enum with type: " + enum_val->type_name()->str() + " not found.");
+}
+
+IValue parseBasic(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue) {
+  switch (ivalue.val_type()) {
+    case mobile::serialization::IValueUnion::NONE:
+      return {};
+    case mobile::serialization::IValueUnion::Int:
+      return ivalue.val_as_Int()->int_val();
+    case mobile::serialization::IValueUnion::Bool:
+      return ivalue.val_as_Bool()->bool_val();
+    case mobile::serialization::IValueUnion::Double:
+      return ivalue.val_as_Double()->double_val();
+    case mobile::serialization::IValueUnion::ComplexDouble: {
+      const auto* comp = ivalue.val_as_ComplexDouble();
+      return c10::complex<double>(comp->real(), comp->imag());
+    }
+    case mobile::serialization::IValueUnion::String:
+      return ivalue.val_as_String()->data()->str();
+    case mobile::serialization::IValueUnion::Device: {
+      return c10::Device(ivalue.val_as_Device()->str()->str());
+    }
+    default:
+      return {};
+  }
+}
+
+at::Tensor parseTensorFromMetadata(
+    FlatbufferLoader* loader,
     const mobile::serialization::TensorMetadata* tensor_md) {
   at::ScalarType type = static_cast<at::ScalarType>(tensor_md->scalar_type());
   auto options = at::CPU(type).options();
@@ -211,8 +344,9 @@ at::Tensor FlatbufferLoader::parseTensor(
       } break;
       case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
-        at::Tensor scales = parseTensor(schema->scales());
-        at::Tensor zero_points = parseTensor(schema->zero_points());
+        at::Tensor scales = parseTensorFromMetadata(loader, schema->scales());
+        at::Tensor zero_points =
+            parseTensorFromMetadata(loader, schema->zero_points());
         tensor = at::_empty_per_channel_affine_quantized(
             {0}, scales, zero_points, schema->axis(), options);
       } break;
@@ -229,7 +363,7 @@ at::Tensor FlatbufferLoader::parseTensor(
   at::TensorImpl* impl = tensor.unsafeGetTensorImpl();
 
   c10::Storage storage;
-  storage = getStorage(tensor_md->storage_location_index());
+  storage = loader->getStorage(tensor_md->storage_location_index());
   impl->set_storage_keep_dtype(storage);
   impl->set_storage_offset(tensor_md->storage_offset());
 
@@ -238,50 +372,93 @@ at::Tensor FlatbufferLoader::parseTensor(
   std::vector<int64_t> stride{
       tensor_md->strides()->begin(), tensor_md->strides()->end()};
   impl->set_sizes_and_strides(size, stride);
+#ifndef MIN_EDGE_RUNTIME
   tensor = autograd::make_variable(tensor, tensor_md->requires_grad());
+#endif
   return tensor;
 }
-IValue FlatbufferLoader::parseList(const mobile::serialization::List* list) {
+
+IValue parseTensor(
+    FlatbufferLoader& loader,
+    const mobile::serialization::IValue& ivalue) {
+  const mobile::serialization::TensorMetadata* tensor_md =
+      ivalue.val_as_TensorMetadata();
+  return parseTensorFromMetadata(&loader, tensor_md);
+}
+
+IValue parseList(
+    FlatbufferLoader& loader,
+    const mobile::serialization::IValue& ivalue) {
+  const mobile::serialization::List* list = ivalue.val_as_List();
   auto res = c10::impl::GenericList(AnyType::get());
   for (int i : *list->items()) {
-    res.emplace_back(getIValue(i));
+    res.emplace_back(loader.getIValue(i));
   }
-  auto type =
-      getOrCreateTypeAnnotations(list->annotation_str())->cast<ListType>();
-  res.unsafeSetElementType(type->getElementType());
+  auto type = loader.getOrCreateTypeAnnotations(list->annotation_str());
+  res.unsafeSetElementType(type->containedType(0));
   return res;
 }
 
-IValue FlatbufferLoader::parseTuple(const mobile::serialization::Tuple* tuple) {
+IValue parseIntList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue) {
+  const auto& list = ivalue.val_as_IntList();
+  return parseListNative<int64_t>(list);
+}
+
+IValue parseDoubleList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue) {
+  const auto& list = ivalue.val_as_DoubleList();
+  return parseListNative<double>(list);
+}
+
+IValue parseBoolList(
+    FlatbufferLoader&,
+    const mobile::serialization::IValue& ivalue) {
+  const auto& list = ivalue.val_as_BoolList();
+  std::vector<uint8_t> res = parseListNative<uint8_t>(list);
+  c10::List<bool> boollist;
+  for (auto x : res) {
+    boollist.push_back(x);
+  }
+  return boollist;
+}
+
+IValue parseTuple(
+    FlatbufferLoader& loader,
+    const mobile::serialization::IValue& ivalue) {
+  const auto& tuple = ivalue.val_as_Tuple();
   std::vector<IValue> res;
   for (int i : *tuple->items()) {
-    res.emplace_back(getIValue(i));
+    res.emplace_back(loader.getIValue(i));
   }
   return c10::ivalue::Tuple::create(res);
 }
 
-IValue FlatbufferLoader::parseDict(const mobile::serialization::Dict* dict) {
+IValue parseDict(
+    FlatbufferLoader& loader,
+    const mobile::serialization::IValue& ivalue) {
+  const auto* dict = ivalue.val_as_Dict();
   auto result = c10::impl::GenericDict(AnyType::get(), AnyType::get());
   const auto* keys = dict->keys();
   const auto* values = dict->values();
   for (size_t i = 0; i < keys->size(); ++i) {
     uint32_t key = keys->Get(i);
     uint32_t val = values->Get(i);
-    result.insert_or_assign(getIValue(key), getIValue(val));
+    result.insert_or_assign(loader.getIValue(key), loader.getIValue(val));
   }
-  auto type =
-      getOrCreateTypeAnnotations(dict->annotation_str())->cast<DictType>();
-  result.unsafeSetKeyType(type->getKeyType());
-  result.unsafeSetValueType(type->getValueType());
+  auto type = loader.getOrCreateTypeAnnotations(dict->annotation_str());
+  result.unsafeSetKeyType(type->containedType(0));
+  result.unsafeSetValueType(type->containedType(1));
   return result;
 }
 
-IValue FlatbufferLoader::parseObject(
+ClassTypePtr FlatbufferLoader::getOrCreateClassTypeForObject(
     const mobile::serialization::Object* object) {
+  auto cls = getType(object->type_index());
   const mobile::serialization::ObjectType* obj_type =
       module_->object_types()->Get(object->type_index());
-  auto cls = getType(object->type_index());
-  bool initialized = true;
   if (cls == nullptr) {
     c10::string_view qn_str(
         obj_type->type_name()->c_str(), obj_type->type_name()->size());
@@ -297,32 +474,46 @@ IValue FlatbufferLoader::parseObject(
     }
     TORCH_CHECK(object->type_index() < all_ivalues_.size());
     all_types_[object->type_index()] = cls;
-    initialized = false;
+
+    if (obj_type->type() == mobile::serialization::TypeType::CLASS_WITH_FIELD) {
+      for (uint32_t i = 0; i < object->attrs()->size(); i++) {
+        IValue val = getIValue(object->attrs()->Get(i));
+        // Need to use concrete object's field's type to set type of field.
+        cls->addAttribute(
+            obj_type->attr_names()->Get(i)->str(),
+            val.type<c10::DynamicType>());
+      }
+    }
+    initialized_types_.insert(object->type_index());
   }
+  return cls;
+}
+
+IValue parseObject(
+    FlatbufferLoader& loader,
+    const mobile::serialization::IValue& ivalue) {
+  const mobile::serialization::Object* object = ivalue.val_as_Object();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(object != nullptr);
+  const auto* cur_input = loader.getCurrentFlatbufferInput();
+  const mobile::serialization::ObjectType* obj_type =
+      cur_input->object_types()->Get(object->type_index());
+  auto cls = loader.getOrCreateClassTypeForObject(object);
   Stack stack;
   switch (obj_type->type()) {
     case mobile::serialization::TypeType::CLASS_WITH_FIELD: {
       auto obj = c10::ivalue::Object::create(
-          at::StrongTypePtr(cu_, cls), object->attrs()->size());
-      if (!initialized) {
-        for (uint32_t i = 0; i < object->attrs()->size(); i++) {
-          IValue val = getIValue(object->attrs()->Get(i));
-          cls->addAttribute(obj_type->attr_names()->Get(i)->str(), val.type());
-          obj->setSlot(i, std::move(val));
-        }
-        initialized_types_.insert(object->type_index());
-      } else {
-        for (uint32_t i = 0; i < object->attrs()->size(); i++) {
-          IValue val = getIValue(object->attrs()->Get(i));
-          obj->setSlot(i, std::move(val));
-        }
+          at::StrongTypePtr(loader.cu_, cls), object->attrs()->size());
+      for (uint32_t i = 0; i < object->attrs()->size(); i++) {
+        IValue val = loader.getIValue(object->attrs()->Get(i));
+        obj->setSlot(i, std::move(val));
       }
       return obj;
     }
     case mobile::serialization::TypeType::CLASS_WITH_SETSTATE: {
-      IValue input = getIValue(object->state());
-      mobile::Function* setstate = getFunction(object->setstate_func());
-      auto obj = c10::ivalue::Object::create(at::StrongTypePtr(cu_, cls), 0);
+      IValue input = loader.getIValue(object->state());
+      mobile::Function* setstate = loader.getFunction(object->setstate_func());
+      auto obj =
+          c10::ivalue::Object::create(at::StrongTypePtr(loader.cu_, cls), 0);
       stack.push_back(obj);
       stack.emplace_back(std::move(input));
       setstate->run(stack);
@@ -331,7 +522,7 @@ IValue FlatbufferLoader::parseObject(
     case mobile::serialization::TypeType::CUSTOM_CLASS: {
       auto custom_class_type =
           torch::jit::getCustomClass(cls->name()->qualifiedName());
-      IValue input = getIValue(object->state());
+      IValue input = loader.getIValue(object->state());
       auto obj = c10::ivalue::Object::create(
           c10::StrongTypePtr(nullptr, custom_class_type), 1);
       stack.push_back(obj);
@@ -344,78 +535,10 @@ IValue FlatbufferLoader::parseObject(
   }
 }
 
-template <typename T, typename U>
-std::vector<T> parseListNative(const U* list) {
-  return {list->items()->begin(), list->items()->end()};
-}
-
 IValue FlatbufferLoader::parseIValue(
     const mobile::serialization::IValue* ivalue) {
-  switch (ivalue->val_type()) {
-    case mobile::serialization::IValueUnion::NONE:
-      return {};
-    case mobile::serialization::IValueUnion::Int:
-      return ivalue->val_as_Int()->int_val();
-    case mobile::serialization::IValueUnion::Bool:
-      return ivalue->val_as_Bool()->bool_val();
-    case mobile::serialization::IValueUnion::Double:
-      return ivalue->val_as_Double()->double_val();
-    case mobile::serialization::IValueUnion::ComplexDouble: {
-      const auto* comp = ivalue->val_as_ComplexDouble();
-      return c10::complex<double>(comp->real(), comp->imag());
-    }
-    case mobile::serialization::IValueUnion::TensorMetadata:
-      return parseTensor(ivalue->val_as_TensorMetadata());
-    case mobile::serialization::IValueUnion::String:
-      return ivalue->val_as_String()->data()->str();
-    case mobile::serialization::IValueUnion::List:
-      return parseList(ivalue->val_as_List());
-    case mobile::serialization::IValueUnion::IntList:
-      return parseListNative<int64_t>(ivalue->val_as_IntList());
-    case mobile::serialization::IValueUnion::DoubleList:
-      return parseListNative<double>(ivalue->val_as_DoubleList());
-    case mobile::serialization::IValueUnion::BoolList: {
-      std::vector<uint8_t> res =
-          parseListNative<uint8_t>(ivalue->val_as_BoolList());
-      c10::List<bool> boollist;
-      for (auto x : res) {
-        boollist.push_back(x);
-      }
-      return boollist;
-    }
-    case mobile::serialization::IValueUnion::Tuple:
-      return parseTuple(ivalue->val_as_Tuple());
-    case mobile::serialization::IValueUnion::Dict:
-      return parseDict(ivalue->val_as_Dict());
-    case mobile::serialization::IValueUnion::Object: {
-      auto val = parseObject(ivalue->val_as_Object());
-      return val;
-    }
-    case mobile::serialization::IValueUnion::Device: {
-      return c10::Device(ivalue->val_as_Device()->str()->str());
-    }
-    case mobile::serialization::IValueUnion::EnumValue: {
-      const auto* enum_val = ivalue->val_as_EnumValue();
-      auto enum_type = getOrCreateTypeAnnotations(enum_val->type_name())
-                           ->cast<c10::EnumType>();
-      AT_ASSERT(
-          enum_type,
-          "Enum with type: " + enum_val->type_name()->str() + " not found.");
-      IValue val = getIValue(enum_val->value());
-      for (const auto& p : enum_type->enumNamesValues()) {
-        if (p.second == val) {
-          auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
-              enum_type, p.first, p.second);
-          return IValue(std::move(enum_holder));
-        }
-      }
-      AT_ASSERT(
-          false,
-          "Enum with type: " + enum_val->type_name()->str() + " not found.");
-    }
-    default:
-      return {};
-  }
+  return ivalue_parsers_[static_cast<uint32_t>(ivalue->val_type())](
+      *this, *ivalue);
 }
 
 void deleteNothing2(void*);
@@ -442,33 +565,62 @@ TypePtr FlatbufferLoader::getOrCreateTypeAnnotations(
   if (iter != type_annotations_.end()) {
     return iter->second;
   }
-  TypePtr type;
-  c10::string_view qn_str(offset->c_str(), offset->size());
-  c10::QualifiedName qn(offset->str());
-  if (qn_str.starts_with(kCustomClassPrefix)) {
-    type = getCustomClass(qn.qualifiedName());
-    TORCH_CHECK(
-        type,
-        "The implementation of class ",
-        qn.qualifiedName(),
-        " cannot be found.");
-  } else if (
-      qn_str.starts_with(kTorchPrefix) || qn_str.starts_with(kJitPrefix)) {
-    if (cu_->get_class(qn) == nullptr) {
-      auto classtype = ClassType::create(qn, cu_, true);
-      cu_->register_type(classtype);
-      type = classtype;
-    } else {
-      type = cu_->get_class(qn);
-    }
-  } else {
-    type = c10::parseType(qn.qualifiedName());
-  }
+  TypePtr type = type_resolver_(offset->str(), cu_);
   type_annotations_[offset] = type;
   return type;
 }
 
-} // namespace
+std::tuple<std::shared_ptr<char>, size_t> get_file_content(
+    const char* filename) {
+#if defined(HAVE_MMAP)
+  int fd = open(filename, O_RDONLY);
+  struct stat statbuf {};
+  fstat(fd, &statbuf);
+  size_t size = statbuf.st_size;
+  void* ptr = mmap(nullptr, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  auto deleter = [statbuf](char* ptr) { munmap(ptr, statbuf.st_size); };
+  std::shared_ptr<char> data(reinterpret_cast<char*>(ptr), deleter);
+#else
+  FILE* f = fopen(filename, "rb");
+  fseek(f, 0, SEEK_END);
+  size_t size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  // make sure buffer size is multiple of alignment
+  size_t buffer_size =
+      (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
+#if defined(__ANDROID__)
+  std::shared_ptr<char> data(
+      static_cast<char*>(memalign(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free);
+#elif defined(_WIN32)
+  std::shared_ptr<char> data(
+      static_cast<char*>(
+          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
+      _aligned_free); // NOLINT
+#else
+  std::shared_ptr<char> data(
+      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free); // NOLINT
+#endif
+  fread(data.get(), size, 1, f);
+  fclose(f);
+#endif
+  return std::make_tuple(data, size);
+}
+
+void FlatbufferLoader::extractJitSourceAndConstants(
+    ExtraFilesMap* jit_sources,
+    std::vector<IValue>* constants) {
+  AT_ASSERT(
+      module_parsed_,
+      "Need to first parse a flatbuffer file before extracing jit_sources");
+  const auto* jit_constants = module_->jit_constants();
+  for (auto i = 0; i < jit_constants->size(); ++i) {
+    constants->emplace_back(getIValue(jit_constants->Get(i)));
+  }
+  parseExtraFilesFromVector(module_->jit_sources(), jit_sources);
+}
 
 mobile::Module parse_and_initialize_mobile_module(
     std::shared_ptr<char> data,
@@ -490,24 +642,9 @@ mobile::Module initialize_mobile_module(
 mobile::Module load_mobile_module_from_file(
     const std::string& filename,
     c10::optional<c10::Device> device) {
-#if defined(HAVE_MMAP)
-  int fd = open(filename.c_str(), O_RDONLY);
-  struct stat statbuf {};
-  fstat(fd, &statbuf);
-  int size = statbuf.st_size;
-  void* ptr = mmap(nullptr, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-  close(fd);
-  auto deleter = [statbuf](char* ptr) { munmap(ptr, statbuf.st_size); };
-  std::shared_ptr<char> data(reinterpret_cast<char*>(ptr), deleter);
-#else
-  FILE* f = fopen(filename.c_str(), "rb");
-  fseek(f, 0, SEEK_END);
-  long size = ftell(f);
-  fseek(f, 0, SEEK_SET);
-  std::shared_ptr<char> data(static_cast<char*>(malloc(size)), free); // NOLINT
-  fread(data.get(), size, 1, f);
-  fclose(f);
-#endif
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
   return parse_and_initialize_mobile_module(std::move(data), size, device);
 }
 

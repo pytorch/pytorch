@@ -1,29 +1,17 @@
 #include <torch/csrc/jit/passes/insert_guards.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 #include <memory>
 #include <unordered_set>
 
 namespace torch {
 namespace jit {
 
-void removeProfilingNodes(Block* b) {
-  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile) {
-      it->output()->replaceAllUsesWith(it->input());
-      it.destroyCurrent();
-    } else {
-      for (Block* ib : it->blocks()) {
-        removeProfilingNodes(ib);
-      }
-    }
-  }
-}
-
 struct GuardInserter {
   GuardInserter(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
 
   void run() {
     insertGuards(graph_->block());
-    removeProfilingNodes(graph_->block());
+    ProfilingRecord::removeProfilingNodes(graph_->block());
   }
 
  private:
@@ -58,10 +46,6 @@ struct GuardInserter {
 void InsertGuards(std::shared_ptr<Graph> graph) {
   GuardInserter gi(std::move(graph));
   gi.run();
-}
-
-void RemoveProfilingNodes(const std::shared_ptr<Graph>& graph) {
-  removeProfilingNodes(graph->block());
 }
 
 } // namespace jit

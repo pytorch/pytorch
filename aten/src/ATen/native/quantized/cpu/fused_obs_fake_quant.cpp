@@ -22,9 +22,9 @@ void calculate_moving_average(
     TORCH_CHECK(
         ch_axis == 0,
         "Per-channel FakeQuant in fused_moving_avg_obs_fake_quant is only supported on axis == 0");
-    std::tie(x_min, x_max) = at::_aminmax(x, 1);
+    std::tie(x_min, x_max) = at::aminmax(x, 1);
   } else {
-    std::tie(x_min, x_max) = at::_aminmax(x);
+    std::tie(x_min, x_max) = at::aminmax(x);
   }
   const float* min_curr_val = x_min.data_ptr<float>();
   const float* max_curr_val = x_max.data_ptr<float>();

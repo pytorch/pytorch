@@ -51,7 +51,7 @@ test/custom_operator/model.pt
 test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
-test/backward_compatibility/nightly_schemas.txt
+test/forward_backward_compatibility/nightly_schemas.txt
 dropout_model.pt
 test/generated_type_hints_smoketest.py
 test/htmlcov
@@ -67,7 +67,9 @@ torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
 torch/_VF.pyi
 torch/nn/functional.pyi
+torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
+torch/csrc/lazy/generated/*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
@@ -255,6 +257,9 @@ cmake-build-debug
 #
 # Below files are not deleted by "setup.py clean".
 
+# Downloaded bazel
+tools/bazel
+
 # Visual Studio Code files
 .vs
 /.vscode/*
@@ -311,6 +316,3 @@ pr.diff
 
 # coverage files
 */**/.coverage.*
-
-# generated flatbuffer schema header
-torch/csrc/jit/serialization/mobile_bytecode_generated.h

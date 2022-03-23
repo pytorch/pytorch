@@ -5,6 +5,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 C10_DEFINE_bool(
     caffe2_keep_on_shrink,
@@ -103,6 +104,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
+// some compiler does not generate the destructor correctly
+TensorImpl::~TensorImpl() = default;
+
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
@@ -116,11 +120,11 @@ TensorImpl::TensorImpl(
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// In most constructors for TensorImpl, you will see Python key is removed from
-// the passed in DispatchKeySet.  Why?
+// In most constructors for TensorImpl, you will see Python and
+// PythonTLSSnapshot keys are removed from the passed in DispatchKeySet.  Why?
 //
-// INVARIANT: Python dispatch key is set iff PyObject for the Tensor has a
-// nontrivial __torch_dispatch__ implementation.
+// INVARIANT: Python and PythonTLSSnapshot dispatch keys are set iff PyObject
+// for the Tensor has a nontrivial __torch_dispatch__ implementation.
 //
 // When a fresh TensorImpl is created, there is *no* PyObject (this only gets
 // initialized lazily at the first point in time the Tensor passes into Python).
@@ -128,8 +132,8 @@ TensorImpl::TensorImpl(
 //
 // In practice, what will happen shortly afterwards is that the TensorImpl
 // will get its PyObject initialized by Tensor._make_subclass; at this point
-// the Python dispatch key will be set and all is well.  The point is to delay
-// the dispatch key setting until that point.
+// the Python and PythonTLSSnapshot dispatch keys will be set and all is well.
+// The point is to delay the dispatch key setting until that point.
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
@@ -144,8 +148,10 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.remove(
-          DispatchKey::Python)) { // See [Note: Python key removal]
+      key_set_(
+          key_set.remove(DispatchKey::Python)
+              .remove(DispatchKey::PythonTLSSnapshot)) { // See [Note: Python
+                                                         // key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -191,7 +197,9 @@ TensorImpl::TensorImpl(
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
   key_set =
-      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
+      key_set.remove(DispatchKey::Python)
+          .remove(
+              DispatchKey::PythonTLSSnapshot); // See [Note: Python key removal]
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
@@ -335,7 +343,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
   }
   SmallVector<int64_t, 5> perm;
   perm.resize(dim());
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     perm[i] = i;
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
@@ -349,7 +357,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
         sizes_and_strides_.stride_at_unchecked(b);
   });
   auto require_stride = 1;
-  for (int64_t i = 0; i < dim(); i++) {
+  for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
       return true;
@@ -412,7 +420,7 @@ void TensorImpl::throw_storage_access_error() const {
 bool TensorImpl::is_contiguous_nondefault_policy_impl(
     at::MemoryFormat memory_format) const {
   if (has_contiguity_ ==
-      static_cast<uint8_t>(HasContiguityPolicy::ContiguityNotSupported)) {
+      static_cast<uint8_t>(CustomizableMethodPolicy::ContiguityNotSupported)) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "Tensors of type ",
@@ -421,7 +429,7 @@ bool TensorImpl::is_contiguous_nondefault_policy_impl(
   } else {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         has_contiguity_ ==
-        static_cast<uint8_t>(HasContiguityPolicy::CustomBehavior));
+        static_cast<uint8_t>(CustomizableMethodPolicy::CustomBehavior));
     return is_contiguous_custom(memory_format);
   }
 }
@@ -431,6 +439,22 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
       false,
       "TensorImpl::is_contiguous_custom should never be called; did you "
       "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+}
+
+IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {
+  if (sizes_customization_policy_ ==
+      static_cast<uint8_t>(CustomizableMethodPolicy::NotSupported)) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "Tensors of type ",
+        tensorimpl_type_name(),
+        " do not have sizes");
+  } else {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false,
+        "custom behavior for sizes() is not supported; please add it or file "
+        "an issue.")
+  }
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -496,14 +520,15 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
   return autograd_meta_.get();
 }
 
-c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
-    const c10::VariableVersion& version_counter,
+template <typename VariableVersion>
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
+    VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
     auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     if (r) {
-      r->set_version_counter(version_counter);
+      r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       return r;
     }
@@ -518,7 +543,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
-      /*version_counter=*/version_counter,
+      /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
   impl->refresh_numel();
   impl->refresh_contiguous();
@@ -526,32 +551,17 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 }
 
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  return shallow_copy_and_detach_core(
+      version_counter, allow_tensor_metadata_change);
+}
+
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::move(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
-    }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
-  }
-  auto impl = c10::make_intrusive<TensorImpl>(
-      // No need to populate Storage; copy_tensor_metadata will do it for us.
-      key_set_,
-      data_type_,
-      device_opt_);
-  copy_tensor_metadata(
-      /*src_impl=*/this,
-      /*dest_impl=*/impl.get(),
-      /*version_counter=*/std::move(version_counter),
-      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
-  return impl;
+  return shallow_copy_and_detach_core(
+      std::move(version_counter), allow_tensor_metadata_change);
 }
 
 void TensorImpl::copy_tensor_metadata_except_version_counter(
@@ -563,7 +573,8 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
+  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python)
+                            .remove(DispatchKey::PythonTLSSnapshot);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
@@ -577,6 +588,8 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->sizes_customization_policy_ =
+      src_impl->sizes_customization_policy_;
   dest_impl->storage_access_should_throw_ =
       src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {

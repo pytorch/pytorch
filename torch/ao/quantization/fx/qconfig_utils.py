@@ -1,98 +1,23 @@
 import torch
-from collections import OrderedDict, defaultdict
-from typing import Union, Callable, Any, Dict, Tuple, Set, Optional
+from collections import defaultdict
+from typing import Callable, Any, Dict, Tuple, Set, Optional
 from torch.ao.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny, qconfig_equals
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
 )
-import re
 from torch.fx import (
     GraphModule,
 )
 from torch.fx.graph import (
     Graph,
 )
+from torch.nn.intrinsic import _FusedModule
 
-from .utils import _parent_name
-from ..utils import (
-    get_combined_dict,
+from ..utils import _parent_name
+from ..qconfig_dict_utils import (
+    get_object_type_qconfig,
+    maybe_adjust_qconfig_for_module_type_or_name,
 )
-from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
-from ..quantization_mappings import (
-    get_default_qat_module_mappings,
-)
-
-
-def get_flattened_qconfig_dict(qconfig_dict):
-    """ flatten the global, object_type and module_name qconfig
-    to the same qconfig_dict so that it can be used by
-    propagate_qconfig_ function.
-    "module_name_regex" is ignored for now since it's not supported
-    in propagate_qconfig_, but it can be fixed later.
-
-    For example:
-    Input: {
-      "": qconfig,
-      "object_type": [
-        (torch.add, qconfig)
-      ],
-      "module_name": [
-        ("conv", qconfig)
-      ]
-    }
-
-    Output: {
-      "": qconfig,
-      torch.add: qconfig,
-      "conv": qconfig
-    }
-    """
-    flattened = dict()
-    if '' in qconfig_dict:
-        flattened[''] = qconfig_dict['']
-
-    def flatten_key(key):
-        if key in qconfig_dict:
-            for (obj, qconfig) in qconfig_dict[key].items():
-                flattened[obj] = qconfig
-
-    flatten_key('object_type')
-    flatten_key('module_name')
-    return flattened
-
-
-def convert_dict_to_ordered_dict(qconfig_dict: Any) -> Dict[str, Dict[Any, Any]]:
-    """ Convert dict in qconfig_dict to ordered dict
-    """
-    # convert a qconfig list for a type to OrderedDict
-    def _convert_to_ordered_dict(key, qconfig_dict):
-        qconfig_dict[key] = OrderedDict(qconfig_dict.get(key, []))
-
-    _convert_to_ordered_dict('object_type', qconfig_dict)
-    _convert_to_ordered_dict('module_name_regex', qconfig_dict)
-    _convert_to_ordered_dict('module_name', qconfig_dict)
-    return qconfig_dict
-
-
-def get_object_type_qconfig(
-        qconfig_dict: Any,
-        object_type: Union[Callable, str],
-        fallback_qconfig: QConfigAny) -> QConfigAny:
-    # object_type can be
-    # 1. module type (call_module)
-    # 2. function (call_function)
-    # 3. string (call_method)
-    return qconfig_dict['object_type'].get(
-        object_type, fallback_qconfig)
-
-
-def get_module_name_regex_qconfig(qconfig_dict, module_name, fallback_qconfig):
-    for regex_pattern, qconfig in \
-            qconfig_dict['module_name_regex'].items():
-        if re.match(regex_pattern, module_name):
-            # first match wins
-            return qconfig
-    return fallback_qconfig
 
 
 def maybe_adjust_qconfig_for_module_name_object_type_order(
@@ -116,48 +41,6 @@ def maybe_adjust_qconfig_for_module_name_object_type_order(
     return fallback_qconfig
 
 
-def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
-    if module_name == '':
-        # module name qconfig not found
-        return fallback_qconfig
-    if module_name in qconfig_dict['module_name']:
-        return qconfig_dict['module_name'][module_name]
-    else:
-        parent, _ = _parent_name(module_name)
-        return get_module_name_qconfig(qconfig_dict, parent, fallback_qconfig)
-
-# get qconfig for module_name,
-# fallback to module_name_regex_qconfig, module_type_qconfig,
-# global_qconfig if necessary
-
-
-def maybe_adjust_qconfig_for_module_type_or_name(qconfig_dict, module_type, module_name, global_qconfig):
-    module_type_qconfig = get_object_type_qconfig(
-        qconfig_dict, module_type, global_qconfig)
-    module_name_regex_qconfig = get_module_name_regex_qconfig(
-        qconfig_dict, module_name, module_type_qconfig)
-    module_name_qconfig = get_module_name_qconfig(
-        qconfig_dict, module_name, module_name_regex_qconfig)
-    return module_name_qconfig
-
-
-def update_qconfig_for_qat(
-    qconfig_dict: Any,
-    additional_qat_module_mapping: Dict[Callable, Callable]
-) -> Any:
-    """
-    Update the qconfig_dict to account for module swaps during QAT.
-    During QAT we perform a module swap on the nn.Module types to the corresponding nn.qat.modules types.
-    """
-    all_qat_mappings = get_combined_dict(
-        get_default_qat_module_mappings(), additional_qat_module_mapping)
-    object_type_dict = qconfig_dict.get("object_type", None)
-    new_object_type_dict = object_type_dict.copy()
-    for k, v in new_object_type_dict.items():
-        if k in all_qat_mappings:
-            object_type_dict[all_qat_mappings[k]] = v
-    return qconfig_dict
-
 def update_qconfig_for_fusion(
     model: GraphModule,
     qconfig_dict: Any,
@@ -173,23 +56,29 @@ def update_qconfig_for_fusion(
 
     for node in model.graph.nodes:
         if node.op == 'call_module' and node.target in modules:
-            module_type = type(modules[str(node.target)])
-            if module_type not in list(DEFAULT_OP_LIST_TO_FUSER_METHOD.values()):
+            maybe_fused_module = modules[str(node.target)]
+            if not isinstance(maybe_fused_module, _FusedModule):
                 continue
 
-            for ops, fuser in DEFAULT_OP_LIST_TO_FUSER_METHOD.items():
-                if module_type == fuser:
-                    fused_qconfig = object_type_dict.get(ops[0], None)
+            ops = list(maybe_fused_module._modules.values())
+            fused_qconfig = object_type_dict.get(type(ops[0]), None)
 
-                    # Raise an error if the modules in the fused module have
-                    # different qconfigs specified in the qconfig_dict
-                    for op in ops:
-                        if not qconfig_equals(object_type_dict.get(op, None), fused_qconfig):
-                            raise LookupError("During fusion, we need to specify the same " +
-                                              f"qconfigs for both modules in {module_type}.")
+            # Raise an error if the modules in the fused module have
+            # different qconfigs specified in the qconfig_dict
+            # TODO: currently it only works for modules,
+            # need to make this work for torch.nn.functional.relu
+            # TODO: currently it only works for object_type configurations,
+            # ideally it should work for different types of configurations,
+            # maybe we want to redesign this part
+            for op in ops[1:]:
+                if not qconfig_equals(object_type_dict.get(type(op), None), fused_qconfig):
+                    raise LookupError(
+                        "During fusion, we need to specify the same " +
+                        f"qconfigs for all module types in {type(maybe_fused_module)} " +
+                        f"offending type: {type(op)}")
 
-                    if fused_qconfig is not None:
-                        object_type_dict[module_type] = fused_qconfig
+            if fused_qconfig is not None:
+                object_type_dict[type(maybe_fused_module)] = fused_qconfig
 
     return qconfig_dict
 
@@ -394,3 +283,19 @@ def compare_prepare_convert_qconfig_dict(prepare_qconfig_dict: Dict[str, Dict[An
                     Updated qconfig {} to {} for key {} {}".format(prepare_qconfig_dict[k], convert_qconfig_dict[k], k, name)
         else:
             assert "Unsupported key in convert_qconfig_dict {}".format(k)
+
+# TODO: rename this file to config_utils
+def get_standalone_module_configs(
+        module_name: str,
+        module_type: Callable,
+        custom_config_dict: Dict[str, Any]):
+    standalone_module_name_configs = \
+        custom_config_dict.get("standalone_module_name", [])
+    standalone_module_class_configs = \
+        custom_config_dict.get("standalone_module_class", [])
+    class_config_map = {x[0]: (x[1], x[2], x[3]) for x in standalone_module_class_configs}
+    name_config_map = {x[0]: (x[1], x[2], x[3]) for x in standalone_module_name_configs}
+    config = class_config_map.get(module_type, (None, None, None))
+    # name config has precedence over type config
+    config = name_config_map.get(module_name, config)
+    return config

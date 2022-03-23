@@ -3,21 +3,21 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
-    input: "9"
+    input: "onnx::Reshape_0"
+    input: "onnx::Reshape_9"
     output: "6"
     name: "Reshape_0"
     op_type: "Reshape"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 2
     data_type: 7
-    name: "9"
+    name: "onnx::Reshape_9"
     raw_data: "\001\000\000\000\000\000\000\000\030\000\000\000\000\000\000\000"
   }
   input {
-    name: "0"
+    name: "onnx::Reshape_0"
     type {
       tensor_type {
         elem_type: 1

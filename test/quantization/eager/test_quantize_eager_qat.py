@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
+import copy
 import math
 import torch
 import torch.nn as nn
@@ -10,6 +11,7 @@ from torch.nn.modules.utils import _pair
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
+import torch.nn.intrinsic.qat as nniqat
 import torch.nn.qat.dynamic as nnqatd
 from torch.ao.quantization import (
     prepare,
@@ -29,13 +31,12 @@ from torch.ao.quantization import (
     NoopObserver,
 )
 from torch.ao.quantization.qconfig import qconfig_equals
-from torch.testing._internal.common_utils import TestCase
-
 from torch.testing._internal.common_quantization import (
     DeFusedEmbeddingBagLinear,
     QuantizationTestCase,
     QuantStubModel,
     ManualLinearQATModel,
+    ManualDropoutQATModel,
     ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
     ManualEmbeddingBagLinear,
@@ -56,7 +57,196 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from functools import reduce
 
-class TestQuantizationAwareTraining(QuantizationTestCase):
+class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
+    """
+    Conv-BN fusion implemented with explicit folding. Useful
+    to verify numerical equivalency with non-folded version.
+    """
+    def __init__(self,
+                 # ConvNd args
+                 in_channels, out_channels, kernel_size, stride,
+                 padding, dilation, transposed, output_padding,
+                 groups,
+                 bias,
+                 padding_mode,
+                 # BatchNormNd args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
+                 # Args for this module
+                 freeze_bn=False,
+                 qconfig=None):
+        nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
+                                         stride, padding, dilation, transposed,
+                                         output_padding, groups, False, padding_mode)
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
+        self.eps = eps
+        self.momentum = momentum
+        self.freeze_bn = freeze_bn if self.training else True
+        self.num_features = out_channels
+        self.gamma = nn.Parameter(torch.empty(out_channels))
+        self.beta = nn.Parameter(torch.empty(out_channels))
+        self.affine = True
+        self.track_running_stats = True
+        self.register_buffer('running_mean', torch.zeros(out_channels))
+        self.register_buffer('running_var', torch.ones(out_channels))
+        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+        self.activation_post_process = self.qconfig.activation()
+        self.weight_fake_quant = self.qconfig.weight()
+        if bias:
+            self.bias = nn.Parameter(torch.empty(out_channels))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_bn_parameters()
+
+    def reset_running_stats(self):
+        self.running_mean.zero_()
+        self.running_var.fill_(1)
+        self.num_batches_tracked.zero_()
+
+    def reset_bn_parameters(self):
+        self.reset_running_stats()
+        init.uniform_(self.gamma)
+        init.zeros_(self.beta)
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
+
+    def reset_parameters(self):
+        super(_ReferenceConvBnNd, self).reset_parameters()
+        # A hack to avoid resetting on undefined parameters
+        if hasattr(self, 'gamma'):
+            self.reset_bn_parameters()
+
+    def update_bn_stats(self):
+        self.freeze_bn = False
+        return self
+
+    def freeze_bn_stats(self):
+        self.freeze_bn = True
+        return self
+
+    def _forward(self, input):
+        # exponential_average_factor is self.momentum set to
+        # (when it is available) only so that if gets updated
+        # in ONNX graph when this node is exported to ONNX.
+        if self.momentum is None:
+            exponential_average_factor = 0.0
+        else:
+            exponential_average_factor = self.momentum
+
+        if self.training and not self.freeze_bn and self.track_running_stats:
+            # TODO: if statement only here to tell the jit to skip emitting this when it is None
+            if self.num_batches_tracked is not None:
+                self.num_batches_tracked += 1
+                if self.momentum is None:  # use cumulative moving average
+                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
+                else:  # use exponential moving average
+                    exponential_average_factor = self.momentum
+
+        # we use running statistics from the previous batch, so this is an
+        # approximation of the approach mentioned in the whitepaper, but we only
+        # need to do one convolution in this case instead of two
+        running_std = torch.sqrt(self.running_var + self.eps)
+        scale_factor = self.gamma / running_std
+        scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
+        if self.bias is not None:
+            zero_bias = torch.zeros_like(self.bias)
+        else:
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
+
+        if self.training and not self.freeze_bn:
+            # recovering original conv to get original batch_mean and batch_var
+            if self.bias is not None:
+                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
+            else:
+                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
+            batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
+            batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
+            n = float(conv_orig.numel() / conv_orig.size()[1])
+            unbiased_batch_var = batch_var * (n / (n - 1))
+            batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
+
+            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
+                (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
+            self.running_mean = exponential_average_factor * batch_mean.detach() + \
+                (1 - exponential_average_factor) * self.running_mean
+            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
+                (1 - exponential_average_factor) * self.running_var
+        else:
+            if self.bias is None:
+                conv = conv + (self.beta - self.gamma * self.running_mean /
+                               running_std).reshape([1, -1, 1, 1])
+            else:
+                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
+        return conv
+
+    def extra_repr(self):
+        # TODO(jerryzh): extend
+        return super(_ReferenceConvBnNd, self).extra_repr()
+
+    def forward(self, input):
+        return self.activation_post_process(self._forward(input))
+
+    @classmethod
+    def from_float(cls, mod, qconfig=None):
+        r"""Create a qat module from a float module or qparams_dict
+            Args: `mod` a float module, either produced by torch.ao.quantization utilities
+            or directly from user
+        """
+        assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
+            cls._FLOAT_MODULE.__name__
+        if not qconfig:
+            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
+            assert mod.qconfig, 'Input float module must have a valid qconfig'
+            qconfig = mod.qconfig
+        conv, bn = mod[0], mod[1]
+        qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
+                         conv.stride, conv.padding, conv.dilation,
+                         conv.groups, conv.bias is not None,
+                         conv.padding_mode,
+                         bn.eps, bn.momentum,
+                         False,
+                         qconfig)
+        qat_convbn.weight = conv.weight
+        qat_convbn.bias = conv.bias
+        qat_convbn.gamma = bn.weight
+        qat_convbn.beta = bn.bias
+        qat_convbn.running_mean = bn.running_mean
+        qat_convbn.running_var = bn.running_var
+        qat_convbn.num_batches_tracked = bn.num_batches_tracked
+        return qat_convbn
+
+class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+
+    def __init__(self,
+                 # ConvNd args
+                 in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=None,
+                 padding_mode='zeros',
+                 # BatchNorm2d args
+                 # num_features: out_channels
+                 eps=1e-05, momentum=0.1,
+                 # affine: True
+                 # track_running_stats: True
+                 # Args for this module
+                 freeze_bn=False,
+                 qconfig=None):
+        kernel_size = _pair(kernel_size)
+        stride = _pair(stride)
+        padding = _pair(padding)
+        dilation = _pair(dilation)
+        _ReferenceConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
+                                    padding, dilation, False, _pair(0), groups, bias, padding_mode,
+                                    eps, momentum, freeze_bn, qconfig)
+
+class TestQuantizeEagerQAT(QuantizationTestCase):
     def setUp(self):
         super().setUp()
 
@@ -85,6 +275,28 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 checkQuantized(model)
 
                 model = quantize_qat(ManualLinearQATModel(qengine), test_only_train_fn,
+                                     [self.train_data])
+                checkQuantized(model)
+
+    def test_dropout(self):
+        for qengine in supported_qengines:
+            with override_quantized_engine(qengine):
+                model = ManualDropoutQATModel(qengine)
+                model = prepare_qat(model)
+                self.checkObservers(model)
+                test_only_train_fn(model, self.train_data)
+                model = convert(model)
+
+                def checkQuantized(model):
+                    self.assertEqual(type(model.fc1), nnq.Linear)
+                    self.assertEqual(type(model.dropout), nnq.Dropout)
+                    test_only_eval_fn(model, self.calib_data)
+                    self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
+
+                checkQuantized(model)
+
+                model = quantize_qat(ManualDropoutQATModel(qengine), test_only_train_fn,
                                      [self.train_data])
                 checkQuantized(model)
 
@@ -132,7 +344,10 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 # Dynamic QAT without memoryless observers should fail
-                with self.assertRaisesRegex(ValueError, "Dynamic QAT requires a memoryless observer"):
+                with self.assertRaisesRegex(ValueError,
+                                            "Dynamic QAT requires a memoryless observer." +
+                                            "This means a MovingAverage observer with averaging constant equal to 1"
+                                            ):
                     model = ManualLinearDynamicQATModel(default_qat_qconfig)
                     model = prepare_qat(model, mapping={torch.nn.Linear: nnqatd.Linear})
 
@@ -344,7 +559,50 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         eps = 1e-5
         self.assertTrue(torch.abs(mq.quant.scale * 2 - res.q_scale()) < eps)
 
-class TestQATActivationOps(QuantizationTestCase):
+    def test_qat_embedding_bag_errors(self):
+        default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+
+        # Test constructor parameters checks here.
+        with self.assertRaisesRegex(AssertionError,
+                                    "qconfig must be provided for QAT module"):
+            nnqat.EmbeddingBag(10, 5, qconfig=None)
+
+        with self.assertRaisesRegex(AssertionError,
+                                    "Embedding Bag weights requires a qscheme of " +
+                                    "torch.per_channel_affine_float_qparams"):
+            nnqat.EmbeddingBag(10, 5, qconfig=default_qat_qconfig)
+
+        # Test from_float checks here.
+        embed = nn.Embedding(10, 5)
+        with self.assertRaisesRegex(AssertionError,
+                                    "qat.EmbeddingBag.from_float only works for EmbeddingBag"):
+            nnqat.EmbeddingBag.from_float(embed)
+        embed_bag = nn.EmbeddingBag(10, 5)
+        with self.assertRaisesRegex(AssertionError,
+                                    "Input float module must have qconfig defined"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+        embed_bag.qconfig = None
+        with self.assertRaisesRegex(AssertionError,
+                                    "Input float module must have a valid qconfig"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+        embed_bag.qconfig = default_qat_qconfig
+        with self.assertRaisesRegex(AssertionError,
+                                    "Embedding Bag weights requires a qscheme of " +
+                                    "torch.per_channel_affine_float_qparams"):
+            nnqat.EmbeddingBag.from_float(embed_bag)
+
+    def test_embedding_qat_qconfig_equal(self):
+        # Embedding QAT uses a NoopObserver class for activation,
+        # and a FakeQuant for weight, make sure that qconfig comparison
+        # functions properly for a mix of partial function and class in
+        # qconfig.
+        model = ManualEmbeddingBagLinear().train()
+        model = prepare_qat(model)
+
+        self.assertTrue(qconfig_equals(model.emb.qconfig,
+                                       default_embedding_qat_qconfig))
+
+class TestQuantizeEagerQATNumerics(QuantizationTestCase):
     def _test_activation_convert_numerics_impl(self, Act, data):
         class M(torch.nn.Module):
             def __init__(self):
@@ -438,198 +696,6 @@ class TestQATActivationOps(QuantizationTestCase):
         m = convert(m)
         # make sure ReLU module is not changed
         self.assertTrue(type(m.relu), nn.ReLU)
-
-
-class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
-    """
-    Conv-BN fusion implemented with explicit folding. Useful
-    to verify numerical equivalency with non-folded version.
-    """
-    def __init__(self,
-                 # ConvNd args
-                 in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, transposed, output_padding,
-                 groups,
-                 bias,
-                 padding_mode,
-                 # BatchNormNd args
-                 # num_features: out_channels
-                 eps=1e-05, momentum=0.1,
-                 # affine: True
-                 # track_running_stats: True
-                 # Args for this module
-                 freeze_bn=False,
-                 qconfig=None):
-        nn.modules.conv._ConvNd.__init__(self, in_channels, out_channels, kernel_size,
-                                         stride, padding, dilation, transposed,
-                                         output_padding, groups, False, padding_mode)
-        assert qconfig, 'qconfig must be provided for QAT module'
-        self.qconfig = qconfig
-        self.eps = eps
-        self.momentum = momentum
-        self.freeze_bn = freeze_bn if self.training else True
-        self.num_features = out_channels
-        self.gamma = nn.Parameter(torch.empty(out_channels))
-        self.beta = nn.Parameter(torch.empty(out_channels))
-        self.affine = True
-        self.track_running_stats = True
-        self.register_buffer('running_mean', torch.zeros(out_channels))
-        self.register_buffer('running_var', torch.ones(out_channels))
-        self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-        self.activation_post_process = self.qconfig.activation()
-        self.weight_fake_quant = self.qconfig.weight()
-        if bias:
-            self.bias = nn.Parameter(torch.empty(out_channels))
-        else:
-            self.register_parameter('bias', None)
-        self.reset_bn_parameters()
-
-    def reset_running_stats(self):
-        self.running_mean.zero_()
-        self.running_var.fill_(1)
-        self.num_batches_tracked.zero_()
-
-    def reset_bn_parameters(self):
-        self.reset_running_stats()
-        init.uniform_(self.gamma)
-        init.zeros_(self.beta)
-        if self.bias is not None:
-            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
-            bound = 1 / math.sqrt(fan_in)
-            init.uniform_(self.bias, -bound, bound)
-
-    def reset_parameters(self):
-        super(_ReferenceConvBnNd, self).reset_parameters()
-        # A hack to avoid resetting on undefined parameters
-        if hasattr(self, 'gamma'):
-            self.reset_bn_parameters()
-
-    def update_bn_stats(self):
-        self.freeze_bn = False
-        return self
-
-    def freeze_bn_stats(self):
-        self.freeze_bn = True
-        return self
-
-    def _forward(self, input):
-        # exponential_average_factor is self.momentum set to
-        # (when it is available) only so that if gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
-
-        if self.training and not self.freeze_bn and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.num_batches_tracked is not None:
-                self.num_batches_tracked += 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.num_batches_tracked)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
-
-        # we use running statistics from the previous batch, so this is an
-        # approximation of the approach mentioned in the whitepaper, but we only
-        # need to do one convolution in this case instead of two
-        running_std = torch.sqrt(self.running_var + self.eps)
-        scale_factor = self.gamma / running_std
-        scaled_weight = self.weight * scale_factor.reshape([-1, 1, 1, 1])
-        if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
-        else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
-        conv = self._conv_forward(input, self.weight_fake_quant(scaled_weight), zero_bias)
-
-        if self.training and not self.freeze_bn:
-            # recovering original conv to get original batch_mean and batch_var
-            if self.bias is not None:
-                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1]) + self.bias.reshape([1, -1, 1, 1])
-            else:
-                conv_orig = conv / scale_factor.reshape([1, -1, 1, 1])
-            batch_mean = torch.mean(conv_orig, dim=[0, 2, 3])
-            batch_var = torch.var(conv_orig, dim=[0, 2, 3], unbiased=False)
-            n = float(conv_orig.numel() / conv_orig.size()[1])
-            unbiased_batch_var = batch_var * (n / (n - 1))
-            batch_rstd = torch.ones_like(batch_var, memory_format=torch.contiguous_format) / torch.sqrt(batch_var + self.eps)
-
-            conv = (self.gamma * batch_rstd).reshape([1, -1, 1, 1]) * conv_orig + \
-                (self.beta - self.gamma * batch_rstd * batch_mean).reshape([1, -1, 1, 1])
-            self.running_mean = exponential_average_factor * batch_mean.detach() + \
-                (1 - exponential_average_factor) * self.running_mean
-            self.running_var = exponential_average_factor * unbiased_batch_var.detach() + \
-                (1 - exponential_average_factor) * self.running_var
-        else:
-            if self.bias is None:
-                conv = conv + (self.beta - self.gamma * self.running_mean /
-                               running_std).reshape([1, -1, 1, 1])
-            else:
-                conv = conv + (self.gamma * (self.bias - self.running_mean) / running_std + self.beta).reshape([1, -1, 1, 1])
-        return conv
-
-    def extra_repr(self):
-        # TODO(jerryzh): extend
-        return super(_ReferenceConvBnNd, self).extra_repr()
-
-    def forward(self, input):
-        return self.activation_post_process(self._forward(input))
-
-    @classmethod
-    def from_float(cls, mod, qconfig=None):
-        r"""Create a qat module from a float module or qparams_dict
-            Args: `mod` a float module, either produced by torch.ao.quantization utilities
-            or directly from user
-        """
-        assert type(mod) == cls._FLOAT_MODULE, 'qat.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
-        if not qconfig:
-            assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
-            assert mod.qconfig, 'Input float module must have a valid qconfig'
-            qconfig = mod.qconfig
-        conv, bn = mod[0], mod[1]
-        qat_convbn = cls(conv.in_channels, conv.out_channels, conv.kernel_size,
-                         conv.stride, conv.padding, conv.dilation,
-                         conv.groups, conv.bias is not None,
-                         conv.padding_mode,
-                         bn.eps, bn.momentum,
-                         False,
-                         qconfig)
-        qat_convbn.weight = conv.weight
-        qat_convbn.bias = conv.bias
-        qat_convbn.gamma = bn.weight
-        qat_convbn.beta = bn.bias
-        qat_convbn.running_mean = bn.running_mean
-        qat_convbn.running_var = bn.running_var
-        qat_convbn.num_batches_tracked = bn.num_batches_tracked
-        return qat_convbn
-
-class _ReferenceConvBn2d(_ReferenceConvBnNd, nn.Conv2d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
-
-    def __init__(self,
-                 # ConvNd args
-                 in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1,
-                 bias=None,
-                 padding_mode='zeros',
-                 # BatchNorm2d args
-                 # num_features: out_channels
-                 eps=1e-05, momentum=0.1,
-                 # affine: True
-                 # track_running_stats: True
-                 # Args for this module
-                 freeze_bn=False,
-                 qconfig=None):
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        _ReferenceConvBnNd.__init__(self, in_channels, out_channels, kernel_size, stride,
-                                    padding, dilation, False, _pair(0), groups, bias, padding_mode,
-                                    eps, momentum, freeze_bn, qconfig)
-
-class TestConvBNQATModule(TestCase):
 
     @given(batch_size=st.integers(2, 4),
            input_channels_per_group=st.sampled_from([2, 3, 4]),
@@ -923,49 +989,42 @@ class TestConvBNQATModule(TestCase):
             qat_op_optim.step()
             qat_ref_op_optim.step()
 
-class TestEmbeddingBagQATModule(TestCase):
-    def test_qat_embedding_bag_errors(self):
-        default_qat_qconfig = get_default_qat_qconfig(torch.backends.quantized.engine)
+    @override_qengines
+    def test_linear_bn_numerics(self):
+        qengine = torch.backends.quantized.engine
+        m_ref = nn.Sequential(
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        m_ref_copy = copy.deepcopy(m_ref)
+        m_ref_copy = torch.ao.quantization.fuse_modules_qat(m_ref_copy, [['0', '1']])
+        qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+        m_ref_copy[0].qconfig = qconfig
+        m = nniqat.LinearBn1d.from_float(m_ref_copy[0])
 
-        # Test constructor parameters checks here.
-        with self.assertRaisesRegex(AssertionError,
-                                    "qconfig must be provided for QAT module"):
-            nnqat.EmbeddingBag(10, 5, qconfig=None)
+        # without fake_quants, fused QAT module should match fp32 module
+        m.apply(torch.quantization.disable_fake_quant)
+        data = torch.randn(4, 4)
+        r1 = m_ref(data)
+        r2 = m(data)
+        self.assertTrue(torch.allclose(r1, r2))
 
-        with self.assertRaisesRegex(AssertionError,
-                                    "Embedding Bag weights requires a qscheme of " +
-                                    "torch.per_channel_affine_float_qparams"):
-            nnqat.EmbeddingBag(10, 5, qconfig=default_qat_qconfig)
-
-        # Test from_float checks here.
-        embed = nn.Embedding(10, 5)
-        with self.assertRaisesRegex(AssertionError,
-                                    "qat.EmbeddingBag.from_float only works for EmbeddingBag"):
-            nnqat.EmbeddingBag.from_float(embed)
-        embed_bag = nn.EmbeddingBag(10, 5)
-        with self.assertRaisesRegex(AssertionError,
-                                    "Input float module must have qconfig defined"):
-            nnqat.EmbeddingBag.from_float(embed_bag)
-        embed_bag.qconfig = None
-        with self.assertRaisesRegex(AssertionError,
-                                    "Input float module must have a valid qconfig"):
-            nnqat.EmbeddingBag.from_float(embed_bag)
-        embed_bag.qconfig = default_qat_qconfig
-        with self.assertRaisesRegex(AssertionError,
-                                    "Embedding Bag weights requires a qscheme of " +
-                                    "torch.per_channel_affine_float_qparams"):
-            nnqat.EmbeddingBag.from_float(embed_bag)
-
-    def test_embedding_qat_qconfig_equal(self):
-        # Embedding QAT uses a NoopObserver class for activation,
-        # and a FakeQuant for weight, make sure that qconfig comparison
-        # functions properly for a mix of partial function and class in
-        # qconfig.
-        model = ManualEmbeddingBagLinear().train()
-        model = prepare_qat(model)
-
-        self.assertTrue(qconfig_equals(model.emb.qconfig,
-                                       default_embedding_qat_qconfig))
+    @override_qengines
+    def test_linear_bn_workflow(self):
+        qengine = torch.backends.quantized.engine
+        m = nn.Sequential(
+            QuantStub(),
+            nn.Linear(4, 4),
+            nn.BatchNorm1d(4),
+        )
+        data = torch.randn(4, 4)
+        m.qconfig = torch.ao.quantization.get_default_qat_qconfig(qengine)
+        m = torch.ao.quantization.fuse_modules_qat(m, [['1', '2']])
+        mp = prepare_qat(m)
+        mp(data)
+        mq = convert(mp)
+        self.assertTrue(type(mq[1]) == nnq.Linear)
+        self.assertTrue(type(mq[2]) == nn.Identity)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

@@ -32,22 +32,7 @@ typedef SSIZE_T ssize_t;
 
 namespace c10d {
 
-// Distributed c10d debug levels
-enum DistributedDebugLevel {
-  OFF = 0,
-  DETAIL = 1,
-  INFO = 2,
-};
-
-// String debug log levels
-extern const char* kDistDebugEnvVar;
-extern const char* kDistDebugDetailLogLevel;
-extern const char* kDistDebugInfoLogLevel;
-extern const char* kDistDebugOffLogLevel;
-
 TORCH_API std::string parse_env(const char* env_var_name);
-
-TORCH_API DistributedDebugLevel parseDistDebugLevel();
 
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
@@ -347,7 +332,7 @@ inline at::Tensor newLikeFlat(
   }
   auto& t = tensors[deviceIdx][0];
   auto device = t.device();
-  for (size_t i = 1; i < tensors[deviceIdx].size(); ++i) {
+  for (const auto i : c10::irange(1, tensors[deviceIdx].size())) {
     if (tensors[deviceIdx][i].device() != device) {
       TORCH_CHECK(false, "Expecting all tensors on the same device");
     }

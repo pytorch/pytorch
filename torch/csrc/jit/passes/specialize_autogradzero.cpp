@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
 
 namespace torch {

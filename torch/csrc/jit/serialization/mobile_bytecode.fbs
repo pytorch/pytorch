@@ -1,3 +1,5 @@
+file_identifier "PTMF";
+
 namespace torch.jit.mobile.serialization;
 
 struct Int {
@@ -28,10 +30,10 @@ table QuantizedSchema {
 
 table TensorMetadata {
   // torch._utils _rebuild_tensor_v2
-  storage_location_index: uint;
+  storage_location_index:uint;
   // enum ScalarType
-  scalar_type: byte;
-  storage_offset: int;
+  scalar_type:byte;
+  storage_offset:int;
   sizes:[int];
   strides:[int];
   requires_grad:bool;
@@ -41,7 +43,7 @@ table TensorMetadata {
 }
 
 table String {
-  data: string;
+  data:string;
 }
 
 table Device {
@@ -49,33 +51,33 @@ table Device {
 }
 
 table List {
-  items: [uint];
-  annotation_str: string;  // to recover key/val type
+  items:[uint];
+  annotation_str:string;  // to recover key/val type
 }
 
 table IntList {
-  items: [long];
+  items:[long];
 }
 
 table DoubleList {
-  items: [double];
+  items:[double];
 }
 
 table BoolList {
-  items: [bool];
+  items:[bool];
 }
 
 table Tuple {
-  items: [uint];
+  items:[uint];
 }
 
 table Dict {
-  keys: [uint];
-  values: [uint];
-  annotation_str: string;  // to recover key/val type
+  keys:[uint];
+  values:[uint];
+  annotation_str:string;  // to recover key/val type
 }
 
-enum TypeType : ubyte {
+enum TypeType :ubyte {
   UNSET,
   CLASS_WITH_FIELD,
   CUSTOM_CLASS,
@@ -85,16 +87,16 @@ enum TypeType : ubyte {
 
 table ObjectType {
   type_name:string;
-  type: TypeType;
+  type:TypeType;
   // Below fields are optional
   attr_names:[string];
 }
 
 table Object {
-  type_index: uint;
-  state: uint;
-  attrs: [uint];
-  setstate_func: uint;
+  type_index:uint;
+  state:uint;
+  attrs:[uint];
+  setstate_func:uint;
 }
 
 struct ComplexDouble {
@@ -125,7 +127,7 @@ table Arg {
   name:string;
   // Why do we use string to represent types
   // rather than index into Code.types?
-  type: string;
+  type:string;
   default_value:uint;  // position into ivalues
 }
 
@@ -143,7 +145,7 @@ table Function {
   instructions:[Instruction];
   operators:[Operator];
   constants:[uint];  // index to ivalue
-  type_annotations: [string];
+  type_annotations:[string];
   register_size:int;
   schema:Schema;
   debug_info:DebugInfo;
@@ -151,7 +153,7 @@ table Function {
 }
 
 table StorageData {
-  data: [ubyte] (force_align: 16);
+  data:[ubyte] (force_align:16);
 }
 
 // Is it needed to represent other types?
@@ -175,23 +177,25 @@ union IValueUnion {
 }
 
 table IValue {
-  val: IValueUnion;
+  val:IValueUnion;
 }
 
 table ExtraFile {
-  name: string;
-  content: string;
+  name:string;
+  content:string;
 }
 
 table Module {
   version:int;
   extra_files:[ExtraFile];
   methods:[uint];  // index to ivalues
-  state_obj: uint; // index to ivalues
-  ivalues: [IValue];
+  state_obj:uint; // index to ivalues
+  ivalues:[IValue];
   storage_data_size:int;  // number of storage data;
-  storage_data: [StorageData];
-  object_types: [ObjectType];
+  storage_data:[StorageData];
+  object_types:[ObjectType];
+  jit_sources:[ExtraFile];
+  jit_constants:[uint];  // index to ivalues
 }
 
 root_type Module;

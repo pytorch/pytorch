@@ -10,7 +10,9 @@
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/dynamic_type.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
@@ -18,6 +20,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 #include <functional>
 #include <iostream>
@@ -335,6 +338,12 @@ struct TORCH_API Node {
   topo_position_t topo_position_ = 0;
   // a managing wrapper for Python to allow invalidation
   std::shared_ptr<Wrap<Node>> wrap_;
+  // Stores the full schema name, if the operator is historic
+  // When the operator is deprecated or the name of the operator
+  // is changed, we need to rely on this name
+  // to retrieve old schemas to successfully apply upgraders
+  // for this operator.
+  c10::optional<std::string> historic_schema_name_ = c10::nullopt;
 
  protected:
   Node(Graph* graph_, NodeKind kind_); // defined after graph
@@ -357,6 +366,14 @@ struct TORCH_API Node {
       wrap_ = std::make_shared<Wrap<Node>>(this);
     }
     return wrap_;
+  }
+
+  const c10::optional<std::string> getHistoricSchemaName() {
+    return historic_schema_name_;
+  }
+
+  void setHistoricSchemaName(const std::string& name) {
+    historic_schema_name_ = name;
   }
 
   Node*& next() {
@@ -1174,6 +1191,8 @@ struct Graph {
   // by default this is set to append to the top level block
   Node* insert_before_;
 
+  c10::optional<size_t> op_version_;
+
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
       : next_unique_(0),
@@ -1224,6 +1243,15 @@ struct Graph {
   ScopePtr current_scope() {
     return current_scope_;
   }
+
+  void set_op_version(c10::optional<size_t> version) {
+    op_version_ = version;
+  }
+
+  c10::optional<size_t> get_op_version() {
+    return op_version_;
+  }
+
   void set_current_scope(ScopePtr scope) {
     current_scope_ = std::move(scope);
   }
@@ -1457,6 +1485,9 @@ inline Value::Value(Node* node_, size_t offset_)
 
 inline Value* Value::setType(TypePtr type) {
   AT_ASSERT(type);
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    type = dyn->fallback();
+  }
   type_ = std::move(type);
   for (Use& use : uses_) {
     use.user->op_ = nullptr;
@@ -1489,8 +1520,17 @@ struct ProfileOp : public Node {
     callback_ = std::move(callback);
   }
 
+  bool hasSeenTensor() const {
+    return has_seen_tensor_;
+  }
+
+  void setHasSeenTensor(bool has_seen_tensor) {
+    has_seen_tensor_ = has_seen_tensor;
+  }
+
  private:
   std::function<void(std::vector<IValue>&)> callback_;
+  bool has_seen_tensor_ = false;
 };
 
 struct TORCH_API ProfileIValueOp : public Node {
@@ -1566,6 +1606,11 @@ TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
     GraphFunction* callee,
     bool use_graph = true);
+
+TORCH_API std::vector<Value*> inlineCallTo(
+    Node* to_replace,
+    GraphFunction* callee,
+    Graph* callee_graph);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
  * tuple unpack node and return the resulting values.

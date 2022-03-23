@@ -186,6 +186,7 @@ def build_constructor_arg_db():
         torch.nn.quantizable.MultiheadAttention: ((10, 2), {}),
         torch.nn.quantized.BatchNorm2d: ((2,), {}),
         torch.nn.quantized.BatchNorm3d: ((2,), {}),
+        torch.nn.quantized.Dropout: ((), {}),
         torch.nn.quantized.Conv1d: ((3, 3, 3), {}),
         torch.nn.quantized.Conv2d: ((3, 3, 3), {}),
         torch.nn.quantized.Conv3d: ((3, 3, 3), {}),
@@ -205,7 +206,7 @@ def build_constructor_arg_db():
         torch.nn.quantized.EmbeddingBag: ((10, 3), {
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.GroupNorm: ((2, 3, torch.nn.Parameter(torch.tensor(2.)),
+        torch.nn.quantized.GroupNorm: ((2, 4, torch.nn.Parameter(torch.tensor(2.)),
                                         torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
         torch.nn.quantized.Hardswish: ((0.1, 0,), {}),
         torch.nn.quantized.InstanceNorm1d: ((2, torch.nn.Parameter(torch.tensor(2.)),

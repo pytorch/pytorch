@@ -6,21 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  push:
-    branches:
-      - master
-      - release/*
-      - fbsync
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(is_default, is_scheduled, ciflow_config.labels) }}
 
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
@@ -35,18 +21,20 @@ env:
 !{{ common.set_xcode_version(xcode_version) }}
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
-    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       JOB_BASE_NAME: !{{ build_environment }}
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
-      !{{ common.checkout_pytorch("recursive") }}
+      - name: print labels
+        run: echo "${PR_LABELS}"
+      !{{ common.checkout() }}
       !{{ common.setup_miniconda("3.8") }}
       - name: Install macOS homebrew dependencies
         run: |
@@ -78,45 +66,22 @@ jobs:
 {% endblock +%}
 {%- if not exclude_test %}
 {% block test +%}
-  generate-test-matrix:
-    runs-on: ubuntu-18.04
-    needs: [!{{ ciflow_config.root_job_name }}]
+  {%- for test_job in test_jobs %}
+  !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: !{{ test_job.name }}
+    needs: build
+    runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      PR_BODY: ${{ github.event.pull_request.body }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
-      !{{ common.checkout_pytorch("false") }}
+      !{{ common.checkout(submodules="false") }}
       - uses: actions/download-artifact@v2
         name: Download PyTorch Build Artifacts from GHA
         with:
@@ -136,9 +101,10 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='macos', use_s3=False, artifact_name="test-jsons", when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
-      !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
-      !{{ common.upload_test_statistics(build_environment, when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
+      !{{ common.upload_downloaded_files(name='macos', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-jsons", use_s3=False) }}
+      !{{ common.upload_test_reports("macos", config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-reports", use_s3=False) }}
+      !{{ common.upload_test_statistics(build_environment, needs_credentials=True) }}
+{%- endfor %}
 {% endblock +%}
 {%- endif %}
 

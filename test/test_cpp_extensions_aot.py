@@ -159,7 +159,7 @@ class TestORTTensor(common.TestCase):
         bias = torch.empty(6, device='ort')
 
         # Make sure forward is overriden
-        out = torch.nn.functional.conv1d(input, weight, bias, 2, 0, 1, 1)
+        out = torch.nn.functional.conv2d(input, weight, bias, 2, 0, 1, 1)
         self.assertEqual(ort_extension.get_test_int(), 2)
         self.assertEqual(out.shape[0], input.shape[0])
         self.assertEqual(out.shape[1], weight.shape[0])

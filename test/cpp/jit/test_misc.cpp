@@ -4,17 +4,18 @@
 #include <ATen/Parallel.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
-
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -41,6 +42,7 @@
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
@@ -50,6 +52,7 @@
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/jit.h>
@@ -75,8 +78,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-using namespace torch::autograd::profiler;
 
 namespace torch {
 namespace jit {
@@ -1993,6 +1994,66 @@ TEST(ProfilerTest, Basic) {
   checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
+TEST(ProfilerTest, OptionalProfiling) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%inp : Tensor,
+      %weight : Tensor,
+      %bias : Tensor?):
+  %1 : Tensor = aten::linear(%inp, %weight, %bias)
+  return (%1))IR",
+      &*graph,
+      vmap);
+
+  auto pr = ProfilingRecord::instrumentGraph(graph);
+  pr->profiling_count_ = 2;
+
+  auto input = torch::randn({1, 2});
+  auto weight = torch::randn({2, 2});
+  auto bias = torch::randn({1, 2});
+
+  auto stack = createStack({input, weight, bias});
+  Code cd(pr->profiled_graph_, "");
+  InterpreterState is{cd};
+  is.run(stack);
+
+  testing::FileCheck()
+      .check_count("Tensor? = prim::profile[profiled_type", 1, true)
+      ->run(*pr->profiled_graph_);
+
+  // make sure we recorded the shape
+  auto begin = pr->profiled_graph_->block()->nodes().begin();
+  auto end = pr->profiled_graph_->block()->nodes().end();
+  auto linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  std::vector<int64_t> bias_expected_shape = {1, 2};
+  auto profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(0, profiled_bias->i(attr::seen_none));
+
+  auto none_bias = c10::IValue();
+
+  stack.clear();
+  stack.emplace_back(input);
+  stack.emplace_back(weight);
+  stack.emplace_back(none_bias);
+  is = InterpreterState{cd};
+  is.run(stack);
+
+  // make sure we recorded that "None" was seen.
+  begin = pr->profiled_graph_->block()->nodes().begin();
+  end = pr->profiled_graph_->block()->nodes().end();
+  linear = std::find_if(
+      begin, end, [](Node* n) { return n->kind() == aten::linear; });
+  ASSERT_NE(linear, end);
+  profiled_bias = linear->namedInput("bias")->node();
+  checkShape(profiled_bias->ty(attr::profiled_type), bias_expected_shape);
+  ASSERT_EQ(1, profiled_bias->i(attr::seen_none));
+}
+
 TEST(CallStackTest, Basic) {
   const auto text = R"(
 def ham(x):
@@ -2664,7 +2725,8 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test unknown operator
   std::unordered_map<std::string, c10::IValue> extra_args;
-  flops = computeFlops(std::string("aten::unknown"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::unknown"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d
@@ -2680,7 +2742,8 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["padding"] = at::IValue(at::IntArrayRef(padding));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
   extra_args["dilation"] = at::IValue(at::IntArrayRef(dilation));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 13440);
 
   // Test aten::conv2d fail
@@ -2688,7 +2751,8 @@ TEST(ComputeFlopsTest, Basic) {
   weight_size = {4, 5, 6};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 2
@@ -2696,14 +2760,16 @@ TEST(ComputeFlopsTest, Basic) {
   stride = {0, 0};
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 3
   extra_args.clear();
   input_size = {4, 5, 6, 7};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::mm
@@ -2712,11 +2778,13 @@ TEST(ComputeFlopsTest, Basic) {
   std::vector<int64_t> mat2_sizes = {6, 5, 4, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test aten::addmm
-  flops = computeFlops(std::string("aten::addmm"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test aten::bmm
@@ -2725,30 +2793,35 @@ TEST(ComputeFlopsTest, Basic) {
   mat2_sizes = {7, 6, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
-  flops = computeFlops(std::string("aten::bmm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::bmm"), extra_args);
   ASSERT_EQ(flops, 1260);
 
   // Test aten::baddbmm
-  flops = computeFlops(std::string("aten::baddbmm"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::baddbmm"), extra_args);
   ASSERT_EQ(flops, 1260);
 
   // Test mm out of range
   extra_args.clear();
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::add.Tensor
   extra_args.clear();
   std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::add"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::add"), extra_args);
   ASSERT_EQ(flops, 360);
 
   // Test aten::mul.Tensor
   extra_args.clear();
   mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::mul"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
 }
 
@@ -2796,6 +2869,33 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check_not("aten::relu_")->run(*graph);
 }
 
+TEST(TestRegisterShapeOp, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph():
+  %2 : int = prim::Constant[value=5]()
+  %3: int[] = prim::ListConstruct(%2, %2)
+  return (%3))IR",
+      &*graph,
+      vmap);
+
+  auto g2 = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %2 : Tensor = prim::MakeTestTensor()
+  return (%2))IR",
+      &*g2,
+      vmap);
+
+  const FunctionSchema& schema = g2->nodes().begin()->schema();
+  torch::jit::RegisterShapeComputeGraphForSchema(schema, graph);
+  PropagateShapesOnGraph(g2);
+  testing::FileCheck().check("5, 5")->run(*g2);
+}
+
 TEST(TestFunctionalToInplaceActivation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -2811,6 +2911,80 @@ graph(%x.1 : Tensor):
   FunctionalToInplaceActivation(graph);
   testing::FileCheck().check("aten::relu_")->run(*graph);
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
+}
+
+// TODO: move to test_kernel when global settings are explicit
+// fusion parameters
+class Composed : public ::testing::Test {
+ public:
+  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  void SetUp() {
+    torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  }
+};
+
+TEST_F(Composed, ComposedOp) {
+  struct WithCPUFuser {
+    WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
+      overrideCanFuseOnCPU(val);
+    }
+
+    ~WithCPUFuser() {
+      overrideCanFuseOnCPU(cpuFuserEnabled);
+    }
+
+    bool cpuFuserEnabled;
+  };
+
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %2)
+        %4 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %3)
+        return (%3, %4))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  // wrong input sizes so we hit the fallback path
+  auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat))
+               .transpose(0, 1);
+  auto ref1 = a * (a * b);
+  auto ref2 = a * ref1;
+  WithCPUFuser g(true);
+  bool fusable_on_device = torch::jit::tensorexpr::getTEMustUseLLVMOnCPU();
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = false;
+  FuseTensorExprs(
+      graph,
+      /*min_group_size*/ 2,
+      /*add_composed_op*/ true,
+      /*fuse_to_dynamic_shapes*/ true);
+  Code code(graph, "");
+  InterpreterState interpreter{code};
+  std::vector<IValue> stack = {a, b};
+  interpreter.run(stack);
+  at::Tensor out2 = pop(stack).toTensor();
+  at::Tensor out1 = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(ref1, out1));
+  ASSERT_TRUE(at::allclose(ref2, out2));
+
+  auto inp_1 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto inp_2 = at::ones({4, 4}, TensorOptions(kCPU).dtype(at::kFloat));
+  stack = {inp_1, inp_2, a, b};
+  InterpreterState interpreter2{code};
+  interpreter2.run(stack);
+  out2 = pop(stack).toTensor();
+  out1 = pop(stack).toTensor();
+  ASSERT_TRUE(at::allclose(ref1, out1));
+  ASSERT_TRUE(at::allclose(ref2, out2));
+  // inp_1 is on the bottom of the stack, and corresponds
+  // to the second output. inp_2 is on the top corresponds to first output
+  ASSERT_TRUE(at::allclose(inp_1, ref2));
+  ASSERT_TRUE(at::allclose(inp_2, ref1));
+  torch::jit::tensorexpr::getTEMustUseLLVMOnCPU() = fusable_on_device;
+#endif
 }
 
 } // namespace jit

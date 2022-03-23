@@ -2879,13 +2879,13 @@ Returns the quantization scheme of a given QTensor.
 """)
 
 add_docstr_all('quantile', r"""
-quantile(q, dim=None, keepdim=False) -> Tensor
+quantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.quantile`
 """)
 
 add_docstr_all('nanquantile', r"""
-nanquantile(q, dim=None, keepdim=False) -> Tensor
+nanquantile(q, dim=None, keepdim=False, *, interpolation='linear') -> Tensor
 
 See :func:`torch.nanquantile`
 """)
@@ -2976,7 +2976,7 @@ In-place version of :meth:`~Tensor.deg2rad`
 
 add_docstr_all('ravel',
                r"""
-ravel(input) -> Tensor
+ravel() -> Tensor
 
 see :func:`torch.ravel`
 """)
@@ -3204,14 +3204,14 @@ See :func:`torch.rot90`
 
 add_docstr_all('round',
                r"""
-round() -> Tensor
+round(decimals=0) -> Tensor
 
 See :func:`torch.round`
 """)
 
 add_docstr_all('round_',
                r"""
-round_() -> Tensor
+round_(decimals=0) -> Tensor
 
 In-place version of :meth:`~Tensor.round`
 """)
@@ -3373,6 +3373,12 @@ Example::
             [0., 0., 2., 1., 1.]])
 
 """.format(**reproducibility_notes))
+
+add_docstr_all('scatter_reduce', r"""
+scatter_reduce(input, dim, index, reduce, *, output_size=None) -> Tensor
+
+See :func:`torch.scatter_reduce`
+""")
 
 add_docstr_all('select',
                r"""
@@ -4177,28 +4183,28 @@ See :func:`torch.triangular_solve`
 
 add_docstr_all('tril',
                r"""
-tril(k=0) -> Tensor
+tril(diagonal=0) -> Tensor
 
 See :func:`torch.tril`
 """)
 
 add_docstr_all('tril_',
                r"""
-tril_(k=0) -> Tensor
+tril_(diagonal=0) -> Tensor
 
 In-place version of :meth:`~Tensor.tril`
 """)
 
 add_docstr_all('triu',
                r"""
-triu(k=0) -> Tensor
+triu(diagonal=0) -> Tensor
 
 See :func:`torch.triu`
 """)
 
 add_docstr_all('triu_',
                r"""
-triu_(k=0) -> Tensor
+triu_(diagonal=0) -> Tensor
 
 In-place version of :meth:`~Tensor.triu`
 """)
@@ -4713,7 +4719,7 @@ See :func:`torch.pinverse`
 
 add_docstr_all('index_add',
                r"""
-index_add(dim, index, source) -> Tensor
+index_add(dim, index, source, *, alpha=1) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.index_add_`.
 """)
@@ -4945,11 +4951,10 @@ Alias for :func:`adjoint`
 
 add_docstr_all('real',
                r"""
-Returns a new tensor containing real values of the :attr:`self` tensor.
+Returns a new tensor containing real values of the :attr:`self` tensor for a complex-valued input tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
 
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
+Returns :attr:`self` if :attr:`self` is a real-valued tensor tensor.
 
 Example::
     >>> x=torch.randn(4, dtype=torch.cfloat)

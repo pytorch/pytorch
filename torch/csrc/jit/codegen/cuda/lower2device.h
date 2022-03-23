@@ -1,16 +1,20 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+#include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <torch/csrc/jit/codegen/cuda/non_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -28,28 +32,26 @@ namespace cuda {
 // container for this information that we can reuse. Would be nice to generate
 // such a structure and propagate it through lowering.
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API GpuLower {
+class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   class KernelIrMapper;
 
  public:
-  GpuLower() = default;
+  GpuLower() = delete;
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit GpuLower(Fusion* fusion) : fusion_(fusion) {
-    lower();
+  explicit GpuLower(Fusion* fusion) {
+    lower(fusion);
   }
 
   kir::Kernel* kernel() const;
 
-  //! Converts a Fusion IR value into the Kernel IR equivalent
-  kir::Val* lowerValue(const Val* val);
-
-  //! Converts a Fusion IR expression into the Kernel IR equivalent
-  kir::Expr* lowerExpr(const Expr* expr);
-
   //! Returns the currently active lowering object
   //! (or nullptr if no lowering is in progress)
   static GpuLower* current();
+
+  ConcretizedBroadcastDomains& concretizedBroadcastDomains() {
+    return concretized_broadcast_domains_;
+  }
 
   const ThreadPredicateMap& threadPredMap() const {
     return thread_pred_map_;
@@ -67,7 +69,7 @@ class TORCH_CUDA_CU_API GpuLower {
     return ca_parallel_map_;
   }
 
-  const auto& trivialReductionInfo() const {
+  const TrivialReductionInfo& trivialReductionInfo() const {
     return trivial_reduction_info_;
   }
 
@@ -111,16 +113,20 @@ class TORCH_CUDA_CU_API GpuLower {
     return partial_split_map_;
   }
 
- private:
-  void lower();
+  auto& nonDivisibleSplitInfo() {
+    return non_divisible_split_info_;
+  }
 
-  // TensorViews are all based on symbolic sizes. When we first initialize them
-  // we don't know if they're inputs or outputs which would mean that they have
-  // runtime shapes. Intermediate tensors (those not going to global memory) do
-  // not have this information. Since we need to have the correct information in
-  // the kernel being fetched for shapes, we want to replace input and output
-  // tensors to reference the runtime structure containing sizes.
-  void replaceSymbolicSizes();
+  const auto& nonDivisibleSplitInfo() const {
+    return non_divisible_split_info_;
+  }
+
+  DoubleBufferInfo& doubleBufferInfo() {
+    return double_buffer_info_;
+  }
+
+ private:
+  void lower(Fusion* fusion);
 
   // Goes through the parallelized iterdomains of the used TVs and find
   //  the parallel dimensions that need to be padded to a multiples of
@@ -131,11 +137,8 @@ class TORCH_CUDA_CU_API GpuLower {
   // Lowered Kernel IR
   std::unique_ptr<kir::Kernel> kernel_;
 
-  // Fusion IR node to Kernel IR node mapping
-  std::unordered_map<const Val*, kir::Val*> kir_val_map_;
-  std::unordered_map<const Expr*, kir::Expr*> kir_expr_map_;
-
   // Some stateful information during lowering
+  ConcretizedBroadcastDomains concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
   ComputeAtMap ca_loop_map_;
@@ -147,6 +150,8 @@ class TORCH_CUDA_CU_API GpuLower {
   WarpPaddedParallelInfo warp_pad_info_;
   ParallelDimensionMap parallel_dimension_map_;
   PartialSplitMap partial_split_map_;
+  NonDivisibleSplitInfo non_divisible_split_info_;
+  DoubleBufferInfo double_buffer_info_;
 
   Fusion* fusion_ = nullptr;
 };

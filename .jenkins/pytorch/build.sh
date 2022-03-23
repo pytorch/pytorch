@@ -148,23 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
+  # hipify sources
   python tools/amd_build/build_amd.py
-  python setup.py install
-
-  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-  sudo rm -f /opt/cache/bin/cc
-  sudo rm -f /opt/cache/bin/c++
-  sudo rm -f /opt/cache/bin/gcc
-  sudo rm -f /opt/cache/bin/g++
-  pushd /opt/rocm/llvm/bin
-  if [[ -d original ]]; then
-    sudo mv original/clang .
-    sudo mv original/clang++ .
-  fi
-  sudo rm -rf original
-  popd
-
-  exit 0
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -192,7 +177,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
+  export USE_PER_OPERATOR_HEADERS=0
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.7-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 
@@ -207,11 +196,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # first build the whole torch for CPU-only
+  # first build torch for CPU-only
   tools/bazel build --config=no-tty :torch
-  # then build selected set of targets with GPU-support.
-  # TODO: eventually this should converge to building the whole :torch with GPU-support
-  tools/bazel build --config=no-tty --config=gpu :c10
+  # then build everything with CUDA
+  tools/bazel build --config=no-tty --config=gpu :all
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -221,16 +209,18 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
-    # ppc64le build fails when WERROR=1
+    # ppc64le, rocm builds fail when WERROR=1
+    # XLA test build fails when WERROR=1
     # set only when building other architectures
-    # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    # or building non-XLA tests.
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* &&
+          "$BUILD_ENVIRONMENT" != *rocm*  &&
+          "$BUILD_ENVIRONMENT" != *xla* ]]; then
       WERROR=1 python setup.py bdist_wheel
-      python -mpip install dist/*.whl
     else
       python setup.py bdist_wheel
-      python -mpip install dist/*.whl
     fi
+    python -mpip install dist/*.whl
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -247,6 +237,25 @@ else
     mkdir -p dist
     if [ -f build/.ninja_log ]; then
       cp build/.ninja_log dist
+    fi
+
+    if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+      # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+      sudo rm -f /opt/cache/bin/cc
+      sudo rm -f /opt/cache/bin/c++
+      sudo rm -f /opt/cache/bin/gcc
+      sudo rm -f /opt/cache/bin/g++
+      pushd /opt/rocm/llvm/bin
+      if [[ -d original ]]; then
+        sudo mv original/clang .
+        sudo mv original/clang++ .
+      fi
+      sudo rm -rf original
+      popd
+
+      # exit before building custom test artifacts until we resolve cmake error:
+      # static library kineto_LIBRARY-NOTFOUND not found.
+      exit 0
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}

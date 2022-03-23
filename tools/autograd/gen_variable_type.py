@@ -77,25 +77,27 @@ DONT_REQUIRE_DERIVATIVE = {
     'isnan', 'isposinf', 'isneginf', 'isinf', 'signbit', 'isin',
     # Functions return none are not differentiable
     'record_stream',
+    # These functions are not differentiable
+    'logical_and', 'logical_xor', 'logical_not', 'logical_or',
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
-    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
+    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone', 'diag_embed',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
     'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
     '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
-    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
-    'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex', 'index_put',
+    'neg', 'complex', 'select', 'where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_linalg_svd', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
@@ -103,11 +105,11 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward', 'reflection_pad3d_backward', 'symeig', '_sparse_sparse_matmul',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_', '_to_copy',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
-    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
+    'diag', 'masked_scatter', 'masked_select', 'index_add', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical', 'linalg_lu_factor_ex',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
-    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
     'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
 }
 
@@ -320,7 +322,8 @@ isFwGradDefined(${req_inp})\
 FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate("""\
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp}_tensor = toNonOptTensor(${inp});
-auto ${inp}_t = ${inp}_t_raw.defined() ? ${inp}_t_raw : at::_efficientzerotensor(${inp}_tensor.sizes(), ${inp}_tensor.options());
+auto ${inp}_t = (${inp}_t_raw.defined() || !${inp}_tensor.defined())
+  ? ${inp}_t_raw : at::${zeros_fn}(${inp}_tensor.sizes(), ${inp}_tensor.options());
 """)
 
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate("""\
@@ -906,12 +909,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
             unpacked_arguments = ""
             for inp in differentiable_inputs:
+                zeros_fn = "zeros" if inplace and inp.name == "self" else "_efficientzerotensor"
                 if inp.name in derivative.required_inputs_fw_grad:
-                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
+                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name, zeros_fn=zeros_fn)
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
             if derivative.required_original_self_value:
-                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp="original_self")
+                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp="original_self", zeros_fn=zeros_fn)
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp="original_self")
             elif inplace and derivative.is_reusing_outplace_formula:
                 # The gradient wasn't already cloned, do it if grad mode is enabled

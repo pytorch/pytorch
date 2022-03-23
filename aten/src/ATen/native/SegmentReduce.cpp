@@ -59,7 +59,7 @@ void _segment_reduce_cpu_kernel1(
             }
 
             // ===== step2: apply reduction
-            for (int64_t j = 0; j < lengths_data[i]; ++j) {
+            for (const auto j : c10::irange(lengths_data[i])) {
               int64_t starting_index =
                   ((lengths_cum_sum + j) * stride_count) + l;
               const auto data = values_data[starting_index];
@@ -153,7 +153,7 @@ void _segment_reduce_cpu_backward_kernel1(
             if (reduction == SegmentReductionType::MAX ||
                 reduction == SegmentReductionType::MIN) {
               int64_t counter = 0;
-              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+              for (const auto j : c10::irange(lengths_data[i])) {
                 int64_t starting_index =
                     ((lengths_cum_sum + j) * stride_count) + l;
                 if (at::_isnan(values_data[starting_index]) ||
@@ -167,7 +167,7 @@ void _segment_reduce_cpu_backward_kernel1(
               if (counter < 2) {
                 continue;
               }
-              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+              for (const auto j : c10::irange(lengths_data[i])) {
                 int64_t starting_index =
                     ((lengths_cum_sum + j) * stride_count) + l;
                 if (grad_input_data[starting_index] > 0) {
@@ -177,14 +177,14 @@ void _segment_reduce_cpu_backward_kernel1(
               }
             } else if (reduction == SegmentReductionType::MEAN) {
               auto grad_val = grad_data[output_index] / lengths_data[i];
-              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+              for (const auto j : c10::irange(lengths_data[i])) {
                 int64_t starting_index =
                     ((lengths_cum_sum + j) * stride_count) + l;
                 grad_input_data[starting_index] = grad_val;
               }
             } else if (reduction == SegmentReductionType::SUM) {
               const auto& grad_val = grad_data[output_index];
-              for (int64_t j = 0; j < lengths_data[i]; ++j) {
+              for (const auto j : c10::irange(lengths_data[i])) {
                 int64_t starting_index =
                     ((lengths_cum_sum + j) * stride_count) + l;
                 grad_input_data[starting_index] = grad_val;
@@ -275,6 +275,7 @@ REGISTER_ARCH_DISPATCH(
 REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 REGISTER_AVX512_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 
 // Currently some computation is being duplicated across forward and backward.
 // TODO: Cache indices in forward pass to re-use in backward
@@ -319,6 +320,9 @@ REGISTER_AVX2_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);
 REGISTER_VSX_DISPATCH(
+    _segment_reduce_backward_stub,
+    &_segment_reduce_cpu_backward_kernel);
+REGISTER_ZVECTOR_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);
 

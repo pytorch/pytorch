@@ -5,6 +5,9 @@
 #
 # NOTE (Apr, 5, 2021): Linux runners are currently all an amazonlinux2
 #
+# NOTE (Jan 5, 2021): Linux runners are all non-ephemeral to reduce the amount of CreateInstaces calls
+#                     to avoid RequestLimitExceeded issues
+#
 # TODO: Add some documentation on how the auto-scaling works
 #
 # NOTE: Default values,
@@ -29,6 +32,13 @@ runner_types:
     os: linux
     max_available: 500
     disk_size: 150
+    is_ephemeral: false
+  linux.4xlarge: # for binary-builds
+    instance_type: c5.4xlarge
+    os: linux
+    max_available: 250
+    disk_size: 150
+    is_ephemeral: false
   linux.8xlarge.nvidia.gpu:
     instance_type: g3.8xlarge
     os: linux

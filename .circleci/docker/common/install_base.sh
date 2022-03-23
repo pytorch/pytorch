@@ -122,7 +122,7 @@ wget https://ossci-linux.s3.amazonaws.com/valgrind-${VALGRIND_VERSION}.tar.bz2
 tar -xjf valgrind-${VALGRIND_VERSION}.tar.bz2
 cd valgrind-${VALGRIND_VERSION}
 ./configure --prefix=/usr/local
-make -j 4
+make -j6
 sudo make install
 cd ../../
 rm -rf valgrind_build

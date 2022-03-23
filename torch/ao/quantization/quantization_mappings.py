@@ -26,10 +26,21 @@ from torch.ao.quantization.utils import get_combined_dict
 
 # Default map for swapping float module to reference quantized modules
 DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    QuantStub: nnq.Quantize,
+    DeQuantStub: nnq.DeQuantize,
     nn.Linear: nnqr.Linear,
     nn.Conv1d: nnqr.Conv1d,
     nn.Conv2d: nnqr.Conv2d,
     nn.Conv3d: nnqr.Conv3d,
+    nn.ConvTranspose1d: nnqr.ConvTranspose1d,
+    nn.ConvTranspose2d: nnqr.ConvTranspose2d,
+    nn.ConvTranspose3d: nnqr.ConvTranspose3d,
+    nn.Embedding: nnqr.Embedding,
+    nn.EmbeddingBag: nnqr.EmbeddingBag,
+    nn.GRUCell: nnqr.GRUCell,
+    nn.LSTMCell: nnqr.LSTMCell,
+    nn.RNNCell: nnqr.RNNCell,
+    nn.LSTM: nnqr.LSTM,
 }
 
 # Default map for swapping float module to quantized ones
@@ -38,6 +49,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     DeQuantStub: nnq.DeQuantize,
     nn.BatchNorm2d: nnq.BatchNorm2d,
     nn.BatchNorm3d: nnq.BatchNorm3d,
+    nn.Dropout: nnq.Dropout,
     nn.Conv1d: nnq.Conv1d,
     nn.Conv2d: nnq.Conv2d,
     nn.Conv3d: nnq.Conv3d,
@@ -57,6 +69,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnq.Linear,
     nn.Linear: nnq.Linear,
     nn.ReLU6: nnq.ReLU6,
+    nn.Dropout: nnq.Dropout,
     # Wrapper Modules:
     nnq.FloatFunctional: nnq.QFunctional,
     # Intrinsic modules:
@@ -75,6 +88,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nniqat.ConvReLU2d: nniq.ConvReLU2d,
     nniqat.ConvReLU3d: nniq.ConvReLU3d,
     nniqat.LinearReLU: nniq.LinearReLU,
+    nniqat.LinearBn1d: nnq.Linear,
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
@@ -97,6 +111,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.ConvReLU2d: nniqat.ConvReLU2d,
     nni.ConvReLU3d: nniqat.ConvReLU3d,
     nni.LinearReLU: nniqat.LinearReLU,
+    nni.LinearBn1d: nniqat.LinearBn1d,
 }
 
 # Default map for swapping dynamic modules
@@ -112,12 +127,14 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.LinearReLU: nniqd.LinearReLU,
     nn.EmbeddingBag: nnq.EmbeddingBag,
     nn.Embedding: nnq.Embedding,
-    nn.Conv1d: nnqd.Conv1d,
-    nn.Conv2d: nnqd.Conv2d,
-    nn.Conv3d: nnqd.Conv3d,
-    nn.ConvTranspose1d: nnqd.ConvTranspose1d,
-    nn.ConvTranspose2d: nnqd.ConvTranspose2d,
-    nn.ConvTranspose3d: nnqd.ConvTranspose3d,
+    # Don't want to enable these by default because the numerical
+    # accuracy is poor compared to other dynamic ops
+    # nn.Conv1d: nnqd.Conv1d,
+    # nn.Conv2d: nnqd.Conv2d,
+    # nn.Conv3d: nnqd.Conv3d,
+    # nn.ConvTranspose1d: nnqd.ConvTranspose1d,
+    # nn.ConvTranspose2d: nnqd.ConvTranspose2d,
+    # nn.ConvTranspose3d: nnqd.ConvTranspose3d,
 }
 
 # Allowlist for propagating the qconfig
@@ -128,11 +145,12 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
 # Default mapping from floating point function or torch ops to quantized ops
 # TODO: merge with default static mapping
 DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS : Dict[Union[Callable, str], Callable] = {
-    F.elu: torch._ops.ops.quantized.elu,
-    F.hardswish: torch._ops.ops.quantized.hardswish,
-    F.instance_norm: torch._ops.ops.quantized.instance_norm,
-    F.layer_norm: torch._ops.ops.quantized.layer_norm,
-    F.leaky_relu: torch._ops.ops.quantized.leaky_relu,
+    F.elu: torch.ops.quantized.elu,
+    F.hardswish: torch.ops.quantized.hardswish,
+    F.instance_norm: torch.ops.quantized.instance_norm,
+    F.layer_norm: torch.ops.quantized.layer_norm,
+    F.leaky_relu: torch.ops.quantized.leaky_relu,
+    F.dropout: torch.ops.quantized.dropout,
 }
 
 # mapping from module to output activation post process class
@@ -164,6 +182,11 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
     return copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+
+def get_default_static_quant_reference_module_mappings() -> Dict[Callable, Any]:
+    ''' Get reference module mapping for post training static quantization
+    '''
+    return copy.deepcopy(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS)
 
 def get_embedding_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping, including mapping for embedding QAT

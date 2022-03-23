@@ -3,17 +3,21 @@
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
-#include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/code.h>
-#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#include <torch/csrc/jit/mobile/compatibility/backport.h>
+#include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
 #include <torch/csrc/jit/mobile/import.h>
-#include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
+#include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
@@ -29,6 +33,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_list.h>
@@ -37,12 +42,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
-#include <torch/csrc/jit/testing/module_differ.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -57,7 +59,6 @@
 #include <pybind11/stl_bind.h>
 #include <chrono>
 #include <cstddef>
-#include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1020,6 +1021,7 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
   py::class_<UpgraderEntry>(m, "_UpgraderEntry")
+      .def(py::init<int, std::string, std::string>())
       .def_property_readonly(
           "bumped_at_version",
           [](const UpgraderEntry& self) { return self.bumped_at_version; })
@@ -1028,6 +1030,15 @@ void initJitScriptBindings(PyObject* module) {
           [](const UpgraderEntry& self) { return self.upgrader_name; })
       .def_property_readonly("old_schema", [](const UpgraderEntry& self) {
         return self.old_schema;
+      });
+
+  py::class_<UpgraderRange>(m, "_UpgraderRange")
+      .def(py::init<int, int>())
+      .def_property_readonly(
+          "min_version",
+          [](const UpgraderRange& self) { return self.min_version; })
+      .def_property_readonly("max_version", [](const UpgraderRange& self) {
+        return self.max_version;
       });
 
   object_class.def(
@@ -1383,7 +1394,12 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_class",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_class(name); });
+             const std::string& name) { return self->get_class(name); })
+      .def(
+          "drop_all_functions",
+          [](const std::shared_ptr<CompilationUnit>& self) {
+            self->drop_all_functions();
+          });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1544,6 +1560,15 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def_property_readonly("owner", &Method::owner);
+  m.def("_generate_upgraders_graph", &generate_upgraders_graph);
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
@@ -1614,15 +1639,6 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("strict"),
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
-
-  m.def(
-      "_compile_graph_to_code_table",
-      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
-        CompilationOptions options;
-        GraphFunction jitFunc(name, graph, nullptr);
-        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
-        return convertMobileFunctionToCodeTable(*mobileFunc, options);
-      });
 
   m.def(
       "_jit_script_class_compile",
@@ -1732,8 +1748,20 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
+  m.def("_is_upgraders_enabled", &is_upgraders_enabled);
+
+  m.def("_get_upgraders_map_size", &get_upgraders_map_size);
+  m.def("_dump_upgraders_map", &dump_upgraders_map);
+
+  m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
+  m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
+
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
+  m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
+  m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
+  m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
       "import_ir_module",
       [](std::shared_ptr<CompilationUnit> cu,
@@ -1794,42 +1822,18 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_load_for_lite_interpreter",
-      [](const std::string& filename,
-         py::object map_location,
-         bool is_flatbuffer = false) {
+      [](const std::string& filename, py::object map_location) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        if (is_flatbuffer) {
-          return load_mobile_module_from_file(filename, optional_device);
-        } else {
-          return _load_for_mobile(filename, optional_device);
-        }
+        return _load_for_mobile(filename, optional_device);
       });
-  m.def(
-      "_save_mobile_module",
-      [](const torch::jit::mobile::Module& m, std::string& filename) {
-        save_mobile_module(m, filename);
-      });
-  m.def(
-      "_module_equals",
-      [](const torch::jit::mobile::Module& lhs,
-         const torch::jit::mobile::Module& rhs) {
-        return moduleEquals(lhs, rhs);
-      });
-  m.def("_jit_module_to_mobile", [](const torch::jit::Module& mod) {
-    CompilationOptions options;
-    return jitModuleToMobile(mod, options);
-  });
-
   m.def(
       "_load_for_lite_interpreter_from_buffer",
-      [](const std::string& buffer,
-         py::object map_location,
-         bool is_flatbuffer = false) {
+      [](const std::string& buffer, py::object map_location) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
@@ -1837,16 +1841,7 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        if (is_flatbuffer) {
-          size_t size = buffer.size();
-          std::shared_ptr<char> data(
-              static_cast<char*>(malloc(size)), free); // NOLINT
-          memcpy(data.get(), buffer.data(), size); // NOLINT
-          return parse_and_initialize_mobile_module(
-              std::move(data), size, optional_device);
-        } else {
-          return _load_for_mobile(in, optional_device);
-        }
+        return _load_for_mobile(in, optional_device);
       });
   m.def(
       "_backport_for_mobile",
@@ -2215,10 +2210,6 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-  m.def(
-      "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });

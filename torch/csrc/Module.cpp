@@ -15,7 +15,7 @@
 #include <ATen/VmapMode.h>
 #include <ATen/dlpack.h>
 #include <ATen/core/Vitals.h>
-#include <TH/TH.h>
+#include <torch/csrc/THConcat.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <cstdlib>
@@ -58,9 +58,11 @@
 #include <torch/csrc/utils/crash_handler.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
+#include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/crash_handler.h>
@@ -587,11 +589,10 @@ PyObject *THPModule_supportedQEngines(PyObject *_unused, PyObject *noargs)
 {
   auto qengines = at::globalContext().supportedQEngines();
   auto list = THPObjectPtr(PyList_New(qengines.size()));
+  if (!list) return nullptr;
   for (const auto i : c10::irange(qengines.size())) {
     PyObject *i64 = THPUtils_packInt64(static_cast<int>(qengines[i]));
-    if (!i64) {
-      throw python_error();
-    }
+    if (!i64) return nullptr;
     PyList_SET_ITEM(list.get(), i, i64);
   }
   return list.release();
@@ -605,22 +606,18 @@ PyObject *THPModule_isEnabledXNNPACK(PyObject *_unused, PyObject *noargs)
 
 PyObject *THPModule_setDefaultMobileCPUAllocator(PyObject *_unused, PyObject *noargs)
 {
-  try {
-    at::globalContext().setDefaultMobileCPUAllocator();
-  } catch (c10::Error& e) {
-    THPUtils_setError(e.what());
-  }
+  HANDLE_TH_ERRORS
+  at::globalContext().setDefaultMobileCPUAllocator();
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPModule_unsetDefaultMobileCPUAllocator(PyObject *_unused, PyObject *noargs)
 {
-  try {
-    at::globalContext().unsetDefaultMobileCPUAllocator();
-  } catch (c10::Error& e) {
-    THPUtils_setError(e.what());
-  }
+  HANDLE_TH_ERRORS
+  at::globalContext().unsetDefaultMobileCPUAllocator();
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPModule_vmapmode_increment_nesting(PyObject* _unused, PyObject *arg) {
@@ -714,6 +711,7 @@ static PyMethodDef TorchMethods[] = {
   {"_unset_default_mobile_cpu_allocator", THPModule_unsetDefaultMobileCPUAllocator, METH_NOARGS, nullptr},
   {"_is_torch_function_enabled", THPModule_isEnabledTorchFunction, METH_NOARGS, nullptr},
   {"_disabled_torch_function_impl", THPModule_disable_torch_function, METH_VARARGS, nullptr},
+  {"_disabled_torch_dispatch_impl", THPModule_disable_torch_dispatch, METH_VARARGS, nullptr},
   {"_has_torch_function", THPModule_has_torch_function, METH_O, nullptr},
   {"_has_torch_function_unary", THPModule_has_torch_function_unary, METH_O, nullptr},
   {"_has_torch_function_variadic", MAYBE_WRAP_FASTCALL(THPModule_has_torch_function_variadic), MAYBE_METH_FASTCALL, nullptr},
@@ -779,6 +777,9 @@ TORCH_API PyObject* initModule();
 // separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
+
+  c10::initLogging();
+
   at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
@@ -832,6 +833,7 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
+  torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::crash_handler::initCrashHandlerBindings(module);
@@ -843,6 +845,7 @@ PyObject* initModule() {
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
+  torch::lazy::initLazyBindings(module);
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
@@ -1065,6 +1068,8 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("DisableTorchFunction", (PyObject*)THPModule_DisableTorchFunctionType(), /* incref= */ false));
   torch::set_disabled_torch_function_impl(PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);
+  torch::set_disabled_torch_dispatch_impl(PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
+  ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
   return module;
   END_HANDLE_TH_ERRORS
 }

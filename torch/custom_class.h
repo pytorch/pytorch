@@ -3,7 +3,7 @@
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
-#include <ATen/core/jit_type.h>
+#include <ATen/core/class_type.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #include <ATen/core/stack.h>
 #include <c10/util/C++17.h>

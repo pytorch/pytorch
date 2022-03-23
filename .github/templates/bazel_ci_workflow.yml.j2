@@ -1,4 +1,5 @@
 {%- extends "linux_ci_workflow.yml.j2" -%}
+{% import 'common_android.yml.j2' as common_android %}
 {%- set exclude_test = true -%}
 {% block name -%}
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
@@ -6,25 +7,25 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
-    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -68,22 +69,7 @@ on:
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
       !{{ common.parse_ref() }}
-      - name: Display and upload binary build size statistics (Click Me)
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        run: |
-          COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-          export COMMIT_TIME
-          pip3 install requests==2.26 boto3==1.16.34
-          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+      !{{ common_android.upload_android_binary_size("", "")}}
       - name: Test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
@@ -97,6 +83,7 @@ on:
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
+            -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
             -e IN_CI \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \

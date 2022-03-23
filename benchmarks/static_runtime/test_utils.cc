@@ -6,9 +6,17 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/allclose.h>
+#endif
+
 #include <memory>
 #include <unordered_map>
 
@@ -69,7 +77,8 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return torch::jit::StaticModule(module_, /* is_frozen */ false, opt);
+    return torch::jit::StaticModule(
+        module_, /* is_frozen */ false, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -91,7 +100,7 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return StaticModule(graph_, opt);
+    return StaticModule(graph_, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -212,8 +221,31 @@ Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return smodule.findNodeWithKindForTesting(kind);
 }
 
+Node* getNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind) {
+  const auto symbol = c10::Symbol::fromQualString(kind);
+  DepthFirstGraphNodeIterator it(graph);
+  for (auto* node = it.next(); node != nullptr; node = it.next()) {
+    if (node->kind() == symbol) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   return getNodeWithKind(smodule, kind) != nullptr;
+}
+
+bool hasNodeWithKind(std::shared_ptr<Graph>& graph, const std::string& kind) {
+  return getNodeWithKind(graph, kind) != nullptr;
+}
+
+std::shared_ptr<Graph> getGraphFromScript(const std::string& jit_script) {
+  script::Module module("module");
+  module.define(jit_script);
+
+  Method method = module.get_method("forward");
+  return module.get_method("forward").graph();
 }
 
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
@@ -258,103 +290,104 @@ void testStaticRuntime(
 
   for (bool enable_out_variant : {true, false}) {
     for (bool manage_output_tensors : {true, false}) {
-      if (!enable_out_variant && manage_output_tensors) {
-        continue;
-      }
-      // run static runtime three times
-      // 1st run: collect allocation profiles (args)
-      // 2nd run: exercise memory planner and resizing with args2
-      // 3rd run: run with args again
-      StaticModuleOptions opts{
-          .cleanup_activations = true,
-          .enable_out_variant = enable_out_variant,
-          .optimize_memory = enable_out_variant,
-          .manage_output_tensors = manage_output_tensors};
-      auto smodule = test_context->makeStaticModule(opts);
-      StaticRuntime runtime(smodule);
-      auto actual = runtime(args, {});
-      if (actual.isTensor()) {
-        EXPECT_GE(smodule.num_nodes(), 2)
-            << "If we only have one node, the output of the op we are testing is "
-            << "not being managed by the memory planner! A failure here "
-            << "can typically be fixed by clone()ing the output of the test script.";
-      }
-      runtime.check_for_memory_leak();
-      // first run
-      VLOG(2) << "enable_out_variant: " << enable_out_variant;
-      VLOG(2) << "manage_output_tensors: " << manage_output_tensors;
-      VLOG(2) << "args: " << args;
-      VLOG(2) << "args2: " << args2;
-      VLOG(2) << "expect: " << expect;
-      VLOG(2) << "actual: " << actual;
-      compareResults(expect, actual, use_allclose, use_equalnan);
-      VLOG(2) << "first run comparison done";
-      if (manage_output_tensors) {
-        actual = IValue();
-        runtime.deallocateOutputTensors();
-        runtime.checkOutputTensorMemoryLeaks();
-      }
-
-      if (!args2.empty()) {
-        auto* memory_planner = runtime.get_memory_planner();
-        size_t managed_bytes =
-            memory_planner ? memory_planner->total_managed() : 0;
-
-        // Run static runtime again with inputs of a different shape.
-        expect = test_context->getExpected(args2);
-        actual = runtime(args2, {});
+      for (bool enable_tensorexpr_fusion : {true, false}) {
+        if (!enable_out_variant && manage_output_tensors) {
+          continue;
+        }
+        // run static runtime three times
+        // 1st run: collect allocation profiles (args)
+        // 2nd run: exercise memory planner and resizing with args2
+        // 3rd run: run with args again
+        StaticModuleOptions opts{
+            .enable_out_variant = enable_out_variant,
+            .optimize_memory = enable_out_variant,
+            .manage_output_tensors = manage_output_tensors,
+            .enable_tensorexpr_fusion = enable_tensorexpr_fusion};
+        auto smodule = test_context->makeStaticModule(opts);
+        StaticRuntime runtime(smodule);
+        auto actual = runtime(args, {});
+        if (actual.isTensor()) {
+          EXPECT_GE(smodule.num_nodes(), 2)
+              << "If we only have one node, the output of the op we are testing is "
+              << "not being managed by the memory planner! A failure here "
+              << "can typically be fixed by clone()ing the output of the test script.";
+        }
         runtime.check_for_memory_leak();
-        VLOG(2) << "comparing with args2";
+        // first run
+        VLOG(2) << "enable_out_variant: " << enable_out_variant;
+        VLOG(2) << "manage_output_tensors: " << manage_output_tensors;
+        VLOG(2) << "enable_tensorexpr_fusion: " << enable_tensorexpr_fusion;
+        VLOG(2) << "args: " << args;
+        VLOG(2) << "args2: " << args2;
+        VLOG(2) << "expect: " << expect;
+        VLOG(2) << "actual: " << actual;
         compareResults(expect, actual, use_allclose, use_equalnan);
-        VLOG(2) << "second run comparison done";
+        VLOG(2) << "first run comparison done";
         if (manage_output_tensors) {
           actual = IValue();
           runtime.deallocateOutputTensors();
           runtime.checkOutputTensorMemoryLeaks();
         }
 
-        size_t new_managed_bytes =
-            memory_planner ? memory_planner->total_managed() : 0;
-        if (check_resize && new_managed_bytes > 0) {
-          VLOG(1) << "managed_bytes: " << managed_bytes
-                  << ", new_managed_bytes: " << new_managed_bytes;
-          EXPECT_TRUE(new_managed_bytes > managed_bytes);
-        }
+        if (!args2.empty()) {
+          auto* memory_planner = runtime.get_memory_planner();
+          size_t managed_bytes =
+              memory_planner ? memory_planner->total_managed() : 0;
 
-        // Run static runtime again with an input of the shape observed during
-        // the profile run.
-        expect = test_context->getExpected(args);
-        actual = runtime(args, {});
-        runtime.check_for_memory_leak();
-        // third run
-        VLOG(2) << "comparing third run";
-        compareResults(expect, actual, use_allclose, use_equalnan);
-        VLOG(2) << "third run comparison done";
-        if (manage_output_tensors) {
-          actual = IValue();
-          runtime.deallocateOutputTensors();
-          runtime.checkOutputTensorMemoryLeaks();
-        }
-      } else {
-        // run static runtime again to exercise the memory planner
-        // and allocate managed tensors.
-        actual = runtime(args, {});
-        runtime.check_for_memory_leak();
-        VLOG(2) << "comparing second run with same args";
-        compareResults(expect, actual, use_allclose, use_equalnan);
-        VLOG(2) << "second run comparison done";
-        if (manage_output_tensors) {
-          actual = IValue();
-          runtime.deallocateOutputTensors();
-          runtime.checkOutputTensorMemoryLeaks();
-        }
-        // third run to use the allocated managed tensors.
-        actual = runtime(args, {});
-        runtime.check_for_memory_leak();
-        if (manage_output_tensors) {
-          actual = IValue();
-          runtime.deallocateOutputTensors();
-          runtime.checkOutputTensorMemoryLeaks();
+          // Run static runtime again with inputs of a different shape.
+          expect = test_context->getExpected(args2);
+          actual = runtime(args2, {});
+          runtime.check_for_memory_leak();
+          VLOG(2) << "comparing with args2";
+          compareResults(expect, actual, use_allclose, use_equalnan);
+          VLOG(2) << "second run comparison done";
+          if (manage_output_tensors) {
+            actual = IValue();
+            runtime.deallocateOutputTensors();
+            runtime.checkOutputTensorMemoryLeaks();
+          }
+
+          size_t new_managed_bytes =
+              memory_planner ? memory_planner->total_managed() : 0;
+          if (check_resize && new_managed_bytes > 0) {
+            EXPECT_GT(new_managed_bytes, managed_bytes);
+          }
+
+          // Run static runtime again with an input of the shape observed during
+          // the profile run.
+          expect = test_context->getExpected(args);
+          actual = runtime(args, {});
+          runtime.check_for_memory_leak();
+          // third run
+          VLOG(2) << "comparing third run";
+          compareResults(expect, actual, use_allclose, use_equalnan);
+          VLOG(2) << "third run comparison done";
+          if (manage_output_tensors) {
+            actual = IValue();
+            runtime.deallocateOutputTensors();
+            runtime.checkOutputTensorMemoryLeaks();
+          }
+        } else {
+          // run static runtime again to exercise the memory planner
+          // and allocate managed tensors.
+          actual = runtime(args, {});
+          runtime.check_for_memory_leak();
+          VLOG(2) << "comparing second run with same args";
+          compareResults(expect, actual, use_allclose, use_equalnan);
+          VLOG(2) << "second run comparison done";
+          if (manage_output_tensors) {
+            actual = IValue();
+            runtime.deallocateOutputTensors();
+            runtime.checkOutputTensorMemoryLeaks();
+          }
+          // third run to use the allocated managed tensors.
+          actual = runtime(args, {});
+          runtime.check_for_memory_leak();
+          if (manage_output_tensors) {
+            actual = IValue();
+            runtime.deallocateOutputTensors();
+            runtime.checkOutputTensorMemoryLeaks();
+          }
         }
       }
     }

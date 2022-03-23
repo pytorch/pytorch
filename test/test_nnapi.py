@@ -286,6 +286,10 @@ class TestNNAPI(TestCase):
                             return torch.sigmoid(arg)
                         raise Exception("Bad op")
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
+                self.check(
+                    UnaryModule(),
+                    qpt(torch.tensor([-1.0, 1.0]), 1. / 256, 0),
+                )
 
     def test_pointwise_binary(self):
         for op in ["add", "sub", "mul", "div"]:

@@ -81,6 +81,12 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::LinAlgError& e) {                              \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));    \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
@@ -98,6 +104,11 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     catch (const c10d::TimeoutError& e) {                            \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(PyExc_TimeoutError, msg);                      \
+      retstmnt;                                                      \
+    }                                                                \
+    catch (const c10d::C10dError& e) {                               \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_RuntimeError, msg);                      \
       retstmnt;                                                      \
     }
 #else
@@ -132,7 +143,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   catch (torch::jit::JITException & e) {                                 \
     throw;                                                               \
   }                                                                      \
-  CATCH_ALL_ERRORS(throw py::error_already_set())
+  catch (const std::exception & e) {                                     \
+    torch::translate_exception_to_python(std::current_exception());      \
+    throw py::error_already_set();                                       \
+  }
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
     }                                                                \
@@ -141,11 +155,14 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       throw;                                                         \
     }                                                                \
   }                                                                  \
-  CATCH_ALL_ERRORS(return retval)
+  catch (const std::exception & e) {                                 \
+    torch::translate_exception_to_python(std::current_exception());  \
+    return retval;                                                   \
+  }
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-extern PyObject *THPException_FatalError;
+extern PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -258,6 +275,9 @@ bool THPException_init(PyObject *module);
 
 namespace torch {
 
+// Set python current exception from a C++ exception
+TORCH_PYTHON_API void translate_exception_to_python(const std::exception_ptr &);
+
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
 TORCH_PYTHON_API bool get_cpp_stacktraces_enabled();
@@ -322,6 +342,14 @@ struct AttributeError : public PyTorchError {
   AttributeError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
     return PyExc_AttributeError;
+  }
+};
+
+// Translates to Python LinAlgError
+struct LinAlgError : public PyTorchError {
+  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  PyObject* python_type() override {
+    return THPException_LinAlgError;
   }
 };
 

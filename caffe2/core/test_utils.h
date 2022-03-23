@@ -6,6 +6,7 @@
 #include "caffe2/utils/proto_utils.h"
 
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
 
 #include <cmath>
 #include <string>
@@ -34,7 +35,7 @@ void assertTensorEquals(
     float epsilon = 0.1f) {
   CAFFE_ENFORCE(tensor.IsType<T>());
   CAFFE_ENFORCE_EQ(tensor.numel(), data.size());
-  for (auto idx = 0; idx < tensor.numel(); ++idx) {
+  for (const auto idx : c10::irange(tensor.numel())) {
     if (tensor.IsType<float>()) {
       assertNear(tensor.data<T>()[idx], data[idx], epsilon);
     } else {
@@ -88,7 +89,7 @@ void randomFill(
   std::mt19937 gen(42);
   std::uniform_real_distribution<RealType> dis(
       static_cast<RealType>(min), static_cast<RealType>(max));
-  for (size_t i = 0; i < size; i++) {
+  for (const auto i : c10::irange(size)) {
     data[i] = dis(gen);
   }
 }

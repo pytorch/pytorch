@@ -1,18 +1,99 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
-#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
+#include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Operators.h>
+#else
+#include <ATen/ops/_conj_physical_native.h>
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/abs.h>
+#include <ATen/ops/abs_native.h>
+#include <ATen/ops/add.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/angle.h>
+#include <ATen/ops/angle_native.h>
+#include <ATen/ops/asin.h>
+#include <ATen/ops/asin_native.h>
+#include <ATen/ops/asinh.h>
+#include <ATen/ops/asinh_native.h>
+#include <ATen/ops/atan.h>
+#include <ATen/ops/atan_native.h>
+#include <ATen/ops/atanh.h>
+#include <ATen/ops/atanh_native.h>
+#include <ATen/ops/ceil.h>
+#include <ATen/ops/ceil_native.h>
+#include <ATen/ops/conj_physical.h>
+#include <ATen/ops/conj_physical_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/erf.h>
+#include <ATen/ops/erf_native.h>
+#include <ATen/ops/erfinv.h>
+#include <ATen/ops/erfinv_native.h>
+#include <ATen/ops/expm1.h>
+#include <ATen/ops/expm1_native.h>
+#include <ATen/ops/floor.h>
+#include <ATen/ops/floor_native.h>
+#include <ATen/ops/isinf.h>
+#include <ATen/ops/isinf_native.h>
+#include <ATen/ops/isnan.h>
+#include <ATen/ops/isnan_native.h>
+#include <ATen/ops/isneginf.h>
+#include <ATen/ops/isneginf_native.h>
+#include <ATen/ops/isposinf.h>
+#include <ATen/ops/isposinf_native.h>
+#include <ATen/ops/log1p.h>
+#include <ATen/ops/log1p_native.h>
+#include <ATen/ops/mm_native.h>
+#include <ATen/ops/neg.h>
+#include <ATen/ops/neg_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/rad2deg.h>
+#include <ATen/ops/rad2deg_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/round.h>
+#include <ATen/ops/round_native.h>
+#include <ATen/ops/round_ops.h>
+#include <ATen/ops/sgn.h>
+#include <ATen/ops/sgn_native.h>
+#include <ATen/ops/sign.h>
+#include <ATen/ops/sign_native.h>
+#include <ATen/ops/signbit.h>
+#include <ATen/ops/signbit_native.h>
+#include <ATen/ops/sin.h>
+#include <ATen/ops/sin_native.h>
+#include <ATen/ops/sinh.h>
+#include <ATen/ops/sinh_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sqrt_native.h>
+#include <ATen/ops/tan.h>
+#include <ATen/ops/tan_native.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/tanh_native.h>
+#include <ATen/ops/trunc.h>
+#include <ATen/ops/trunc_native.h>
+#include <ATen/ops/zeros.h>
+#include <ATen/ops/zero_native.h>
+#endif
 
 #include <algorithm>
 
@@ -29,7 +110,7 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr) (
 }
 
 TORCH_META_FUNC(_convert_indices_from_csr_to_coo) (
-  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const bool transpose
 ) {
   TORCH_CHECK(crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
   TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
@@ -60,7 +141,7 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 
   at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     input_t curr_value = data_in[start], next_value;
-    for (int64_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       next_value = data_in[i + 1];
       for (; curr_value < next_value; curr_value++)
         data_out[curr_value + 1] = static_cast<output_t>(i + 1);
@@ -94,17 +175,17 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
   return result;
 }
 
-template <typename F>
-Tensor& unary_op_inplace(Tensor& self, const F& op_inplace) {
+template <typename F, typename ...Args>
+Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
 
   auto self_values = self.values();
-  op_inplace(self_values);
+  (self_values.*op_inplace)(std::forward<Args>(args)...);
   return self;
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices) {
+void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
   int64_t nrows = crow_indices.numel() - 1;
   if (nrows == 0) {
     indices.zero_();
@@ -113,11 +194,12 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
   auto crow_indices_ = crow_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  output_t* data_out = indices.data_ptr<output_t>();
-
-  indices.select(0, 1).copy_(*col_indices.expect_contiguous());
+  auto row0 = indices.select(0, transpose?1:0);
+  auto row1 = indices.select(0, transpose?0:1);
+  output_t* data_out = row0.data_ptr<output_t>();
+  row1.copy_(*col_indices.expect_contiguous());
   at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
-    for (int64_t i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
     }
   });
@@ -173,6 +255,10 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
+Tensor& normal_sparse_csr_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  return unary_op_inplace(self, &Tensor::normal_, mean, std, gen);
+}
+
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
  * Only simple funcs, with 0->0 correspondence are currently supported. */
 
@@ -188,9 +274,7 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 
 #define CREATE_UNARY_UFUNC_INPLACE(op_name)                                \
   Tensor& op_name##_sparse_csr_(Tensor& self) {                            \
-    return unary_op_inplace(self, [](Tensor& t) {                          \
-      return t.op_name##_();                                               \
-    });                                                                    \
+    return unary_op_inplace(self, &Tensor::op_name##_);                    \
   }
 
 #define CREATE_UNARY_UFUNC(op_name)                                        \
@@ -216,7 +300,6 @@ CREATE_UNARY_UFUNC(floor);
 CREATE_UNARY_UFUNC(log1p);
 CREATE_UNARY_UFUNC(neg);
 CREATE_UNARY_UFUNC(rad2deg);
-CREATE_UNARY_UFUNC(round);
 CREATE_UNARY_UFUNC(sign);
 CREATE_UNARY_UFUNC(sin);
 CREATE_UNARY_UFUNC(sinh);
@@ -226,6 +309,24 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
+
+CREATE_UNARY_UFUNC_INPLACE(zero);
+
+// With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
+// to unresolved overload.
+Tensor& round_sparse_csr_out(const Tensor& self, Tensor& result) {
+  return unary_op_out(&at::_ops::round_out::call, self, result);
+}
+
+Tensor round_sparse_csr(const Tensor& self) {
+  return get_result_tensor_for_unary_op(&at::_ops::round::call, self);
+}
+
+Tensor& round_sparse_csr_(Tensor& self) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  self.values().round_();
+  return self;
+}
 
 // angle, isneginf, isposinf and signbit currently don't have an inplace variant
 CREATE_UNARY_UFUNC_NO_INPLACE(angle);
@@ -248,7 +349,7 @@ void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, 
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  scalar_t cast_beta = beta.to<scalar_t>();
+  r.mul_(beta);
   AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
     auto csr_accessor = csr.accessor<index_t, 1>();
     auto col_indices_accessor = col_indices.accessor<index_t, 1>();
@@ -372,7 +473,7 @@ Tensor& addmm_out_sparse_csr_cpu(
           "Please use PyTorch built with MKL on Linux.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
-    AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
         addmm_out_sparse_csr_native_cpu<scalar_t>(mat1, mat2, result, alpha, beta);
     });
 #else
@@ -571,15 +672,15 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu) (
 }
 
 TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
-  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const Tensor& result
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const bool transpose, const Tensor& result
 ) {
   if (out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(result, crow_indices, col_indices);
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(result, crow_indices, col_indices, transpose);
     });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices);
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices, transpose);
     });
   }
 }

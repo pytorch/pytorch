@@ -41,6 +41,7 @@ def run_autogen() -> None:
             "aten/src/ATen",
             "-d",
             "build/aten/src/ATen",
+            "--per-operator-headers",
         ]
     )
 
@@ -52,14 +53,7 @@ def run_autogen() -> None:
             "aten/src/ATen/native/native_functions.yaml",
             "--nn-path",
             "aten/src",
-        ]
-    )
-
-
-def gen_flatbuffers() -> None:
-    run_timed_cmd(
-        [
-            "bash", "scripts/gen_flatbuffer.sh"
+            "--gen_lazy_ts_backend",
         ]
     )
 
@@ -68,7 +62,6 @@ def generate_build_files() -> None:
     update_submodules()
     gen_compile_commands()
     run_autogen()
-    gen_flatbuffers()
 
 
 if __name__ == "__main__":

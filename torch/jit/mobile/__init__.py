@@ -41,19 +41,13 @@ def _load_for_lite_interpreter(f, map_location=None):
             raise ValueError("The provided filename {} does not exist".format(f))
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))
-    zip_magic = b'PK\x03\x04'
+
     map_location = validate_map_location(map_location)
+
     if isinstance(f, str) or isinstance(f, pathlib.Path):
-        is_flatbuffer = False
-        with open(f, 'rb') as fi:
-            magic_bytes = fi.read(4)
-            is_flatbuffer = (magic_bytes != zip_magic)
-        cpp_module = torch._C._load_for_lite_interpreter(f, map_location, is_flatbuffer)
+        cpp_module = torch._C._load_for_lite_interpreter(f, map_location)
     else:
-        all_bytes = f.read()
-        is_flatbuffer = (all_bytes[:4] != zip_magic)
-        cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
-            all_bytes, map_location, is_flatbuffer)
+        cpp_module = torch._C._load_for_lite_interpreter_from_buffer(f.read(), map_location)
 
     return LiteScriptModule(cpp_module)
 
@@ -221,15 +215,3 @@ def _get_model_ops_and_info(f_input):
         return torch._C._get_model_ops_and_info(str(f_input))
     else:
         return torch._C._get_model_ops_and_info(f_input.read())
-
-
-def save_mobile_module(m: LiteScriptModule, filename: str):
-    torch._C._save_mobile_module(m._c, filename)
-
-def jit_module_to_mobile(m):
-    mobile_m = torch._C._jit_module_to_mobile(m._c)
-    return LiteScriptModule(mobile_m)
-
-
-def module_equals(lhs: LiteScriptModule, rhs: LiteScriptModule):
-    torch._C._module_equals(lhs._c, rhs._c)

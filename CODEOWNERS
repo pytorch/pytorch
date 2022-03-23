@@ -12,7 +12,6 @@
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
 /docs/source/conf.py @albanD
-/aten/src/ATen/native/native_functions.yaml @ezyang
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
@@ -45,6 +44,11 @@
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
 /.github/ @seemethere @janeyx99 @atalman
+
+# Custom Test Infrastructure
+/test/run_test.py @pytorch-dev-infra
+/torch/testing/_internal/common_device_type.py @mruberry
+/torch/testing/_internal/common_utils.py @pytorch-dev-infra
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano

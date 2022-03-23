@@ -323,11 +323,11 @@ class GaussianNLLLoss(_Loss):
             losses. Default: ``'mean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+        - Input: :math:`(N, *)` or :math:`(*)` where :math:`*` means any number of additional
           dimensions
-        - Target: :math:`(N, *)`, same shape as the input, or same shape as the input
+        - Target: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input
           but with one dimension equal to 1 (to allow for broadcasting)
-        - Var: :math:`(N, *)`, same shape as the input, or same shape as the input but
+        - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
           with one dimension equal to 1, or same shape as the input but with one fewer
           dimension (to allow for broadcasting)
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
@@ -879,7 +879,7 @@ class SmoothL1Loss(_Loss):
         also known as delta for Huber). This leads to the following differences:
 
         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
-          converges to a constant 0 loss.
+          converges to a constant 0 loss. When beta is 0, Smooth L1 loss is equivalent to L1 loss.
         * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
           :class:`HuberLoss` converges to :class:`MSELoss`.
         * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
@@ -1031,14 +1031,14 @@ class CrossEntropyLoss(_WeightedLoss):
     This is particularly useful when you have an unbalanced training set.
 
     The `input` is expected to contain raw, unnormalized scores for each class.
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
-    :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
-    `K`-dimensional case. The latter is useful for higher dimension inputs, such
+    `input` has to be a Tensor of size :math:`(C)` for unbatched input,
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
+    `K`-dimensional case. The last being useful for higher dimension inputs, such
     as computing cross entropy loss per-pixel for 2D images.
 
     The `target` that this criterion expects should contain either:
 
-    - Class indices in the range :math:`[0, C-1]` where :math:`C` is the number of classes; if
+    - Class indices in the range :math:`[0, C)` where :math:`C` is the number of classes; if
       `ignore_index` is specified, this loss also accepts this class index (this index
       may not necessarily be in the class range). The unreduced (i.e. with :attr:`reduction`
       set to ``'none'``) loss for this case can be described as:
@@ -1070,7 +1070,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
       .. math::
           \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
+          l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\sum_{i=1}^C \exp(x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
       :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
@@ -1119,16 +1119,20 @@ class CrossEntropyLoss(_WeightedLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`, or
-          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+        - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`(N)` where each value is
-          :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-          same shape as the input.
-        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
-          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
-          Otherwise, scalar.
+        - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+
+        where:
+
+        .. math::
+            \begin{aligned}
+                C ={} & \text{number of classes} \\
+                N ={} & \text{batch size} \\
+            \end{aligned}
 
     Examples::
 
@@ -1447,7 +1451,7 @@ class TripletMarginLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-                  input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math`(N, D)`; a scalar otherwise.
 
     Examples::
 
@@ -1616,7 +1620,7 @@ class CTCLoss(_Loss):
             to be aligned to the targets.
 
     Shape:
-        - Log_probs: Tensor of size :math:`(T, N, C)`,
+        - Log_probs: Tensor of size :math:`(T, N, C)` or :math:`(T, C)`,
           where :math:`T = \text{input length}`,
           :math:`N = \text{batch size}`, and
           :math:`C = \text{number of classes (including blank)}`.
@@ -1633,12 +1637,12 @@ class CTCLoss(_Loss):
           In the :math:`(\operatorname{sum}(\text{target\_lengths}))` form,
           the targets are assumed to be un-padded and
           concatenated within 1 dimension.
-        - Input_lengths: Tuple or tensor of size :math:`(N)`,
+        - Input_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
           where :math:`N = \text{batch size}`. It represent the lengths of the
           inputs (must each be :math:`\leq T`). And the lengths are specified
           for each sequence to achieve masking under the assumption that sequences
           are padded to equal lengths.
-        - Target_lengths: Tuple or tensor of size :math:`(N)`,
+        - Target_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
           where :math:`N = \text{batch size}`. It represent lengths of the targets.
           Lengths are specified for each sequence to achieve masking under the
           assumption that sequences are padded to equal lengths. If target shape is
@@ -1648,7 +1652,7 @@ class CTCLoss(_Loss):
           If the targets are given as a 1d tensor that is the concatenation of individual
           targets, the target_lengths must add up to the total length of the tensor.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N)`, where :math:`N = \text{batch size}`.
+          :math:`(N)` if input is batched or :math:`()` if input is unbatched, where :math:`N = \text{batch size}`.
 
     Examples::
 
@@ -1684,6 +1688,22 @@ class CTCLoss(_Loss):
         >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
         >>> target_lengths = torch.randint(low=1, high=T, size=(N,), dtype=torch.long)
         >>> target = torch.randint(low=1, high=C, size=(sum(target_lengths),), dtype=torch.long)
+        >>> ctc_loss = nn.CTCLoss()
+        >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
+        >>> loss.backward()
+        >>>
+        >>>
+        >>> # Target are to be un-padded and unbatched (effectively N=1)
+        >>> T = 50      # Input sequence length
+        >>> C = 20      # Number of classes (including blank)
+        >>>
+        >>> # Initialize random batch of input vectors, for *size = (T,C)
+        >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
+        >>> input_lengths = torch.tensor(T, dtype=torch.long)
+        >>>
+        >>> # Initialize random batch of targets (0 = blank, 1:C = classes)
+        >>> target_lengths = torch.randint(low=1, high=T, size=(), dtype=torch.long)
+        >>> target = torch.randint(low=1, high=C, size=(target_lengths,), dtype=torch.long)
         >>> ctc_loss = nn.CTCLoss()
         >>> loss = ctc_loss(input, target, input_lengths, target_lengths)
         >>> loss.backward()

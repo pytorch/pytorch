@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -22,6 +23,7 @@
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
@@ -655,6 +657,13 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+#if ENABLE_UPGRADERS
+    // At this point, we might have received a graph that is compiled with
+    // old operator schemas that might not exist in the system anymore.
+    // Therefore, we replace such ops with its' valid upgrader.
+    ReplaceOldOperatorsWithUpgraders(graph);
+#endif
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
@@ -2469,12 +2478,14 @@ struct to_ir {
   void emitRaise(const Raise& raise) {
     auto sv = emitSugaredExpr(raise.expr(), 1);
     Value* error_message = nullptr;
+    Value* qualified_class_name = nullptr;
 
     if (auto exception_instance =
             std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
       // The typical case, an instance of the exception class was thrown:
       //    raise RuntimeError("error")
       error_message = exception_instance->getValue();
+      qualified_class_name = exception_instance->getQualifiedClassName();
     } else if (
         auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
       // A bare exception was thrown so add an empty message. e.g.
@@ -2491,7 +2502,11 @@ struct to_ir {
       error_message = graph->insert(aten::str, {error_message});
     }
 
-    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
+    graph->insert(
+        prim::RaiseException,
+        {error_message, qualified_class_name},
+        {},
+        raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -3539,6 +3554,22 @@ struct to_ir {
       }
       case prim::dict: {
         return emitApplySpecialFormForDict(apply, type_hint);
+      }
+      case aten::index: {
+        const SourceRange& loc = apply.range();
+        auto select = Select(apply.callee());
+        auto self = emitSugaredExpr(select.value(), 1)->asValue(loc, method);
+
+        auto inputs = apply.inputs();
+        if (inputs.size() != 1) {
+          throw ErrorReport(apply)
+              << "__getitem__ expected exactly 1 arguments, got "
+              << inputs.size();
+        }
+        auto input =
+            emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
+
+        return std::make_shared<SimpleValue>(emitIndex(loc, self, {input}));
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
@@ -5170,7 +5201,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
-    CompilationUnit::FunctionType type) const {
+    CompilationUnit::FunctionType type,
+    c10::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5202,8 +5234,11 @@ std::unique_ptr<Function> CompilationUnit::define(
       name = mangle(name);
     }
   }
-  auto fn = torch::make_unique<GraphFunction>(
-      std::move(name), std::make_shared<Graph>(), creator);
+
+  auto graph = std::make_shared<Graph>();
+  graph->set_op_version(operator_set_version);
+
+  auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
     // Register this as a method on `self`'s type
     if (type == CompilationUnit::FunctionType::Hook) {
@@ -5224,7 +5259,8 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<Def>& definitions,
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
-    bool shouldMangle) {
+    bool shouldMangle,
+    c10::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5266,7 +5302,8 @@ std::vector<Function*> CompilationUnit::define(
         self,
         function_table,
         shouldMangle,
-        CompilationUnit::FunctionType::Method);
+        CompilationUnit::FunctionType::Method,
+        operator_set_version);
 
     record_function(std::move(fn));
   }

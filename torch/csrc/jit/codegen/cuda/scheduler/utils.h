@@ -165,6 +165,9 @@ std::pair<bool, bool> canonicalDimReduction(
 // (WelfordOp)
 TORCH_CUDA_CU_API std::vector<TensorView*> getReductionTvs(Fusion* fusion);
 
+// Returns a list of TensorViews that are the consumer tv for a view operation.
+std::vector<TensorView*> getViewTVs(Fusion* fusion);
+
 // Reset inputs and outputs to global memory, everything else to local.
 void clearMemorySpace(Fusion* fusion);
 

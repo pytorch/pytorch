@@ -71,11 +71,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   # DO NOT install cmake here as it would install a version newer than 3.10, but
   # we want to pin to version 3.10.
-  SCIPY_VERSION=1.1.0
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
-    SCIPY_VERSION=1.6.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
@@ -96,26 +94,28 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   conda_install nnpack -c killeent
 
   # Install some other packages, including those needed for Python test reporting
-  # TODO: Why is scipy pinned
+  # Pin SciPy because of failing distribution tests (see #60347)
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+  # Pin unittest-xml-reporting to freeze printing test summary logic, related: https://github.com/pytorch/pytorch/issues/69014
   as_jenkins pip install --progress-bar off pytest \
-    scipy==$SCIPY_VERSION \
+    scipy==1.6.3 \
     scikit-image \
     psutil \
-    unittest-xml-reporting \
+    "unittest-xml-reporting<=3.2.0,>=2.0.0" \
     boto3==1.16.34 \
     hypothesis==4.53.2 \
     expecttest==0.1.3 \
     mypy==0.812 \
-    tb-nightly
+    tb-nightly \
+    librosa>=0.6.2
 
   # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.54.1
   else
-    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+    as_jenkins pip install --progress-bar off numba==0.49.0
   fi
 
   # Update scikit-learn to a python-3.8 compatible version

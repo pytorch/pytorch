@@ -175,7 +175,6 @@ class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
 
  private:
   LegacyPadding legacy_pad_;
-  int pad_;
 
  protected:
   vector<int> kernel_;

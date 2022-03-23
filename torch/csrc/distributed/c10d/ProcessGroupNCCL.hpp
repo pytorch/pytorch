@@ -440,6 +440,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       PostProcess post,
       const char* profilingTitle);
 
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_impl(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions());
+
   // Checks for NCCL errors on each of the communicators and returns an
   // appropriate exception_ptr (nullptr if no errors).
   static std::exception_ptr checkForNCCLErrorsInternal(

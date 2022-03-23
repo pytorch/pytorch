@@ -1,7 +1,6 @@
 # Python dependencies required for development
 astunparse
 expecttest
-flatbuffers
 future
 numpy
 psutil

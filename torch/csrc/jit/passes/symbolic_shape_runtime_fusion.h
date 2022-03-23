@@ -3,6 +3,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+
 #include <unordered_map>
 
 namespace torch {
@@ -25,7 +26,30 @@ namespace jit {
 // shape propagation fails to propagate # of dims or if complete shapes on
 // inputs not set
 
-TORCH_API bool GenerateGuard(Node* tensorexpr_graph_node);
+TORCH_API bool GenerateGuard(
+    Node* tensorexpr_graph_node,
+    bool add_composed_op = false);
+
+TORCH_API void runTensorExprDynamicGroup(const Code& code, Stack& stack);
+
+enum class StrideInput {
+  // Tensors natively store whether they are contiguous or not as a property
+  // this makes it faster to query `is_contiguous` or
+  // `is_contiguous(memory_format=channels_last)`
+  // than looping through the sizes/strides yourself
+  // For tensors with these properties, we only store one value:
+  TENSOR_CONT,
+  TENSOR_CONT_CHANNELS_LAST,
+  // now, we describe other cases, where there is one stride enum
+  // per dimension
+  S_ONE, // STRIDE_ONE: packed
+  S_CONT, // STRIDE_CONTIGUOUS: stride[i + 1] * sizes[i + 1]
+  S_TRAN_CONT, // STRIDE_TRANSPOSED_CONTIGUOUS: stride[i-1] * sizes[i-1]
+  S_AS_ARG, // STRIDE_AS_ARG: stride passed in as runtime value
+};
+
+TORCH_API std::string toString(StrideInput si);
+TORCH_API StrideInput strideInputFromString(const std::string& si);
 
 } // namespace jit
 } // namespace torch

@@ -259,6 +259,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
      DispatchKey::SparseCUDA,
      DispatchKey::SparseHIP,
      DispatchKey::SparseVE,
+     DispatchKey::SparseXPU,
      DispatchKey::SparseCsrCPU,
      DispatchKey::SparseCsrCUDA,
      DispatchKey::Meta});

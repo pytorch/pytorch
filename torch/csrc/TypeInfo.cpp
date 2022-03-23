@@ -21,7 +21,7 @@ PyObject* THPFInfo_New(const at::ScalarType& type) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
-  self_->type = c10::toValueType(type);
+  self_->type = c10::toRealValueType(type);
   return self.release();
 }
 

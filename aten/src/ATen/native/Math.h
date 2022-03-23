@@ -13,6 +13,10 @@
 #include <c10/util/math_compat.h>
 #include <ATen/AccumulateType.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -405,10 +409,11 @@ static inline float calc_digamma(float x) {
 }
 
 template <typename scalar_t, bool is_cuda=false>
-static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
   // already blocked if n <= 1
-  return ((n % 2) ? 1.0 : -1.0) *
-      ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
+  const auto one = scalar_t{1};
+  return ((n % 2) ? one : -one) *
+      ::exp(::lgamma(static_cast<scalar_t>(n) + one)) *
       zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
 }
 
@@ -2107,3 +2112,5 @@ calc_erfcx(T x)
     }
   }
 }
+
+C10_CLANG_DIAGNOSTIC_POP()

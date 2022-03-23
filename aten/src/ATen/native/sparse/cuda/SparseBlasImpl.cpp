@@ -1,4 +1,7 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
@@ -7,6 +10,14 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/empty_strided.h>
+#endif
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/MaybeOwned.h>
@@ -109,6 +120,253 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.sizes());
 }
 
+void block_sparse_triangular_solve_vec(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solver with block sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 4.5.0+. ",
+      "Please use PyTorch built with newer ROCm version.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  // values is expected to be a blocks of sparse matrix
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
+  // blocks are expected to be square
+  TORCH_INTERNAL_ASSERT(A.values().size(2) == A.values().size(1));
+  // only block of size > 1 is supported in cuSPARSE
+  TORCH_INTERNAL_ASSERT(A.values().size(-1) > 1);
+  // blocks are expected to be in row- or column-major order
+  TORCH_INTERNAL_ASSERT(
+      A.values().is_contiguous() ||
+      A.values().transpose(-2, -1).is_contiguous());
+
+  // cuSPARSE can't work with empty sparse matrices
+  if (A._nnz() == 0) {
+    X.fill_(NAN);
+    return;
+  }
+
+  const cusparseDirection_t block_layout = A.values().is_contiguous()
+      ? CUSPARSE_DIRECTION_ROW
+      : CUSPARSE_DIRECTION_COLUMN;
+
+  c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
+  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
+
+  auto block_size = cuda_int_cast(A.values().size(2), "block_size");
+  auto nnzb = cuda_int_cast(A._nnz(), "nnzb");
+  auto mb = cuda_int_cast(A.size(0), "mb") / block_size;
+
+  auto desc = at::cuda::sparse::CuSparseMatDescriptor(upper, unitriangular);
+  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE
+                                      : CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  auto info = at::cuda::sparse::CuSparseBsrsv2Info();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "block_sparse_triangular_solve_vec", [&] {
+        scalar_t alpha = 1;
+        auto values = A.values();
+        auto values_data_ptr = values.data_ptr<scalar_t>();
+        auto crow_indices = A.crow_indices().to(kInt);
+        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto col_indices = A.col_indices().to(kInt);
+        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        int buffer_size = 0;
+
+        at::cuda::sparse::bsrsv2_bufferSize(
+            handle,
+            block_layout,
+            opA,
+            mb,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            &buffer_size);
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        at::cuda::sparse::bsrsv2_analysis(
+            handle,
+            block_layout,
+            opA,
+            mb,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+
+        at::cuda::sparse::bsrsv2_solve(
+            handle,
+            block_layout,
+            opA,
+            mb,
+            nnzb,
+            &alpha,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            B_->data_ptr<scalar_t>(),
+            X_->data_ptr<scalar_t>(),
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+      });
+  if (!X.is_same(*X_)) {
+    X.copy_(*X_);
+  }
+#endif
+}
+
+void block_sparse_triangular_solve_mat(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solver with block sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 4.5.0+. ",
+      "Please use PyTorch built with newer ROCm version.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
+  // values is expected to be a blocks of sparse matrix
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
+  // blocks are expected to be square
+  TORCH_INTERNAL_ASSERT(A.values().size(2) == A.values().size(1));
+  // only block of size > 1 is supported in cuSPARSE
+  TORCH_INTERNAL_ASSERT(A.values().size(-1) > 1);
+  // blocks are expected to be in row- or column-major order
+  TORCH_INTERNAL_ASSERT(
+      A.values().is_contiguous() ||
+      A.values().transpose(-2, -1).is_contiguous());
+
+  // cuSPARSE can't work with empty sparse matrices
+  if (A._nnz() == 0) {
+    X.fill_(NAN);
+    return;
+  }
+
+  const cusparseDirection_t block_layout = A.values().is_contiguous()
+      ? CUSPARSE_DIRECTION_ROW
+      : CUSPARSE_DIRECTION_COLUMN;
+
+  c10::MaybeOwned<Tensor> X_ = prepare_column_major_matrix_for_cusparse(X);
+  c10::MaybeOwned<Tensor> B_ = prepare_column_major_matrix_for_cusparse(B);
+
+  int ldb = cuda_int_cast(B_->stride(-1), "ldb");
+  int ldx = cuda_int_cast(X_->stride(-1), "ldx");
+
+  cusparseOperation_t opX = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE
+                                      : CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  auto block_size = cuda_int_cast(A.values().size(2), "block_size");
+  auto nnzb = cuda_int_cast(A._nnz(), "nnzb");
+  auto mb = cuda_int_cast(A.size(0), "mb") / block_size;
+  auto n = cuda_int_cast(B.size(-1), "n");
+
+  auto desc = at::cuda::sparse::CuSparseMatDescriptor(upper, unitriangular);
+  auto info = at::cuda::sparse::CuSparseBsrsm2Info();
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      X.scalar_type(), "block_sparse_triangular_solve_vec", [&] {
+        scalar_t alpha = 1;
+        auto values = A.values();
+        auto values_data_ptr = values.data_ptr<scalar_t>();
+        auto crow_indices = A.crow_indices().to(kInt);
+        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto col_indices = A.col_indices().to(kInt);
+        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        int buffer_size = 0;
+
+        at::cuda::sparse::bsrsm2_bufferSize(
+            handle,
+            block_layout,
+            opA,
+            opX,
+            mb,
+            n,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            &buffer_size);
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto work_data = allocator.allocate(buffer_size);
+
+        at::cuda::sparse::bsrsm2_analysis(
+            handle,
+            block_layout,
+            opA,
+            opX,
+            mb,
+            n,
+            nnzb,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+
+        at::cuda::sparse::bsrsm2_solve(
+            handle,
+            block_layout,
+            opA,
+            opX,
+            mb,
+            n,
+            nnzb,
+            &alpha,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            info.descriptor(),
+            B_->data_ptr<scalar_t>(),
+            ldb,
+            X_->data_ptr<scalar_t>(),
+            ldx,
+            CUSPARSE_SOLVE_POLICY_NO_LEVEL,
+            work_data.get());
+      });
+  if (!X.is_same(*X_)) {
+    X.copy_(*X_);
+  }
+#endif
+}
+
 void block_sparse_mv(
     const at::sparse_csr::SparseCsrTensor& mat,
     const Tensor& vec,
@@ -181,7 +439,7 @@ void block_sparse_mm(
     const Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
   // values is expected to be a blocks of sparse matrix
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.values().dim() == 3);
+  TORCH_INTERNAL_ASSERT(mat1.values().dim() == 3);
   // blocks are expected to be square
   TORCH_INTERNAL_ASSERT(mat1.values().size(2) == mat1.values().size(1));
   // only block of size > 1 is supported in cuSPARSE
@@ -273,7 +531,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.values().dim() == 3 && mat1.values().size(-1) > 1) {
+  if (mat1.values().dim() >= 3 && mat1.values().size(-1) > 1) {
     return block_sparse_mm(mat1, mat2, beta, alpha, result);
   }
 #if !AT_USE_CUSPARSE_GENERIC_API()
@@ -296,9 +554,9 @@ void spmm(
   IntArrayRef result_strides = result_->strides();
   IntArrayRef mat2_strides = mat2_->strides();
   auto ndim = result_->dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat2.dim() == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2 || ndim == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 || mat1.dim() == 3);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat2.dim() == 2 || mat2.dim() == 3);
   bool is_result_row_major = (result_strides[ndim - 1] == 1);
   bool is_mat2_row_major = (mat2_strides[ndim - 1] == 1);
   bool transpose_B = (is_result_row_major ^ is_mat2_row_major);
@@ -336,9 +594,10 @@ void spmm(
       result.scalar_type(),
       "spmm",
       [&] {
-        auto beta_ = beta.to<scalar_t>();
-        auto alpha_ = alpha.to<scalar_t>();
-        cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
+        using opmath_t = at::opmath_type<scalar_t>;
+        auto beta_ = beta.to<opmath_t>();
+        auto alpha_ = alpha.to<opmath_t>();
+        cudaDataType compute_type = at::cuda::getCudaDataType<opmath_t>();
         auto handle = at::cuda::getCurrentCUDASparseHandle();
 
         size_t buffer_size;
@@ -544,7 +803,8 @@ void addmm_out_sparse_csr(
   } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);
   } else {
-    TORCH_INTERNAL_ASSERT(false, "Received unexpected tensor layouts as input.");
+    TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
+                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
 }
 
@@ -816,6 +1076,18 @@ void triangular_solve_out_sparse_csr(
     bool upper,
     bool transpose,
     bool unitriangular) {
+  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
+    // If A has no nnz, then A is singular and we can't solve.
+    X.fill_(NAN);
+    return;
+  }
+  if (A.values().dim() == 3 && A.values().size(-1) > 1) {
+    if (B.size(-1) == 1) {
+      return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
+    } else {
+      return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
+    }
+  }
 #if !AT_USE_CUSPARSE_GENERIC_SPSV()
   TORCH_CHECK(
       false,
@@ -823,10 +1095,6 @@ void triangular_solve_out_sparse_csr(
       "PyTorch with at least CUDA 11.3. ",
       "Please use PyTorch built with newer CUDA version.");
 #else
-  if (B.numel() == 0 || X.numel() == 0 || A._nnz() == 0) {
-    return;
-  }
-
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:

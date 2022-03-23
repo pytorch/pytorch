@@ -1,12 +1,12 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 
+#include <ATen/core/type_factory.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
 
 namespace torch {
 namespace jit {
-const std::unordered_map<std::string, TypePtr>& string_to_type_lut();
 namespace {
 
 bool isTorch(const Expr& expr) {
@@ -21,6 +21,11 @@ std::string collectQualname(const Select& select) {
   std::string basename = collectQualname(Select(base));
   return basename + "." + select.selector().name();
 }
+
+const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut() {
+  return c10::DefaultTypeFactory::basePythonTypes();
+}
+
 } // namespace
 
 TypePtr ScriptTypeParser::subscriptToType(

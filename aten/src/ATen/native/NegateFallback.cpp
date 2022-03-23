@@ -28,10 +28,18 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("neg_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.self_Tensor", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave.self_int", torch::CppFunction::makeFallthrough());
+
+  // See test_metadata_check_when_primal_has_neg_bit in test_autograd.py
+  m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
   m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
   m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_svd", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_svd.U", torch::CppFunction::makeFallthrough());
 
   TORCH_VIEW_FNS(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)

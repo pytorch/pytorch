@@ -3,6 +3,9 @@
 Quantization
 ============
 
+.. automodule:: torch.quantization
+.. automodule:: torch.quantization.fx
+
 .. warning ::
      Quantization is in beta and subject to change.
 
@@ -816,6 +819,63 @@ An e2e example::
   # turn off quantization for conv2
   m.conv2.qconfig = None
 
+Saving and Loading Quantized models
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When calling ``torch.load`` on a quantized model, if you see an error like::
+
+  AttributeError: 'LinearPackedParams' object has no attribute '_modules'
+
+This is because directly saving and loading a quantized model using ``torch.save`` and ``torch.load``
+is not supported. To save/load quantized models, the following ways can be used:
+
+1. Saving/Loading the quantized model state_dict
+
+An example::
+
+  class M(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.linear = nn.Linear(5, 5)
+          self.relu = nn.ReLU()
+
+      def forward(self, x):
+          x = self.linear(x)
+          x = self.relu(x)
+          return x
+
+  m = M().eval()
+  prepare_orig = prepare_fx(m, {'' : default_qconfig})
+  prepare_orig(torch.rand(5, 5))
+  quantized_orig = convert_fx(prepare_orig)
+
+  # Save/load using state_dict
+  b = io.BytesIO()
+  torch.save(quantized_orig.state_dict(), b)
+
+  m2 = M().eval()
+  prepared = prepare_fx(m2, {'' : default_qconfig})
+  quantized = convert_fx(prepared)
+  b.seek(0)
+  quantized.load_state_dict(torch.load(b))
+
+2. Saving/Loading scripted quantized models using ``torch.jit.save`` and ``torch.jit.load``
+
+An example::
+
+  # Note: using the same model M from previous example
+  m = M().eval()
+  prepare_orig = prepare_fx(m, {'' : default_qconfig})
+  prepare_orig(torch.rand(5, 5))
+  quantized_orig = convert_fx(prepare_orig)
+
+  # save/load using scripted model
+  scripted = torch.jit.script(quantized_orig)
+  b = io.BytesIO()
+  torch.jit.save(scripted, b)
+  b.seek(0)
+  scripted_quantized = torch.jit.load(b)
+
 Numerical Debugging (prototype)
 -------------------------------
 
@@ -826,3 +886,22 @@ Numerical Debugging (prototype)
   Eager mode numeric suite
 * :ref:`torch_ao_ns_numeric_suite_fx`
   FX numeric suite
+
+
+.. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
+.. They are here for tracking purposes until they are more permanently fixed.
+.. py:module:: torch.ao
+.. py:module:: torch.ao.nn
+.. py:module:: torch.ao.nn.sparse
+.. py:module:: torch.ao.nn.sparse.quantized
+.. py:module:: torch.ao.nn.sparse.quantized.dynamic
+.. py:module:: torch.ao.ns
+.. py:module:: torch.ao.ns.fx
+.. py:module:: torch.ao.quantization
+.. py:module:: torch.ao.quantization.fx
+.. py:module:: torch.ao.quantization.fx.backend_config
+.. py:module:: torch.ao.sparsity
+.. py:module:: torch.ao.sparsity.experimental
+.. py:module:: torch.ao.sparsity.experimental.pruner
+.. py:module:: torch.ao.sparsity.scheduler
+.. py:module:: torch.ao.sparsity.sparsifier

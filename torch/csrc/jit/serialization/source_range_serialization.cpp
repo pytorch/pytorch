@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
 namespace torch {
@@ -111,8 +112,13 @@ void ConcreteSourceRangeUnpickler::unpickle() {
     return;
   }
 
-  auto ivaluesTuple =
-      jit::unpickle(reinterpret_cast<const char*>(data.get()), size).toTuple();
+  auto ivaluesTuple = jit::unpickle(
+                          reinterpret_cast<const char*>(data.get()),
+                          size,
+                          nullptr,
+                          {},
+                          c10::parseType)
+                          .toTuple();
   const auto& ivalues = ivaluesTuple->elements();
 
   unpickled_records = std::make_shared<SourceRangeRecords>();
