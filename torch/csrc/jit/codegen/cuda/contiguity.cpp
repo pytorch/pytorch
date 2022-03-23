@@ -83,8 +83,7 @@ void ContigIDs::handle(Merge* merge) {
   // If any root input is not contig, output is not contig
   if (!(std::all_of(
           ordered_inputs.begin(), ordered_inputs.end(), [this](IterDomain* id) {
-            return is_contig_root_.at(id) && !id->isBroadcast() &&
-                !id->isReduction();
+            return is_contig_root_.at(id) && !id->isReduction();
           }))) {
     return;
   }

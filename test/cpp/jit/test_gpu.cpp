@@ -21323,6 +21323,48 @@ TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
 }
 
+TEST_F(NVFuserTest, FusionContigIndexingWithBroadcast_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({4});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({3, 4});
+  fusion.addInput(tv1);
+
+  auto tv2 = broadcast(tv0, {true, false});
+  auto tv3 = add(tv2, tv1);
+  fusion.addOutput(tv3);
+
+  tv3->merge(0);
+  TransformPropagator::from(tv3);
+
+  tv2->setMemoryType(MemoryType::Local);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({4}, options);
+  auto t1 = at::randn({3, 4}, options);
+
+  auto t3 = t0.unsqueeze(0).add(t1);
+  {
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, {t0, t1});
+    auto cg_outputs = fe.runFusion({t0, t1});
+
+    testValidate(&fusion, cg_outputs, {t0, t1}, {t3}, __LINE__, __FILE__);
+  }
+
+  // Make sure tv2 indexing also works when it's stored in global memory
+  tv2->setMemoryType(MemoryType::Global);
+  {
+    FusionExecutor fe;
+    fe.compileFusion(&fusion, {t0, t1});
+    auto cg_outputs = fe.runFusion({t0, t1});
+
+    testValidate(&fusion, cg_outputs, {t0, t1}, {t3}, __LINE__, __FILE__);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

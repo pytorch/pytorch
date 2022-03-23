@@ -411,11 +411,36 @@ void IndexCompute::handle(Merge* merge) {
     // Shouldn't hit this, but don't want to segfault if somehow we do.
     TORCH_INTERNAL_ASSERT(!input_ids.empty());
 
+    // Try to find the last non broadcast entry to put the index in if it's a
+    // contiguous merge. This isn't strictly necessary but there's implicit
+    // assumptions in the indexing logic that assume broadcasted root domains
+    // can be ignored. This logic is just to try and match that logic.
+    // Initialize everything to zero.
     for (auto root_id : input_ids) {
       index_map_[root_id] = zero;
     }
 
-    index_map_[*(input_ids.end() - 1)] = out_ind;
+    // If all are broadcast we can just send the index to the last entry.
+    if (std::all_of(input_ids.begin(), input_ids.end(), [](IterDomain* id) {
+          // I don't think reductions can be in here, but strictly matching the
+          // logic in the indexing functions like
+          // getNonGlobalConsumerStridedIndices
+          return id->isBroadcast() || id->isReduction() || id->isStride();
+        })) {
+      index_map_[*(input_ids.end() - 1)] = out_ind;
+    } else {
+      for (auto id_it = input_ids.rbegin(); id_it != input_ids.rend();
+           id_it++) {
+        auto id = *id_it;
+        if (id->isBroadcast() || id->isReduction() || id->isStride()) {
+          continue;
+        } else {
+          index_map_[id] = out_ind;
+          break;
+        }
+      }
+    }
+
     return;
   }
 
@@ -1044,15 +1069,20 @@ Val* hoistConsumerIndex(
     return index;
   }
 
-  // Find the true indexed domain, which can be a merged contiguous domain.
-  auto indexed_consumer_id_it =
-      consumer_indexing.rootToContigID().find(consumer_root_id);
-  TORCH_INTERNAL_ASSERT(
-      indexed_consumer_id_it != consumer_indexing.rootToContigID().end(),
-      "Consumer indexed ID not found: ",
-      consumer_root_id->toString());
-  auto indexed_consumer_id = indexed_consumer_id_it->second;
-
+  auto indexed_consumer_id = consumer_root_id;
+  {
+    // Find the true indexed domain, which can be a merged contiguous domain.
+    auto contig_id_it =
+        consumer_indexing.rootToContigID().find(consumer_root_id);
+    TORCH_INTERNAL_ASSERT(
+        contig_id_it != consumer_indexing.rootToContigID().end(),
+        "Consumer indexed ID not found: ",
+        consumer_root_id->toString());
+    if (consumer_indexing.indexMap().find(contig_id_it->second) !=
+        consumer_indexing.indexMap().end()) {
+      indexed_consumer_id = contig_id_it->second;
+    }
+  }
   // Insert the index into the common index map. A previously inserted
   // val can be returned.
   auto common_index = GpuLower::current()
@@ -1103,13 +1133,21 @@ Val* hoistProducerIndex(
     return index;
   }
 
-  auto indexed_producer_id_it =
-      producer_indexing.rootToContigID().find(producer_root_id);
-  TORCH_INTERNAL_ASSERT(
-      indexed_producer_id_it != producer_indexing.rootToContigID().end(),
-      "Producer indexed ID not found: ",
-      producer_root_id->toString());
-  auto indexed_producer_id = indexed_producer_id_it->second;
+  auto indexed_producer_id = producer_root_id;
+  // If the root domain maps to a contiguous domain that was successfully
+  // indexed, we will use that instead of the root domain.
+  {
+    auto contig_id_it =
+        producer_indexing.rootToContigID().find(producer_root_id);
+    TORCH_INTERNAL_ASSERT(
+        contig_id_it != producer_indexing.rootToContigID().end(),
+        "Producer indexed ID not found: ",
+        producer_root_id->toString());
+    if (producer_indexing.indexMap().find(contig_id_it->second) !=
+        producer_indexing.indexMap().end()) {
+      indexed_producer_id = contig_id_it->second;
+    }
+  }
 
   // Use the corresponding consumer domain to find matching
   // for-loops. Note that there's no CA mapping with the producer
@@ -1177,12 +1215,29 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // map. Use consumer as a proxy between producer and the generated reference.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
 
+  // Map sent to best effort replay needs to match the exact incantation for
+  // compute_at_mode.cpp with MappingMode::Index
+  auto c2p_root_map = pairwise_map.mapConsumerToProducer(
+      consumer_tv->domain(), producer_tv->domain());
+
+  // For index map do not map any broadcast dimensions to non-broadcast
+  // dimensions
+  // Prevent any broadcasted axes being mapped to non-broadcasted axes.
+  for (auto it = c2p_root_map.begin(); it != c2p_root_map.end();) {
+    auto c_id = it->first;
+    auto p_id = it->second;
+    if (p_id->isBroadcast() != c_id->isBroadcast()) {
+      it = c2p_root_map.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
   // This replay has to be consistent with compute at index map.
   BestEffortReplay replay_producer_as_consumer(
       producer_tv->domain()->domain(),
       consumer_tv->domain()->domain(),
-      pairwise_map.mapConsumerToProducer(
-          consumer_tv->domain(), producer_tv->domain()));
+      c2p_root_map);
 
   const auto& c2p_map = replay_producer_as_consumer.getReplay();
   const auto p2c_map = invertOneToOneMap(c2p_map);
@@ -1471,12 +1526,29 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // producer to reference.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
   {
+    // Map sent to best effort replay needs to match the exact incantation for
+    // compute_at_mode.cpp with MappingMode::Index
+    auto c2p_root_map = pairwise_map.mapConsumerToProducer(
+        consumer_tv->domain(), producer_tv->domain());
+
+    // For index map do not map any broadcast dimensions to non-broadcast
+    // dimensions
+    // Prevent any broadcasted axes being mapped to non-broadcasted axes.
+    for (auto it = c2p_root_map.begin(); it != c2p_root_map.end();) {
+      auto c_id = it->first;
+      auto p_id = it->second;
+      if (p_id->isBroadcast() != c_id->isBroadcast()) {
+        it = c2p_root_map.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
     // This replay has to be consistent with compute at index map.
     BestEffortReplay replay_producer_as_consumer(
         producer_tv->domain()->domain(),
         consumer_tv->domain()->domain(),
-        pairwise_map.mapConsumerToProducer(
-            consumer_tv->domain(), producer_tv->domain()));
+        c2p_root_map);
 
     const auto& c2p_map = replay_producer_as_consumer.getReplay();
 
