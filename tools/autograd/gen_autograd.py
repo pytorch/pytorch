@@ -5,6 +5,7 @@ repository, run:
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
        aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 

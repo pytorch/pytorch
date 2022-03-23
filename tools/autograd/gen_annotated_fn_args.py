@@ -5,6 +5,7 @@ test/test_overrides.py.
 
 python -m tools.autograd.gen_annotated_fn_args \
        aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
