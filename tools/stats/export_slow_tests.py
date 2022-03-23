@@ -12,6 +12,7 @@ from urllib.request import urlopen
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 SLOW_TEST_CASE_THRESHOLD_SEC = 60.0
 RELATIVE_DIFFERENCE_THRESHOLD = 0.1
+IGNORED_JOBS = ["asan", "periodic"]
 
 def get_test_case_times() -> Dict[str, float]:
     reports: List[Report] = get_previous_reports_for_branch('origin/viable/strict', "")
@@ -21,6 +22,10 @@ def get_test_case_times() -> Dict[str, float]:
         if report.get('format_version', 1) != 2:  # type: ignore[misc]
             raise RuntimeError("S3 format currently handled is version 2 only")
         v2report = cast(Version2Report, report)
+
+        if any(job_name in str(report['build_job']) for job_name in IGNORED_JOBS):
+            continue
+
         for test_file in v2report['files'].values():
             for suitename, test_suite in test_file['suites'].items():
                 for casename, test_case in test_suite['cases'].items():

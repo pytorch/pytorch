@@ -6669,16 +6669,13 @@ class TestAutogradForwardMode(TestCase):
             def __new__(cls, data=None):
                 return torch.Tensor._make_subclass(cls, data)
 
-            __torch_function__ = torch._C._disabled_torch_function_impl
-
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 if func.overloadpacket == torch.ops.aten.alias:
                     counter[0] += 1
 
-                    # Make sure autograd is not disabled here
-                    foo = torch.rand(1, requires_grad=True)
-                    self.assertIsNotNone(foo.exp().grad_fn)
+                    with no_dispatch():
+                        return MySubclass(torch.ops.aten.alias(*args))
 
                 with no_dispatch():
                     return func(*args, **kwargs)
@@ -6687,11 +6684,10 @@ class TestAutogradForwardMode(TestCase):
         s = MySubclass(a)
 
         with fwAD.dual_level():
-            # Only the primal has "alias" called on it
             fwAD.make_dual(s, torch.rand_like(s))
             self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
-            self.assertEqual(counter[0], 1)
+            self.assertEqual(counter[0], 2)
 
     def test_print(self):
         with fwAD.dual_level() as level:
