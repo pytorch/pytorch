@@ -3,6 +3,7 @@
 <!-- toc -->
 
   - [General Overview](#general-overview)
+  - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
     - [`pytorch/pytorch`](#pytorchpytorch)
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
@@ -12,6 +13,9 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
+  - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
+    - [Modify release matrix](#modify-release-matrix)
+    - [Open Google Colab issue](#open-google-colab-issue)
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
@@ -27,9 +31,23 @@
 
 Releasing a new version of PyTorch generally entails 3 major steps:
 
+0. Cutting a release branch preparations
 1. Cutting a release branch and making release branch specific changes
 2. Drafting RCs (Release Candidates), and merging cherry picks
-3. Promoting RCs to stable
+3. Promoting RCs to stable and performing release day tasks
+
+## Cutting a release branch preparations
+
+Following Requirements needs to be met prior to final RC Cut:
+
+* Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
+``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
+* Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
+* All the nighly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/nightly)
 
 ## Cutting release branches
 
@@ -121,6 +139,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
@@ -133,6 +152,24 @@ Promotion should occur in two steps:
 * Promote S3 wheels to PyPI
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
+
+## Additonal Steps to prepare for release day
+
+The following should be prepared for the release day
+
+### Modify release matrix
+
+Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
+
+After modifying published_versions.json you will need to regenerate regenerate the quick-start-module.js file run following command
+```
+python3 scripts/gen_quick_start_module.py >assets/quick-start-module.js
+```
+Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
+
+### Open Google Colab issue
+
+This is normally done right after the release is completed. We would need to create Google Colab Issue see following [PR](https://github.com/googlecolab/colabtools/issues/2372)
 
 # Patch Releases
 
