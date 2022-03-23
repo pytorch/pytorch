@@ -120,7 +120,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         tensor_class: str = default_args.tensor_class,
                         tensor_class_hdr: str = default_args.tensor_class_hdr,
                         shape_inference_hdr: str = default_args.shape_inference_hdr,
-                        lazy_ir_cls: Type[LazyIR] = default_args.lazy_ir_cls) -> None:
+                        lazy_ir_cls: Type[LazyIR] = default_args.lazy_ir_cls,
+                        per_operator_headers: bool = False) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
 
@@ -225,7 +226,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
         gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                     backend_key, dispatch_key, selector)
+                                     backend_key, dispatch_key, selector,
+                                     per_operator_headers=per_operator_headers)
 
     # Generate native function impls that build IR nodes
     ns_helper = NamespaceHelper(cpp_namespace)
