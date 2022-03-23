@@ -202,11 +202,7 @@ class Tensor(torch._C._TensorBase):
         if self.dtype not in torch.storage._dtype_to_storage_type_map():
             raise RuntimeError(f'unsupported Storage type: {self.dtype}')
 
-        storage = self._storage()
-        storage_name = torch.storage._dtype_to_storage_type_map()[self.dtype]
-        storage_class = eval(type(storage).__module__ + '.' + storage_name)
-        storage = storage_class(wrap_storage=storage)
-        return storage
+        return torch._TypedStorage(wrap_storage=self._storage(), dtype=self.dtype)
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
@@ -866,10 +862,7 @@ class Tensor(torch._C._TensorBase):
         Returns the type of the underlying storage.
 
         """
-        # NB: this returns old fashioned _TypedStorage, e.g., FloatStorage, as it
-        # would be pretty pointless otherwise (it would always return
-        # _UntypedStorage)
-        return type(self.storage())
+        return self.storage()._get_legacy_storage_class()
 
     def refine_names(self, *names):
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
