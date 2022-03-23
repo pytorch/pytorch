@@ -527,13 +527,8 @@ void scatter_scalar_reduce_cuda_kernel(const Tensor& self, const int64_t dim, co
     cuda_scatter_fill_base_kernel<false>()(self, dim, index, value,
                                       "scatter_fill_cuda_multiply_", reduce_multiply);
     break;
-<<<<<<< HEAD
   default :
     break;
-=======
-  default:
-      break;
->>>>>>> bbcef151d1... scatter_reduce CUDA support
   }
 }
 
