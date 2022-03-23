@@ -149,7 +149,7 @@ class ShardedTensor(object):
         dims = _flatten_tensor_size(size)
 
         if not isinstance(sharding_spec, shard_spec.ShardingSpec):
-            raise ValueError(f'Expecting ShardingSpec but got: {type(self._sharding_spec)}')
+            raise ValueError(f'Expecting ShardingSpec but got: {type(sharding_spec)}')
 
         self._sharding_spec = sharding_spec
 
@@ -683,9 +683,18 @@ class ShardedTensor(object):
             raise NotImplementedError("Only single local shard is supported.")
         return self.local_shards()[0].tensor
 
-    def __torch_function__(self, func, types, args=(), kwargs=None):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
-            return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
+            # Find ShardedTensor instance to get process_group.
+            for arg in args:
+                if isinstance(arg, ShardedTensor):
+                    return _SHARDED_OPS[func](types, args, kwargs, arg._process_group)
+
+            for kwarg in kwargs.values():
+                if isinstance(kwarg, ShardedTensor):
+                    return _SHARDED_OPS[func](types, args, kwargs, kwarg._process_group)
+
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")

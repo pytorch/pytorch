@@ -62,10 +62,10 @@ class PackageImporter(Importer):
             zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (Path, str)):
             filename = str(file_or_buffer)
-            if not os.path.isdir(self.filename):
-                zip_reader = DefaultPackageZipFileReader(self.filename)
+            if not os.path.isdir(filename):
+                zip_reader = DefaultPackageZipFileReader(filename)
             else:
-                zip_reader = DirectoryReader(self.filename)
+                zip_reader = DirectoryReader(filename)
         else:
             filename = "<binary>"
             zip_reader = DefaultPackageZipFileReader(file_or_buffer)
