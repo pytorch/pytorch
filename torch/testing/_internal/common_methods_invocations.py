@@ -1816,11 +1816,14 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
     for shape in cases:
         for weight in [-1., 0., 0.8, 1.]:
             weight_tensor = torch.tensor(weight, device=device, dtype=dtype, requires_grad=requires_grad)
-            yield SampleInput(make_arg(shape), kwargs=dict(weight=weight_tensor))
+            yield SampleInput(make_arg(shape), args=(weight_tensor,))
 
         if len(shape) >= 2:
             channel_size = shape[1]
-            yield SampleInput(make_arg(shape), kwargs=dict(weight=make_arg((channel_size,))))
+            yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+    weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
+    yield SampleInput(make_arg((S, S)), kwargs=dict(weight=make_arg((S,)),))
 
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -15414,8 +15417,8 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         '_masked.median',
-        dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool),  # row may be masked out so need floating type for nan's
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16),
+        dtypes=all_types_and(torch.bfloat16),  # row may be masked out so need floating type for nan's
+        dtypesIfCUDA=all_types_and(torch.float16),
         method_variant=None,
         supports_out=False,
         supports_forward_ad=True,
