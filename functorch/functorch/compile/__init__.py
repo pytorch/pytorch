@@ -18,7 +18,8 @@ from .._src.compilers import (
     nnc_jit,
     memory_efficient_fusion,
     debug_compile,
-    print_compile
+    print_compile,
+    default_decompositions
 )
 from .._src.partitioners import (
     min_cut_rematerialization_partition,
