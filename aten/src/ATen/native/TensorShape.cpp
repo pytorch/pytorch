@@ -1600,7 +1600,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       auto dim_indices_counts = get_counts(indices[dim], /*bins=*/size,
           // When self is coalesced and dim == 0, indices[dim] is sorted.
           /*is_sorted=*/self.is_coalesced() && dim == 0);
-      auto index_counts = get_counts(index, /*bins=*/size,
+      auto index_counts = get_counts(nneg_index, /*bins=*/size,
           // We cannot assume that index is always sorted.
           /*is_sorted=*/false);
 
@@ -1615,7 +1615,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
         else {
           // do merge/quick sort in O(index_len * log(index_len))
-          return std::get<0>(index.sort());
+          return std::get<0>(nneg_index.sort());
         }
       }();
 
