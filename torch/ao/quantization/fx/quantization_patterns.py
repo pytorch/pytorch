@@ -277,41 +277,13 @@ class CatQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return True
 
-# handle conv, maybe followed by relu
-# NB: matching order is reversed, that is we match from the bottom of this list to the beginning
-@register_quant_pattern(torch.nn.Conv1d)
-@register_quant_pattern(torch.nn.Conv2d)
-@register_quant_pattern(torch.nn.Conv3d)
-@register_quant_pattern(torch.nn.functional.conv1d)
-@register_quant_pattern(torch.nn.functional.conv2d)
-@register_quant_pattern(torch.nn.functional.conv3d)
-# TODO: add qat.Conv1d
-@register_quant_pattern(torch.nn.qat.Conv2d)
-@register_quant_pattern(torch.nn.qat.Conv3d)
-@register_quant_pattern(torch.nn.intrinsic.ConvReLU1d)
-@register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
-@register_quant_pattern(torch.nn.intrinsic.ConvReLU3d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvBn1d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvBn2d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvBn3d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU1d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU2d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU3d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU2d)
-@register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU3d)
+# TODO(andrew): figure out why functional conv + relu doesn't work
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv1d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv3d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv1d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv2d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
-# just for error checks
-@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv1d))
-@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
-@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
-# TODO: rename Relu -> ReLU to be more consistent with other classes
 class ConvReluQuantizeHandler(QuantizeHandler):
     def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
@@ -326,17 +298,9 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         elif node.op == "call_function":
             self.conv = node.target  # type: ignore[assignment]
 
-@register_quant_pattern(torch.nn.functional.linear)
-@register_quant_pattern(torch.nn.qat.Linear)
-@register_quant_pattern(torch.nn.intrinsic.LinearReLU)
-@register_quant_pattern(torch.nn.intrinsic.qat.LinearReLU)
+# TODO(andrew): figure out why functional linear + relu doesn't work
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.linear))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.linear))
-@register_quant_pattern(torch.nn.intrinsic.LinearBn1d)
-@register_quant_pattern(torch.nn.intrinsic.qat.LinearBn1d)
-# for error checks
-@register_quant_pattern((torch.nn.ReLU, torch.nn.Linear))
-@register_quant_pattern((torch.nn.functional.relu, torch.nn.Linear))
 class LinearReLUQuantizeHandler(QuantizeHandler):
     def __init__(
             self,
