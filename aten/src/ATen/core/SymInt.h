@@ -5,7 +5,7 @@ namespace c10 {
 
 // SymInt is a C++ wrapper class used by LTC and AOTAutograd for tracing
 // arithmetic operations on symbolic integers (e.g. sizes).
-// 
+//
 // `SymInt` is also a data type in Pytorch that can be used in function schemas
 // to enable tracing.
 //
