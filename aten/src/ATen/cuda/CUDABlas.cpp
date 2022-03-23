@@ -674,7 +674,9 @@ void gemm_and_bias(
   if (activation == GEMMAndBiasActivationEpilogue::RELU) {
     epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
   } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
+#if CUDA_VERSION >= 11040
     epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
+#endif
   }
   TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
       computeDesc.descriptor(),

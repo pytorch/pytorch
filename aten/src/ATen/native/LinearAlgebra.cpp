@@ -1298,6 +1298,19 @@ TORCH_IMPL_FUNC(addmm_out_cpu)(const Tensor& self, const Tensor& mat1, const Ten
   }
 }
 
+TORCH_IMPL_FUNC(addmm_activation_out_cpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor &result) {
+  auto b_self = expand_size(self, {mat1.sizes()[0], mat2.sizes()[1]}, "addmm_out");
+  {
+    at::NoNamesGuard guard;
+    addmm_impl_cpu_(const_cast<Tensor&>(result), *b_self, mat1, mat2, beta, alpha);
+    if (use_gelu) {
+      at::gelu_out(const_cast<Tensor&>(result), result);
+    } else {
+      at::relu_(const_cast<Tensor&>(result));
+    }
+  }
+}
+
 TORCH_IMPL_FUNC(mm_out_cpu)(const Tensor & self, const Tensor & mat2, const Tensor & result) {
   {
     at::NoNamesGuard guard;

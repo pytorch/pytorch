@@ -77,6 +77,8 @@ enum GEMMAndBiasActivationEpilogue {
   GELU,
 };
 
+// NOTE: GELU activation is not supported prior to CUDA 11.4 and will
+// do nothing if passed in that case.
 template <typename Dtype>
 void gemm_and_bias(
     bool transpose_mat1,

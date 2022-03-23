@@ -3086,10 +3086,10 @@
 
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: amin
+  structured_delegate: amin.out
 
 - func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
     CPU, CUDA: amin_out
 
@@ -5178,6 +5178,7 @@
 - func: _addmm_activation.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
+    CPU: addmm_activation_out_cpu
     CUDA: addmm_activation_out_cuda
 
 - func: _addmm_activation(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False) -> Tensor

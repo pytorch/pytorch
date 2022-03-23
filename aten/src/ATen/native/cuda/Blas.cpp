@@ -232,7 +232,15 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               self.data_ptr<scalar_t>(),
               result_->data_ptr<scalar_t>(),
               result_ld,
-              activation);
+#if CUDA_VERSION >= 11040
+              activation
+#else
+              // GELU is not supported (and does not compile!) prior to CUDA 11.4.
+              activation != cuda::blas::GEMMAndBiasActivationEpilogue::GELU
+              ? activation
+              : cuda::blas::GEMMAndBiasActivationEpilogue::None
+#endif
+          );
         });
   } else
 #endif
@@ -274,6 +282,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       default: break;
     }
   }
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && CUDA_VERSION < 11040 && !defined(_MSC_VER)
+  if (useLtInterface && activation == cuda::blas::GEMMAndBiasActivationEpilogue::GELU) {
+    result_ = c10::MaybeOwned<Tensor>::owned(at::gelu(*result_));
+  }
+#endif
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);

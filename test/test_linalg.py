@@ -5695,7 +5695,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 ---(input size: {:4}, eigenpairs:{:2}, units: relative error, maxiter={:4})---
 '''.format(tol, eq_err, eq_err_general, iters1, eq_err_scipy, eq_err_general_scipy, iters2, m, k, niter))
 
-    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False):
+    def _test_addmm_addmv(self, f, t, m, v, *, alpha=None, beta=None, transpose_out=False, activation=None):
         dtype = t.dtype
         numpy_dtype = dtype
         if dtype in {torch.bfloat16}:
@@ -5714,6 +5714,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         res3 = alpha * (m.to(numpy_dtype).cpu().numpy() @ v.to(numpy_dtype).cpu().numpy())
         if beta != 0:
             res3 += (beta * t).to(numpy_dtype).cpu().numpy()
+        if activation == "relu":
+            res3 = res3 * (res3 > 0)
+        else:
+            assert activation is None, f"unsupported activation {activation}"
         res3 = torch.from_numpy(res3).to(dtype)
         self.assertEqual(res1, res2)
         self.assertEqual(res1, res3)
@@ -5786,29 +5790,23 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for row_major, incx, incy, lda_tail in itertools.product((False, True), (1, 2), (1, 2), (0, 1)):
             _test(row_major, incx, incy, lda_tail)
 
-    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
-                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*get_all_complex_dtypes(),
-                  *get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
-    @dtypes(*get_all_complex_dtypes(), *get_all_fp_dtypes())
-    @tf32_on_and_off(0.05)
-    def test_addmm(self, device, dtype):
+    def _test_addmm_impl(self, func, activation, device, dtype):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2)
+        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
 
         # Test 0-strided
         M = torch.randn(10, 1, device=device).to(dtype).expand(10, 25)
         m1 = torch.randn(10, 1, device=device).to(dtype).expand(10, 50)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2)
+        self._test_addmm_addmv(func, M, m1, m2, activation=activation)
 
         # Test beta=0, M=nan
         M = torch.full((10, 25), math.nan, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
-        self._test_addmm_addmv(torch.addmm, M, m1, m2, beta=0)
+        self._test_addmm_addmv(func, M, m1, m2, beta=0, activation=activation)
 
         # Test transpose
         for t1, t2, t3, t4 in itertools.product([True, False], repeat=4):
@@ -5820,7 +5818,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
             m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
-            self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
+            self._test_addmm_addmv(func, M, m1, m2, transpose_out=t4, activation=activation)
+
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*get_all_complex_dtypes(),
+                  *get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
+    @dtypes(*get_all_complex_dtypes(), *get_all_fp_dtypes())
+    @tf32_on_and_off(0.05)
+    def test_addmm(self, device, dtype):
+        self._test_addmm_impl(torch.addmm, None, device, dtype)
+
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
+    @dtypes(*get_all_fp_dtypes(include_half=False))
+    @tf32_on_and_off(0.05)
+    def test_addmm_activation(self, device, dtype):
+        self._test_addmm_impl(torch._addmm_activation, "relu", device, dtype)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] + get_all_complex_dtypes()))
