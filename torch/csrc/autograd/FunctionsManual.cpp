@@ -5250,6 +5250,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
+  bool include_self,
   const Tensor& result) {
   Tensor grad_self, grad_src;
 
@@ -5266,7 +5267,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (grad * result).gather(dim, index) / src;
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = ones_like(grad);
+    Tensor N = include_self ? ones_like(grad) : zeros_like(grad);
     N.scatter_add_(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
     grad_self = grad / N;
@@ -5278,6 +5279,10 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
+  }
+
+  if (!include_self) {
+    grad_self = grad_self.scatter(dim, index, 0);
   }
 
   return std::make_tuple(grad_self, grad_src);
