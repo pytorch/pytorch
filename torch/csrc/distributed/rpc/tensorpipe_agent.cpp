@@ -369,15 +369,8 @@ void TensorPipeAgent::checkAndSetStaticGroup(
       (uint8_t*)isStaticGroupStr.c_str(),
       (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
   std::vector<uint8_t> returnedVec;
-  bool isStaticGroupKeyExists =
-      store->check(std::vector<std::string>{isStaticGroupKey});
-  if (isStaticGroupKeyExists) {
-    returnedVec =
-        store->compareSet(isStaticGroupKey, isStaticGroupVec, isStaticGroupVec);
-  } else {
-    returnedVec = store->compareSet(
-        isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
-  }
+  returnedVec = store->compareSet(
+      isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
   std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
   // In both cases, the returned value should be the value of isStaticGroupStr,
   // otherwise there is a discrepency with initialization among one of the
@@ -385,7 +378,8 @@ void TensorPipeAgent::checkAndSetStaticGroup(
   TORCH_CHECK(
       returnedVal == isStaticGroupStr,
       fmt::format(
-          "RPC group behavior is different than expected. isStaticGroup_ is initialized with {} while in store it is {}",
+          "RPC group mixes statically and dynamically initialized members which is not supported. ",
+          "Static group property is initialized as {} and is trying to be set as {} ",
           isStaticGroup_,
           returnedVal));
 }
