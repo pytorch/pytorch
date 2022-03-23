@@ -1597,10 +1597,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return counts;
       };
 
-      auto dim_indices_counts = get_counts(indices[dim], /*bins=*/size,
+      const auto dim_indices_counts = get_counts(indices[dim], /*bins=*/size,
           // When self is coalesced and dim == 0, indices[dim] is sorted.
           /*is_sorted=*/self.is_coalesced() && dim == 0);
-      auto index_counts = get_counts(nneg_index, /*bins=*/size,
+      const auto index_counts = get_counts(nneg_index, /*bins=*/size,
           // We cannot assume that index is always sorted.
           /*is_sorted=*/false);
 
