@@ -628,6 +628,13 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
             assert os.path.exists(os.path.join(tmpdir, 'ailzhang_torchhub_example_master'))
 
+        # Test that set_dir properly calls expanduser()
+        # non-regression test for https://github.com/pytorch/pytorch/issues/69761
+        new_dir = os.path.join("~", "hub")
+        torch.hub.set_dir(new_dir)
+        self.assertEqual(torch.hub.get_dir(), os.path.expanduser(new_dir))
+
+
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
