@@ -390,9 +390,6 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             torch.matmul,
             toq.matmul,
         ]),
-        set([
-            torch.sum,
-        ]),
     ]
 
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
