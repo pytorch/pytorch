@@ -107,9 +107,14 @@ def plural(n: int) -> str:
 
 
 def get_base_commit(sha1: str) -> str:
-    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
+    default_branch = os.environ.get('GIT_DEFAULT_BRANCH')
+    # capture None and "" cases
+    if not default_branch:
+        default_branch = "master"
+
+    default_remote = f"origin/{default_branch}"
     return subprocess.check_output(
-        ["git", "merge-base", sha1, default_branch],
+        ["git", "merge-base", sha1, default_remote],
         encoding="ascii",
     ).strip()
 
