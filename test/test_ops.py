@@ -718,6 +718,16 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_with_mode(op, args, kwargs)
             composite_compliance.check_all_permutations(op, args, kwargs)
 
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    def test_backward(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            composite_compliance.check_backward_formula(op, args, kwargs)
+
 
 class TestMathBits(TestCase):
     # Tests that
