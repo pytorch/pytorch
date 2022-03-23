@@ -88,6 +88,7 @@ def verify_reusing_compiled_graph(mod, ncase=10):
         actual = optimized_mod(*rand_args)
 
         if not allclose(expected, actual):
+            print(f"Incorrect results. expected {expected}, actual {actual}")
             failed_index.append(i)
 
     if len(failed_index) > 0:
@@ -99,10 +100,8 @@ def maketest(module_cls):
 
     return wrapper
 
-# import pdb; pdb.set_trace()
 class OptimizeTest(unittest.TestCase):
     test_sub = maketest(ModuleSub)
     test_const_scale = maketest(ModuleConstScale)
     test_addcmul = maketest(ModuleAddcmul)
     test_return_multi = maketest(ModuleReturnMulti)
-    # test_eager_tensor = maketest(ModuleEagerTensor)

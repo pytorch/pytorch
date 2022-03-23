@@ -78,6 +78,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
         print("LTC IR:", _LAZYC._get_ltc_tensors_text(lazy_out))
 
     graph_input_tensor_ids, graph_input_ivalues = _LAZYC._get_ltc_tensors_ts_device_data_node(lazy_out)
+    assert len(graph_input_tensor_ids) == len(graph_input_ivalues)
     graph_input_matcher = GraphInputMatcher(tensor_id_to_arg_idx, graph_input_tensor_ids, graph_input_ivalues)
 
     graph_hash = _LAZYC._get_graph_hash(lazy_out)
