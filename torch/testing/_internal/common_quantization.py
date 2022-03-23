@@ -1104,11 +1104,11 @@ class MultiheadAttentionwithHiddenDynamicModel(torch.nn.Module):
     def __init__(self, qengine='fbgemm'):
         super().__init__()
         self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.mha = torch.nn.MultiheadAttention(2, 2).to(dtype=torch.float)
+        self.mha = torch.nn.MultiheadAttention(16, 2).to(dtype=torch.float)
 
-    def forward(self, x, hid):
-        x, hid = self.mha(x, hid)
-        return x, hid
+    def forward(self, q, k, v):
+        out, weights = self.mha(q, k, v)
+        return out, weights
 
 class ConvModel(torch.nn.Module):
     def __init__(self):
