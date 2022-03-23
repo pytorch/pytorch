@@ -44,7 +44,7 @@ bool isAutocastNode(Value* value) {
   return class_name.has_value() &&
       (*class_name == "__torch__.torch.cuda.amp.autocast_mode.autocast" ||
        *class_name == "__torch__.torch.cpu.amp.autocast_mode.autocast" ||
-       *class_name == "__torch__.torch.autocast_mode.autocast");
+       *class_name == "__torch__.torch.amp.autocast_mode.autocast");
 }
 
 // If we have an autocast instance, return it

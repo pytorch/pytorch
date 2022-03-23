@@ -600,6 +600,77 @@ class TestFuseFx(QuantizationTestCase):
             if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
                 self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
 
+    def test_fusion_pattern_with_matchallnode(self):
+        """This test tests that the node matched by MatchAllNode will be regared as an input
+        instead of a module to be fused. For instance, we have two patterns:
+            (nn.ReLU, (torch.add, MatchAllNode, nn.Conv2d))
+            (nn.ReLU, nn.Conv2d)
+        And we wanna fuse the following model
+            Conv2d -> ReLU +
+            Conv2d ------ Add -> ReLU
+        ReLU in the first row is matched as MatchAllNode in the residual pattern. But it won't be
+        fused as part of that pattnern. It needs to be properly fused with the upstream Conv2d.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3)
+                self.relu1 = torch.nn.ReLU()
+                self.conv2 = torch.nn.Conv2d(3, 3, 3)
+                self.relu2 = torch.nn.ReLU()
+
+            def forward(self, x):
+                y = self.conv1(x)
+                y = self.relu1(y)
+
+                x = self.conv2(x)
+                x = torch.add(x, y)
+                x = self.relu2(x)
+                return x
+
+        m = M().eval()
+
+        def fuse_conv_relu(is_qat, relu, conv):
+            return conv
+
+        def fuse_conv_res_relu(is_qat, relu, add_pattern):
+            _, conv, _ = add_pattern
+            return conv
+
+        def conv_res_relu_root_node_getter(pattern):
+            relu, (_, conv, _) = pattern
+            return conv
+
+        def conv_res_relu_extra_inputs_getter(pattern):
+            relu, (_, _, extra_input) = pattern
+            return [extra_input]
+
+        conv_relu_config = {
+            "pattern": (nn.ReLU, nn.Conv2d),
+            "fuser_method": fuse_conv_relu,
+        }
+        conv_res_relu_config = {
+            "pattern": (nn.ReLU, (torch.add, nn.Conv2d, MatchAllNode)),
+            "fuser_method": fuse_conv_res_relu,
+            "root_node_getter": conv_res_relu_root_node_getter,
+            "extra_inputs_getter": conv_res_relu_extra_inputs_getter,
+        }
+
+        backend_config_dict = {
+            "configs": [
+                conv_relu_config,
+                conv_res_relu_config,
+            ],
+        }
+        m = fuse_fx(m, backend_config_dict=backend_config_dict)
+        self.assertEqual(type(m.conv1), torch.nn.Conv2d)
+        self.assertEqual(type(m.conv2), torch.nn.Conv2d)
+        # check relu are gone since we replaced the both patterns to conv
+        self.assertFalse(hasattr(m, "relu1"))
+        self.assertFalse(hasattr(m, "relu2"))
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
     def test_pattern_match(self):
@@ -959,6 +1030,8 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
+        """ Tests fusion and quantization for "Conv - Bn" and "Conv - Bn - ReLU"
+        """
         convs = {
             1: nn.Conv1d,
             2: nn.Conv2d,
@@ -999,8 +1072,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        # TODO: add 1d support
-        options = itertools.product([2, 3], [True, False], self.static_quant_types)
+        options = itertools.product([1, 2, 3], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
@@ -2173,6 +2245,88 @@ class TestQuantizeFx(QuantizationTestCase):
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(data)
             self.assertEqual(res, ref_res)
+
+    @skipIfNoFBGEMM
+    def test_custom_module_class_input_has_multiple_users(self):
+        """ Tests that the flow still works when the input of custom module
+        has multiple users
+        """
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class ObservedCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_float(cls, float_module):
+                assert hasattr(float_module, 'qconfig')
+                observed = cls(float_module.linear)
+                observed.qconfig = float_module.qconfig
+                return observed
+
+        class StaticQuantCustomModule(torch.nn.Module):
+            def __init__(self, linear):
+                super().__init__()
+                self.linear = linear
+
+            def forward(self, x):
+                return self.linear(x)
+
+            @classmethod
+            def from_observed(cls, observed_module):
+                assert hasattr(observed_module, 'qconfig')
+                assert hasattr(observed_module, 'activation_post_process')
+                observed_module.linear.activation_post_process = \
+                    observed_module.activation_post_process
+                quantized = cls(nnq.Linear.from_float(observed_module.linear))
+                return quantized
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.custom = CustomModule()
+
+            def forward(self, x0):
+                x1 = self.custom(x0)
+                x2 = self.linear(x0)
+                return x1 + x2
+
+        prepare_custom_config_dict = {
+            "float_to_observed_custom_module_class": {
+                "static": {
+                    CustomModule: ObservedCustomModule
+                }
+            }
+        }
+        convert_custom_config_dict = {
+            "observed_to_quantized_custom_module_class": {
+                "static": {
+                    ObservedCustomModule: StaticQuantCustomModule
+                }
+            }
+        }
+        m = M().eval()
+        m = prepare_fx(
+            m,
+            {"": default_qconfig},
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        # make sure it works
+        m = convert_fx(
+            m,
+            convert_custom_config_dict=convert_custom_config_dict)
+        # make sure it runs
+        m(torch.randn(3, 3))
 
     @skipIfNoFBGEMM
     def test_non_traceable_module(self):
