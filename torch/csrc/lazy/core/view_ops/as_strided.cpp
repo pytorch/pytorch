@@ -17,7 +17,7 @@ AsStrided::AsStrided(
           OpKind(at::aten::as_strided),
           {input},
           [&]() {
-            return Shape(GetShapeFromTsValue(input).scalar_type(), size);
+            return Shape(input.shape().scalar_type(), size);
           },
           /*num_outputs=*/1,
           MHash(size, stride, storage_offset)),

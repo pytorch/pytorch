@@ -74,19 +74,29 @@
 namespace at {
 namespace meta {
 
-native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
-  if (reduce == "add" || reduce == "sum") {
-    return native::SCATTER_GATHER_OP::REDUCE_ADD;
-  } else if (reduce == "multiply" || reduce == "prod") {
-    return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
-  } else if (reduce == "mean") {
-    return native::SCATTER_GATHER_OP::REDUCE_MEAN;
-  } else if (reduce == "amax") {
-    return native::SCATTER_GATHER_OP::REDUCE_MAXIMUM;
-  } else if (reduce == "amin") {
-  return native::SCATTER_GATHER_OP::REDUCE_MINIMUM;
+native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce, bool use_new_options = false) {
+  if (use_new_options) {
+    if (reduce == "sum") {
+      return native::SCATTER_GATHER_OP::REDUCE_ADD;
+    } else if (reduce == "prod") {
+      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+    } else if (reduce == "mean") {
+      return native::SCATTER_GATHER_OP::REDUCE_MEAN;
+    } else if (reduce == "amax") {
+      return native::SCATTER_GATHER_OP::REDUCE_MAXIMUM;
+    } else if (reduce == "amin") {
+    return native::SCATTER_GATHER_OP::REDUCE_MINIMUM;
+    } else {
+      TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin.");
+    }
   } else {
-    TORCH_CHECK(false, "reduce argument must be either add, sum, multiply, prod, mean, amax or amin.");
+    if (reduce == "add" || reduce == "sum") {
+      return native::SCATTER_GATHER_OP::REDUCE_ADD;
+    } else if (reduce == "multiply" || reduce == "prod") {
+      return native::SCATTER_GATHER_OP::REDUCE_MULTIPLY;
+    } else {
+      TORCH_CHECK(false, "reduce argument must be either add or multiply.")
+    }
   }
 }
 
@@ -119,7 +129,7 @@ TORCH_META_FUNC(gather)
   at::native::gather_shape_check(self, wrapped_dim, index);
 }
 
-template <typename Meta>
+template <bool use_new_options = false, typename Meta>
 void scatter_meta_impl(
     Meta& meta,
     const Tensor& self,
@@ -143,7 +153,7 @@ void scatter_meta_impl(
   meta.set_output(self.sizes(), self.options());
   if (reduce.has_value()) {
     // Check if we have a valid reduce operator.
-    get_operator_enum(reduce.value());
+    get_operator_enum(reduce.value(), use_new_options);
   }
 }
 
@@ -185,11 +195,8 @@ TORCH_META_FUNC2(scatter_reduce, two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
- bool include_input
- ) {
-  (void) include_input;
-  scatter_meta_impl(*this, self, dim, index, src, reduce);
+ const c10::string_view reduce) {
+  scatter_meta_impl</* use_new_options */true>(*this, self, dim, index, src, reduce);
 }
 
 TORCH_PRECOMPUTE_META_FUNC(index_copy)
@@ -314,7 +321,6 @@ DEFINE_DISPATCH(scatter_fill_stub);
 DEFINE_DISPATCH(scatter_add_stub);
 DEFINE_DISPATCH(scatter_reduce_stub);
 DEFINE_DISPATCH(scatter_scalar_reduce_stub);
-DEFINE_DISPATCH(scatter_reduce_two_stub);
 
 static bool all_strides_match(TensorList tensors) {
   TORCH_CHECK(tensors.size() >= 1);
@@ -1188,37 +1194,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   return grad.new_zeros(self.sizes()).scatter_add_(dim, index, grad);
 }
 
-static void scatter_reduce_exclude_input_helper(
-  const Tensor& self,
-  int64_t dim,
-  const Tensor& index,
-  SCATTER_GATHER_OP op) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-    at::ScalarType::Half, at::ScalarType::BFloat16,
-    self.scalar_type(), "cuda_scatter_reduce_exclude_input_init", [&] {
-    scalar_t init_val;
-    switch (op) {
-      case SCATTER_GATHER_OP::REDUCE_ADD:
-        init_val = (scalar_t)0;
-        break;
-      case SCATTER_GATHER_OP::REDUCE_MULTIPLY:
-        init_val = (scalar_t)1;
-        break;
-      case SCATTER_GATHER_OP::REDUCE_MAXIMUM:
-        init_val = std::numeric_limits<scalar_t>::lowest();
-        break;
-      case SCATTER_GATHER_OP::REDUCE_MINIMUM:
-        init_val = std::numeric_limits<scalar_t>::max();
-        break;
-      case SCATTER_GATHER_OP::REDUCE_MEAN:
-        init_val = (scalar_t)0;
-        break;
-    }
-    self.scatter_(dim, index, init_val);
-  });
-}
-
-template <typename T, typename ReduceStub, typename FillStub>
+template <bool use_new_options = false, typename T, typename ReduceStub, typename FillStub>
 void scatter_impl(
     const Tensor& self,
     int64_t dim,
@@ -1227,8 +1203,7 @@ void scatter_impl(
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
-    const c10::optional<c10::string_view> reduce = nullopt,
-    bool reduce_includes_input = true) {
+    const c10::optional<c10::string_view> reduce = nullopt) {
 
   dim = at::maybe_wrap_dim(dim, self.dim());
   auto mut_out = const_cast<Tensor&>(out);
@@ -1240,11 +1215,7 @@ void scatter_impl(
   if (index.numel() == 0) return;
 
   if (reduce.has_value()) {
-    auto op = meta::get_operator_enum(reduce.value());
-    if (!reduce_includes_input) {
-      // scatter inits for reduction to appropriate indices (used by scatter_reduce.two)
-      scatter_reduce_exclude_input_helper(mut_out, dim, index, op);
-    }
+    auto op = meta::get_operator_enum(reduce.value(), use_new_options);
     reduce_stub(self.device().type(), mut_out, dim, index, src, op);
   } else {
     fill_stub(self.device().type(), mut_out, dim, index, src);
@@ -1335,20 +1306,17 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce,
- bool include_input,
  const Tensor& out) {
-  scatter_impl(self, dim, index, src, out,
-               scatter_reduce_two_stub,
-               scatter_stub,
-               reduce,
-               include_input);
+  scatter_impl</* use_new_options */true>(self, dim, index, src, out,
+                                          scatter_reduce_stub,
+                                          scatter_stub,
+                                          reduce);
 
-  if (meta::get_operator_enum(reduce) == SCATTER_GATHER_OP::REDUCE_MEAN) {
+  if (meta::get_operator_enum(reduce, true) == SCATTER_GATHER_OP::REDUCE_MEAN) {
     auto ones = at::ones_like(src);
-    auto count = include_input ? at::ones_like(out) : at::zeros_like(out);
+    auto count = at::ones_like(out);
     count.scatter_add_(dim, index, ones);
-    count.masked_fill_(count == 0, 1);
-    if (out.is_floating_point()) {
+    if (out.is_floating_point() or out.is_complex()) {
       out.div_(count);
     } else {
       out.div_(count, "floor");

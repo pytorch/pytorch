@@ -4,12 +4,17 @@
 
   - [General Overview](#general-overview)
   - [Cutting release branches](#cutting-release-branches)
+    - [`pytorch/pytorch`](#pytorchpytorch)
+    - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes](#making-release-branch-specific-changes)
     - [Getting CI signal on release branches:](#getting-ci-signal-on-release-branches)
   - [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
     - [Release Candidate Storage](#release-candidate-storage)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
+  - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
+    - [Modify release matrix](#modify-release-matrix)
+    - [Open Google Colab issue](#open-google-colab-issue)
 - [Patch Releases](#patch-releases)
   - [Patch Release Criteria](#patch-release-criteria)
   - [Patch Release Process](#patch-release-process)
@@ -31,26 +36,35 @@ Releasing a new version of PyTorch generally entails 3 major steps:
 
 ## Cutting release branches
 
+### `pytorch/pytorch`
+
 Release branches are typically cut from the branch [`viable/strict`](https://github.com/pytorch/pytorch/tree/viable/strict) as to ensure that tests are passing on the release branch.
 
-Release branches *should* be prefixed like so:
-```
-release/{MAJOR}.{MINOR}
+There's a convenience script to create release branches from current `viable/strict` (from root `pytorch/pytorch`):
+
+```bash
+DRY_RUN=disabled scripts/release/cut-release-branch.sh
 ```
 
-An example of this would look like:
-```
-release/1.8
+This script should create 2 branches:
+* `release/{MAJOR}.{MINOR}`
+* `orig/release/{MAJOR}.{MINOR}`
+
+### `pytorch/builder` / PyTorch domain libraries
+
+Convenience script can also be used domains as well as `pytorch/builder`
+
+> NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
+
+```bash
+DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
 ```
 
-Please make sure to create branch that pins divergent point of release branch from the main branch, i.e. `orig/release/{MAJOR}.{MINOR}`
 ### Making release branch specific changes
 
 These are examples of changes that should be made to release branches so that CI / tooling can function normally on
 them:
 
-* Update target determinator to use release branch:
-  * Example: https://github.com/pytorch/pytorch/pull/40712
 * Update backwards compatibility tests to use RC binaries instead of nightlies
   * Example: https://github.com/pytorch/pytorch/pull/40706
 * A release branches should also be created in [`pytorch/xla`](https://github.com/pytorch/xla) and [`pytorch/builder`](https://github.com/pytorch/builder) repos and pinned in `pytorch/pytorch`
@@ -63,6 +77,7 @@ These are examples of changes that should be made to the *default* branch after 
   * Example: https://github.com/pytorch/pytorch/pull/65435
 
 ### Getting CI signal on release branches:
+
 Create a PR from `release/{MAJOR}.{MINOR}` to `orig/release/{MAJOR}.{MINOR}` in order to start CI testing for cherry-picks into release branch.
 
 Example:
@@ -109,6 +124,7 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+
 ## Promoting RCs to Stable
 
 Promotion of RCs to stable is done with this script:
@@ -121,6 +137,24 @@ Promotion should occur in two steps:
 * Promote S3 wheels to PyPI
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
+
+## Additonal Steps to prepare for release day
+
+The following should be prepared for the release day
+
+### Modify release matrix
+
+Need to modify release matrix for get started page. See following [PR](https://github.com/pytorch/pytorch.github.io/pull/959) as reference.
+
+After modifying published_versions.json you will need to regenerate regenerate the quick-start-module.js file run following command
+```
+python3 scripts/gen_quick_start_module.py >assets/quick-start-module.js
+```
+Please note: This PR needs to be merged on the release day and hence it should be absolutely free of any failures. To test this PR, open another test PR but pointing to to the Release candidate location as above [Release Candidate Storage](RELEASE.md#release-candidate-storage)
+
+### Open Google Colab issue
+
+This is normally done right after the release is completed. We would need to create Google Colab Issue see following [PR](https://github.com/googlecolab/colabtools/issues/2372)
 
 # Patch Releases
 

@@ -5245,47 +5245,42 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
   const Tensor& grad,
-  const Tensor& input,
+  const Tensor& self,
   int dim,
   const Tensor& index,
   const Tensor& src,
   c10::string_view reduce,
-  bool include_input,
-  const Tensor & result) {
-  Tensor grad_input, grad_src;
+  const Tensor& result) {
+  Tensor grad_self, grad_src;
 
   if (!grad.defined()) {
-    return std::make_tuple(grad_input, grad_src);
+    return std::make_tuple(grad_self, grad_src);
   }
 
   if (reduce == "sum") {
-    grad_input = grad;
+    grad_self = grad;
     grad_src = grad.gather(dim, index);
   } else if (reduce == "prod") {
-    grad_input = (grad * result) / input;
-    grad_input.masked_fill_(input == 0, 0);
+    grad_self = (grad * result) / self;
+    grad_self.masked_fill_(self == 0, 0);
     grad_src = (grad * result).gather(dim, index) / src;
     grad_src.masked_fill_(src == 0, 0);
   } else if (reduce == "mean") {
-    Tensor N = include_input ? ones_like(grad) : zeros_like(grad);
+    Tensor N = ones_like(grad);
     N.scatter_add_(dim, index, ones_like(src));
     N.masked_fill_(N == 0, 1);
-    grad_input = grad / N;
+    grad_self = grad / N;
     Tensor N_src = N.gather(dim, index);
     grad_src = grad.gather(dim, index) / N_src;
   } else if (reduce == "amax" || reduce == "amin") {
-    grad_input = (input == result) * grad;
+    grad_self = (self == result) * grad;
     Tensor value = result.gather(dim, index);
     grad_src = (src == value) * grad.gather(dim, index);
   } else {
     AT_ERROR("Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ", reduce, ".");
   }
 
-  if (!include_input) {
-    grad_input = grad_input.scatter(dim, index, 0);
-  }
-
-  return std::make_tuple(grad_input, grad_src);
+  return std::make_tuple(grad_self, grad_src);
 
 }
 

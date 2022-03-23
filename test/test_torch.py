@@ -3297,56 +3297,6 @@ else:
                                             [False, True, False, True, False],
                                             [True, False, True, False, True]], device=device))
 
-    # FIXME: move to test_scatter_gather_ops.py
-    @dtypes(*get_all_fp_dtypes(include_half=False, include_bfloat16=False))
-    def test_scatter_reduce(self, device, dtype):
-        shapes = [((3, 5, 3), (3, 5, 3), (3, 5, 3)),
-                  ((3, 5, 3), (2, 3, 3), (3, 5, 3))]
-        reduces = ["sum", "prod", "mean", "amax", "amin"]
-        fns = {"sum": lambda t, v: t.add_(v),
-               "prod": lambda t, v: t.mul_(v),
-               "mean": lambda t, v: t.add_(v),
-               "amax": lambda t, v: torch.max(t, v, out=t),
-               "amin": lambda t, v: torch.min(t, v, out=t)}
-
-        for self_shape, idx_shape, src_shape in shapes:
-            input = make_tensor(self_shape, dtype=dtype, device=device)
-            src = make_tensor(src_shape, dtype=dtype, device=device)
-            for dim in range(len(self_shape)):
-                index = torch.randint(0, self_shape[dim], idx_shape, dtype=torch.long, device=device)
-                for reduce, include_input in product(reduces, [True, False]):
-                    output = input.scatter_reduce(dim, index, src, reduce, include_input=include_input)
-                    expected = input.clone().detach()
-                    counts = torch.zeros(self_shape, dtype=dtype, device=device)
-                    op = fns[reduce]
-                    for i, j, k in itertools.product(range(idx_shape[0]), range(idx_shape[1]), range(idx_shape[2])):
-                        v = src[i, j, k]
-                        m = index[i, j, k]
-
-                        if dim == 0:
-                            i = m
-                        elif dim == 1:
-                            j = m
-                        else:
-                            k = m
-
-                        if (counts[i, j, k] == 0):
-                            if (include_input):
-                                op(expected[i, j, k], v)
-                                counts[i, j, k] += 2
-                            else:
-                                expected[i, j, k] = v
-                                counts[i, j, k] += 1
-                        else:
-                            op(expected[i, j, k], v)
-                            counts[i, j, k] += 1
-
-                    if (reduce == "mean"):
-                        counts.masked_fill_(counts == 0, 1)
-                        expected /= counts
-
-                    self.assertTrue(torch.allclose(output, expected))
-
     # FIXME: find a test suite for the masked scatter operator
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())

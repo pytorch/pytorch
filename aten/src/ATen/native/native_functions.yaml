@@ -4778,6 +4778,11 @@
   dispatch:
     CPU, CUDA: where
 
+- func: where.self_out(Tensor condition, Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: where_self_out
+
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
 
@@ -6060,19 +6065,19 @@
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
 
-- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_input=True) -> Tensor
+- func: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce) -> Tensor
   structured_delegate: scatter_reduce.two_out
   variants: function, method
 
-- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce, *, bool include_input=True) -> Tensor(a!)
+- func: scatter_reduce_.two(Tensor(a!) self, int dim, Tensor index, Tensor src, str reduce) -> Tensor(a!)
   structured_delegate: scatter_reduce.two_out
   variants: method
 
-- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_input=True, Tensor(a!) out) -> Tensor(a!)
+- func: scatter_reduce.two_out(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_reduce_two
+    CPU: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
