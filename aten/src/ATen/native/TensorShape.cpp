@@ -61,8 +61,8 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
   c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
                                           c10::optional<IntArrayRef>(stride) : c10::nullopt;
-  /* We can re-use this kernel for the meta device.\
-   * We just need to make sure we don't actually try to resize the (null) storage. */
+  // We can re-use this kernel for the meta device.
+  // We just need to make sure we don't actually try to resize the (null) storage.
   at::native::resize_impl_cpu_(result.unsafeGetTensorImpl(), size, stride_opt, /*resize_storage=*/!result.is_meta());
   return result;
 }
@@ -95,7 +95,7 @@ Tensor& set_meta_(Tensor& result) {
   Storage storage(
       Storage::use_byte_size_t(),
       0,
-      at::detail::GetMetaAllocator(),
+      c10::GetAllocator(kMeta),
       true);
   result.set_(storage, 0, {0}, {});
   TORCH_INTERNAL_ASSERT(dtype == result.dtype());
