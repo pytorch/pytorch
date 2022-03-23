@@ -369,15 +369,8 @@ void TensorPipeAgent::checkAndSetStaticGroup(
       (uint8_t*)isStaticGroupStr.c_str(),
       (uint8_t*)isStaticGroupStr.c_str() + isStaticGroupStr.length());
   std::vector<uint8_t> returnedVec;
-  bool isStaticGroupKeyExists =
-      store->check(std::vector<std::string>{isStaticGroupKey});
-  if (isStaticGroupKeyExists) {
-    returnedVec =
-        store->compareSet(isStaticGroupKey, isStaticGroupVec, isStaticGroupVec);
-  } else {
-    returnedVec = store->compareSet(
-        isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
-  }
+  returnedVec = store->compareSet(
+      isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
   std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
   // In both cases, the returned value should be the value of isStaticGroupStr,
   // otherwise there is a discrepency with initialization among one of the
@@ -385,7 +378,8 @@ void TensorPipeAgent::checkAndSetStaticGroup(
   TORCH_CHECK(
       returnedVal == isStaticGroupStr,
       fmt::format(
-          "RPC group behavior is different than expected. isStaticGroup_ is initialized with {} while in store it is {}",
+          "RPC group mixes statically and dynamically initialized members which is not supported. ",
+          "Static group property is initialized as {} and is trying to be set as {} ",
           isStaticGroup_,
           returnedVal));
 }
@@ -404,17 +398,18 @@ TensorPipeAgent::TensorPipeAgent(
           std::move(cb),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kSecToMsConversion))),
+      store_(store),
+      isStaticGroup_(worldSize.has_value()),
       opts_(std::move(opts)),
       reverseDeviceMaps_(std::move(reverseDeviceMaps)),
       devices_(std::move(devices)),
       threadPool_(opts_.numWorkerThreads),
       context_(std::make_shared<tensorpipe::Context>(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
-      store_(store),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      shutdownStore_("shutdown", store),
-      isStaticGroup_(worldSize.has_value()) {
+      shutdownStore_("shutdown", store) {
+  std::cout << "HELLO IN CONSTRUCTOR" << std::endl;
   if (isStaticGroup_) {
     worldSize_ = worldSize.value();
   }
@@ -1068,6 +1063,16 @@ void TensorPipeAgent::join(bool shutdown) {
       // It is enough to wait for there to be no more active client calls, since
       // each server call corresponds to a client call for some other worker.
       callCountCV_.wait(lock, [this] { return clientActiveCalls_ == 0; });
+
+      // With dynamic RPC groups we are only concerned with active calls on
+      // local worker ActiveCallCount is 0 at this point and we will shutdown
+      // (any future calls will be dropped)
+      if (!isStaticGroup_) {
+        if (shutdown) {
+          shuttingDown_ = true;
+        }
+        break;
+      }
       // We'd like to immediately proceed with the allreduce, but it's a call
       // that may block for some time, as it waits for other workers to also
       // complete all their active client calls. While we call allreduce we must
@@ -1244,6 +1249,11 @@ void TensorPipeAgent::updateGroupMembership(
   // TODO: Rank with workerInfo is leaving, update internal mappings
   else {
     std::cout << "is leaving" << std::endl;
+    workerIdToInfo_.erase(id);
+    workerNameToInfo_.erase(name);
+    workerNameToURL_.erase(name);
+
+    // TODO: test for
   }
 }
 

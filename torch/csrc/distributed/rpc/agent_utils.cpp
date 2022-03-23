@@ -111,9 +111,10 @@ std::unordered_map<std::string, worker_id_t> collectCurrentNames(
 
       nameToId.emplace(workerName, workerId);
     }
+    // Add own name to worker list
     allWorkerInfos = fmt::format("{},{}-{}", allWorkerInfos, selfName, selfId);
   } else {
-    // Add own name to worker list
+    // List is currently empty, set to its own name
     allWorkerInfos = fmt::format("{}-{}", selfName, selfId);
   }
   std::vector<uint8_t> allWorkerInfosVector(

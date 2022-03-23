@@ -397,29 +397,29 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         # Validate devices and device_maps locally for current rank
         # local_devices = list(_tensorpipe_check_local_device_maps(name, device_count, rpc_backend_options))
 
-        with utils.group_membership_management(store, name):
-            # Construct TPAgent with empty reverse_device_map and devices
-            # these properties will be updated after initialization
-            agent = TensorPipeAgent(
-                store,
-                name,
-                rank,
-                world_size,
-                rpc_backend_options,
-                {},
-                [],
-            )
-            api._init_rpc_states(agent)
+        # with utils.group_membership_management(store, name):
+        # Construct TPAgent with empty reverse_device_map and devices
+        # these properties will be updated after initialization
+        agent = TensorPipeAgent(
+            store,
+            name,
+            rank,
+            world_size,
+            rpc_backend_options,
+            {},
+            [],
+        )
+        api._init_rpc_states(agent)
 
-            try:
-                # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
-                # This is a synchronous operation that completes once all existing ranks are updated
-                # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
-                # _set_devices_and_reverse_device_map(agent, rank, rpc_backend_options.device_maps)
-                pass
-            except Exception:
-                # api.shutdown()
-                raise
+        try:
+            # TODO: Notify all workers in group this rank has joined and set devices and reverse_device_map
+            # This is a synchronous operation that completes once all existing ranks are updated
+            # _tensorpipe_check_remote_device_maps(agent, rpc_backend_options)
+            # _set_devices_and_reverse_device_map(agent, rank, rpc_backend_options.device_maps)
+            pass
+        except Exception:
+            # api.shutdown()
+            raise
         return agent
 
 register_backend(

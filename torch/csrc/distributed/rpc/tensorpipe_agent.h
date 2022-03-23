@@ -225,8 +225,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
 
-  bool isStaticGroup_;
   const c10::intrusive_ptr<::c10d::Store>& store_;
+  const bool isStaticGroup_;
 
  protected:
   // TensorPipe write function that could be used to write response
@@ -349,11 +349,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // the shutdown process
   ::c10d::PrefixStore shutdownStore_;
   int worldSize_ = 0;
-<<<<<<< Updated upstream
-  const bool isStaticGroup_;
-=======
->>>>>>> Stashed changes
-
   std::atomic<uint64_t> nextMessageID_{0};
 
   // Metadata used for tracking of whether certain RPCs have timed out or not.
