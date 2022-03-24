@@ -4,7 +4,7 @@ from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = ['entr', 'psi', 'digamma', 'gammaln', 'polygamma', 'erf', 'erfc', 'erfinv',
            'erfcx', 'logit', 'logsumexp', 'expit', 'exp2', 'expm1', 'xlog1py', 'xlogy',
-           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log1p', 'sinc', 'round', 'log_softmax',
+           'i0', 'i0e', 'i1', 'i1e', 'ndtr', 'ndtri', 'log_ndtr', 'log1p', 'sinc', 'round', 'log_softmax',
            'zeta', 'multigammaln', 'gammainc', 'gammaincc', 'softmax']
 
 Tensor = torch.Tensor
@@ -545,6 +545,28 @@ Keyword args:
 Example::
     >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
     tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
+""".format(**common_args))
+
+log_ndtr = _add_docstr(_special.special_log_ndtr,
+                   r"""
+log_ndtr(input, *, out=None) -> Tensor
+Computes the log of the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{log_ndtr}(x) = \log\left(\frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt \right)
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.log_ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([-6.6077 -3.7832 -1.841  -0.6931 -0.1728 -0.023  -0.0014])
+    TODO(bahuang) double check torch's result
 """.format(**common_args))
 
 log1p = _add_docstr(_special.special_log1p,

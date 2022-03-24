@@ -10359,6 +10359,14 @@
   python_module: special
   variants: function
 
+- func: special_log_ndtr(Tensor self) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_log_ndtr.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
 - func: special_xlog1py(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: special

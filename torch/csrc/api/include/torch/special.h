@@ -419,6 +419,23 @@ inline Tensor& ndtr_out(Tensor& result, const Tensor& self) {
   return torch::special_ndtr_out(result, self);
 }
 
+/// Computes the log of area under the standard Gaussian probability density function,
+/// integrated from minus infinity to :attr:`input`, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.log_ndtr
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::log_ndtr(t);
+/// ```
+inline Tensor log_ndtr(const Tensor& self) {
+  return torch::special_log_ndtr(self);
+}
+
+inline Tensor& log_ndtr_out(Tensor& result, const Tensor& self) {
+  return torch::special_log_ndtr_out(result, self);
+}
+
 /// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
 /// See https://pytorch.org/docs/master/special.html#torch.special.i0e.
 ///

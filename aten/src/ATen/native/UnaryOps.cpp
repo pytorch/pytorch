@@ -568,6 +568,39 @@ Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
 Tensor special_ndtr(const Tensor& self) {
   return calc_ndtr(self);
 }
+namespace {
+  
+  Tensor calc_log_ndtr(const Tensor& self) {
+    // TODO(bahuang)
+  }
+
+} // namespace
+
+// special_ndtr
+Tensor& special_log_ndtr(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(
+      self.device() == result.device(),
+      "Expected all tensors to be on the same device, but found at least two devices, ",
+      self.device(),
+      " and ",
+      result.device(),
+      "!");
+
+  auto log_ndtr = calc_log_ndtr(self);
+  TORCH_CHECK(
+      at::can_cast(log_ndtr.scalar_type(), result.scalar_type()),
+      "result type ",
+      log_ndtr.scalar_type(),
+      " can't be cast to the desired output type ",
+      result.scalar_type());
+
+  at::native::resize_output(result, log_ndtr.sizes());
+  return result.copy_(log_ndtr);
+}
+
+Tensor special_log_ndtr(const Tensor& self) {
+  return calc_log_ndtr(self);
+}
 
 // FIXME: remove const_cast once unary_op_impl_out is updated
 TORCH_IMPL_FUNC(sgn_out) (const Tensor& self, const Tensor& result) {
