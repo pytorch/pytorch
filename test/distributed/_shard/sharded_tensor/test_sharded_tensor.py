@@ -448,7 +448,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # test read only properties, they're read only as we can't simply change
         # the global metadata without changing the underlying shard's properties
-        with self.assertRaisesRegex(AttributeError, "can't set attribute"):
+        with self.assertRaisesRegex(RuntimeError, "torch function '__set__'"):
             st.requires_grad = True
 
     @with_comms
@@ -907,7 +907,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.strided layout is currently supported'):
-            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse)
+            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse_coo)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.contiguous_format memory_format is currently supported'):
