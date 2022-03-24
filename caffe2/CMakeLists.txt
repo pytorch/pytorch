@@ -654,7 +654,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     include(../mlc/mlc_build.cmake)
   endif()
 
-  if(MKLDNN_FOUND AND NOT WIN32 AND NOT APPLE AND NOT BUILD_LITE_INTERPRETER AND NOT INTERN_BUILD_MOBILE)
+  if(BUILD_ONEDNN_GRAPH)
     list(APPEND Caffe2_CPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_fuser.cpp
