@@ -42,7 +42,10 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.num_tensor_args = len(node.args)
+        if isinstance(node, Node):
+            self.num_tensor_args = len(node.args)
+        else:
+            self.num_tensor_args = 0
         self.all_node_args_are_tensors = True
         # the last node of the matched pattern
         self.last_node = node
