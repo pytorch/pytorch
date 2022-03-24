@@ -5316,7 +5316,6 @@ class SpectralFuncInfo(OpInfo):
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
-            skipCUDAIfRocm,
         ]
 
         super().__init__(name=name,
@@ -9722,8 +9721,6 @@ op_db: List[OpInfo] = [
                skipCPUIfNoFFT,
                DecorateInfo(unittest.skip("Skipped! istft does not match the native function"),
                             'TestJit', 'test_variant_consistency_jit'),
-               # gradcheck fails on ROCm (gh-68429)
-               DecorateInfo(skipCUDAIfRocm, 'TestGradients', 'test_fn_grad'),
            ],
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_istft,
