@@ -279,6 +279,7 @@ def parse_args() -> Any:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--comment-id", type=int)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -613,12 +614,12 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
-    comment = pr.get_last_comment()
+    comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
     if not RE_REVERT_CMD.match(comment.body_text):
         raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
     if comment.editor_login is not None:
@@ -665,7 +666,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
         except Exception as e:
             msg = f"Reverting PR {args.pr_num} failed due to {e}"
             run_url = os.getenv("GH_RUN_URL")
