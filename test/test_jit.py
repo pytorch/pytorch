@@ -14822,7 +14822,6 @@ dedent """
             a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
-        @torch.jit.script
         def foo(a):
             return a.narrow_copy(0, 0, 5)
 
