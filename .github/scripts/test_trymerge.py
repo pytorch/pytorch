@@ -44,6 +44,22 @@ class TestGitHubPR(TestCase):
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_lint_fails(self, mocked_gql: Any) -> None:
+        "Tests that PR fails mandatory lint check"
+        pr = GitHubPR("pytorch", "pytorch", 74649)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_last_comment(self, mocked_gql: Any) -> None:
+        "Tests that last comment can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        comment = pr.get_last_comment()
+        self.assertEqual(comment.author_login, "github-actions")
+        self.assertIsNone(comment.editor_login)
+        self.assertTrue("You've committed this PR" in comment.body_text)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_get_author_null(self, mocked_gql: Any) -> None:
         """ Tests that PR author can be computed
             If reply contains NULL
@@ -70,9 +86,15 @@ class TestGitHubPR(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_checksuites_pagination(self, mocked_gql: Any) -> None:
-        "Tests that PR with lots of checksuits can be fetch"
+        "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
         self.assertGreater(len(pr.get_checkrun_conclusions()), 0)
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_comments_pagination(self, mocked_gql: Any) -> None:
+        "Tests that PR with 50+ comments can be fetched"
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        self.assertGreater(len(pr.get_comments()), 50)
 
 
 if __name__ == "__main__":
