@@ -85,8 +85,9 @@ def _remove_if_exists(path):
             shutil.rmtree(path)
 
 
-def _git_archive_link(repo_owner, repo_name, branch):
-    return 'https://github.com/{}/{}/archive/{}.zip'.format(repo_owner, repo_name, branch)
+def _git_archive_link(repo_owner, repo_name, ref):
+    # See https://docs.github.com/en/rest/reference/repos#download-a-repository-archive-zip
+    return f"https://github.com/{repo_owner}/{repo_name}/zipball/{ref}"
 
 
 def _load_attr_from_module(module, func_name):
@@ -106,24 +107,24 @@ def _get_torch_home():
 
 def _parse_repo_info(github):
     if ':' in github:
-        repo_info, branch = github.split(':')
+        repo_info, ref = github.split(':')
     else:
-        repo_info, branch = github, None
+        repo_info, ref = github, None
     repo_owner, repo_name = repo_info.split('/')
 
-    if branch is None:
-        # The branch wasn't specified by the user, so we need to figure out the
+    if ref is None:
+        # The ref wasn't specified by the user, so we need to figure out the
         # default branch: main or master. Our assumption is that if main exists
         # then it's the default branch, otherwise it's master.
         try:
             with urlopen(f"https://github.com/{repo_owner}/{repo_name}/tree/main/"):
-                branch = 'main'
+                ref = 'main'
         except HTTPError as e:
             if e.code == 404:
-                branch = 'master'
+                ref = 'master'
             else:
                 raise
-    return repo_owner, repo_name, branch
+    return repo_owner, repo_name, ref
 
 
 def _read_url(url):
@@ -131,7 +132,7 @@ def _read_url(url):
         return r.read().decode(r.headers.get_content_charset('utf-8'))
 
 
-def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
+def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
     # Use urlopen to avoid depending on local git.
     headers = {'Accept': 'application/vnd.github.v3+json'}
     token = os.environ.get(ENV_GITHUB_TOKEN)
@@ -149,10 +150,10 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
             if not response:
                 break
             for br in response:
-                if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                if br['name'] == ref or br['commit']['sha'].startswith(ref):
                     return
 
-    raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
+    raise ValueError(f'Cannot find {ref} in https://github.com/{repo_owner}/{repo_name}. '
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 
@@ -162,12 +163,12 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
     if not os.path.exists(hub_dir):
         os.makedirs(hub_dir)
     # Parse github repo information
-    repo_owner, repo_name, branch = _parse_repo_info(github)
+    repo_owner, repo_name, ref = _parse_repo_info(github)
     # Github allows branch name with slash '/',
     # this causes confusion with path on both Linux and Windows.
     # Backslash is not allowed in Github branch name so no need to
     # to worry about it.
-    normalized_br = branch.replace('/', '_')
+    normalized_br = ref.replace('/', '_')
     # Github renames folder repo-v1.x.x to repo-1.x.x
     # We don't know the repo name before downloading the zip file
     # and inspect name from it.
@@ -182,14 +183,32 @@ def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=Fal
     else:
         # Validate the tag/branch is from the original repo instead of a forked repo
         if not skip_validation:
-            _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+            _validate_not_a_forked_repo(repo_owner, repo_name, ref)
 
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
 
-        url = _git_archive_link(repo_owner, repo_name, branch)
-        sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
-        download_url_to_file(url, cached_file, progress=False)
+        try:
+            url = _git_archive_link(repo_owner, repo_name, ref)
+            sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
+            download_url_to_file(url, cached_file, progress=False)
+        except HTTPError as err:
+            if err.code == 300:
+                # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
+                # in the repo. This can be disambiguated by explicitely using refs/heads/ or refs/tags
+                # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
+                # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
+                warnings.warn(
+                    f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
+                    "Torchhub will now assume that it's a branch. "
+                    "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
+                    "refs/tags/tag_name as the ref. That might require using skip_validation=True."
+                )
+                disambiguated_branch_ref = f"refs/heads/{ref}"
+                url = _git_archive_link(repo_owner, repo_name, ref=disambiguated_branch_ref)
+                download_url_to_file(url, cached_file, progress=False)
+            else:
+                raise
 
         with zipfile.ZipFile(cached_file) as cached_zipfile:
             extraced_repo_name = cached_zipfile.infolist()[0].filename
@@ -264,7 +283,7 @@ def set_dir(d):
         d (string): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
-    _hub_dir = d
+    _hub_dir = os.path.expanduser(d)
 
 
 def list(github, force_reload=False, skip_validation=False):
@@ -272,8 +291,8 @@ def list(github, force_reload=False, skip_validation=False):
     List all callable entrypoints available in the repo specified by ``github``.
 
     Args:
-        github (string): a string with format "repo_owner/repo_name[:tag_name]" with an optional
-            tag/branch. If ``tag_name`` is not specified, the default branch is assumed to be ``main`` if
+        github (string): a string with format "repo_owner/repo_name[:ref]" with an optional
+            ref (tag or branch). If ``ref`` is not specified, the default branch is assumed to be ``main`` if
             it exists, and otherwise ``master``.
             Example: 'pytorch/vision:0.10'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
@@ -308,14 +327,14 @@ def help(github, model, force_reload=False, skip_validation=False):
     Show the docstring of entrypoint ``model``.
 
     Args:
-        github (string): a string with format <repo_owner/repo_name[:tag_name]> with an optional
-            tag/branch. If ``tag_name`` is not specified, the default branch is assumed to be ``main`` if
-            it exists, and otherwise ``master``.
+        github (string): a string with format <repo_owner/repo_name[:ref]> with an optional
+            ref (a tag or a branch). If ``ref`` is not specified, the default branch is assumed
+            to be ``main`` if it exists, and otherwise ``master``.
             Example: 'pytorch/vision:0.10'
         model (string): a string of entrypoint name defined in repo's ``hubconf.py``
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is ``False``.
-        skip_validation (bool, optional): if ``False``, torchhub will check that the branch or commit
+        skip_validation (bool, optional): if ``False``, torchhub will check that the ref
             specified by the ``github`` argument properly belongs to the repo owner. This will make
             requests to the GitHub API; you can specify a non-default GitHub token by setting the
             ``GITHUB_TOKEN`` environment variable. Default is ``False``.
@@ -345,16 +364,16 @@ def load(repo_or_dir, model, *args, source='github', force_reload=False, verbose
     for loading other objects such as tokenizers, loss functions, etc.
 
     If ``source`` is 'github', ``repo_or_dir`` is expected to be
-    of the form ``repo_owner/repo_name[:tag_name]`` with an optional
-    tag/branch.
+    of the form ``repo_owner/repo_name[:ref]`` with an optional
+    ref (a tag or a branch).
 
     If ``source`` is 'local', ``repo_or_dir`` is expected to be a
     path to a local directory.
 
     Args:
         repo_or_dir (string): If ``source`` is 'github',
-            this should correspond to a github repo with format ``repo_owner/repo_name[:tag_name]`` with
-            an optional tag/branch, for example 'pytorch/vision:0.10'. If ``tag_name`` is not specified,
+            this should correspond to a github repo with format ``repo_owner/repo_name[:ref]`` with
+            an optional ref (tag or branch), for example 'pytorch/vision:0.10'. If ``ref`` is not specified,
             the default branch is assumed to be ``main`` if it exists, and otherwise ``master``.
             If ``source`` is 'local'  then it should be a path to a local directory.
         model (string): the name of a callable (entrypoint) defined in the
