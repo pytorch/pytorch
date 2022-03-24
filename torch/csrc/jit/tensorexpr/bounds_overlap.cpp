@@ -225,8 +225,20 @@ std::vector<IndexBounds> subtractIndicesBounds(
         remaining = A[i];
       } else {
         auto remainingSlices = subtractBound(remaining, slice);
-        TORCH_INTERNAL_ASSERT(remainingSlices.size() == 1, buildErrorMessage());
-        remaining = remainingSlices[0];
+        // In some cases, we might end up with empty remainingSlices due to the
+        // optimization done in subtraction while handling diff expressions
+        // that have a single variable in `subtractBound()`.
+        //
+        // For example:
+        //    (j, j) - (j + v, j + v) => (j, j + v - 1)
+        // When we try to extract the remaining slices from (j, j), we perform:
+        //    (j, j) - (j, j + v - 1) => ()
+        // and end up with empty remainingSlices.
+        if (!remainingSlices.empty()) {
+          TORCH_INTERNAL_ASSERT(
+              remainingSlices.size() == 1, buildErrorMessage());
+          remaining = remainingSlices[0];
+        }
       }
     }
 
