@@ -26,6 +26,7 @@ env:
 jobs:
 {% block docker_build +%}
   docker-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:

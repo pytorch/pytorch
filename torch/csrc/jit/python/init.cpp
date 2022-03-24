@@ -600,6 +600,18 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+      .def(
+          "_jit_set_nvfuser_skip_node_kind",
+          // Args:
+          //     `op_name`: Symbol of op;
+          //     `flip`: flag indicating whether to flip the given op in the
+          //             skip list.
+          // Returns:
+          //     a bool flag indicating if `op_name` was already in the skip
+          //     list.
+          [](const std::string& op_name, bool flip = true) {
+            return fuser::cuda::skipNode(op_name, flip);
+          })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_nvfuser_single_node_mode",
@@ -672,6 +684,7 @@ void initJITBindings(PyObject* module) {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
                 TORCH_INTERNAL_ASSERT(
+                    false,
                     "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
