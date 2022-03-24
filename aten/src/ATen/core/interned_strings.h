@@ -321,10 +321,10 @@ namespace c10 {
   _(attr, seen_none)
 
 enum class _keys : unique_t {
-#define DEFINE_KEY(ns, s) ns##_##s,
-  FORALL_NS_SYMBOLS(DEFINE_KEY)
-#undef DEFINE_KEY
-      num_symbols
+    #define DEFINE_KEY(ns, s) ns##_##s,
+    FORALL_NS_SYMBOLS(DEFINE_KEY)
+    #undef DEFINE_KEY
+    num_symbols
 };
 
 #define DEFINE_SYMBOL(ns, s) \
