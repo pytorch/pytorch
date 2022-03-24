@@ -1,3 +1,8 @@
+_coverage: 91.09
+_covered_ops: 358
+_generated_ops: 705
+_production_ops: 393
+_uncovered_ops: 35
 all_generated_ops:
 - aten::Bool.Tensor
 - aten::Bool.int
