@@ -41,7 +41,12 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         if not handlers:
             handlers = (decoder_basichandlers, decoder_imagehandler('torch'))
         self.decoder = Decoder(*handlers, key_fn=key_fn)
-        deprecation_warning(type(self).__name__, old_functional_name="routed_decode")
+        deprecation_warning(
+            type(self).__name__,
+            deprecation_version="1.13",
+            removal_version="1.15",
+            old_functional_name="routed_decode",
+        )
 
     def add_handler(self, *handler: Callable) -> None:
         self.decoder.add_handler(*handler)
