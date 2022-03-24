@@ -18,7 +18,6 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <ATen/native/vulkan/api/Context.h>
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include <torch/csrc/autograd/grad_mode.h>
@@ -51,7 +50,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  at::native::vulkan::api::Context* const context = at::native::vulkan::api::context();
   std::cout << "Loaded context." << std::endl;
 
   std::cout << "Starting benchmark." << std::endl;

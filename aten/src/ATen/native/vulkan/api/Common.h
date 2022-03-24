@@ -32,7 +32,11 @@
 #define VK_CHECK(function)                                  \
   do {                                                      \
     const VkResult result = (function);                     \
-    TORCH_CHECK(VK_SUCCESS == result, "VkResult:", result); \
+    TORCH_CHECK(                                            \
+        VK_SUCCESS == result,                               \
+        C10_STRINGIZE(__FILE__), " [",                      \
+        C10_STRINGIZE(__LINE__), "] "                       \
+        "VkResult:", result);                               \
   } while (false)
 
 #define VK_CHECK_RELAXED(function)                          \
