@@ -8981,6 +8981,7 @@ op_db: List[OpInfo] = [
     OpInfo('cartesian_prod',
            op=torch.cartesian_prod,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_autograd=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_cartesian_prod,
