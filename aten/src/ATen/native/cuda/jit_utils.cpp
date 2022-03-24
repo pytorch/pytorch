@@ -829,7 +829,7 @@ bool _r_mkdir(const std::string& dir) {
   }
 
   // Find folder separator and check if we are at the top
-  int pos = dir.find_last_of("/\\");
+  auto  pos = dir.find_last_of("/\\");
   if (pos == std::string::npos) {
     return false;
   }
@@ -845,10 +845,10 @@ bool _r_mkdir(const std::string& dir) {
 #else
   ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
 #endif
-  return (ret==0);
+  return ret == 0;
 }
 
-// Creates direcotiries recusrively assuming that base exists
+// Creates directories recursively assuming that base exists
 bool r_mkdir_with_base(std::string& base, std::string& dir){
   const char* p_base = base.c_str();
   const bool base_exists = (access(p_base, F_OK) == 0);
