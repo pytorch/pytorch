@@ -4341,6 +4341,42 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             world_size=self.world_size)
         rpc.shutdown(graceful=False)
 
+    # Dynamic RPC new ranks communicate with existing ranks
+    @dist_init(setup_rpc=False)
+    def test_without_world_size_new_rank_can_communicated_with_existing_rank(self):
+        # TODO: Using process group for synchronization to ensure rank 0 is created first
+        dist.init_process_group(
+            backend='gloo',
+            init_method=self.file_init_method,
+            rank=self.rank,
+            world_size=self.world_size)
+
+        if self.rank == 0:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+
+        # Rank 0 will be initialized with RPC after this barrier
+        dist.barrier()
+
+        if self.rank != 0:
+            # Newly joined ranks will be able to communicate with rank 0, since that was created first
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                backend=self.rpc_backend,
+                rank=self.rank,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+            result = rpc.rpc_sync(worker_name(0), torch.add, args=(torch.tensor(1), torch.tensor(1)))
+            self.assertEqual(torch.add(torch.tensor(1), torch.tensor(1)), result)
+
+        # TODO: Remove the sync before shutdown and replace with graceful shutdown
+        dist.barrier()
+        rpc.shutdown(graceful=False)
+
     @dist_init(setup_rpc=False)
     def test_init_rpc_without_world_size_without_rank(self):
         # default initialization uses file init
