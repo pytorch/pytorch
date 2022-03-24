@@ -1,12 +1,15 @@
 import argparse
 import os
 import pathlib
-import pkg_resources
 import shutil
 import sys
 import tempfile
 import yaml
 from typing import Any, List, Optional, cast
+
+# Note that even though this is deprecated, a certain Meta internal
+# build is not compatible with importlib.resources file listing.
+import pkg_resources
 
 try:
     # use faster C loader if available
@@ -178,6 +181,9 @@ def main() -> None:
     options = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as autograd_dir_str:
+        # Copy all of the tools.autograd resources to a temporary
+        # directory so that code generation below can see it as local
+        # files.
         autograd_dir = pathlib.Path(autograd_dir_str)
         copy_resource_to_dir("tools.autograd", "deprecated.yaml", autograd_dir)
         copy_resource_to_dir("tools.autograd", "derivatives.yaml", autograd_dir)
@@ -230,6 +236,10 @@ def main() -> None:
 
 
 def copy_resource_to_dir(package: str, name: str, dest_dir: pathlib.Path) -> None:
+    """Copies the file resource from the package to the given directory."""
+    # Note that this will read the local file in the event that there
+    # is no archive to extract from, e.g. normal CMake and Bazel
+    # builds.
     with pkg_resources.resource_stream(package, name) as in_file:
         dest = dest_dir / name
         with dest.open(mode="xb") as out_file:
