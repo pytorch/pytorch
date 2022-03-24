@@ -242,7 +242,7 @@ Tensor norm_jvp(
   // NB: currently norm_jvp is also reused for dist's jvp (which haas two differentiable inputs)
   //     but self_t still cannot be a ZT because that would require both self_t and other_t to be ZT
   TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor());
-  size_t ndim = self_p.sizes().size();  // composite compliance?
+  size_t ndim = self_p.dim();  // composite compliance?
   double p = p_.value_or(2.0).toDouble();
 
   if (p == 0.0) {
@@ -253,14 +253,12 @@ Tensor norm_jvp(
     result = at::real(result);
     return result.sum(dim, keepdim);
   } else if (p == 2.0) {
-    auto result = self_p.sgn();
+    auto result = self_p;
     result = areAnyTensorSubclassLike({self_t}) ? result.mul(self_t.conj()) : result.mul_(self_t.conj());
     result = at::real(result);
-    result *= self_p.abs();
     result = result.sum(dim, keepdim);
     return result.div_(norm);
   } else if (std::isinf(p)) {
-    size_t ndim = self_p.sizes().size();
     if (!keepdim && self_p.dim() != 0) {
       norm = unsqueeze_multiple(norm, dim, ndim);
     }
