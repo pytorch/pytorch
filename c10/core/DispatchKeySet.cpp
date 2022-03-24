@@ -123,7 +123,6 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
 }
 
 DispatchKeySet::iterator& DispatchKeySet::iterator::operator++() {
-  TORCH_INTERNAL_ASSERT(next_functionality_ >= num_backends, "nb=", static_cast<uint32_t>(num_backends), "nf=", static_cast<uint32_t>(next_functionality_));
   TORCH_INTERNAL_ASSERT(next_functionality_ <= iterator::end_iter_mask_val);
   TORCH_INTERNAL_ASSERT(next_backend_ <= num_backends, next_backend_);
 

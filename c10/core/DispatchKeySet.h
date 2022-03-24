@@ -420,14 +420,14 @@ class DispatchKeySet final {
   }
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
-// [Note: Trimmed Mobile Dispatch Keys]
-/**
- * The method below maps the dispatch key in the enum DispatchKey to an
- * integer index in the dispatchTable_ array in OperatorEntry. The array
- * is trimmed for mobile to reduce peak memory usage since it's
- * unnecessary to reserve additional space for dispatch keys that will
- * never be used on mobile.
- */
+  // [Note: Trimmed Mobile Dispatch Keys]
+  /**
+   * The method below maps the dispatch key in the enum DispatchKey to an
+   * integer index in the dispatchTable_ array in OperatorEntry. The array
+   * is trimmed for mobile to reduce peak memory usage since it's
+   * unnecessary to reserve additional space for dispatch keys that will
+   * never be used on mobile.
+   */
   int getDispatchTableIndexForDispatchKeySet() const {
     auto dk = highestPriorityTypeId();
     switch (dk) {
@@ -469,7 +469,6 @@ class DispatchKeySet final {
     return offset_and_mask.offset + backend_idx;
   }
 #endif
-
 
   // returns the "index" of the highest priority backend in the keyset.
   // This is pretty similar to getBackendKey(), but:
@@ -525,7 +524,12 @@ class DispatchKeySet final {
           current_dispatchkey_idx_(end_iter_key_val),
           current_backendcomponent_idx_(end_iter_key_val) {
       // Go to the first key in the set
-      TORCH_INTERNAL_ASSERT(next_functionality_ >= num_backends, "nb=", static_cast<uint32_t>(num_backends), "nf=", static_cast<uint32_t>(next_functionality_));
+      TORCH_INTERNAL_ASSERT(
+          next_functionality_ >= num_backends,
+          "num_backends=",
+          static_cast<uint32_t>(num_backends),
+          "next_functionality_=",
+          static_cast<uint32_t>(next_functionality_));
       ++(*this);
     }
 
