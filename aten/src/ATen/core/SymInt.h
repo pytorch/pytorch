@@ -4,12 +4,12 @@
 namespace c10 {
 
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
-// represent concrete dimension values. 
+// represent concrete dimension values.
 //
 // `SymInt` is also a data type in Pytorch that can be used in function schemas
 // to enable tracing.
 //
-// `SymInt` is introduced to enable tracing arithmetic 
+// `SymInt` is introduced to enable tracing arithmetic
 // operations on symbolic integers (e.g. sizes). Tracing symbolic sizes will
 // allow LTC and AOTAutograd representing dynamic shapes in expression graphs
 // faithfully without baking in concrete dimension values.
@@ -28,23 +28,26 @@ class TORCH_API SymInt {
         SymInt(int64_t d):
         data_(d) {};
 
-        int64_t expect_int const() {
+        int64_t expect_int() const {
             // we are dealing with concrete ints only for now
             return data_;
         }
 
-        bool is_symbolic const() {
+        bool is_symbolic() const {
             return false;
         }
 
         bool operator==(const SymInt& p2) const
         {
-            TORCH_INTERNAL_ASSERT("NYI");
-            return false;
+            return data_ == p2.data_;
         }
 
         SymInt operator+(SymInt sci) const {
             return data_ + sci.data_;
+        }
+
+        int64_t data() const {
+            return data_;
         }
 
     private:

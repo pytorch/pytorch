@@ -1403,7 +1403,7 @@ TEST(TestSymInt, NarrowCopy) {
 TEST(TestSymInt, AddSymbolicInt) {
   c10::SymInt a(5);
   c10::SymInt b(3);
-  ASSERT_TRUE((a + b).data_);
+  ASSERT_TRUE((a + b).expect_int() == 8);
 }
 
 TEST(FallbackGraphsTest, Basic) {

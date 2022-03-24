@@ -144,7 +144,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 }
 
 std::ostream& operator<<(std::ostream& os, SymInt s) {
-  os << "SymInt(" << s.data_ << ")";
+  os << "SymInt(" << s.data() << ")";
   return os;
 }
 

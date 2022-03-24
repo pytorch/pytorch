@@ -545,7 +545,7 @@ public:
   }
 
   IValue(c10::SymInt i) : tag(Tag::SymInt), is_intrusive_ptr(false) {
-    payload.u.as_int = i.data_;
+    payload.u.as_int = i.data();
   }
 
   bool isSymInt() const {
