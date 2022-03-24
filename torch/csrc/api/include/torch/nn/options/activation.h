@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/arg.h>
-#include <torch/enum.h>
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
@@ -92,37 +91,6 @@ namespace functional {
 /// F::glu(input, GLUFuncOptions(1));
 /// ```
 using GLUFuncOptions = GLUOptions;
-} // namespace functional
-
-// ============================================================================
-
-/// Options for the `GELU` module.
-///
-/// Example:
-/// ```
-/// GELU model(GELUOptions(torch::kNone));
-/// ```
-struct TORCH_API GELUOptions {
-  typedef c10::variant<enumtype::kNone, enumtype::kTanh> gelu_t;
-
-  TORCH_OPTIONS_CTOR_VARIANT_ARG2(GELUOptions, approximate, kNone, kTanh)
-
-  /// Specifies the approximation to apply to the output.
-  TORCH_ARG(gelu_t, approximate) = torch::kNone;
-};
-
-namespace functional {
-/// Options for `torch::nn::functional::gelu`.
-///
-/// See the documentation for `torch::nn::GELUOptions` class to learn what
-/// arguments are supported.
-///
-/// Example:
-/// ```
-/// namespace F = torch::nn::functional;
-/// F::gelu(input, F::GELUFuncOptions(torch::kNone));
-/// ```
-using GELUFuncOptions = GELUOptions;
 } // namespace functional
 
 // ============================================================================

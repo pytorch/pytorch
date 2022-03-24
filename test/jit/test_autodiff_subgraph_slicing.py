@@ -447,7 +447,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         %0 : int[] = prim::Constant[value=[2, 2, 1]]()
         %1 : int = prim::Constant[value=0]()
         %2 : Tensor = aten::t(%b)
-        %3 : Tensor = aten::relu(%2)
+        %3 : Tensor = aten::gelu(%2)
         %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %3, %2)
         return (%4)
 """
@@ -471,7 +471,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         %1 : int = prim::Constant[value=0]()
         %d : Tensor = aten::t(%c)
         %2 : Tensor = aten::t(%b)
-        %3 : Tensor = aten::relu(%2)
+        %3 : Tensor = aten::gelu(%2)
         %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%3, %2, %d, %b, %c, %b)
         return (%4)
 """

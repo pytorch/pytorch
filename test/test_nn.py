@@ -9142,25 +9142,16 @@ class TestNN(NNTestCase):
             def _gelu_ref(X):
                 return X * stats.norm.cdf(X)
 
-            def _tanh_gelu_ref(X):
-                M_SQRT_2_PI = math.sqrt(2 / math.pi)
-                Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
-                return 0.5 * X * (1.0 + np.tanh(Z))
-
-            for approximate in ['none', 'tanh']:
-                for d in devices:
-                    if contiguous:
-                        X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
-                    else:
-                        X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                    res = F.gelu(X, approximate)
-                    if approximate == 'tanh':
-                        ref = _tanh_gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                    else:
-                        ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                    self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-                    if dtype == torch.float64:
-                        gradcheck(F.gelu, [X, approximate], eps=1e-4)
+            for d in devices:
+                if contiguous:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
+                else:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
+                res = F.gelu(X)
+                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
+                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
+                if dtype == torch.float64:
+                    gradcheck(F.gelu, [X], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):

@@ -872,7 +872,7 @@ class ShapePropagator : public PropertyPropBase {
             "aten::rrelu(Tensor self, Scalar lower, Scalar upper, bool training, Generator? generator) -> Tensor",
             "aten::rsqrt(Tensor self) -> Tensor",
             "aten::selu(Tensor self) -> Tensor",
-            "aten::gelu(Tensor self, int approximate=0) -> Tensor",
+            "aten::gelu(Tensor self) -> Tensor",
             "aten::sigmoid(Tensor self) -> Tensor",
             "aten::sign(Tensor self) -> Tensor",
             "aten::sin(Tensor self) -> Tensor",

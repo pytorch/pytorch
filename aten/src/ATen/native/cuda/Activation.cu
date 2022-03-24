@@ -392,71 +392,30 @@ void elu_backward_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Sc
   });
 }
 
-void GeluCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate) {
-  if (approximate == at::Gelu::Tanh) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
-      using T_ACC = acc_type<scalar_t, true>;
-      gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-        constexpr T_ACC kBeta = M_SQRT2 * M_2_SQRTPI * T_ACC(0.5);
-        constexpr T_ACC kKappa = 0.044715;
-        auto x_cube = static_cast<T_ACC>(x) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x);
-        auto inner = kBeta * (static_cast<T_ACC>(x) + kKappa * x_cube);
-        return T_ACC(0.5) * static_cast<T_ACC>(x) * (T_ACC(1) + c10::cuda::compat::tanh(inner));
-      });
+void GeluCUDAKernelImpl(TensorIteratorBase& it) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
+    using T_ACC = acc_type<scalar_t, true>;
+    gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+      return static_cast<T_ACC>(x) *
+          c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, it.dtype(), "GeluCUDAKernelImpl", [&]() {
-      using T_ACC = acc_type<scalar_t, true>;
-      gpu_kernel(it, [] GPU_LAMBDA(scalar_t x) -> scalar_t {
-        constexpr T_ACC kAlpha = M_SQRT1_2;
-        return static_cast<T_ACC>(x) * T_ACC(0.5) * (T_ACC(1) + ::erf(static_cast<T_ACC>(x) * kAlpha));
-      });
-    });
-  }
+  });
 }
 
-void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it, int64_t approximate) {
-  if (approximate == at::Gelu::Tanh) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-        it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
-          using T_ACC = acc_type<scalar_t, true>;
-          gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
-            constexpr T_ACC kBeta = M_SQRT2 * M_2_SQRTPI * T_ACC(0.5);
-            constexpr T_ACC kKappa = 0.044715;
-            auto x_sq = static_cast<T_ACC>(x) * static_cast<T_ACC>(x);
-            auto x_cube = x_sq * static_cast<T_ACC>(x);
-            auto inner = kBeta * (static_cast<T_ACC>(x) + kKappa * x_cube);
-            auto tanh_inner = c10::cuda::compat::tanh(inner);
-
-            auto left = T_ACC(0.5) * static_cast<T_ACC>(x);
-            auto right = T_ACC(1) + tanh_inner;
-
-            auto left_derivative = 0.5 * right;
-
-            auto tanh_derivative = T_ACC(1) - tanh_inner * tanh_inner;
-            auto inner_derivative = kBeta * (T_ACC(1) + T_ACC(3) * kKappa * x_sq);
-            auto right_derivative = left * tanh_derivative * inner_derivative;
-
-            return static_cast<T_ACC>(dy) * (left_derivative + right_derivative);
+void GeluBackwardCUDAKernelImpl(TensorIteratorBase& it) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+      it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
+        using T_ACC = acc_type<scalar_t, true>;
+        gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+          constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
+          const T_ACC cdf = c10::cuda::compat::normcdf(static_cast<T_ACC>(x));
+          const T_ACC pdf =
+              c10::cuda::compat::exp(
+                  T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
+              kBeta;
+          return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
         });
       });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
-        it.dtype(), "GeluBackwardCUDAKernelImpl", [&]() {
-          using T_ACC = acc_type<scalar_t, true>;
-          gpu_kernel(it, [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
-            constexpr T_ACC kBeta = M_2_SQRTPI * M_SQRT1_2 * T_ACC(0.5);
-            constexpr T_ACC kAlpha = M_SQRT1_2;
-            const T_ACC cdf =
-                T_ACC(0.5) * (T_ACC(1) + ::erf(static_cast<T_ACC>(x) * kAlpha));
-            const T_ACC pdf =
-                c10::cuda::compat::exp(
-                    T_ACC(-0.5) * static_cast<T_ACC>(x) * static_cast<T_ACC>(x)) *
-                kBeta;
-            return static_cast<T_ACC>(dy) * (cdf + static_cast<T_ACC>(x) * pdf);
-          });
-        });
-  }
 }
 
 namespace {

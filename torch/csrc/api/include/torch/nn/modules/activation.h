@@ -570,17 +570,12 @@ TORCH_MODULE(GLU);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GELUImpl : public torch::nn::Cloneable<GELUImpl> {
  public:
-  explicit GELUImpl(const GELUOptions& options_ = {});
-
   Tensor forward(const Tensor& input);
 
   void reset() override;
 
   /// Pretty prints the `GELU` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
-
-  /// The options with which this `Module` was constructed.
-  GELUOptions options;
 };
 
 /// A `ModuleHolder` subclass for `GELUImpl`.
