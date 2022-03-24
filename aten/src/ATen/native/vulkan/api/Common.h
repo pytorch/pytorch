@@ -61,7 +61,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct Adapter;
+class Adapter;
 struct Command;
 class Context;
 struct Descriptor;
@@ -71,6 +71,7 @@ class Runtime;
 struct Shader;
 
 struct GPU final {
+  VkInstance instance;
   const Adapter* adapter;
   VkDevice device;
   VkQueue queue;

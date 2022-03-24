@@ -18,24 +18,67 @@ namespace api {
 // device <-> tensor affinity explicit.
 //
 
-struct Adapter final {
-  Runtime* runtime;
-  VkPhysicalDevice handle;
-  VkPhysicalDeviceProperties properties;
-  VkPhysicalDeviceMemoryProperties memory_properties;
-  uint32_t compute_queue_family_index;
+class Adapter final {
+ public:
+  explicit Adapter(const VkPhysicalDevice handle);
 
+  Adapter(const Adapter&) = delete;
+  Adapter& operator=(const Adapter&) = delete;
+
+  Adapter(Adapter&&);
+  Adapter& operator=(Adapter&&) = delete;
+
+  ~Adapter();
+
+  void init_device();
+
+  VkPhysicalDevice physical_handle() const;
+  uint32_t compute_queue_family_index() const;
+  VkDevice device_handle() const;
+  VkQueue compute_queue() const;
+
+ private:
+  VkPhysicalDevice physical_handle_;
+  VkPhysicalDeviceProperties properties_;
+  VkPhysicalDeviceMemoryProperties memory_properties_;
+  std::vector<VkQueueFamilyProperties> queue_families_;
+  uint32_t compute_queue_family_index_;
+
+  VkDevice handle_;
+  VkQueue queue_;
+
+ public:
   inline bool has_unified_memory() const {
     // Ideally iterate over all memory types to see if there is a pool that
     // is both host-visible, and device-local.  This should be a good proxy
     // for now.
-    return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU == properties.deviceType;
+    return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU == properties_.deviceType;
   }
 
   inline Shader::WorkGroup local_work_group_size() const {
     return { 4u, 4u, 4u, };
   }
 };
+
+//
+// Impl
+//
+
+inline VkPhysicalDevice Adapter::physical_handle() const {
+  return physical_handle_;
+}
+
+inline uint32_t Adapter::compute_queue_family_index() const {
+  return compute_queue_family_index_;
+}
+
+inline VkDevice Adapter::device_handle() const {
+  return handle_;
+}
+
+inline VkQueue Adapter::compute_queue() const {
+  return queue_;
+}
 
 } // namespace api
 } // namespace vulkan

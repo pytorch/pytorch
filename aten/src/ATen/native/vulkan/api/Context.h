@@ -27,11 +27,14 @@ namespace api {
 
 class Context final {
  public:
-  explicit Context(const Adapter& adapter);
+  explicit Context(const VkInstance instance, size_t adapter_i);
+
   Context(const Context&) = delete;
-  Context(Context&&) = default;
   Context& operator=(const Context&) = delete;
+
+  Context(Context&&) = default;
   Context& operator=(Context&&) = default;
+
   ~Context();
 
   GPU gpu();
@@ -67,9 +70,8 @@ class Context final {
 
  private:
   // Construction and destruction order matters.  Do not move members around.
-  Adapter adapter_;
-  Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
-  VkQueue queue_;
+  VkInstance instance_;
+  size_t adapter_i_;
   Shader shader_;
   Pipeline pipeline_;
   ThreadContext threadcontext_;
@@ -84,10 +86,12 @@ Context* context();
 
 inline GPU Context::gpu() {
   // A GPU is simply a (physical device, logical device, device queue) trio.
+  const Adapter* p_adapter = runtime()->get_adapter_p(adapter_i_);
   return {
-    &adapter_,
-    device(),
-    queue(),
+    instance_,
+    p_adapter,
+    p_adapter->device_handle(),
+    p_adapter->compute_queue(),
   };
 }
 
@@ -112,13 +116,11 @@ inline Resource& Context::resource() {
 }
 
 inline VkDevice Context::device() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
-  return device_.get();
+  return runtime()->get_adapter(adapter_i_).device_handle();
 }
 
 inline VkQueue Context::queue() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
-  return queue_;
+  return runtime()->get_adapter(adapter_i_).compute_queue();
 }
 
 namespace detail {

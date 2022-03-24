@@ -333,7 +333,7 @@ inline void Command::Buffer::Barrier::reset() {
 Command::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     command_pool_(
-        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index),
+        create_command_pool(gpu.device, gpu.adapter->compute_queue_family_index()),
         VK_DELETER(CommandPool)(device_)),
     buffer_{} {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

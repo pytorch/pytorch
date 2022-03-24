@@ -19,50 +19,90 @@ namespace api {
 // are associated with a Context to make tensor <-> device affinity explicit.
 //
 
+enum AdapterSelector {
+  FIRST,
+};
+
+struct RuntimeConfiguration final {
+  bool enableValidationMessages;
+  bool initDefaultDevice;
+  AdapterSelector defaultSelector;
+};
+
 class Runtime final {
  public:
-  enum class Type {
-    Debug,
-    Release,
-  };
+  explicit Runtime(const RuntimeConfiguration config);
 
-  explicit Runtime(Type type);
+  // Do not allow copying. There should be only one global instance of this class.
   Runtime(const Runtime&) = delete;
   Runtime& operator=(const Runtime&) = delete;
-  Runtime(Runtime&&) = default;
-  Runtime& operator=(Runtime&&) = default;
-  ~Runtime() = default;
+
+  Runtime(Runtime&&);
+  Runtime& operator=(Runtime&&) = delete;
+
+  ~Runtime();
 
   VkInstance instance() const;
 
-  typedef std::function<bool (const Adapter&)> Selector;
-  Adapter select(const Selector& selector);
+  typedef std::function<size_t (const std::vector<Adapter>&)> Selector;
+  size_t init_adapter(const Selector& selector);
+
+  Adapter* get_adapter_p();
+  Adapter& get_adapter();
+
+  Adapter* get_adapter_p(size_t i);
+  Adapter& get_adapter(size_t i);
+
+  size_t default_adapter_i() const;
 
  private:
-  class Debug final {
-   public:
-    explicit Debug(VkInstance);
-    void operator()(VkDebugReportCallbackEXT) const;
+  VkInstance instance_;
+  std::vector<Adapter> adapters_;
+  size_t default_adapter_i_;
 
-   private:
-    VkInstance instance_;
-  };
-
- private:
-  // Construction and destruction order matters.  Do not move members around.
-  Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
-  Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
+  VkDebugReportCallbackEXT debug_report_callback_;
 };
 
+// The global runtime is retrieved using this function, where it is declared as
+// a static local variable.
 Runtime* runtime();
+
+// This variable only exists to trigger Runtime initialization upon application
+// loading.
+static Runtime* runtime_init = runtime();
 
 //
 // Impl
 //
 
 inline VkInstance Runtime::instance() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(instance_);
-  return instance_.get();
+  return instance_;
+}
+
+inline Adapter* Runtime::get_adapter_p() {
+  TORCH_CHECK(
+      default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
+      "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
+  return &adapters_[default_adapter_i_];
+}
+
+inline Adapter& Runtime::get_adapter() {
+  TORCH_CHECK(
+      default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
+      "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
+  return adapters_[default_adapter_i_];
+}
+
+inline Adapter* Runtime::get_adapter_p(size_t i) {
+  return &adapters_[i];
+}
+
+inline Adapter& Runtime::get_adapter(size_t i) {
+  return adapters_[i];
+}
+
+inline size_t Runtime::default_adapter_i() const {
+  return default_adapter_i_;
 }
 
 } // namespace api
