@@ -1600,7 +1600,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           /*is_sorted=*/self.is_coalesced() && dim == 0);
 
       Tensor index_sorted, index_counts;
-      std::tie(index_sorted, index_counts) = [&get_counts](const Tensor& index, int64_t size) {
+      std::tie(index_sorted, index_counts) = [&get_counts](const Tensor& index, int64_t size)
+        -> std::tuple<Tensor, Tensor> {
         int64_t index_len = index.numel();
         Tensor index_sorted, index_counts;
         // TODO: find a better threshold based on actual runtime benchmarking.
@@ -1622,12 +1623,11 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       }(nneg_index, size);
 
       // find res_dim_indices
-      Tensor res_dim_indices;
-      {
+      const auto res_dim_indices = [&dim_indices_counts, &index_sorted, index_len](void) -> Tensor {
         const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
         const auto perm = at::arange(index_len, index_sorted.options());
-        res_dim_indices = at::repeat_interleave(perm, selected_dim_indices_counts);
-      }
+        return at::repeat_interleave(perm, selected_dim_indices_counts);
+      }();
 
       // find selected_dim_indices
       Tensor selected_dim_indices = at::empty_like(res_dim_indices);
