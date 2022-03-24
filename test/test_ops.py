@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: unknown"]
 
 from collections.abc import Sequence
 from functools import partial
