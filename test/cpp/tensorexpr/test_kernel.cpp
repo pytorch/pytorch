@@ -1894,16 +1894,17 @@ TEST_F(Kernel, FuseLoopsWithVariableBounds) {
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
     auto run_kernel = [&](int dim1, int dim2) {
-      auto a =
-          at::rand({dim1, 3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
-      auto b =
-          at::rand({dim1, 7, dim2}, at::TensorOptions(device).dtype(at::kFloat));
-      auto c =
-          at::rand({dim1, 9, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+      auto a = at::rand(
+          {dim1, 3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+      auto b = at::rand(
+          {dim1, 7, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+      auto c = at::rand(
+          {dim1, 9, dim2}, at::TensorOptions(device).dtype(at::kFloat));
 
       auto ref = at::cat({a, b, c}, 1);
 
-      std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
+      std::vector<IValue> stack =
+          fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
       stack.emplace_back(dim1);
       stack.emplace_back(dim2);
       kernel.run(stack);
