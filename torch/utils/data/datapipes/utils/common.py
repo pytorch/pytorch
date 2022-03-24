@@ -96,12 +96,33 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         )
 
 
-def deprecation_warning(name, new_name: str = ""):
-    new_name_statement = ""
-    if new_name:
-        new_name_statement = f" Please use {new_name} instead."
-    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`." +
-                  new_name_statement, DeprecationWarning)
+def deprecation_warning(
+    old_class_name: str,
+    *,
+    old_functional_name: str = "",
+    new_class_name: str = "",
+    new_functional_name: str = "",
+) -> None:
+    msg = f"`{old_class_name}()`"
+    if old_functional_name:
+        msg = f"{msg} and its functional API `.{old_functional_name}()` are"
+    else:
+        msg = f"{msg} is"
+    # TODO: Make the deprecation and removal version concrete.
+    #  See https://github.com/pytorch/pytorch/wiki/PyTorch's-Python-Frontend-Backward-and-Forward-Compatibility-Policy#minimizing-the-disruption-of-bc-breaking-changes
+    msg = f"{msg} deprecated and will be removed in the future."
+
+    if new_class_name or new_functional_name:
+        msg = f"{msg} Please use"
+        if new_class_name:
+            msg = f"{msg} `{new_class_name}()`"
+        if new_class_name and new_functional_name:
+            msg = f"{msg} or"
+        if new_functional_name:
+            msg = f"{msg} `.{new_functional_name}()`"
+        msg = f"{msg} instead."
+
+    warnings.warn(msg, FutureWarning)
 
 
 class StreamWrapper:
