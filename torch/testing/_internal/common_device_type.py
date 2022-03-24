@@ -656,6 +656,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
 #                testing the operator raises an error and doesn't crash.
 # - supported_backward: Every dtype supported by the operator's backward pass.
 # - unsupported_backward: Run tests on dtypes not supported by the operator's backward pass.
+# - any_one: Runs a test for one dtype the operator supports. Prioritizes dtypes the
+#     operator supports in both forward and backward.
 # - none: Useful for tests that are not dtype-specific. No dtype will be passed to the test
 #         when this is selected.
 class OpDTypes(Enum):
@@ -664,7 +666,8 @@ class OpDTypes(Enum):
     unsupported = 2  # Test only unsupported dtypes
     supported_backward = 3  # Test all supported backward dtypes
     unsupported_backward = 4  # Test only unsupported backward dtypes
-    none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
+    any_one = 5  # Test precisely one supported dtype
+    none = 6  # Instantiate no dtype variants (no dtype kwarg needed)
 
 
 # Decorator that defines the OpInfos a test template should be instantiated for.
@@ -698,7 +701,9 @@ class OpDTypes(Enum):
 #     operator's gradient formula supports
 #   OpDTypes.unsupported_backward - the test is instantiated for all dtypes the
 #     operator's gradient formula doesn't support
-#   OpDTypes.none - the test is instantied without any dtype. The test signature
+#   OpDTypes.any_one - the test is instantiated for one dtype the
+#     operator supports. The dtype supports forward and backward if possible.
+#   OpDTypes.none - the test is instantiated without any dtype. The test signature
 #     should not include a dtype kwarg in this case.
 #
 # These options allow tests to have considerable control over the dtypes
@@ -733,6 +738,32 @@ class ops(_TestParametrizer):
                 dtypes = op.supported_dtypes(device_cls.device_type)
             elif self.opinfo_dtypes == OpDTypes.basic:
                 dtypes = op.default_test_dtypes(device_cls.device_type)
+            elif self.opinfo_dtypes == OpDTypes.any_one:
+                # Arbitrary order
+                dtype_order = (
+                    torch.float32,
+                    torch.float64,
+                    torch.complex64,
+                    torch.complex128,
+                    torch.float16,
+                    torch.bfloat16,
+                    torch.long,
+                    torch.int32,
+                    torch.int16,
+                    torch.int8,
+                    torch.uint8,
+                    torch.bool
+                )
+
+                # Tries to pick a dtype that supports both forward or backward
+                supported = op.supported_dtypes(device_cls.device_type)
+                supported_backward = op.supported_backward_dtypes(device_cls.device_type)
+                supported_both = supported.intersection(supported_backward)
+                dtype_set = supported_both if len(supported_both) > 0 else supported
+                for dtype in dtype_order:
+                    if dtype in dtype_set:
+                        dtypes = {dtype}
+                        break
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
