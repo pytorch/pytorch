@@ -1,6 +1,7 @@
 from torch.utils.data.datapipes.utils.common import check_lambda_fn
 from typing import Callable, TypeVar
-from torch.utils.data import MapDataPipe, functional_datapipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import MapDataPipe
 
 T_co = TypeVar('T_co', covariant=True)
 

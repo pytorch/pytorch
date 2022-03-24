@@ -234,10 +234,7 @@ class TestSparseCSR(TestCase):
                                     device=device)
         y = x.clone()
 
-        self.assertEqual(x.shape, y.shape)
-        self.assertEqual(x.crow_indices(), y.crow_indices())
-        self.assertEqual(x.col_indices(), y.col_indices())
-        self.assertEqual(x.values(), y.values())
+        self.assertEqual(x, y)
 
     @skipMeta
     @dtypes(*get_all_dtypes())
@@ -249,9 +246,7 @@ class TestSparseCSR(TestCase):
 
             a.copy_(b)
 
-            self.assertEqual(a.crow_indices(), b.crow_indices())
-            self.assertEqual(a.col_indices(), b.col_indices())
-            self.assertEqual(a.values(), b.values())
+            self.assertEqual(a, b)
 
         ns = [5, 2, 0]
         for shape, index_dtype in zip(itertools.product(ns, ns), [torch.int32, torch.int64]):
@@ -1389,10 +1384,7 @@ class TestSparseCSR(TestCase):
                                           index_dtype=sample.input.crow_indices().dtype)
             op(sample.input, *sample.args, **sample.kwargs, out=out)
 
-            self.assertEqual(out.values(), expect.values())
-            self.assertEqual(out.crow_indices(), expect.crow_indices())
-            self.assertEqual(out.col_indices(), expect.col_indices())
-            self.assertEqual(out._nnz(), expect._nnz())
+            self.assertEqual(out, expect)
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_inplace(self, device, dtype, op):
@@ -1424,10 +1416,7 @@ class TestSparseCSR(TestCase):
             actual = op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
 
             self.assertIs(actual, sample.input)
-            self.assertEqual(actual.values(), expect.values())
-            self.assertEqual(actual.crow_indices(), expect.crow_indices())
-            self.assertEqual(actual.col_indices(), expect.col_indices())
-            self.assertEqual(actual._nnz(), expect._nnz())
+            self.assertEqual(actual, expect)
 
     @unittest.expectedFailure
     @ops(sparse_csr_unary_ufuncs, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble])
@@ -1469,7 +1458,8 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
 
         for sample in samples:
-            a = sample.args[0].to_sparse_csr()
+            # TODO: Remove detach once we have autograd support for CSR input
+            a = sample.args[0].to_sparse_csr().detach()
 
             for addmm in [torch.addmm, torch.sparse.addmm]:
 
@@ -1500,7 +1490,8 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
 
         for sample in samples:
-            a = sample.args[0].to_sparse_csr()
+            # TODO: Remove detach once we have autograd support for CSR input
+            a = sample.args[0].to_sparse_csr().detach()
 
             def fn(c, b):
                 output = torch.addmv(c, a, b, **sample.kwargs)
@@ -1532,7 +1523,8 @@ class TestSparseCSR(TestCase):
 
         # Here we assume that the signature is op(sparse_input, dense_input) -> dense_output
         for sample in samples:
-            sparse_input = sample.input.to_sparse_csr()
+            # TODO: Remove detach once we have autograd support for CSR input
+            sparse_input = sample.input.to_sparse_csr().detach()
 
             def fn(*args):
                 output = op.gradcheck_wrapper(op.get_op(), sparse_input, *args, **sample.kwargs)
@@ -1584,9 +1576,7 @@ class TestSparseCSR(TestCase):
         for index_dtype in [torch.int32, torch.int64]:
             inp = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
             detached_inp = inp.detach()
-            self.assertEqual(inp.values(), detached_inp.values())
-            self.assertEqual(inp.crow_indices(), detached_inp.crow_indices())
-            self.assertEqual(inp.col_indices(), detached_inp.col_indices())
+            self.assertEqual(inp, detached_inp)
 
 
 
