@@ -93,6 +93,7 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
+    # TODO remove this comment, it's just to create a non-empty commit
     @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.
