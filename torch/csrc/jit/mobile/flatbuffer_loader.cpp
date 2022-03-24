@@ -168,7 +168,7 @@ void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files) {
   auto extra_files_offsets = module->extra_files();
-  parseExtraFilesFromVector(module->extra_files(), &extra_files);
+  parseExtraFilesFromVector(extra_files_offsets, &extra_files);
 }
 
 mobile::Module FlatbufferLoader::parseModule(
@@ -589,7 +589,11 @@ std::tuple<std::shared_ptr<char>, size_t> get_file_content(
   // make sure buffer size is multiple of alignment
   size_t buffer_size =
       (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
-#ifdef _WIN32
+#if defined(__ANDROID__)
+  std::shared_ptr<char> data(
+      static_cast<char*>(memalign(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
+      free);
+#elif defined(_WIN32)
   std::shared_ptr<char> data(
       static_cast<char*>(
           _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
