@@ -515,7 +515,7 @@ class TestTensorCreation(TestCase):
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
         float_to_complex_map = {torch.float16: torch.complex32,
-                             torch.float: torch.complex64, torch.double: torch.complex128}
+                                torch.float: torch.complex64, torch.double: torch.complex128}
         complex_dtype = float_to_complex_map[dtype]
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
