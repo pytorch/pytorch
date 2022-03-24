@@ -110,7 +110,10 @@ def deprecation_warning(
         msg = f"{msg} and its functional API `.{old_functional_name}()` are"
     else:
         msg = f"{msg} is"
-    msg = f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}."
+    msg = (
+        f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}. "
+        f"See https://github.com/pytorch/data/issues/163 for details."
+    )
 
     if new_class_name or new_functional_name:
         msg = f"{msg} Please use"
