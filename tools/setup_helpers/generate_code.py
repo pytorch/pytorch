@@ -202,6 +202,7 @@ def main() -> None:
         from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
         run_gen_lazy_tensor(aten_path=aten_path,
                             source_yaml=ts_backend_yaml,
+                            backend_name="TorchScript",
                             output_dir=lazy_install_dir,
                             dry_run=False,
                             impl_path=ts_native_functions,
