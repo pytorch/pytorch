@@ -1142,7 +1142,7 @@ class CyclicLR(_LRScheduler):
 
         self.cycle_momentum = cycle_momentum
         if cycle_momentum:
-            if 'momentum' not in optimizer.defaults:
+            if 'momentum' not in optimizer.defaults and 'betas' not in self.optimizer.defaults:
                 raise ValueError('optimizer must support momentum with `cycle_momentum` option enabled')
 
             base_momentums = self._format_param('base_momentum', optimizer, base_momentum)
