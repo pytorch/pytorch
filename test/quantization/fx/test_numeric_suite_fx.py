@@ -633,9 +633,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 op in METHS_UNMATCHABLE
             )
 
-        from torch.ao.quantization.fx.backend_config import get_native_backend_config_dict
-        from torch.ao.quantization.fx.backend_config.utils import get_pattern_to_quantize_handlers
-
         default_quant_patterns = get_all_quant_patterns()
         for pattern, qhandler_cls in default_quant_patterns.items():
             base_op = None
