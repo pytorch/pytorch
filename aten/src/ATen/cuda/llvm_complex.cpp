@@ -724,6 +724,16 @@ log10(const complex<_Tp>& __x)
     return log(__x) / log(_Tp(10));
 }
 
+// log2
+
+template<class _Tp>
+inline
+complex<_Tp>
+log2(const complex<_Tp>& __x)
+{
+    return log(__x) / log(_Tp(2));
+}
+
 // sqrt
 
 template<class _Tp>
