@@ -6,7 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, enable_doc_jobs) }}
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, branches, enable_doc_jobs) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
@@ -40,6 +40,7 @@ env:
 jobs:
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -150,11 +151,13 @@ jobs:
 {% block test +%}
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     needs: build
     runs-on: !{{ test_job.runner }}
     timeout-minutes: !{{ timeout_after + 30 }}
     env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: !{{ test_job.config }}
@@ -323,6 +326,7 @@ jobs:
 {%- endif -%}
 {%- if enable_doc_jobs %}
   build-docs:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
