@@ -13,6 +13,7 @@ TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/t
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
+XLA_DIR="$(pwd)/xla"
 
 BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
@@ -424,7 +425,10 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
-  XLA_DIR=xla
+  echo "WONJOO: build_xla"
+  pwd
+  ls
+  echo $XLA_DIR
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
@@ -437,6 +441,9 @@ build_xla() {
 }
 
 test_xla() {
+  echo "WONJOO: test_xla"
+  pwd
+  ls
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"

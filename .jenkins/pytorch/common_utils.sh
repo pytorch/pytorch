@@ -91,6 +91,8 @@ function checkout_install_torchvision() {
 }
 
 function clone_pytorch_xla() {
+  echo "WONJOO: clone_pytorch_xla"
+  pwd
   if [[ ! -d ./xla ]]; then
     git clone --recursive -b lazy-tensor-device --single-branch https://github.com/pytorch/xla.git
   fi
