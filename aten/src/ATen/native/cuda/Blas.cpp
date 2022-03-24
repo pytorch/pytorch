@@ -113,7 +113,25 @@ c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bo
 
 namespace {
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, cuda::blas::GEMMAndBiasActivationEpilogue activation=cuda::blas::GEMMAndBiasActivationEpilogue::None) {
+enum class Activation {
+  None,
+  RELU,
+  GELU,
+};
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
+  switch (a) {
+    case Activation::None:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
+    case Activation::RELU:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
+    case Activation::GELU:
+      return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
+}
+#endif
+
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -233,11 +251,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               result_->data_ptr<scalar_t>(),
               result_ld,
 #if CUDA_VERSION >= 11040
-              activation
+              activation_to_gemm_and_blas_arg(activation)
 #else
               // GELU is not supported (and does not compile!) prior to CUDA 11.4.
-              activation != cuda::blas::GEMMAndBiasActivationEpilogue::GELU
-              ? activation
+              activation != Activation::GELU
+              ? activation_to_gemm_and_blas_arg(activation)
               : cuda::blas::GEMMAndBiasActivationEpilogue::None
 #endif
           );
@@ -273,10 +291,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               result_ld);
         });
     switch (activation) {
-      case cuda::blas::GEMMAndBiasActivationEpilogue::RELU:
+      case Activation::RELU:
         at::relu_(const_cast<Tensor&>(*result_));
         break;
-      case cuda::blas::GEMMAndBiasActivationEpilogue::GELU:
+      case Activation::GELU:
         at::gelu_(const_cast<Tensor&>(*result_));
         break;
       default: break;
@@ -284,7 +302,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   }
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && CUDA_VERSION < 11040 && !defined(_MSC_VER)
-  if (useLtInterface && activation == cuda::blas::GEMMAndBiasActivationEpilogue::GELU) {
+  if (useLtInterface && activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*result_));
   }
 #endif
