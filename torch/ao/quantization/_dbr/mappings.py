@@ -6,7 +6,6 @@ toq = torch.ops.quantized
 from torch.ao.quantization.quantization_mappings import (
     DEFAULT_STATIC_QUANT_MODULE_MAPPINGS,
     DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
-    DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS,
 )
 
 import operator
@@ -68,10 +67,6 @@ module_types_supported_by_quantization |= \
     set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
 module_types_supported_by_quantization |= \
     set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.values())
-module_types_supported_by_quantization |= \
-    set(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.keys())
-module_types_supported_by_quantization |= \
-    set(DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.values())
 module_types_supported_by_quantization |= set([
     # these are quantizeable modules which do not need swaps
     nn.ReLU,
@@ -147,9 +142,6 @@ for a, b in DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.items():
     a_related_to_b.add((a, b))
     a_related_to_b.add((b, a))
 for a, b in DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.items():
-    a_related_to_b.add((a, b))
-    a_related_to_b.add((b, a))
-for a, b in DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS.items():
     a_related_to_b.add((a, b))
     a_related_to_b.add((b, a))
 for a, b in fp32_to_int8_fun_mapping.items():

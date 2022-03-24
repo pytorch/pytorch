@@ -102,8 +102,6 @@ class SeenQOpInfo:
     qconfig: QConfigAny
     # fusion_info for the op, is None if no fusion is found
     fusion_info: Optional[FusionInfo]
-    # True if this op is a reference op during inference
-    is_reference_op_at_inference: bool
 
     def __repr__(self) -> str:
         s = f"(type): {self.type}\n"
@@ -650,7 +648,7 @@ def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
 def get_input_args_quant_dequant_info(
     seen_q_op_info: SeenQOpInfo,
     tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-) -> Tuple[List[Optional[Tuple[float, int, torch.dtype]]], List[bool], bool]:
+) -> Tuple[List[Optional[Tuple[float, int]]], List[bool], bool]:
     """
     Returns a list of information about the tensor inputs to the current op.
 
@@ -676,7 +674,7 @@ def get_input_args_quant_dequant_info(
       # dequants
       [False, False]
     """
-    quant_infos: List[Optional[Tuple[float, int, torch.dtype]]] = []
+    quant_infos: List[Optional[Tuple[float, int]]] = []
     dequant_infos: List[bool] = []
 
     # determine the expected output dtype
@@ -692,20 +690,12 @@ def get_input_args_quant_dequant_info(
             tensor_id = input_arg.id
             if input_arg.inf_dtype != output_dtype:
                 any_arg_quant_or_dequant_needed = True
-                if output_dtype in (torch.quint8, torch.qint32):
+                if output_dtype == torch.quint8:
                     assert tensor_id in tensor_id_to_scale_zp
                     scale, zp = tensor_id_to_scale_zp[tensor_id]
                     # TODO: return this to the caller
-                    quant_infos.append((scale, zp, output_dtype))  # type: ignore[arg-type]
-                    if output_dtype == torch.qint32:
-                        # For now, we treat all qint32 ops as reference, so
-                        # we add a dequant before the op.
-                        # TODO(future PR): extend this to more dtypes
-                        # TODO(future PR): use is_reference flag instead of
-                        # assuming
-                        dequant_infos.append(True)
-                    else:
-                        dequant_infos.append(False)
+                    quant_infos.append((scale, zp,))  # type: ignore[arg-type]
+                    dequant_infos.append(False)
                 else:
                     quant_infos.append(None)
                     dequant_infos.append(True)

@@ -5,13 +5,9 @@ import torch
 from torch.nn.intrinsic import _FusedModule
 from ..utils import (
     activation_is_int8_quantized,
-    activation_is_int32_quantized,
     op_is_int8_dynamically_quantized,
 )
 from torch.ao.quantization import swap_module
-from torch.ao.quantization.quantization_mappings import (
-    DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS,
-)
 
 def _swap_child_modules(
     module: torch.nn.Module,
@@ -46,7 +42,6 @@ def _swap_child_modules(
             continue
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
         op_int8_dynamically_quantized = op_is_int8_dynamically_quantized(qconfig)
-        activation_int32_quantized = activation_is_int32_quantized(qconfig)
 
         # Get the output observer from qstate and attach it to the module,
         # to match the API for Eager mode module swaps
@@ -63,16 +58,6 @@ def _swap_child_modules(
             if not type(mod) in dynamic_mappings:
                 continue
             reassign[local_fqn] = swap_module(mod, dynamic_mappings, {})
-        elif activation_int32_quantized:
-            # For now, only apply reference logic to modules quantized to
-            # int32. Do it automatically.
-            # TODO(future PR): extend this logic to more dtypes, and add
-            # the is_reference API flag instead of doing this automatically.
-            # Note: swap modules only does the swap if the mapping for this
-            # module exists.
-            reassign[local_fqn] = swap_module(
-                mod, DEFAULT_REFERENCE_STATIC_QUANT_MODULE_MAPPINGS, {})
-
         # TODO(future PR): add support for other dtypes
 
     for key, value in reassign.items():

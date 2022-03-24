@@ -22,8 +22,6 @@ from torch.testing import FileCheck
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
-    QConfig,
-    MinMaxObserver,
 )
 from torch.quantization.quantize_fx import (
     prepare_fx,
@@ -1343,24 +1341,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         ):
             FileCheck().check_count("aten::alias", 0, exactly=True).run(graph)
 
-    def test_conv_int32_reference_model(self):
-        m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        int32_obs_ctr = MinMaxObserver.with_args(dtype=torch.qint32)
-        int32_qconfig = QConfig(weight=int32_obs_ctr, activation=int32_obs_ctr)
-        qconfig_dict = {'': int32_qconfig}
-        mp = _quantize_dbr.prepare(m, qconfig_dict, (torch.randn(1, 1, 1, 1),))
-        mp(torch.randn(1, 1, 1, 1))
-        mq = _quantize_dbr.convert(mp)
-        res = mq(torch.randn(1, 1, 1, 1))
-        mqt = torch.jit.trace(mq, (torch.randn(1, 1, 1, 1),))
-        # verify the right ops are present:
-        # x0 -> quant -> (dequant -> conv_ref -> quant) -> dequant -> x1
-        FileCheck()\
-            .check_count("aten::quantize_per_tensor", 2, exactly=True)\
-            .run(mqt.graph)
-        FileCheck()\
-            .check_count("aten::dequantize", 2, exactly=True)\
-            .run(mqt.graph)
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRMultipleOps(QuantizeDBRTestCase):

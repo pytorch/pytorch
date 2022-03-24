@@ -43,10 +43,10 @@ class AllModuleTracer(torch.fx.Tracer):
                         new_first_arg.append(args[0][idx])
                     else:
                         # create a quant node
-                        scale, zp, dtype = input_arg_quant_info
+                        scale, zp = input_arg_quant_info
                         quant = super().create_node(
                             'call_function', torch.quantize_per_tensor,
-                            (args[0][idx], scale.item(), zp.item(), dtype), {}, None, None)
+                            (args[0][idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
                         new_first_arg.append(quant)
                 new_args = [new_first_arg, *args[1:]]
             elif target == torch.cat:
@@ -61,10 +61,10 @@ class AllModuleTracer(torch.fx.Tracer):
                         new_args.append(args[idx])
                     else:
                         # create a quant node
-                        scale, zp, dtype = input_arg_quant_info
+                        scale, zp = input_arg_quant_info
                         quant = super().create_node(
                             'call_function', torch.quantize_per_tensor,
-                            (args[idx], scale.item(), zp.item(), dtype), {}, None, None)
+                            (args[idx], scale.item(), zp.item(), torch.quint8), {}, None, None)
                         new_args.append(quant)
             args = tuple(new_args)
         return args

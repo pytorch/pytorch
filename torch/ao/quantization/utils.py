@@ -190,12 +190,6 @@ def activation_is_int8_quantized(qconfig):
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
-def activation_is_int32_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    quantized to int32 or not
-    """
-    return activation_dtype(qconfig) == torch.qint32
-
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
     quantized or not

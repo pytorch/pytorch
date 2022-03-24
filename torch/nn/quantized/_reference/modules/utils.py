@@ -84,7 +84,7 @@ def _quantize_weight(
         weight_zero_point: torch.Tensor,
         weight_axis: torch.Tensor):
     if weight_qscheme == torch.per_tensor_affine:
-        if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
+        if weight_dtype in [torch.quint8, torch.qint8]:
             weight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, weight_dtype)
         elif weight_dtype == torch.float16:
             weight = weight.to(weight_dtype)

@@ -42,15 +42,11 @@ from .function_fusion import (
     get_seen_q_op_info_of_end_of_fusion,
 )
 
-from torch.ao.quantization.utils import (
-    activation_is_int32_quantized,
-)
-
 OpConvertInfo = Tuple[
     # quantized equivalent of original op (None means keep original)
     Optional[Callable],
-    # arg_quant_infos, each element is (scale, zp, dtype) for quantized and None otherwise
-    List[Optional[Tuple[float, int, torch.dtype]]],
+    # arg_quant_infos, each element is (scale, zp) for quantized and None otherwise
+    List[Optional[Tuple[float, int]]],
     # arg_dequant_infos, each element is True if this arg needs a dequant
     List[bool],
     # packed param name, if the op has a packed param
@@ -458,11 +454,9 @@ class AutoQuantizationState(torch.nn.Module):
                     quant_info = arg_quant_infos[tensor_arg_idx]
                     dequant_info = arg_dequant_infos[tensor_arg_idx]
                     if quant_info is not None:
-                        scale, zp, dtype = quant_info
-                        arg = torch.quantize_per_tensor(arg, scale, zp, dtype)
-                    if dequant_info is True:
-                        # Note: both quant and dequant paths are taken for
-                        # reference ops.
+                        scale, zp = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                    elif dequant_info is True:
                         arg = arg.dequantize()
                     new_first_arg.append(arg)
                     tensor_arg_idx += 1
@@ -476,11 +470,9 @@ class AutoQuantizationState(torch.nn.Module):
                     quant_info = arg_quant_infos[tensor_arg_idx]
                     dequant_info = arg_dequant_infos[tensor_arg_idx]
                     if quant_info is not None:
-                        scale, zp, dtype = quant_info
-                        arg = torch.quantize_per_tensor(arg, scale, zp, dtype)
-                    if dequant_info is True:
-                        # Note: both quant and dequant paths are taken for
-                        # reference ops.
+                        scale, zp = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                    elif dequant_info is True:
                         arg = arg.dequantize()
                     new_args.append(arg)
                     tensor_arg_idx += 1
@@ -526,22 +518,10 @@ class AutoQuantizationState(torch.nn.Module):
         global_op_idx: List[int],
     ) -> Any:
         """
-        This function is called after an op call in a converted model.
+        This function is called aftern an op call in a converted model.
+
+        TODO: add dequant, if needed
         """
-        # TODO(future PR): improve performance by moving this out of the
-        # path of non-reference ops
-        seen_q_op_info = self._get_cur_seen_q_op_info()
-
-        if seen_q_op_info.is_reference_op_at_inference:
-            # given the current reference module design,
-            # we need to quantize to the target dtype
-            output_tensor_info = seen_q_op_info.output_tensor_infos[0]
-            tensor_id, inf_dtype = \
-                output_tensor_info.id, output_tensor_info.inf_dtype
-            scale, zp = self.tensor_id_to_scale_zp[tensor_id]
-            output = torch.quantize_per_tensor(
-                output, scale, zp, inf_dtype)
-
         if self.log_op_outputs:
             output_clone = clone_detach_tensor_without_dispatch(output)
             seen_q_op_info = self._get_cur_seen_q_op_info()
@@ -815,15 +795,11 @@ class AutoQuantizationState(torch.nn.Module):
             op_type_is_module = isinstance(op, torch.nn.Module)
             op_type = type(op) if op_type_is_module else op  # type: ignore[assignment]
             qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op_type)
-            # TODO(future PR): use API flag instead of qconfig for is_reference
-            is_reference_op_at_inference = \
-                qconfig is not None and activation_is_int32_quantized(qconfig)
             self.idx_to_seen_q_op_infos[self.idx] = SeenQOpInfo(
                 self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
-                op_packing_only_uses_module_attributes, qconfig, None,
-                is_reference_op_at_inference)
+                op_packing_only_uses_module_attributes, qconfig, None)
 
         return args, kwargs
 
