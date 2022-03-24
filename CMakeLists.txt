@@ -680,7 +680,13 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+SET(BUILD_ONEDNN_GRAPH 0)
+
 include(cmake/Dependencies.cmake)
+
+if(BUILD_ONEDNN_GRAPH)
+  string(APPEND CMAKE_CXX_FLAGS " -DBUILD_ONEDNN_GRAPH")
+endif()
 
 if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
   # CUDA < 10.2 doesn't support compiling and extracting header dependencies in

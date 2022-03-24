@@ -16,7 +16,7 @@ set_property(
 set_property(
   TARGET caffe2::mkldnn PROPERTY INTERFACE_LINK_LIBRARIES
   ${MKLDNN_LIBRARIES})
-if(NOT APPLE AND NOT WIN32)
+if(BUILD_ONEDNN_GRAPH)
   if(NOT TARGET caffe2::dnnl_graph)
     add_library(caffe2::dnnl_graph INTERFACE IMPORTED)
   endif()
