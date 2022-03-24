@@ -717,6 +717,22 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+) {
+  if (min_p.defined() && max_p.defined()) {
+    return where(min_p > max_p, max_t, where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
+  } else if (min_p.defined()) {
+    return where(self_p > min_p, self_t, min_t);
+  } else if (max_p.defined()) {
+    return where(self_p < max_p, self_t, max_t);
+  } else {
+    return self_t;
+  }
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
@@ -5197,6 +5213,25 @@ Tensor lu_factor_ex_jvp(
       auto dLU2 = at::linalg_solve_triangular(U1, PdA2, /*upper=*/true, /*left=*/false) - L2.matmul(dK.triu());
       return at::cat({dLU1, dLU2}, /*dim=*/-2);
     }
+  }
+}
+
+Tensor logsumexp_jvp(const Tensor& self_p, const Tensor& self_t, IntArrayRef dim, bool keepdim) {
+  // NB: for simplicitly, we recompute some values that can be reused from forward
+  auto self_p_exp = (self_p - at::amax(self_p, dim, true)).exp();  // Use the exp-normalize trick
+  auto sumexp_p = self_p_exp.sum(dim, keepdim);
+
+  // NB: it's OK for logsumexp_jvp to be reused for formulas like softmax/log_softmax
+  //     that only have one differentiable input, because that means self_t are never zerotensors
+  TORCH_INTERNAL_ASSERT(!self_t._is_zerotensor())
+  if (areAnyTensorSubclassLike({self_p, self_t})) {
+    auto result = (self_p_exp * self_t).sum(dim, keepdim);
+    result /= sumexp_p;
+    return result;
+  } else {
+    self_p_exp *= self_t;
+    auto sumexp_t = self_p_exp.sum(dim, keepdim);
+    return sumexp_t /= sumexp_p;
   }
 }
 
