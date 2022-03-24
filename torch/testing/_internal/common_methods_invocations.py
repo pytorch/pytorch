@@ -1816,11 +1816,14 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
     for shape in cases:
         for weight in [-1., 0., 0.8, 1.]:
             weight_tensor = torch.tensor(weight, device=device, dtype=dtype, requires_grad=requires_grad)
-            yield SampleInput(make_arg(shape), kwargs=dict(weight=weight_tensor))
+            yield SampleInput(make_arg(shape), args=(weight_tensor,))
 
         if len(shape) >= 2:
             channel_size = shape[1]
-            yield SampleInput(make_arg(shape), kwargs=dict(weight=make_arg((channel_size,))))
+            yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+    weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
+    yield SampleInput(make_arg((S, S)), kwargs=dict(weight=make_arg((S,)),))
 
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -5403,7 +5406,7 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
-def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False):
+def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None):
     if same_size:
         return [make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous) for _ in range(N)]
     else:
@@ -9080,6 +9083,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',

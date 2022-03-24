@@ -16,6 +16,8 @@ from torch.ao.quantization.fake_quantize import (
     default_fused_per_channel_wt_fake_quant,
     default_embedding_fake_quant,
     default_embedding_fake_quant_4bit,
+    fused_wt_fake_quant_range_neg_127_to_127,
+    fused_per_channel_wt_fake_quant_range_neg_127_to_127,
 )
 
 from .observer import (
@@ -311,6 +313,27 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                              "in get_default_qat_qconfig is not supported. Version number must be 0 or 1")
 
     return qconfig
+
+"""
+Default symmetric QAT qconfig for qnnpack. And its per channel weight variant.
+"""
+default_symmetric_qnnpack_qat_qconfig = QConfig(
+    activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                       quant_min=-128,
+                                                       quant_max=127,
+                                                       dtype=torch.qint8,
+                                                       reduce_range=False,
+                                                       eps=2 ** -12),
+    weight=fused_wt_fake_quant_range_neg_127_to_127)
+
+default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
+    activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                       quant_min=-128,
+                                                       quant_max=127,
+                                                       dtype=torch.qint8,
+                                                       reduce_range=False,
+                                                       eps=2 ** -12),
+    weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
 def _get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
     return {
