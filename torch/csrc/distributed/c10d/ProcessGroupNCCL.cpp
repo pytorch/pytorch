@@ -282,7 +282,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     OpType opType,
     uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs)
+    const c10::optional<std::vector<at::Tensor>>& inputs,
+    bool desyncDebug)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
       workStartTime_(std::chrono::steady_clock::now()),
@@ -290,8 +291,10 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  ncclStartEvents_ =
-      std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
+  if (desyncDebug) {
+    ncclStartEvents_ =
+        std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
+  }
   ncclEndEvents_ =
       std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclComms_.resize(devices.size());
@@ -546,9 +549,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
-  // Infer desync debug from whether TORCH_DISTRIBUTED_DEBUG >= INFO
-  // Provide backward support of NCCL_DESYNC_DEBUG
-  desyncDebug_ = dist_debug_level_ >= DebugLevel::Info || parseEnvVarFlag(NCCL_DESYNC_DEBUG);
+  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG);
 
   if (blockingWait_) {
     if (asyncErrorHandling_ || desyncDebug_) {
@@ -591,6 +592,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
@@ -1347,7 +1349,8 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
       opType,
       seq_,
       profilingTitle,
-      inputs);
+      inputs,
+      desyncDebug_);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
