@@ -5948,7 +5948,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = M().eval()
         # nothing to fuse so skipping the fuse step
         qconfig_dict = {'': default_qconfig}
-        prepared = prepare_fx(m, qconfig_dict, prepare_custom_config_dict={"input_quantized_idxs": [0]})
+        prepared = prepare_fx(m, qconfig_dict, prepare_custom_config_dict={"input_quantized_idxs": {0: torch.quint8}})
 
         # not runnable
         quantized = convert_fx(prepared)

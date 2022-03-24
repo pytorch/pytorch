@@ -345,8 +345,7 @@ def convert_standalone_module(
     observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
     sm_input_quantized_idxs = \
         observed_standalone_module \
-        ._standalone_module_input_quantized_idxs\
-        .tolist()  # type: ignore[operator]
+        ._standalone_module_input_quantized_idxs
     # remove the dequantize nodes for inputs
     args = list(node.args)
     for idx in range(len(args)):
@@ -360,10 +359,9 @@ def convert_standalone_module(
     # add dequantize node for output
     sm_output_quantized_idxs = \
         observed_standalone_module \
-        ._standalone_module_output_quantized_idxs \
-        .tolist()  # type: ignore[operator]
+        ._standalone_module_output_quantized_idxs
     if len(sm_output_quantized_idxs) > 0:
-        assert sm_output_quantized_idxs[0] == 0, "Currently only quantized"
+        assert sm_output_quantized_idxs[0] == torch.quint8, "Currently only quantized"
         "output idxs = [0] is supported"
 
         # if it's non-empty, then it means the output is kept in quantized form
