@@ -1,8 +1,10 @@
 import argparse
-import importlib.resources
 import os
 import pathlib
+import pkg_resources
+import shutil
 import sys
+import tempfile
 import yaml
 from typing import Any, List, Optional, cast
 
@@ -175,7 +177,19 @@ def main() -> None:
     )
     options = parser.parse_args()
 
-    with importlib.resources.path("tools.autograd", "templates") as autograd_templates_dir:
+    with tempfile.TemporaryDirectory() as autograd_dir_str:
+        autograd_dir = pathlib.Path(autograd_dir_str)
+        copy_resource_to_dir("tools.autograd", "deprecated.yaml", autograd_dir)
+        copy_resource_to_dir("tools.autograd", "derivatives.yaml", autograd_dir)
+
+        templates_dir = autograd_dir / "templates/"
+        templates_dir.mkdir()
+        for template_name in pkg_resources.resource_listdir("tools.autograd", "templates"):
+            if pkg_resources.resource_isdir("tools.autograd.templates", template_name):
+                # Only copy one level deep.
+                continue
+            copy_resource_to_dir("tools.autograd.templates", template_name, templates_dir)
+
         generate_code(
             options.ninja_global,
             options.native_functions_path,
@@ -184,8 +198,9 @@ def main() -> None:
             options.disable_autograd,
             options.force_schema_registration,
             # options.selected_op_list
-            operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
-            autograd_dir=autograd_templates_dir.parent,
+            operator_selector=get_selector(options.selected_op_list_path,
+                                           options.operators_yaml_path),
+            autograd_dir=autograd_dir,
         )
 
     if options.gen_lazy_ts_backend:
@@ -212,6 +227,13 @@ def main() -> None:
                             node_base_hdr=ts_node_base,
                             build_in_tree=True,
                             per_operator_headers=options.per_operator_headers)
+
+
+def copy_resource_to_dir(package: str, name: str, dest_dir: pathlib.Path) -> None:
+    with pkg_resources.resource_stream(package, name) as in_file:
+        dest = dest_dir / pathlib.Path(in_file.name).name
+        with dest.open(mode="xb") as out_file:
+            shutil.copyfileobj(in_file, out_file)
 
 
 if __name__ == "__main__":
