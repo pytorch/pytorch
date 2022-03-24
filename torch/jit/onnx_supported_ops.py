@@ -13,20 +13,12 @@ class TorchSchema:
     opsets: List[int]
 
     def __init__(self, schema, symbolic=False) -> None:
-        if symbolic is False:
-            self.name = schema.name
-            self.overload_name = schema.overload_name
-            self.arguments = [arg.name for arg in schema.arguments]
-            self.optional_arguments = []
-            self.returns = [ret.name for ret in schema.returns]
-            self.opsets = []
-        else:
-            self.name = schema
-            self.overload_name = ""
-            self.arguments = []
-            self.optional_arguments = []
-            self.returns = []
-            self.opsets = []
+        self.name = schema.name
+        self.overload_name = schema.overload_name
+        self.arguments = [arg.name for arg in schema.arguments]
+        self.optional_arguments = []
+        self.returns = [ret.name for ret in schema.returns]
+        self.opsets = []
 
     def __str__(self) -> str:
         s = f"{self.name}.{self.overload_name}("
@@ -41,15 +33,8 @@ class TorchSchema:
     def __eq__(self, other) -> bool:
         if not isinstance(other, TorchSchema):
             return False
-        if (
-            self.name == other.name
+        if self.name == other.name:
             # TODO: Handle overloads
-            # and
-            #    (
-            #        len(self.arguments) == len(other.arguments)
-            #        or len(self.optional_arguments) == 1
-            #    )
-        ):
             return True
         return False
 
@@ -58,45 +43,6 @@ class TorchSchema:
 
     def is_backward(self) -> bool:
         return "backward" in self.name
-
-    def overload_handler(self) -> bool:
-
-        def has_out(self):
-            return self.overload_name == "out" or \
-                self.overload_name == "output" or \
-                "output" in self.overload_name or \
-                "_out" in self.overload_name
-
-        # Named tensors not supported by TorchScript compiler
-        def has_dimname(self):
-            return self.overload_name == "Dimname" or \
-                self.overload_name == "dimname" or \
-                "name" in self.overload_name
-
-        def is_inplace(self):
-            return self.name[-1] == "_"
-
-        def add_to_optional_arguments(self):
-            if self.overload_name in self.arguments:
-                # self.arguments.remove(self.overload_name)
-                self.optional_arguments.append(self.overload_name)
-            # else:
-            #    if self.overload_name == "padding":
-            #        print("Re")
-            #    self.arguments.append(self.overload_name)
-
-        elim_cond = has_dimname(self) or has_out(self) or is_inplace(self)
-        if not elim_cond:
-            add_to_optional_arguments(self)
-        return elim_cond
-
-    # TODO: several variants
-    #   1. vec: upsample_nearest2d.vec(input, output_size, scale_factors)
-    #   2. out: vdot.out(self, other, out)
-    #   3. Scalar: true_divide.Scalar / true_divide.Tensor
-    #   4. name, Dimname, names_dim:
-    #           transpose.Dimname(self, dim0, dim1)
-    #           var.names_dim(self, dim, unbiased, keepdim)
 
 
 # Create TorchSchema object directory of all aten schemas
@@ -108,6 +54,7 @@ def get_all_aten_forward_schemas():
     return aten_schemas
 
 
+# TODO: Do not hard code opset here
 # Create TorchSchema object directory of all registered symbolics
 # get_registered_op(opname, domain, version):
 for i in range(7, 16):
