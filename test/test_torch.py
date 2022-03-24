@@ -54,7 +54,8 @@ import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.common_dtype import (
-    get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes
+    get_all_fp_dtypes, get_all_int_dtypes, get_all_math_dtypes, get_all_dtypes, get_all_complex_dtypes,
+    all_types_and_complex_and
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -218,6 +219,16 @@ class TestTorchDeviceType(TestCase):
         l[2:7] = [1] * 5
         s[2:7] = 1
         self.assertEqual(s, storage_type(l))
+
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes())
+    def test_tensor_storage_type(self, device, dtype):
+        a = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
+
+        module = torch.cuda if (torch.device(device).type == 'cuda') else torch
+        expected_storage_type = getattr(module, torch.storage._dtype_to_storage_type_map()[dtype])
+
+        self.assertEqual(a.storage_type(), expected_storage_type)
 
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
@@ -447,25 +458,11 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.cummax(zero_d, 0)[0].shape)
         self.assertEqual((), torch.cummin(zero_d, 0)[0].shape)
 
-        # renorm
-        self.assertRaises(RuntimeError, lambda: torch.renorm(zero_d, 0.5, 0, 1.0))
-
         # sort, topk
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.sort(zero_d, 0, True)])
         self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, False)])
         self.assertEqual([(), ()], [x.shape for x in torch.topk(zero_d, 1, 0, True)])
-
-        # lstsq (gels)
-        self.assertRaises(RuntimeError, lambda: torch.lstsq(zero_d, zero_d))
-
-        # eig
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, False))
-        self.assertRaises(RuntimeError, lambda: torch.eig(zero_d, True))
-
-        # this is only implemented on cpu
-        if (torch.device(device).type == 'cpu'):
-            self.assertRaises(RuntimeError, lambda: torch.ormqr(zero_d, zero_d, zero_d))
 
         # max, min
         self.assertEqual((), torch.max(zero_d, zero_d).shape)
@@ -474,9 +471,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((), torch.min(zero_d, zero_d).shape)
         self.assertEqual((1,), torch.min(one_d, zero_d).shape)
         self.assertEqual((1,), torch.min(zero_d, one_d).shape)
-
-        # diag
-        self.assertRaises(RuntimeError, lambda: torch.diag(zero_d))
 
         zero_d_int = torch.tensor(1, device=device)
         one_d_int = torch.tensor([1], device=device)
@@ -1402,16 +1396,6 @@ else:
 
         backward_func(self, device)
 
-    def test_embedding_scalar_weight_error(self, device):
-        indices = torch.rand(2, 2, device=device).long()
-        weights = [
-            torch.tensor(1.0, device=device),
-            torch.tensor(1.0, device=device).reshape(1, 1, 1),
-        ]
-        for weight in weights:
-            with self.assertRaisesRegex(RuntimeError, "'weight' must be 2-D"):
-                torch.embedding(weight, indices)
-
     def test_dist(self, device):
         def run_test(x, y):
             for p in [0, 1, 2, 3, 4, inf, -inf]:
@@ -2057,37 +2041,6 @@ else:
             # values such as nan or inf
             assert torch.isfinite(x.grad).all()
 
-    def test_multinomial_constraints(self, device):
-        x = torch.empty(1, 2, 3, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "prob_dist must be 1 or 2 dim",
-            lambda: torch.multinomial(x, 2))
-        x = torch.empty(1, 2, dtype=torch.long, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "multinomial only supports floating-point dtypes for input",
-            lambda: torch.multinomial(x, 2))
-        x = torch.empty(1, 2, dtype=torch.double, device=device)
-        y = torch.empty(1, 2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "multinomial expects Long tensor out",
-            lambda: torch.multinomial(x, 2, out=y))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample <= 0 samples",
-            lambda: torch.multinomial(x, 0))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample <= 0 samples",
-            lambda: torch.multinomial(x, -1))
-        x = torch.empty(2, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "cannot sample n_sample > prob_dist",
-            lambda: torch.multinomial(x, 3, False))
-        x = torch.empty(16777217, dtype=torch.double, device=device)
-        self.assertRaisesRegex(
-            RuntimeError, "number of categories cannot exceed",
-            lambda: torch.multinomial(x, 3))
-
     def test_cumsum(self, device):
         x = torch.rand(100, 100, device=device)
         res1 = torch.cumsum(x, 1)
@@ -2521,38 +2474,6 @@ else:
                 actual, expected = self._inf_nan_preprocess(list(actual), expected)
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
-    # FIXME: port this to ErrorInputs
-    @onlyNativeDeviceTypes
-    @dtypes(torch.long, torch.float32, torch.complex64)
-    def test_error_gradient(self, device, dtype):
-        t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected spacing to be unspecified, a scalar '):
-            dim = (1, 0)
-            spacing = [0.1]
-            torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient only supports edge_order=1 and edge_order=2.'):
-            torch.gradient(t, edge_order=3)
-
-        with self.assertRaisesRegex(RuntimeError, 'dim 1 appears multiple times in the list of dims'):
-            dim = (1, 1)
-            spacing = 0.1
-            torch.gradient(t, spacing=spacing, dim=dim, edge_order=1)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each tensor to be on the same device,'):
-            dim = (0, 1)
-            coordinates = [torch.tensor([1, 2, 4], device='cpu'), torch.tensor([1, 2, 4], device='meta')]
-            torch.gradient(t, spacing=coordinates, dim=dim, edge_order=1)
-
-        with self.assertRaises(IndexError):
-            torch.gradient(t, dim=3)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
-            torch.gradient(torch.tensor([[1], [2], [3]]), edge_order=1)
-
-        with self.assertRaisesRegex(RuntimeError, 'torch.gradient expected each dimension size to be at least'):
-            torch.gradient(torch.tensor([[1, 2], [3, 4]]), edge_order=2)
-
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)
@@ -2711,7 +2632,7 @@ else:
             self.assertEqual(dst, src.conj_physical())
 
     def test_clone_all_dtypes_and_devices(self, device):
-        for dt in get_all_dtypes():
+        for dt in get_all_dtypes(include_complex32=True):
             x = torch.tensor((1, 1), dtype=dt, device=device)
             y = x.clone()
             self.assertEqual(x, y)
@@ -4004,19 +3925,6 @@ else:
             mask[1:].masked_fill_(mask[:-1], False)
 
     # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_masked_select_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((3,))
-        y = torch.rand((6,), device=device)
-        mask = torch.tensor([True, False, True, True, False, False], device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.masked_select(y, mask, out=x)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.masked_select(y, mask, out=y)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.masked_select(mask.clone(), mask, out=mask)
-
-    # FIXME: convert to ErrorInputs
     @expectedFailureMeta  # RuntimeError not raised
     @onlyNativeDeviceTypes
     def test_masked_scatter_mem_overlap(self, device):
@@ -4026,15 +3934,6 @@ else:
 
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x.masked_scatter_(mask, src)
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_index_select_mem_overlap(self, device):
-        x = torch.rand((1, 6), device=device).expand((2, 6))
-        y = torch.rand((3, 6), device=device)
-        ind = torch.tensor([0, 1], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.index_select(y, 1, ind, out=x)
 
     # FIXME: convert to ErrorInputs
     @onlyNativeDeviceTypes
@@ -4049,32 +3948,6 @@ else:
             src.scatter_(0, ind, src)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.scatter_(0, ind, ind.clone())
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_gather_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((3,))
-        src = torch.rand((6,), device=device)
-        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(src, 0, ind, out=x)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(src, 0, ind, out=src)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.gather(ind.clone(), 0, ind[1:], out=ind[:1])
-
-    # FIXME: convert to ErrorInputs
-    @onlyNativeDeviceTypes
-    def test_take_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((3,))
-        src = torch.rand((6,), device=device)
-        ind = torch.tensor([2, 1, 0], device=device, dtype=torch.int64)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.take(src, ind, out=x)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.take(src, ind, out=src)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            torch.take(ind.clone(), ind[1:], out=ind[:-1])
 
     # FIXME: move to test distributions
     @onlyCUDA
@@ -5299,6 +5172,43 @@ else:
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
+    def test_copy_(self, device, dtype):
+        def can_cast(src_dtype, dst_dtype):
+            # torch.can_cast(torch.int16, torch.uint8) returns True
+            # which isn't actually safe-cast.
+            # This function returns False in this case.
+            def is_unsigned_int(dtype):
+                return dtype is torch.uint8
+
+            if is_unsigned_int(dst_dtype):
+                return is_unsigned_int(src_dtype)
+            return torch.can_cast(src_dtype, dst_dtype)
+
+        def make_tensor_wrapper(shape, dtype):
+            if dtype is not torch.complex32:
+                # Make tensor does not support generating
+                # complex32 tensor
+                return make_tensor(shape, device=device, dtype=dtype)
+            return torch.randn(shape, device=device, dtype=dtype)
+
+        t = make_tensor_wrapper((50,), dtype)
+        src_dtypes = all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32)
+        for src_dtype in src_dtypes:
+            src = make_tensor_wrapper((50,), dtype=src_dtype)
+            t.copy_(src)
+            dst = make_tensor_wrapper((50, ), dtype=src_dtype)
+            if can_cast(src_dtype, dtype):
+                rtol = None
+                atol = None
+                if dtype in (torch.half, torch.complex32):
+                    rtol = 1e-3
+                    atol = 1e-3
+                if dtype in (torch.bfloat16,):
+                    rtol = 1e-2
+                    atol = 1e-2
+                self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -6246,6 +6156,7 @@ class TestTorch(TestCase):
         self.assertEqual(bools.size(), 8)
         self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
         self.assertEqual(bools.type(), 'torch.BoolStorage')
+        self.assertTrue(isinstance(bools, torch.BoolStorage))
 
         f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
         bools = torch.BoolStorage.from_buffer(f, 'big')
@@ -6258,6 +6169,122 @@ class TestTorch(TestCase):
         bytes = torch.ByteStorage.from_buffer(a)
         self.assertEqual(bytes.nbytes(), 4)
         self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
+        self.assertTrue(isinstance(bytes, torch.ByteStorage))
+
+    def test_storage_error(self):
+        quantized_storages = [
+            torch.QInt32Storage,
+            torch.QInt8Storage,
+            torch.QUInt2x4Storage,
+            torch.QUInt4x2Storage,
+            torch.QUInt8Storage,
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, r"Only child classes of _LegacyStorage can be instantiated"):
+            torch.storage._LegacyStorage()
+
+        for storage_class in torch._storage_classes:
+            if storage_class in [torch._UntypedStorage, torch.cuda._UntypedStorage, torch._TypedStorage]:
+                continue
+
+            device = 'cuda' if storage_class.__module__ == 'torch.cuda' else 'cpu'
+            dtype = storage_class.dtype
+
+            if device == 'cuda' and not torch.cuda.is_available():
+                continue
+
+            # Legacy <type>Storage constructor errors
+            with self.assertRaisesRegex(RuntimeError, r"'device' cannot be specified"):
+                storage_class(device='cpu')
+
+            with self.assertRaisesRegex(RuntimeError, r"'dtype' cannot be specified"):
+                storage_class(dtype=torch.float)
+
+            with self.assertRaisesRegex(TypeError, r"got an unexpected keyword"):
+                storage_class(sdlkjf=torch.float)
+
+            with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
+                storage_class(0, 0)
+
+            with self.assertRaisesRegex(TypeError, r"invalid data type"):
+                storage_class('string')
+
+            with self.assertRaisesRegex(TypeError, r"Argument type not recognized"):
+                storage_class(torch.tensor([]))
+
+            s = storage_class()
+
+            with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
+                storage_class(0, wrap_storage=s._untyped())
+
+            with self.assertRaisesRegex(TypeError, r"must be _UntypedStorage"):
+                storage_class(wrap_storage=s)
+
+            if torch.cuda.is_available():
+                if storage_class in quantized_storages:
+                    with self.assertRaisesRegex(RuntimeError, r"Cannot create CUDA storage with quantized dtype"):
+                        s.cuda()
+
+                else:
+
+                    if s.is_cuda:
+                        s_other_device = s.cpu()
+                    else:
+                        s_other_device = s.cuda()
+
+                    with self.assertRaisesRegex(RuntimeError, r"Device of 'wrap_storage' must be"):
+                        storage_class(wrap_storage=s_other_device._untyped())
+
+            # _TypedStorage constructor errors
+            with self.assertRaisesRegex(RuntimeError, r"No positional arguments"):
+                torch._TypedStorage(0, wrap_storage=s._untyped(), dtype=dtype)
+
+            with self.assertRaisesRegex(RuntimeError, r"Argument 'dtype' must be specified"):
+                torch._TypedStorage(wrap_storage=s._untyped())
+
+            with self.assertRaisesRegex(TypeError, r"Argument 'dtype' must be torch.dtype"):
+                torch._TypedStorage(wrap_storage=s._untyped(), dtype=0)
+
+            with self.assertRaisesRegex(RuntimeError, r"Argument 'device' should not be specified"):
+                torch._TypedStorage(wrap_storage=s._untyped(), dtype=dtype, device=device)
+
+            with self.assertRaisesRegex(TypeError, r"Argument 'wrap_storage' must be _UntypedStorage"):
+                torch._TypedStorage(wrap_storage=s, dtype=dtype)
+
+            with self.assertRaisesRegex(RuntimeError, r"Storage device not recognized"):
+                torch._TypedStorage(dtype=dtype, device='xla')
+
+            if torch.cuda.is_available():
+                if storage_class in quantized_storages:
+                    with self.assertRaisesRegex(RuntimeError, r"Cannot create CUDA storage with quantized dtype"):
+                        torch._TypedStorage(dtype=dtype, device='cuda')
+
+            with self.assertRaisesRegex(TypeError, r"Argument type not recognized"):
+                torch._TypedStorage(torch.tensor([]), dtype=dtype, device=device)
+
+            with self.assertRaisesRegex(RuntimeError, r"Too many positional arguments"):
+                torch._TypedStorage(0, 0, dtype=dtype, device=device)
+
+    def test_storage_error_no_attribute(self):
+        storage_classes = [
+            torch.cuda.ByteStorage,
+            torch.cuda.FloatStorage,
+            torch.cuda._UntypedStorage,
+        ]
+        for storage_class in storage_classes:
+            with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                storage_class.from_buffer()
+
+            if storage_class == torch.cuda._UntypedStorage:
+                with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                    storage_class._new_with_weak_ptr()
+
+            else:
+                with self.assertRaisesRegex(AttributeError, r'has no attribute'):
+                    storage_class._new_with_weak_ptr()
+
+            with self.assertRaisesRegex(RuntimeError, r'Not available for CUDA storage'):
+                storage_class._new_shared_filename(0, 0, 0)
 
     def test_storage_casts(self):
         storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
@@ -7323,7 +7350,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     # Verifies that (deep)copies of dtypes are the same objects
     def test_copy_dtypes(self):
-        for dtype in get_all_dtypes():
+        for dtype in get_all_dtypes(include_complex32=True):
             copied_dtype = copy.deepcopy(dtype)
             self.assertIs(dtype, copied_dtype)
 
@@ -7439,6 +7466,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Validates regression reported in https://github.com/pytorch/pytorch/issues/45269
         x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.cfloat).t()
         y = torch.empty(100, 100, dtype=torch.cfloat)
+        y.copy_(x)
+        self.assertEqual(y[:, 0], range(100))
+        self.assertEqual(y[:, 40], range(4000, 4100))
+
+        x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.complex32).t()
+        y = torch.empty(100, 100, dtype=torch.complex32)
         y.copy_(x)
         self.assertEqual(y[:, 0], range(100))
         self.assertEqual(y[:, 40], range(4000, 4100))
