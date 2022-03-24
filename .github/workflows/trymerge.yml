@@ -28,5 +28,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          FORCE: ${{ github.event.client_payload.force}}
         run: |
-          python3 .github/scripts/trymerge.py "${PR_NUM}"
+          if [ -n "${FORCE}" ]; then
+            python3 .github/scripts/trymerge.py --force "${PR_NUM}"
+          else
+            python3 .github/scripts/trymerge.py "${PR_NUM}"
+          fi

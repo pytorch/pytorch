@@ -5489,6 +5489,13 @@
     CPU, CUDA: dense_to_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_sparse
 
+- func: to_sparse_csr(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    CPU, CUDA: dense_to_sparse_csr
+    SparseCPU, SparseCUDA: coo_to_sparse_csr
+    SparseCsrCPU, SparseCsrCUDA: csr_to_sparse_csr
+
 - func: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
@@ -6275,25 +6282,25 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: bitwise_left_shift
+    CompositeExplicitAutograd: bitwise_left_shift
 
 - func: bitwise_left_shift_.Tensor_Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: bitwise_left_shift_
+    CompositeExplicitAutograd: bitwise_left_shift_
 
 - func: bitwise_left_shift.Tensor_Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_left_shift_out
+    CompositeExplicitAutograd: bitwise_left_shift_out
 
 - func: bitwise_left_shift.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_left_shift
+    CompositeExplicitAutograd: bitwise_left_shift
 
 - func: __rshift__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6340,25 +6347,25 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: bitwise_right_shift
+    CompositeExplicitAutograd: bitwise_right_shift
 
 - func: bitwise_right_shift_.Tensor_Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
-    CPU, CUDA: bitwise_right_shift_
+    CompositeExplicitAutograd: bitwise_right_shift_
 
 - func: bitwise_right_shift.Tensor_Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_right_shift_out
+    CompositeExplicitAutograd: bitwise_right_shift_out
 
 - func: bitwise_right_shift.Scalar_Tensor(Scalar self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_right_shift
+    CompositeExplicitAutograd: bitwise_right_shift
 
 - func: tril_(Tensor(a!) self, int diagonal=0) -> Tensor(a!)
   structured_delegate: tril.out
