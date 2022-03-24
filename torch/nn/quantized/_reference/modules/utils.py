@@ -16,7 +16,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             None, torch.per_tensor_affine, torch.per_channel_affine,
             torch.per_channel_affine_float_qparams], \
             Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}")
-        if self.weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2]:
+        if self.weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]:
             zero_point_dtype = weight_qparams["zero_point"].dtype if \
                 isinstance(weight_qparams["zero_point"], torch.Tensor) else \
                 torch.int
@@ -98,11 +98,11 @@ def _quantize_weight(
         return weight
 
     if weight_qscheme == torch.per_tensor_affine:
-        if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
+        if weight_dtype in [torch.quint8, torch.qint8, torch.qint32, torch.qint32]:
             weight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, weight_dtype)
             return weight
     elif weight_qscheme in [torch.per_channel_affine, torch.per_channel_affine_float_qparams]:
-        if weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2]:
+        if weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]:
             weight = torch.quantize_per_channel(
                 weight, weight_scale,
                 weight_zero_point, weight_axis.item(), weight_dtype)  # type: ignore[arg-type]

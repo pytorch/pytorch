@@ -199,6 +199,61 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             (16, 5)
         )
 
+    def test_int16_reference_module(self):
+
+        class RefM(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.ConvTranspose2d(1, 1, 1)
+                self.conv.weight = torch.nn.Parameter(torch.randn_like(self.conv.weight), requires_grad=False)
+                self.conv.bias = torch.nn.Parameter(torch.randn_like(self.conv.bias), requires_grad=False)
+                self.quant1 = QuantStub()
+                self.dequant1 = DeQuantStub()
+                self.quant2 = QuantStub()
+                self.dequant2 = DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant1(x)
+                x = self.dequant1(x)
+                x = self.conv(x)
+                x = self.quant2(x)
+                x = self.dequant2(x)
+                return x
+
+
+        input_size = (16, 1, 10, 10)
+        data = torch.randn(*input_size, dtype=torch.float)
+
+        original_ref_m = RefM()
+        torch.quantization.engine = "qnnpack"
+        from torch.ao.quantization.observer import MovingAverageMinMaxObserver
+
+        weight_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            # set qmin and qmax to represent qint16
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+            qscheme=torch.per_tensor_symmetric,
+        )
+        act_obs = MovingAverageMinMaxObserver.with_args(
+            dtype=torch.qint32,
+            quant_min=-1 * (2 ** 15),
+            quant_max=(2 ** 15) - 1,
+        )
+        custom_qconfig = QConfig(activation=act_obs, weight=weight_obs)
+
+        # quantize the reference model
+        original_ref_m.eval()
+        original_ref_m.qconfig = custom_qconfig
+
+        ref_m = prepare(original_ref_m)
+        # calibration
+        ref_m(torch.randn(*input_size, dtype=torch.float))
+
+        ref_m = convert(ref_m, is_reference=True)
+        self.assertNotEqual(ref_m.conv.weight_scale, 1.0)
+
+
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
         """ Implementation for testing common activation ops like leaky relu
