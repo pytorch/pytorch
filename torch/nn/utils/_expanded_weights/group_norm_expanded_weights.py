@@ -1,3 +1,4 @@
+from math import prod
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads
@@ -10,9 +11,14 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
     def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         expanded_args, expanded_kwargs = standard_kwargs(kwarg_names, expanded_args_and_kwargs)
-        output, mean, rstd = forward_helper(torch._group_norm_all_outputs, expanded_args, expanded_kwargs)
-        ctx.input, ctx.num_groups = expanded_args
-        ctx.weight, ctx.bias, ctx.eps = expanded_kwargs['weight'], expanded_kwargs['bias'], expanded_kwargs['eps']
+        input, num_groups = expanded_args
+        N = input.shape[0]
+        C = input.shape[1]
+        HxW = prod(input.shape[2:])
+        weight, bias, eps = expanded_kwargs['weight'], expanded_kwargs['bias'], expanded_kwargs['eps']
+        output, mean, rstd = forward_helper(torch.native_group_norm, (input, weight, bias, N, C, HxW, num_groups, eps), {})
+        ctx.input, ctx.num_groups = input, num_groups
+        ctx.weight, ctx.bias, ctx.eps = weight, bias, eps
         ctx.mean, ctx.rstd = mean, rstd
         return output
 
