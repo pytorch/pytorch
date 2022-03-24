@@ -285,8 +285,14 @@ TracerResult trace_run(const std::string& input_module_path) {
 
   // run with QNNPACK
   run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
-  at::globalContext().setQEngine(at::QEngine::FBGEMM);
-  run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+  // HACK: some code paths are executed as fallbacks to QNNPack paths an easy way around that is to just run it in FBGEMM
+  // This however has the problem that not every model can run in fbgemm. Adding the try catch 'fixes' those models, but the
+  // fall back case still exists and now we cant trace it and will need to think of a better way to handle it.
+  try {
+    at::globalContext().setQEngine(at::QEngine::FBGEMM);
+    run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
+  } catch (...) {}
+
 
   op_tracer.getCalledOperators().withLock(
       [&](std::set<std::string>& called_operators) {
