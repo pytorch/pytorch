@@ -344,9 +344,6 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
     """
 
-    # if 'storage_context' not in importer.external_registry:
-    #     importer.external_registry['storage_context'] = torch._C.DeserializationStorageContext()
-
     if not isinstance(importer.zip_reader, TorchScriptPackageZipFileReader):
         raise RuntimeError(
             "Loading ScriptObjects from a PackageImporter created from a "
