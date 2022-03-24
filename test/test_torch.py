@@ -3681,6 +3681,7 @@ else:
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows, see https://github.com/pytorch/pytorch/issues/74154')
     @skipIfRocm
     @onlyCUDA
     @largeTensorTest('10GB', device='cpu')
