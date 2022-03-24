@@ -31,6 +31,29 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   const Tensor& gamma = *gamma_maybe_owned;
   const Tensor& beta = c10::value_or_else(beta_opt, [] { return Tensor(); });
 
+  TORCH_CHECK(
+      C % group == 0,
+      "Expected number of channels in input to be divisible by ",
+      "num_groups, but got input of shape ",
+      X.sizes(),
+      " and "
+      "num_groups=",
+      group);
+  TORCH_CHECK(
+      !gamma.defined() || (gamma.dim() == 1 && gamma.numel() == C),
+      "Expected weight to be a vector of size equal to the number of ",
+      "channels in input, but got weight of shape ",
+      gamma.sizes(),
+      " and input of shape ",
+      X.sizes());
+  TORCH_CHECK(
+      !beta.defined() || (beta.dim() == 1 && beta.numel() == C),
+      "Expected bias to be a vector of size equal to the number of ",
+      "channels in input, but got bias of shape ",
+      beta.sizes(),
+      " and input of shape ",
+      X.sizes());
+
   auto memory_format = X.device().is_cpu() ?
       X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
@@ -113,12 +136,13 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   return std::make_tuple(dX, dgamma, dbeta);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _group_norm_all_outputs(
+Tensor group_norm(
     const Tensor& input,
     int64_t num_groups,
     const c10::optional<Tensor>& weight_opt /* optional */,
     const c10::optional<Tensor>& bias_opt /* optional */,
-    double eps) {
+    double eps,
+    bool /* cudnn_enabled, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
@@ -162,17 +186,8 @@ std::tuple<Tensor, Tensor, Tensor> _group_norm_all_outputs(
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
-  return at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps);
-}
-
-Tensor group_norm(
-    const Tensor& input,
-    int64_t num_groups,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
-    double eps,
-    bool /* cudnn_enabled, deprecated */) {
-  return std::get<0>(at::native::_group_norm_all_outputs(input, num_groups, weight_opt, bias_opt, eps));
+  return std::get<0>(
+      at::native_group_norm(X, gamma, beta, N, C, HxW, num_groups, eps));
 }
 
 DEFINE_DISPATCH(GroupNormKernel);
