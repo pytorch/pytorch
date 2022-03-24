@@ -83,9 +83,11 @@ class TORCH_API Node {
   //
   // None leaf node's node_hash does not contains shape information always.
   // So we pass in the hash value rather than a function.
+  Node(OpKind op, OpList operands, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
   Node(OpKind op, size_t num_outputs, hash_t node_hash, std::function<hash_t(bool)> dag_hash_fn);
 
   // Contructor used to create leaf nodes.
+  Node(OpKind op, OpList operands, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn); 
   Node(OpKind op, size_t num_outputs, std::function<hash_t(bool)> node_hash_fn);
 
   virtual ~Node();
@@ -102,9 +104,12 @@ class TORCH_API Node {
 
   virtual const Shape& shape(size_t output_index = 0) const = 0;
 
-  virtual const std::vector<Output>& operands() const = 0;
-
-  virtual const Output& operand(size_t i) const = 0;
+  const std::vector<Output>& operands() const {
+    return operands_as_outputs_;
+  }
+  const Output& operand(size_t i) const {
+    return operands_as_outputs_.at(i);
+  }
 
   hash_t node_hash() const {
     return node_hash_;
@@ -138,11 +143,19 @@ class TORCH_API Node {
 
   virtual std::string ToString() const;
 
+ protected:
+  // Adds node's index output number as operand.
+  void AddOperand(NodePtr node, size_t index = 0);
+
  private:
   // The ID of the operation captured by this node.
   OpKind op_;
+  // A node holds a real reference to its operands.
+  std::vector<NodePtr> operands_;
+  // Outputs do not hold references on the nodes, and neither do the uses, since
+  // otherwise we get into circular reference counting.
+  std::vector<Output> operands_as_outputs_;
   size_t num_outputs_ = 1;
-
   // The hash value of this node.
   hash_t node_hash_;
   // dag_hash represents the hash value of the graph rooted at this node. There are 2 variants, one
@@ -260,6 +273,7 @@ struct TORCH_API Value {
   size_t index = 0;
 };
 
+hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes);
 
 } // namespace lazy
 } // namespace torch

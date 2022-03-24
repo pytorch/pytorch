@@ -23,11 +23,11 @@ class IrUtilNode : public Node {
     operands_.push_back(std::move(v.node));
   }
 
-  const std::vector<Output>& operands() const override {
+  const std::vector<Output>& operands() const {
     return operands_as_outputs_;
   }
 
-  const Output& operand(size_t i) const override {
+  const Output& operand(size_t i) const {
     return operands_as_outputs_.at(i);
   }
 

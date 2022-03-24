@@ -17,11 +17,11 @@ class CacheNode : public Node {
         str_(str) {}
   ~CacheNode() override = default;
 
-  const std::vector<Output>& operands() const override {
+  const std::vector<Output>& operands() const {
     TORCH_INTERNAL_ASSERT(false, "Can't access operands of test node");
   }
 
-  const Output& operand(size_t i) const override {
+  const Output& operand(size_t i) const {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
   const Shape& shape(size_t i) const override { return shape_; }

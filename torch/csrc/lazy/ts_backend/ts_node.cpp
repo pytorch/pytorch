@@ -26,22 +26,9 @@ void TsNodeSetShapeDeferred(
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
-hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes) {
-  hash_t hash = seed;
-  for (auto& operand : operands) {
-    if (!operand) {
-      hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
-      continue;
-    }
-    auto operand_hash = bakeInSizes ? operand.hash_with_sizes() : operand.hash_without_sizes();
-    hash = HashCombine(hash, operand_hash);
-  }
-  return hash;
-}
-
 TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
                size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs,
+    : Node(op, operands, num_outputs,
            // TODO(WHC) this is inefficient (having to compute node_hash twice
            // since I can't call hash() yet) so probably move dag_hash
            // initialization to a separate function?
@@ -49,19 +36,7 @@ TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
            /* dag_hash */
            [&](bool bakeInSizes) { return OperandHashes(operands, HashCombine(op.hash(), hash_seed), bakeInSizes); }),
       shapes_(shapes),
-      python_stacktrace_(GetFirstUserFrameInPythonIfEnabled()) {
-  for (auto& operand : operands) {
-    // Ideally, optional operands should be filtered by the leaf node classes,
-    // but it's just much easier to do it here.
-    // TODO(alanwaketan): Find a way to move the below logic to the leaf node
-    // classes.
-    if (!operand) {
-      continue;
-    }
-
-    AddOperand(operand.node, operand.index);
-  }
-}
+      python_stacktrace_(GetFirstUserFrameInPythonIfEnabled()) {}
 
 TsNode::TsNode(OpKind op, OpList operands,
                const std::function<Shape()>& shape_fn,
@@ -80,7 +55,7 @@ void TsNode::SetShapeDeferred(
 }
 
 TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); }),
+    : Node(op, OpList{}, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); }),
     python_stacktrace_(GetFirstUserFrameInPythonIfEnabled())
 {
   shapes_.push_back(std::move(shape));
@@ -125,12 +100,6 @@ std::string TsNode::ToString() const {
 hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed, bool bakeInSizes) {
   hash_t h = HashCombine(op.hash(), shape.hash(bakeInSizes));
   return HashCombine(h, hash_seed);
-}
-
-void TsNode::AddOperand(NodePtr node, size_t index) {
-  CHECK_LT(index, node->num_outputs());
-  operands_.push_back(std::move(node));
-  operands_as_outputs_.emplace_back(operands_.back().get(), index);
 }
 
 TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
