@@ -342,9 +342,15 @@ void TensorPipeAgent::removeFromTimeoutMap(uint64_t messageId) {
   }
 }
 
-void TensorPipeAgent::prepareNames() {
-  auto nameToId = collectNames(
-      rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+void TensorPipeAgent::prepareNames(bool isStaticGroup) {
+  std::unordered_map<std::string, worker_id_t> nameToId;
+  if (isStaticGroup) {
+    nameToId = collectNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_, worldSize_);
+  } else {
+    nameToId = collectCurrentNames(
+        rankToNameStore_, workerInfo_.id_, workerInfo_.name_);
+  }
 
   for (const auto& entry : nameToId) {
     const auto& workerName = entry.first;
@@ -410,7 +416,7 @@ TensorPipeAgent::TensorPipeAgent(
   checkAndSetStaticGroup(store);
 
   // collect worker names
-  prepareNames();
+  prepareNames(isStaticGroup_);
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
