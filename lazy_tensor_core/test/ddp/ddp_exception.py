@@ -7,6 +7,8 @@ import torch.optim as optim
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 import lazy_tensor_core
+import lazy_tensor_core.core.lazy_model as ltm
+
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
 def setup(rank, world_size):
@@ -14,7 +16,8 @@ def setup(rank, world_size):
     os.environ['MASTER_PORT'] = '12356'
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.Backend.register_backend("lazy", ltm.create_lazy_process_group)
+    dist.init_process_group("lazy", rank=rank, world_size=world_size)
 
 def cleanup():
     dist.destroy_process_group()
@@ -36,17 +39,19 @@ def demo_basic(rank, world_size):
     setup(rank, world_size)
 
     model = ToyModel().to(f"lazy:{rank}")
-    ddp_model = DDP(model, device_ids=[rank], gradient_as_bucket_view=True)
+    ddp_model = DDP(model, gradient_as_bucket_view=True)
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
 
-    optimizer.zero_grad()
-    outputs = ddp_model(torch.randn(20, 10).to(f"lazy:{rank}"))
-    labels = torch.randn(20, 5).to(f"lazy:{rank}")
-    loss_fn(outputs, labels).backward()
-    optimizer.step()
-    print(f"Outputs: \n{outputs}")
+    for _ in range(2):
+        optimizer.zero_grad()
+        outputs = ddp_model(torch.randn(20, 10).to(f"lazy:{rank}"))
+        labels = torch.randn(20, 5).to(f"lazy:{rank}")
+        loss = loss_fn(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        print(f"loss: \n{loss}")
 
     cleanup()
 

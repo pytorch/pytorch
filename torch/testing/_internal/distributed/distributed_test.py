@@ -1270,7 +1270,7 @@ class DistributedTest:
             rank = dist.get_rank()
             if rank == 0:
                 with self.assertRaisesRegex(
-                    RuntimeError, "Tensors must be CUDA/Lazy and dense"
+                    RuntimeError, "Tensors must be CUDA and dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)

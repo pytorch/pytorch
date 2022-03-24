@@ -22,10 +22,14 @@ def setup(rank, world_size):
     os.environ['MASTER_PORT'] = '12356'
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.Backend.register_backend("lazy", ltm.create_lazy_process_group)
+    # dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group("lazy", rank=rank, world_size=world_size)
+
 
 def cleanup():
     dist.destroy_process_group()
+
 
 class ToyModel(nn.Module):
     def __init__(self):
@@ -36,19 +40,6 @@ class ToyModel(nn.Module):
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
-
-
-def my_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
-    buffer = bucket.buffer()
-
-    cuda_buffer = buffer.to(torch.device('cuda', buffer.device.index))
-    torch.distributed.all_reduce(cuda_buffer)
-    buffer.copy_(cuda_buffer)
-
-    fut = torch.futures.Future()
-    fut.set_result(buffer)
-
-    return fut
 
 
 def demo_basic(rank, world_size):
@@ -64,13 +55,10 @@ def demo_basic(rank, world_size):
 
     # create model and move it to GPU with id rank
     model = ToyModel().to(device)
-    # we need to pass gradient_as_bucket_view=True as DDP internally sees gradients as
-    # bucket views/alias because of LazyTensor. In more depth, the alias check relies on
-    # TensorImpl's storages and LTCTensorImpl doesn't have storages so it confuses the
-    # is_alias_of check to always return true.
-    model = DDP(model, device_ids=[rank], gradient_as_bucket_view=True)
-    # model.register_comm_hook(None, noop_hook)
-    # model.register_comm_hook(None, my_hook)
+    # Somehow, LazyTensor relies on gradient_as_bucket_view to function properly while
+    # composing with DDP.
+    # FIXME(alanwaketan): Investigate why and if we can remove this constraint.
+    model = DDP(model, gradient_as_bucket_view=True)
 
     loss_fn = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
@@ -98,6 +86,7 @@ def run_demo(demo_fn, world_size):
              args=(world_size,),
              nprocs=world_size,
              join=True)
+
 
 if __name__ == "__main__":
     print(f"main process id: {os.getpid()}")

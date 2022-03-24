@@ -23,8 +23,6 @@
 
 #include <torch/csrc/cuda/nccl.h>
 
-#include <lazy_tensor_core/lazy_tensor_core/csrc/ts_backend/backend_impl.h>
-#include <torch/csrc/lazy/core/tensor.h>
 
 namespace c10d {
 
@@ -379,7 +377,6 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
     // Checking the work's corresponding CUDA events' status
     if (!(*ncclEndEvents_)[i].query()) {
       return false;
-    }
   }
   return true;
 }
@@ -1201,8 +1198,8 @@ namespace {
 
 // Check validity of tensor
 void check_gpu_single_tensor(const at::Tensor& tensor) {
-  if (((tensor.device().type() != at::kLazy) && !tensor.is_cuda()) || tensor.is_sparse()) {
-    TORCH_CHECK(false, "Tensors must be CUDA/Lazy and dense");
+  if (!tensor.is_cuda() || tensor.is_sparse()) {
+    TORCH_CHECK(false, "Tensors must be CUDA and dense");
   }
   if (!tensor.is_contiguous()) {
     TORCH_CHECK(false, "Tensors must be contiguous");
@@ -1228,8 +1225,8 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
   usedDevices.reserve(tensors.size());
 
   for (const auto& t : tensors) {
-    if (((t.device().type() != at::kLazy) && !t.is_cuda()) || t.is_sparse()) {
-      TORCH_CHECK(false, "Tensors must be CUDA/Lazy and dense");
+    if (!t.is_cuda() || t.is_sparse()) {
+      TORCH_CHECK(false, "Tensors must be CUDA and dense");
     }
     if (t.scalar_type() != first.scalar_type()) {
       TORCH_CHECK(false, "Tensors must have identical type");
@@ -1240,7 +1237,7 @@ void check_gpu_tensors_different_devices(const std::vector<at::Tensor>& tensors)
     if (t.strides() != first.strides()) {
       TORCH_CHECK(false, "Tensors must have identical strides");
     }
-    if ((t.device().type() != at::kLazy) && !t.is_non_overlapping_and_dense()) {
+    if (!t.is_non_overlapping_and_dense()) {
       TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     const auto inserted = usedDevices.insert(t.get_device()).second;
@@ -1378,6 +1375,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PostProcess post,
     OpType opType,
     const char* profilingTitle) {
+
   errorIfCapturingNonCapturableNCCL();
 
   // Bump collective counter
@@ -1598,18 +1596,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   return work;
 }
 
-// Experimental features, don't merge back to master.
-std::vector<at::Tensor> extractCudaTensors(const std::vector<at::Tensor>& inputs) {
-  std::vector<at::Tensor> cudaInputs;
-  cudaInputs.reserve(inputs.size());
-  for (auto& input : inputs) {
-    cudaInputs.push_back(
-        dynamic_cast<torch_lazy_tensors::compiler::TSData*>(torch::lazy::GetLtcTensor(input)->GetDataHandle().get())->data());
-  }
-
-  return cudaInputs;
-}
-
 template <typename Fn>
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -1617,23 +1603,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     Fn fn,
     OpType opType,
     const char* profilingTitle) {
-  // A hack to extract cuda tensors from the lazy tensor.
-  if (inputs.front().device().type() == at::kLazy) {
-    // We currently oly support broadcast and allReduce, where
-    // the python API is unary.
-    TORCH_INTERNAL_ASSERT(inputs.data() == outputs.data());
-
-    auto cudaInputs = extractCudaTensors(inputs);
-    return collective(
-        cudaInputs,
-        cudaInputs,
-        fn,
-        [](std::vector<at::cuda::CUDAStream>&) {},
-        [](std::vector<at::cuda::CUDAStream>&) {},
-        opType,
-        profilingTitle);
-  }
-
   return collective(
       inputs,
       outputs,
