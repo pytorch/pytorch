@@ -9690,6 +9690,7 @@ dedent """
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
+    # TODO: remove this comment, it's just to get a non-empty commit
     def test_script_pack_padded_sequence(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
