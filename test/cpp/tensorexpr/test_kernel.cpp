@@ -1968,10 +1968,7 @@ TEST_F(Kernel, FuseLoopsWithVariableConcatDim) {
   # CHECK: for (int64_t i
   # CHECK-NEXT: for (int64_t j
   # CHECK-NEXT: for (int64_t k
-  # CHECK: for (int64_t j
-  # CHECK-NEXT: for (int64_t k
-  # CHECK: for (int64_t j
-  # CHECK-NEXT: for (int64_t k
+  # CHECK-NOT: for (int64_t j
   # CHECK-NOT: for (int64_t i
         )IR";
     torch::jit::testing::FileCheck().run(verification_pattern, oss.str());

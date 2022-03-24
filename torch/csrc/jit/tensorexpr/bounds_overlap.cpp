@@ -6,6 +6,41 @@ namespace jit {
 namespace tensorexpr {
 namespace analysis {
 
+// Returns true if the given expression includes a "Sub" term.
+bool hasSub(ExprPtr e) {
+  return !NodeFinder<Sub>::find(e).empty();
+}
+
+// Returns true if the given expression has negative immediates.
+bool hasNegativeImms(ExprPtr e) {
+#define NEG_IMMS(Type, Name)                    \
+  {                                             \
+    auto imms = NodeFinder<Name##Imm>::find(e); \
+    for (const auto& imm : imms) {              \
+      if (immediateIsNegative(imm)) {           \
+        return true;                            \
+      }                                         \
+    }                                           \
+  }
+  AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, NEG_IMMS);
+#undef NEG_IMMS
+  return false;
+}
+
+// Assumption:
+//   * The variables in the given expression can never be negative.
+//
+// So, the only way for the given expression to be negative is if it includes
+// at least one of:
+//     * "subtract" term.
+//     * a negative immediate value.
+// The expression could involve multiple subtract terms and negative
+// immediate values and end up being positive. But even if one of them is
+// present we conservatively assume that it can be negative.
+bool isPositiveExpr(ExprPtr e) {
+  return !hasSub(e) && !hasNegativeImms(e);
+}
+
 OverlapKind boundOverlap(Bound a, Bound b) {
   // If they're equal they're equal.
   bool startEqual = exprEquals(a.start, b.start);
@@ -14,16 +49,43 @@ OverlapKind boundOverlap(Bound a, Bound b) {
     return ContainedOrEqual;
   }
 
+  // We have to figure out if the bounds fall under the following 2 cases:
+  // 1. a is before b
+  //      a.start ... a.end ... b.start ... b.end
+  // 2. b is before a
+  //      b.start ... b.end ... a.start ... a.end
+  //
+  // So, we compute "a.start - b.end" and "b.start - a.end". If even one of
+  // those is positive, then it is guaranteed that the bounds do not overlap.
+  //
+  // If the diff is a constant, then we can directly check if the constant is
+  // positive. If the diff is not a constant, then it will be made of
+  // variables that correspond to the bounds of buffers involved. These buffer
+  // bounds can never be negative. So, we check if the given expression is
+  // guaranteed to be positive under the assumption that the variables involved
+  // are never negative.
+
   ExprPtr lowDiff = IRSimplifier::simplify(alloc<Sub>(a.start, b.end));
   ExprPtr highDiff = IRSimplifier::simplify(alloc<Sub>(b.start, a.end));
 
-  if (lowDiff->isConstant() && highDiff->isConstant()) {
+  if (lowDiff->isConstant()) {
     int low = immediateAs<int>(lowDiff);
-    int high = immediateAs<int>(highDiff);
     // No overlap.
-    if (low > 0 || high > 0) {
+    if (low > 0) {
       return NoOverlap;
     }
+  } else if (isPositiveExpr(lowDiff)) {
+    return NoOverlap;
+  }
+
+  if (highDiff->isConstant()) {
+    int high = immediateAs<int>(highDiff);
+    // No overlap.
+    if (high > 0) {
+      return NoOverlap;
+    }
+  } else if (isPositiveExpr(highDiff)) {
+    return NoOverlap;
   }
 
   ExprPtr diff_start = IRSimplifier::simplify(alloc<Sub>(b.start, a.start));
