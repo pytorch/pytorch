@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <ATen/core/SymInt.h>
 #include <c10/util/C++17.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
@@ -25,7 +26,6 @@
 #include <vector>
 
 namespace c10 {
-
 /// ArrayRef - Represent a constant reference to an array (0 or more elements
 /// consecutively in memory), i.e. a start pointer and a length.  It allows
 /// various APIs to take consecutive elements easily and conveniently.
@@ -92,7 +92,47 @@ class ArrayRef final {
     debugCheckNullptrInvariant();
   }
 
-  /// Construct an ArrayRef from a generic Container.
+  template <
+      typename T1 = T,
+      typename T2,
+      typename = std::enable_if_t<
+          std::is_same<c10::SymInt, T1>::value &&
+          std::is_same<int64_t, T2>::value>>
+  ArrayRef(const std::vector<T2>& Vec)
+      : Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
+        Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
+
+  template <
+      typename T1 = T,
+      typename T2,
+      typename = std::enable_if_t<
+          std::is_same<SymInt, T1>::value && std::is_same<int64_t, T2>::value>>
+  ArrayRef(const ArrayRef<T2> ar)
+      : Data(reinterpret_cast<const T*>(ar.data())), Length(ar.size()) {}
+
+  // template <typename T1 = T, size_t N,
+  // typename = std::enable_if_t<std::is_same<SymInt, T1>::value>>
+  // //typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
+  // ArrayRef(const SmallVector<int64_t, N>& Vec):
+  //   Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
+  //   Length(Vec.size()) { debugCheckNullptrInvariant();
+  // }
+
+  template <
+      typename T1 = T,
+      typename T2,
+      typename U,
+      typename = std::enable_if_t<
+          std::is_same<SymInt, T1>::value && std::is_same<int64_t, T2>::value>>
+  // typename = std::enable_if_t<std::is_constructible<T1, U>::value>>
+  ArrayRef(const SmallVectorTemplateCommon<T2, U>& Vec)
+      : Data(reinterpret_cast<const c10::SymInt*>(Vec.data())),
+        Length(Vec.size()) {
+    debugCheckNullptrInvariant();
+  }
+
   template <
       typename Container,
       typename = std::enable_if_t<std::is_same<
@@ -368,5 +408,7 @@ using IntArrayRef = ArrayRef<int64_t>;
 // This alias is deprecated because it doesn't make ownership
 // semantics obvious.  Use IntArrayRef instead!
 C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
+
+TORCH_API at::IntArrayRef ExpectIntArrayRef(c10::ArrayRef<c10::SymInt> ar);
 
 } // namespace c10

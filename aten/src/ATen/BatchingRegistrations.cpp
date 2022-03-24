@@ -143,7 +143,8 @@ Tensor binary_pointwise_batching_rule(
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
 
-Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit) {
+Tensor expand_batching_rule(const Tensor& self, c10::ArrayRef<c10::SymInt> psize, bool implicit) {
+  auto size = c10::ExpectIntArrayRef(psize);
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto size_physical = self_physical.getPhysicalShape(size);
   auto self_physical_dim = self_physical.tensor().dim();

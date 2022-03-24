@@ -721,6 +721,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       ;
 #endif
 
+  TENSORIMPL_MAYBE_VIRTUAL inline c10::ArrayRef<c10::SymInt> sym_sizes() const {
+    return c10::ArrayRef<c10::SymInt>(sizes());
+  }
+
  private:
   IntArrayRef sizes_nondefault_policy_impl() const;
 

@@ -428,6 +428,11 @@ class TORCH_API Tensor final {
     return impl_.get()->sizes();
   }
 
+
+  inline c10::ArrayRef<c10::SymInt> sym_sizes() const {
+    return impl_.get()->sym_sizes();
+  }
+
   inline int64_t size_from_dim(int k) const {
     return size_from_dim_(k, impl_->sizes());
   }

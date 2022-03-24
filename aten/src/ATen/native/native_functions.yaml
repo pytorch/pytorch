@@ -2048,7 +2048,7 @@
     SparseCPU, SparseCUDA: expm1_sparse_out
     SparseCsrCPU, SparseCsrCUDA: expm1_sparse_csr_out
 
-- func: expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)
+- func: expand(Tensor(a) self, SymInt[] size, *, bool implicit=False) -> Tensor(a)
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   device_check: NoCheck
   device_guard: False

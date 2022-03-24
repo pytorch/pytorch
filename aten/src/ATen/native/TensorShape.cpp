@@ -798,7 +798,8 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand(const Tensor& self, IntArrayRef size, bool /*unused*/) {
+Tensor expand(const Tensor& self, c10::ArrayRef<c10::SymInt> packed_size, bool /*unused*/) {
+  auto size = ExpectIntArrayRef(packed_size);
   TORCH_CHECK(size.size() >= (size_t)self.dim(),
            "expand(", self.toString(), "{", self.sizes(), "}, size=", size,
            "): the number of sizes provided (", size.size(), ") ",

@@ -108,7 +108,7 @@ Tensor FunctionalInverses::diagonal_inverse(const Tensor& base, const Tensor& mu
     return base.diagonal_scatter(mutated_view, offset, dim1, dim2);
 }
 
-Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& mutated_view, at::IntArrayRef size, bool implicit) {
+Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& mutated_view, c10::ArrayRef<c10::SymInt> size, bool implicit) {
     return at::sum_to(mutated_view, base.sizes());
 }
 
