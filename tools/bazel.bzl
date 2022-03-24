@@ -5,7 +5,7 @@ load("//tools/config:defs.bzl", "if_cuda")
 
 def _py_library(name, **kwds):
     deps = [dep for dep in kwds.pop("deps", []) if dep != None]
-    native.py_library(name=name, deps=deps, **kwds)
+    native.py_library(name = name, deps = deps, **kwds)
 
 def _requirement(_pypi_project):
     return None
