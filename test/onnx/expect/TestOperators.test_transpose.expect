@@ -8,7 +8,7 @@ graph {
     name: "Identity_0"
     op_type: "Identity"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Identity_0"
     type {

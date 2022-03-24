@@ -42,7 +42,7 @@ graph {
       type: INT
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 10
     dims: 8

@@ -1109,3 +1109,12 @@ API Reference
   :members:
 
 .. autofunction:: torch.fx.replace_pattern
+
+
+.. The experimental and passes submodules are missing docs.
+.. Adding it here for coverage but this doesn't add anything to the
+.. rendered doc.
+.. py:module:: torch.fx.passes
+.. py:module:: torch.fx.experimental
+.. py:module:: torch.fx.experimental.unification
+.. py:module:: torch.fx.experimental.unification.multipledispatch

@@ -392,27 +392,29 @@ struct alignas(2) Half {
 #endif
 };
 
-// This is just a placeholder for whatever complex representation we
-// end up deciding to use for half-precision complex numbers.
+// TODO : move to complex.h
 template <>
 struct alignas(4) complex<Half> {
-  using value_type = Half;
   Half real_;
   Half imag_;
+
+  // Constructors
   complex() = default;
-  Half real() const {
+  // Half constructor is not constexpr so the following constructor can't
+  // be constexpr
+  C10_HOST_DEVICE explicit inline complex(const c10::complex<float>& value)
+      : real_(value.real()), imag_(value.imag()) {}
+
+  // Conversion operator
+  inline C10_HOST_DEVICE operator c10::complex<float>() const {
+    return {real_, imag_};
+  }
+
+  constexpr C10_HOST_DEVICE Half real() const {
     return real_;
   }
-  Half imag() const {
+  constexpr C10_HOST_DEVICE Half imag() const {
     return imag_;
-  }
-  explicit inline complex(c10::complex<float> value)
-      : real_(value.real()), imag_(value.imag()) {}
-  explicit inline complex(c10::complex<double> value)
-      : real_(static_cast<float>(value.real())),
-        imag_(static_cast<float>(value.imag())) {}
-  inline operator c10::complex<float>() const {
-    return {real_, imag_};
   }
 };
 
@@ -442,7 +444,7 @@ struct alignas(4) complex<Half> {
 // for `f > limit::max()` below
 template <typename To, typename From>
 typename std::enable_if<std::is_same<From, bool>::value, bool>::type overflows(
-    From f) {
+    From /*f*/) {
   return false;
 }
 

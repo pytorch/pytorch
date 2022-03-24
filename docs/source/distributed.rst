@@ -123,14 +123,24 @@ It is imperative that all processes specify the same number of interfaces in thi
 Other NCCL environment variables
 """"""""""""""""""""""""""""""""
 
-NCCL has also provided a number of environment variables for fine-tuning purposes.
+**Debugging** - in case of NCCL failure, you can set ``NCCL_DEBUG=INFO`` to print an explicit
+warning message as well as basic NCCL initialization information.
 
-Commonly used ones include the following for debugging purposes:
+You may also use ``NCCL_DEBUG_SUBSYS`` to get more details about a specific
+aspect of NCCL. For example, ``NCCL_DEBUG_SUBSYS=COLL`` would print logs of
+collective calls, which may be helpful when debugging hangs, especially those
+caused by collective type or message size mismatch. In case of topology
+detection failure, it would be helpful to set ``NCCL_DEBUG_SUBSYS=GRAPH``
+to inspect the detailed detection result and save as reference if further help
+from NCCL team is needed.
 
-- ``export NCCL_DEBUG=INFO``
-- ``export NCCL_DEBUG_SUBSYS=ALL``
+**Performance tuning** - NCCL performs automatic tuning based on its topology detection to save users'
+tuning effort. On some socket-based systems, users may still try tuning
+``NCCL_SOCKET_NTHREADS`` and ``NCCL_NSOCKS_PERTHREAD`` to increase socket
+network bandwidth. These two environment variables have been pre-tuned by NCCL
+for some cloud providers, such as AWS or GCP.
 
-For the full list of NCCL environment variables, please refer to
+For a full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
 
@@ -787,3 +797,42 @@ With the ``NCCL`` backend, such an application would likely result in a hang whi
 In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
 collective desynchronization checks will work for all applications that use ``c10d`` collective calls backed by process groups created with the
 :func:`torch.distributed.init_process_group` and :func:`torch.distributed.new_group` APIs.
+
+Logging
+-------
+
+In addition to explicit debugging support via :func:`torch.distributed.monitored_barrier` and ``TORCH_DISTRIBUTED_DEBUG``, the underlying C++ library of ``torch.distributed`` also outputs log
+messages at various levels. These messages can be helpful to understand the execution state of a distributed training job and to troubleshoot problems such as network connection failures. The
+following matrix shows how the log level can be adjusted via the combination of ``TORCH_CPP_LOG_LEVEL`` and ``TORCH_DISTRIBUTED_DEBUG`` environment variables.
+
++-------------------------+-----------------------------+------------------------+
+| ``TORCH_CPP_LOG_LEVEL`` | ``TORCH_DISTRIBUTED_DEBUG`` |   Effective Log Level  |
++=========================+=============================+========================+
+| ``ERROR``               | ignored                     | Error                  |
++-------------------------+-----------------------------+------------------------+
+| ``WARNING``             | ignored                     | Warning                |
++-------------------------+-----------------------------+------------------------+
+| ``INFO``                | ignored                     | Info                   |
++-------------------------+-----------------------------+------------------------+
+| ``INFO``                | ``INFO``                    | Debug                  |
++-------------------------+-----------------------------+------------------------+
+| ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
++-------------------------+-----------------------------+------------------------+
+
+
+.. Distributed modules that are missing specific entries.
+.. Adding them here for tracking purposes until they are more permanently fixed.
+.. py:module:: torch.distributed.algorithms
+.. py:module:: torch.distributed.algorithms.ddp_comm_hooks
+.. py:module:: torch.distributed.algorithms.model_averaging
+.. py:module:: torch.distributed.elastic
+.. py:module:: torch.distributed.elastic.utils
+.. py:module:: torch.distributed.elastic.utils.data
+.. py:module:: torch.distributed.launcher
+.. py:module:: torch.distributed.nn
+.. py:module:: torch.distributed.nn.api
+.. py:module:: torch.distributed.nn.jit
+.. py:module:: torch.distributed.nn.jit.templates
+.. py:module:: torch.distributed.pipeline
+.. py:module:: torch.distributed.pipeline.sync
+.. py:module:: torch.distributed.pipeline.sync.skip
