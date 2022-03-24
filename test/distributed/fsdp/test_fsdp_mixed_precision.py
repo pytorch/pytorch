@@ -350,9 +350,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             model.module.run_backward(loss)
             optim.step()
 
-class TestFSDPMixedPrecisionNoShard(TestFSDPMixedPrecision):
+class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     """
-    Smaller test suite for no_shard (i.e. world_size == 1) case.
+    Smaller test suite for unshared param (i.e. world_size == 1) case.
     """
     @property
     def world_size(self):

@@ -362,11 +362,11 @@ class FullyShardedDataParallel(nn.Module):
         self.backward_prefetch = backward_prefetch
         self.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
         self.mixed_precision = mixed_precision
-        # Original buffer type (assumes all buffers in model are same dtype). In
+        # Original buffer type (mapping since all buffers may not be of same type). In
         # the case of mixed precision training, this is used to restore buffers
         # to their original type (which may not be the same as that of the
         # parameters in the model) when checkpointing.
-        self._orig_buffer_dtype = None
+        self._orig_buffer_dtypes: Dict[str, torch.dtype] = {}
 
         # Only handle params which are not already sharded. This enables
         # sharding individual layers of a Module, with an outer wrapper to
@@ -600,46 +600,59 @@ class FullyShardedDataParallel(nn.Module):
     def _cast_buffers(
         self,
         device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
-        memo: Optional[Set] = None
+        dtype: Optional[Dict[str, torch.dtype]] = None,
+        memo: Optional[Set] = None,
+        recurse: bool = True,
     ) -> None:
         """Move all buffers to the given *device* and *dtype*.
         If *device* is not given, then it will default to
-        ``self.compute_device``. In the
-        case of nested FSDP instances, we will respect the child instance's
+        ``self.compute_device``, otherwise buffer will be moved to ``device``.
+        In the case of nested FSDP instances, we will respect the child instance's
         ``compute_device`` configuration.
-        If *dtype* is not given, then type of buffer will remain the same.
+        If *dtype* is given, it must be a mapping of buffer name to buffer dtype,
+            and this argument is currently only given to restore back to original
+            buffer types during checkpoint. If *dtype* is not given, and we are
+            in mixed precision training, the buffer will be cast to buffer_dtype,
+            otherwise the buffer will not be cast.
         Args:
             device (torch.device, Optional):
                 device to cast buffers to (defaults to compute_device)
+            dtype: (Dict[str, torch.dtype], Optional):
+                Mapping of buffer name to their dtype to cast to.
             memo (Set, Optional):
                 set of modules that have already been processed
+            recurse (bool, Optional):
+                Whether to call _cast_buffers recursively on nested FSDP
+                instances (default is True).
         """
         if memo is None:
             memo = set()
         for module in self.modules():
-            if module is not self and isinstance(module, FullyShardedDataParallel):
+            if module is not self and isinstance(module, FullyShardedDataParallel) and recurse:
                 # Allow any child FSDP instances to handle their own buffers.
-                module._cast_buffers(device=device, dtype=dtype, memo=memo)
+                module._cast_buffers(device=device, dtype=dtype, memo=memo, recurse=recurse)
             elif module not in memo:
                 memo.add(module)
                 for name, buf in module.named_buffers(recurse=False):
                     if buf is None:
                         continue
                     buf = buf.to(device=device or self.compute_device)
-                    # Note that this assumes all buffers are of the same dtype.
-                    # If needed this can be relaxed by maintaining a mapping
-                    # from buffer name to the type.
-                    if self._orig_buffer_dtype is None:
-                        self._orig_buffer_dtype = buf.dtype
+                    if name not in self._orig_buffer_dtypes:
+                        self._orig_buffer_dtypes[name] = buf.dtype
                     # If given, cast buffer to the given dtype. This is used to
                     # suppport mixed precision for buffers
                     # (given by self.mixed_precision.buffer_dtype) and also used
                     # to restore the buffer dtype to the original precision for
                     # state_dict() calls.
                     # Note that non-floating point buffers are not casted.
-                    if dtype is not None and torch.is_floating_point(buf):
-                        buf = buf.to(dtype=dtype)
+                    if torch.is_floating_point(buf):
+                        if dtype:
+                            buf = buf.to(dtype=dtype[name])
+                        # Note that we don't pass in self.mixed_precision.buffer_dtype
+                        # recursively into _cast_buffers, as we want to respect
+                        # mp config for child FSDP instances.
+                        elif self.mixed_precision:
+                            buf = buf.to(self.mixed_precision.buffer_dtype)
 
                     setattr(module, name, buf)
 
@@ -772,11 +785,8 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root:
             # Buffers stay on GPU, and don't get sharded. Since _cast_buffers
             # applies recursively, we only call this from the root instance.
-            buffer_mixed_precision_dtype = (
-                None if not self.mixed_precision
-                else self.mixed_precision.buffer_dtype
-            )
-            self._cast_buffers(dtype=buffer_mixed_precision_dtype)
+            if self.mixed_precision:
+                self._cast_buffers(recurse=True)
 
             # Don't free the full params for the outer-most (root) instance,
             # In most cases, root instance contains params in the last layers
@@ -1106,11 +1116,8 @@ class FullyShardedDataParallel(nn.Module):
         # back to their mixed precision type. This is because buffers are cast
         # during lazy_init() and stay at their mixed precision type before/after
         # forward/backward. As a result state_dict() should maintain this.
-        buffer_mixed_precision_dtype = (
-            None if not self.mixed_precision
-            else self.mixed_precision.buffer_dtype
-        )
-        self._cast_buffers(dtype=buffer_mixed_precision_dtype)
+        if self._is_root and self.mixed_precision:
+            self._cast_buffers(recurse=True)
         return processed_state_dict
 
     def state_dict(self, *args, **kwargs):
@@ -1162,7 +1169,7 @@ class FullyShardedDataParallel(nn.Module):
                     # call here instead of above because summon_full_params itself
                     # calls _lazy_init() which would cast the buffers.
                     if self.mixed_precision is not None and self._is_root:
-                        self._cast_buffers(dtype=self._orig_buffer_dtype)
+                        self._cast_buffers(dtype=self._orig_buffer_dtypes, recurse=False)
                     state_dict = super().state_dict(*args, **kwargs)
             else:
                 # Since buffers are not sharded and stay casted, restore them to their
@@ -1172,7 +1179,7 @@ class FullyShardedDataParallel(nn.Module):
                 # call here instead of above because summon_full_params itself
                 # calls _lazy_init() which would cast the buffers.
                 if self.mixed_precision is not None and self._is_root:
-                    self._cast_buffers(dtype=self._orig_buffer_dtype)
+                    self._cast_buffers(dtype=self._orig_buffer_dtypes, recurse=False)
                 state_dict = super().state_dict(*args, **kwargs)
 
             # TODO: support offload to CPU in post state dict hook.
