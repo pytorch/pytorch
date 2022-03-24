@@ -599,9 +599,9 @@ class TestNumericSuiteEager(QuantizationTestCase):
         """
         qengine = torch.backends.quantized.engine
 
-        def compare_and_validate_results(float_model, q_model, mha_input):
+        def compare_and_validate_results(float_model, q_model, q, k, v):
             act_compare_dict = compare_model_outputs(
-                float_model, q_model, mha_input
+                float_model, q_model, q, k, v
             )
             self.assertEqual(len(act_compare_dict), 0)
 
@@ -620,10 +620,6 @@ class TestNumericSuiteEager(QuantizationTestCase):
                         )
 
         q, k, v = torch.rand(10, 5, 16), torch.rand(10, 5, 16), torch.rand(10, 5, 16)
-        mha_input = [q, k, v]
-
-        # m = MultiheadAttentionwithHiddenDynamicModel()
-        # out, w = m(*mha_input)
 
         model_list = [MultiheadAttentionwithHiddenDynamicModel(qengine)]
         for model in model_list:
@@ -631,7 +627,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
             q_model = quantize_dynamic(model)
-            compare_and_validate_results(model, q_model, mha_input)
+            compare_and_validate_results(model, q_model, q, k, v)
 
     @override_qengines
     def test_output_logger(self):
