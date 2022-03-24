@@ -6,10 +6,10 @@ from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
 
+from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter, PackagingError
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
 from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
-from torch.package.package_exporter_no_torch import PackagingError
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
 try:
@@ -189,7 +189,7 @@ class TestDependencyAPI(PackageTestCase):
         obj2 = package_a.PackageAObject(obj)
 
         buffer = BytesIO()
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaises(PackagingError):
             with self.PackageExporter(buffer) as he:
                 he.mock(include="package_a.subpackage")
                 he.intern("**")
