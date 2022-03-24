@@ -17,7 +17,7 @@ class OrderedDictWrapper(object):
     """
 
     def __init__(self, cpp_module, attr):
-        self.cpp_module = cpp_module
+        self.cpp_module=cpp_module
         self.attr = attr
 
     @property
