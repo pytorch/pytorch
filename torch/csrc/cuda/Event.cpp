@@ -119,7 +119,7 @@ static PyObject * THCPEvent_wait(PyObject *_self, PyObject *_stream) {
   {
     auto self = (THCPEvent*)_self;
     auto stream = (THCPStream*)_stream;
-    pybind11::gil_scoped_release no_gil;
+    pybind11::gil_scoped_release no_gil = 0;
     self->cuda_event.block(stream->cuda_stream);
   }
   Py_RETURN_NONE;
@@ -145,7 +145,7 @@ static PyObject * THCPEvent_synchronize(PyObject *_self, PyObject *noargs) {
   HANDLE_TH_ERRORS
   {
     auto self = (THCPEvent*)_self;
-    pybind11::gil_scoped_release no_gil;
+    pybind11::gil_scoped_release no_gil = 0;
     self->cuda_event.synchronize();
   }
   Py_RETURN_NONE;

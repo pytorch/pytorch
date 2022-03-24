@@ -405,6 +405,7 @@ jobs:
 
           python3 -m tools.linter.clang_tidy \
             --paths \
+              torch/csrc/cuda \
               torch/csrc/fx \
               torch/csrc/utils \
               torch/csrc/generic \
