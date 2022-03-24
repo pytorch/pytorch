@@ -1179,4 +1179,10 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   return ctx->dstFuture;
 }
 
+SymIntArray generic_to(IValue ivalue, _fake_type<SymIntArray>) {
+  return createVectorFromList<c10::SymInt>(
+    std::move(ivalue).to<c10::List<c10::SymInt>>()
+  );
+}
+
 } // namespace c10

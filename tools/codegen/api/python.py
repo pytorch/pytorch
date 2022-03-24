@@ -652,6 +652,8 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
             return f"::std::array<bool,{t.size}>"
         elif str(t.elem) == "int":
             return f"IntArrayRef[{size}]" if size is not None else "IntArrayRef"
+        elif str(t.elem) == "SymInt":
+            return f"SymIntArrayRef[{size}]" if size is not None else "SymIntArrayRef"
         elif str(t.elem) == "Tensor":
             return f"TensorList[{size}]" if size is not None else "TensorList"
         elif str(t.elem) == "Scalar":
@@ -1219,6 +1221,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return "dimnamelist"
         elif str(t.elem) == "int":
             # accept definite size
+<<<<<<< HEAD
             return "intlist"
         elif str(t) == "float[]":
             return "doublelist"
@@ -1226,6 +1229,17 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             return "scalarlist"
     raise RuntimeError(f"type '{t}' is not supported by PythonArgParser")
 
+=======
+            return 'intlist'
+        elif str(t.elem) == 'SymInt':
+            # accept definite size
+            return 'symintlist'
+        elif str(t) == 'float[]':
+            return 'doublelist'
+        elif str(t) == 'Scalar[]':
+            return 'scalarlist'
+    raise RuntimeError(f'type \'{t}\' is not supported by PythonArgParser')
+>>>>>>> 4b8e108f3e (adding symint list)
 
 # Return RHS expression for python argument using PythonArgParser output.
 # e.g. for arg name 'foo', arg type 'bool', arg_index = 2, returns '_r.toBool(2)'

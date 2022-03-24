@@ -219,6 +219,9 @@ class TORCH_API TensorBase {
   IntArrayRef sizes() const {
     return impl_->sizes();
   }
+  c10::SymIntArrayRef sym_sizes() const {
+    return impl_.get()->sym_sizes();
+  }
   IntArrayRef strides() const {
     return impl_->strides();
   }

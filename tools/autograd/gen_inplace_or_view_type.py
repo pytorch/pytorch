@@ -10,7 +10,7 @@ from tools.codegen.api.autograd import (
     dispatch_strategy,
 )
 from tools.codegen.api.types import (Binding, DispatcherSignature, CType, BaseCType,
-                                     OptionalCType, longT, boolT, intArrayRefT)
+                                     OptionalCType, longT, boolT, intArrayRefT, symIntArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
@@ -95,6 +95,10 @@ ALL_VIEW_FUNCTIONS = {
     **VIEW_FUNCTIONS,
     '_unsafe_view': 'self',
 }
+
+SYMINTARRAYREF_TO_SYMINTARRAY = CodeTemplate("""\
+auto ${vec} = c10::SymIntArray(${arg}.vec());
+""")
 
 ARRAYREF_TO_VEC = CodeTemplate("""\
 auto ${vec} = ${arg}.vec();
@@ -242,7 +246,8 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
         BaseCType(longT),
         OptionalCType(BaseCType(longT)),
         BaseCType(boolT),
-        BaseCType(intArrayRefT)]
+        BaseCType(intArrayRefT),
+        BaseCType(symIntArrayRefT)]
     for unpacked_binding in unpacked_bindings:
         arg, arg_type = unpacked_binding.name, unpacked_binding.nctype.type
         if arg == 'self_':
@@ -260,6 +265,10 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             # reference type, so materialize a vector to close over by value
             arg_vec = arg + '_vec'
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
+            updated_unpacked_args.append(arg_vec)
+        elif arg_type == BaseCType(symIntArrayRefT):
+            arg_vec = arg + '_vec'
+            replay_view_func += SYMINTARRAYREF_TO_SYMINTARRAY.substitute(arg=arg, vec=arg_vec)
             updated_unpacked_args.append(arg_vec)
         elif arg_type == OptionalCType(BaseCType(longT)):
             # Materialize int64_t? to int64_t

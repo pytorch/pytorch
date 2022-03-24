@@ -168,6 +168,7 @@ struct PythonArgs {
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
+  inline c10::SymIntArray symintlist(int i);
   inline c10::OptionalArray<int64_t> intlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
@@ -386,6 +387,11 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
 
 inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
+}
+
+inline c10::SymIntArray PythonArgs::symintlist(int i) {
+  auto intlist = intlistWithDefault(i, signature.params[i].default_intlist);
+  return c10::SymIntArray(c10::fmap(intlist, [](int64_t n) {return c10::SymInt(n); }));
 }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<int64_t> default_intlist) {

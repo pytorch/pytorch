@@ -26,6 +26,8 @@ from tools.codegen.api.types import (
     scalar_t,
     opmath_t,
     optionalIntArrayRefT,
+    symIntArrayT,
+    symIntArrayRefT
 )
 
 # This file implements a small program synthesis engine that implements
@@ -60,6 +62,7 @@ options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
 longVec_ctype = VectorCType(BaseCType(longT))
 optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
+symIntArray_ctype = BaseCType(symIntArrayT)
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
 optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
 
@@ -299,6 +302,8 @@ Check this module for more information.
             return direct_solve(NamedCType(goal.name, longVec_ctype))
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
+        elif goal.type == BaseCType(symIntArrayRefT):
+            return direct_solve(NamedCType(goal.name, symIntArray_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):

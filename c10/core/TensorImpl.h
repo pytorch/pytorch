@@ -14,6 +14,7 @@
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
+#include <c10/util/SymIntArrayRef.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
@@ -557,6 +558,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 #else
       ;
 #endif
+
+  TENSORIMPL_MAYBE_VIRTUAL inline c10::SymIntArrayRef sym_sizes() const {
+    return c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(sizes().data()), sizes().size());
+  }
 
  private:
   IntArrayRef sizes_nondefault_policy_impl() const;
