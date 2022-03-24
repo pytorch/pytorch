@@ -194,7 +194,7 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
 
     if impl_path is not None:
         error_on_missing_kernels(native_functions, backend_indices, backend_key,
-                                 autograd_key, impl_path, full_codegen)
+                                 autograd_key, class_name, impl_path, full_codegen)
 
 
     """ Validate Shape Inference Definitions
@@ -229,7 +229,7 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
 
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
-        gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
+        gen_dispatcher_registrations(fm, output_dir, class_name, cpp_namespace, backend_indices, grouped_native_functions,
                                      backend_key, dispatch_key, selector,
                                      build_in_tree=build_in_tree,
                                      per_operator_headers=per_operator_headers)
