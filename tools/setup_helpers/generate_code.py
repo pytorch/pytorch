@@ -1,4 +1,5 @@
 import argparse
+import importlib.resources
 import os
 import pathlib
 import sys
