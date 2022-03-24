@@ -1,5 +1,5 @@
 import functools
-from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
+from typing import Any, Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta
 from torch.utils.data._utils.serialization import serialize_fn, SerializationType, deserialize_fn
@@ -62,19 +62,23 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
     reduce_ex_hook : Optional[Callable] = None
     getstate_hook: Optional[Callable] = None
 
-    def __getattr__(self, attribute_name):
-        if attribute_name in IterDataPipe.functions:
-            function = functools.partial(IterDataPipe.functions[attribute_name], self)
-            return function
-        else:
+    def __setattr__(self, name: str, value: Any):
+        if name in IterDataPipe.functions:
+            raise AttributeError(f"`{name}` has been taken by the functional API for IterDataPipe")
+        super().__setattr__(name, value)
+
+    def __getattr__(self, attribute_name: str):
+        if attribute_name not in IterDataPipe.functions:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
+        function = functools.partial(IterDataPipe.functions[attribute_name], self)
+        return function
 
     @classmethod
-    def register_function(cls, function_name, function):
+    def register_function(cls, function_name: str, function):
         cls.functions[function_name] = function
 
     @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
+    def register_datapipe_as_function(cls, function_name: str, cls_to_register, enable_df_api_tracing=False):
         if function_name in cls.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 
@@ -168,19 +172,23 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
     """
     functions: Dict[str, Callable] = {}
 
-    def __getattr__(self, attribute_name):
-        if attribute_name in MapDataPipe.functions:
-            function = functools.partial(MapDataPipe.functions[attribute_name], self)
-            return function
-        else:
+    def __setattr__(self, name: str, value: Any):
+        if name in MapDataPipe.functions:
+            raise AttributeError(f"`{name}` has been taken by the functional API for MapDataPipe")
+        super().__setattr__(name, value)
+
+    def __getattr__(self, attribute_name: str):
+        if attribute_name not in MapDataPipe.functions:
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
+        function = functools.partial(MapDataPipe.functions[attribute_name], self)
+        return function
 
     @classmethod
-    def register_function(cls, function_name, function):
+    def register_function(cls, function_name: str, function):
         cls.functions[function_name] = function
 
     @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register):
+    def register_datapipe_as_function(cls, function_name: str, cls_to_register):
         if function_name in cls.functions:
             raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
 

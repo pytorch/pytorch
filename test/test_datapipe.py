@@ -274,6 +274,18 @@ class TestIterableDataPipeBasic(TestCase):
         except Exception as e:
             warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
 
+    def test_datapipe_setattr(self):
+        class _DummyDataPipe(IterDataPipe):
+            def __init__(self):
+                self.map = 1
+
+        with self.assertRaisesRegex(AttributeError, r"`map` has been taken"):
+            _ = _DummyDataPipe()
+
+        datapipe = dp.iter.IterableWrapper(range(10))
+        with self.assertRaisesRegex(AttributeError, r"`map` has been taken"):
+            datapipe.map = 1
+
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         datapipe = dp.iter.FileLister(temp_dir, '')
