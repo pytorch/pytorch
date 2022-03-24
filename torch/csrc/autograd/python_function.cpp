@@ -586,6 +586,42 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject* args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
+static void _append_subgraph(
+    torch::jit::Node* node,
+    torch::jit::Graph* graph,
+    std::vector<torch::jit::Node*> subgraph_trace_outputs,
+    bool unpack_output) {
+  
+  node->g_(torch::jit::attr::Subgraph, std::make_shared<torch::jit::Graph>(graph->current_scope()));
+  auto subgraph = node->g(torch::jit::attr::Subgraph);
+
+  std::unordered_map<Value*, Value*> value_map;
+  auto value_map_func = [&](Value* v) { return value_map.at(v); };
+  for (size_t i = 0; i < node->inputs().size(); ++i) {
+    auto subgraph_input = subgraph->addInput();
+    subgraph_input->copyMetadata(node->inputs().at(i));
+    value_map[node->inputs().at(i)] = subgraph_input;
+  }
+  // Find node position in graph, all subsequent nodes after are added to subgraph
+  auto node_posn = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  std::vector<Value*> tuple_outputs;
+  // Skip TupleUnpack node if outputs are tuple
+  if (!unpack_output) {
+    node_posn++;
+  }
+  for (node_posn++; node_posn != graph->nodes().end(); ++node_posn) {
+    torch::jit::Node* clonenode = *node_posn;
+    auto* new_node = subgraph->insertNode(subgraph->createClone(clonenode, value_map_func));
+    auto trace_it = std::find(subgraph_trace_outputs.begin(), subgraph_trace_outputs.end(), clonenode);
+    for (size_t i = 0; i < clonenode->outputs().size(); ++i) {
+      value_map[clonenode->outputs()[i]] = new_node->outputs()[i];
+      if (trace_it != subgraph_trace_outputs.end()) {
+        subgraph->registerOutput(new_node->outputs()[i]);
+      }
+    }
+  }
+}
+
 static torch::jit::Node* _trace_pre_record(
     PyObject* op_obj,
     PyObject* input_objects,
@@ -650,6 +686,8 @@ static void _trace_post_record(
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
+
+  std::vector<torch::jit::Node*> subgraph_trace_outputs;
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
@@ -657,39 +695,17 @@ static void _trace_post_record(
       const auto& tensor = THPVariable_Unpack(obj);
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
-        auto old_outputs = jit::tracer::getValueTrace(tensor);
+        subgraph_trace_outputs.push_back(jit::tracer::getValueTrace(tensor)->node());
         jit::tracer::setValueTrace(tensor, value);
-
-        // create subgraph
-        auto shared_graph = std::make_shared<torch::jit::Graph>(graph->current_scope());
-        node->g_(torch::jit::attr::Subgraph, shared_graph);
-
-        // manipulate subgraph
-        //
-        auto subgraph = node->g(torch::jit::attr::Subgraph);
-        std::unordered_map<Value*, Value*> value_map;
-        auto value_map_func = [&](Value* v) { return value_map.at(v); };
-        // add inputs
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          auto new_input = subgraph->addInput();
-          new_input->copyMetadata(node->inputs().at(i));
-          value_map[node->inputs().at(i)] = new_input;
-        }
-        // fix controlflow
-        auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
-        for (it++; it != graph->nodes().end(); ++it) {
-          torch::jit::Node* clonenode = *it;
-          auto* new_node = subgraph->insertNode(subgraph->createClone(clonenode, value_map_func));
-          for (size_t i = 0; i < clonenode->outputs().size(); ++i) {
-            value_map[clonenode->outputs()[i]] = new_node->outputs()[i];
-            if (clonenode == old_outputs->node()) {
-              subgraph->registerOutput(new_node->outputs()[i]);
-            }
-          }
-        }
       }
     }
   }
+  if (!unpack_output) {
+    _append_subgraph(old_node, graph, subgraph_trace_outputs, unpack_output);
+  } else {
+    _append_subgraph(node, graph, subgraph_trace_outputs, unpack_output);
+  }
+
   // If TupleUnpack operator is created, we copy its output type back
   // to the original tuple type.
   if (!unpack_output) {
