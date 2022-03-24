@@ -43,8 +43,8 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
         self.decoder = Decoder(*handlers, key_fn=key_fn)
         deprecation_warning(
             type(self).__name__,
-            deprecation_version="1.13",
-            removal_version="1.15",
+            deprecation_version="1.12",
+            removal_version="1.14",
             old_functional_name="routed_decode",
         )
 
