@@ -204,7 +204,7 @@ tb-nightly
 #Pinned versions:
 #test that import:
 
-unittest-xml-reporting<=3.2.0,>=2.0.0
+unittest-xml-reporting
 #Description: saves unit test results to xml
 #Pinned versions:
 #test that import:
