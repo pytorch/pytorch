@@ -63,6 +63,21 @@ namespace c10 {
   _(bool, Bool)                                                    \
   _(at::BFloat16, BFloat16)
 
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
+  _(uint8_t, Byte)                             \
+  _(int8_t, Char)                              \
+  _(int16_t, Short)                            \
+  _(int, Int)                                  \
+  _(int64_t, Long)                             \
+  _(at::Half, Half)                            \
+  _(float, Float)                              \
+  _(double, Double)                            \
+  _(c10::complex<c10::Half>, ComplexHalf)      \
+  _(c10::complex<float>, ComplexFloat)         \
+  _(c10::complex<double>, ComplexDouble)       \
+  _(bool, Bool)                                \
+  _(at::BFloat16, BFloat16)
+
 enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
