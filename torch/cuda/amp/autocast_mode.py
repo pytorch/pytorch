@@ -10,7 +10,7 @@ from torch._six import string_classes
 from typing import Any
 
 
-class autocast(torch.autocast_mode.autocast):
+class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
