@@ -1,5 +1,6 @@
 import argparse
 import os
+import pathlib
 import sys
 import yaml
 from typing import Any, List, Optional, cast
@@ -32,7 +33,9 @@ def generate_code(ninja_global: Optional[str] = None,
                   subset: Optional[str] = None,
                   disable_autograd: bool = False,
                   force_schema_registration: bool = False,
-                  operator_selector: Any = None) -> None:
+                  operator_selector: Any = None,
+                  *,
+                  autograd_dir: pathlib.Path) -> None:
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -51,7 +54,6 @@ def generate_code(ninja_global: Optional[str] = None,
             os.makedirs(d)
     runfiles_dir = os.environ.get("RUNFILES_DIR", None)
     data_dir = os.path.join(runfiles_dir, 'pytorch') if runfiles_dir else ''
-    autograd_dir = os.path.join(data_dir, 'tools', 'autograd')
     tools_jit_templates = os.path.join(data_dir, 'tools', 'jit', 'templates')
 
     if subset == "pybindings" or not subset:
@@ -167,16 +169,18 @@ def main() -> None:
     )
     options = parser.parse_args()
 
-    generate_code(
-        options.ninja_global,
-        options.native_functions_path,
-        options.install_dir,
-        options.subset,
-        options.disable_autograd,
-        options.force_schema_registration,
-        # options.selected_op_list
-        operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
-    )
+    with importlib.resources.path("tools.autograd", "templates") as autograd_templates_dir:
+        generate_code(
+            options.ninja_global,
+            options.native_functions_path,
+            options.install_dir,
+            options.subset,
+            options.disable_autograd,
+            options.force_schema_registration,
+            # options.selected_op_list
+            operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
+            autograd_dir=autograd_templates_dir.parent,
+        )
 
     if options.gen_lazy_ts_backend:
         aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
