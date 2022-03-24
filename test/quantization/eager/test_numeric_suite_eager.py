@@ -551,8 +551,8 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
         def compute_error(x, y):
             Ps = torch.norm(x)
-            Pn = torch.norm(x-y)
-            return 20*torch.log10(Ps/Pn)
+            Pn = torch.norm(x - y)
+            return 20 * torch.log10(Ps / Pn)
 
         data = img_data[0][0]
         # Take in floating point and quantized model as well as input data, and returns a dict, with keys
