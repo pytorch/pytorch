@@ -78,7 +78,14 @@ class Context final {
 };
 
 bool available();
+
+// The global runtime is retrieved using this function, where it is declared as
+// a static local variable.
 Context* context();
+
+// This variable only exists to trigger Context initialization upon application
+// loading.
+static Context* context_init = context();
 
 //
 // Impl

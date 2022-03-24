@@ -8,6 +8,7 @@ namespace api {
 
 namespace {
 
+
 void find_requested_layers_and_extensions(
     std::vector<const char*>& enabled_layers,
     std::vector<const char*>& enabled_extensions,
@@ -226,20 +227,19 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 
   const bool enableValidationMessages =
 #if defined(DEBUG)
-    false;
-#else
     true;
+#else
+    false;
 #endif /* DEBUG */
-
   const bool initDefaultDevice = true;
 
-  const RuntimeConfiguration config {
+  const RuntimeConfiguration default_config {
     enableValidationMessages,
     initDefaultDevice,
   };
 
   try {
-    return std::unique_ptr<Runtime>(new Runtime(config));
+    return std::unique_ptr<Runtime>(new Runtime(default_config));
   }
   catch (const std::exception& e) {
     TORCH_WARN(
