@@ -5154,6 +5154,43 @@ else:
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32))
+    def test_copy_(self, device, dtype):
+        def can_cast(src_dtype, dst_dtype):
+            # torch.can_cast(torch.int16, torch.uint8) returns True
+            # which isn't actually safe-cast.
+            # This function returns False in this case.
+            def is_unsigned_int(dtype):
+                return dtype is torch.uint8
+
+            if is_unsigned_int(dst_dtype):
+                return is_unsigned_int(src_dtype)
+            return torch.can_cast(src_dtype, dst_dtype)
+
+        def make_tensor_wrapper(shape, dtype):
+            if dtype is not torch.complex32:
+                # Make tensor does not support generating
+                # complex32 tensor
+                return make_tensor(shape, device=device, dtype=dtype)
+            return torch.randn(shape, device=device, dtype=dtype)
+
+        t = make_tensor_wrapper((50,), dtype)
+        src_dtypes = all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.complex32)
+        for src_dtype in src_dtypes:
+            src = make_tensor_wrapper((50,), dtype=src_dtype)
+            t.copy_(src)
+            dst = make_tensor_wrapper((50, ), dtype=src_dtype)
+            if can_cast(src_dtype, dtype):
+                rtol = None
+                atol = None
+                if dtype in (torch.half, torch.complex32):
+                    rtol = 1e-3
+                    atol = 1e-3
+                if dtype in (torch.bfloat16,):
+                    rtol = 1e-2
+                    atol = 1e-2
+                self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -7474,6 +7511,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         # Validates regression reported in https://github.com/pytorch/pytorch/issues/45269
         x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.cfloat).t()
         y = torch.empty(100, 100, dtype=torch.cfloat)
+        y.copy_(x)
+        self.assertEqual(y[:, 0], range(100))
+        self.assertEqual(y[:, 40], range(4000, 4100))
+
+        x = torch.arange(100 * 100).reshape(100, 100).to(dtype=torch.complex32).t()
+        y = torch.empty(100, 100, dtype=torch.complex32)
         y.copy_(x)
         self.assertEqual(y[:, 0], range(100))
         self.assertEqual(y[:, 40], range(4000, 4100))

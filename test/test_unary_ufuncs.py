@@ -907,6 +907,7 @@ class TestUnaryUfuncs(TestCase):
     @onlyCPU
     @slowTest
     @dtypes(torch.float)
+    @unittest.skipIf(True, "Insufficient memory on linux.(2|4)xlarge")
     def test_exp_slow(self, device, dtype):
         # Test for https://github.com/pytorch/pytorch/issues/17271
         # This is pretty slow on my Macbook but it only takes a few
