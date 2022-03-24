@@ -1841,80 +1841,71 @@ TEST_F(Kernel, FuseLoopsWithVariableBounds) {
 #ifdef TORCH_ENABLE_LLVM
   bool old_cat_wo_conditionals = getCatWoConditionals();
   getCatWoConditionals() = true;
-  const auto graph_template = R"IR(
-      graph(%a : Float(SS(-2), 3, SS(-3), requires_grad=0, device=${device}),
-            %b : Float(SS(-2), 7, SS(-3), requires_grad=0, device=${device}),
-            %c : Float(SS(-2), 9, SS(-3), requires_grad=0, device=${device}),
+  const auto graph_string = R"IR(
+      graph(%a : Float(SS(-2), 3, SS(-3), requires_grad=0, device=cpu),
+            %b : Float(SS(-2), 7, SS(-3), requires_grad=0, device=cpu),
+            %c : Float(SS(-2), 9, SS(-3), requires_grad=0, device=cpu),
             %SS_2 : int,
             %SS_3 : int):
         %dim : int = prim::Constant[value=1]()
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
-        %r : Float(SS(-2), 19, SS(-3), requires_grad=0, device=${device}) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        %r : Float(SS(-2), 19, SS(-3), requires_grad=0, device=cpu) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
         return (%r))IR";
-  for (bool use_cuda : {false, true}) {
-    if (!torch::cuda::is_available() && use_cuda) {
-      continue;
-    }
-    auto device = use_cuda ? at::kCUDA : at::kCPU;
-    at::jit::TemplateEnv env;
-    env.s("device", use_cuda ? "cuda:0" : "cpu");
-    const auto graph_string = format(graph_template, env);
-    std::shared_ptr<Graph> graph = std::make_shared<Graph>();
-    torch::jit::parseIR(graph_string, graph.get());
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
 
-    std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
+  std::vector<int64_t> symbolic_shape_inputs = {-2, -3};
 
-    std::vector<torch::jit::StrideInput> input_desc = {
-        torch::jit::StrideInput::TENSOR_CONT};
-    std::unordered_map<
-        const torch::jit::Value*,
-        std::vector<torch::jit::StrideInput>>
-        symbolic_strides;
-    symbolic_strides[graph->inputs().at(0)] = input_desc;
-    symbolic_strides[graph->inputs().at(1)] = input_desc;
-    symbolic_strides[graph->inputs().at(2)] = input_desc;
-    symbolic_strides[graph->outputs().at(0)] = input_desc;
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->inputs().at(2)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
 
-    TensorExprKernel kernel(
-        graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
-    std::ostringstream oss;
-    oss << *kernel.getCodeGenStmt();
-    const std::string& verification_pattern =
-        R"IR(
-  # CHECK: for (int64_t i
-  # CHECK-NEXT: for (int64_t j
-  # CHECK-NEXT: for (int64_t k
-  # CHECK: for (int64_t j
-  # CHECK-NEXT: for (int64_t k
-  # CHECK: for (int64_t j
-  # CHECK-NEXT: for (int64_t k
-  # CHECK-NOT: for (int64_t i
-        )IR";
-    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+  std::ostringstream oss;
+  oss << *kernel.getCodeGenStmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int64_t i
+# CHECK-NEXT: for (int64_t j
+# CHECK-NEXT: for (int64_t k
+# CHECK: for (int64_t j
+# CHECK-NEXT: for (int64_t k
+# CHECK: for (int64_t j
+# CHECK-NEXT: for (int64_t k
+# CHECK-NOT: for (int64_t i
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-    auto run_kernel = [&](int dim1, int dim2) {
-      auto a = at::rand(
-          {dim1, 3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
-      auto b = at::rand(
-          {dim1, 7, dim2}, at::TensorOptions(device).dtype(at::kFloat));
-      auto c = at::rand(
-          {dim1, 9, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+  auto run_kernel = [&](int dim1, int dim2) {
+    auto a =
+        at::rand({dim1, 3, dim2}, at::TensorOptions(kCPU).dtype(at::kFloat));
+    auto b =
+        at::rand({dim1, 7, dim2}, at::TensorOptions(kCPU).dtype(at::kFloat));
+    auto c =
+        at::rand({dim1, 9, dim2}, at::TensorOptions(kCPU).dtype(at::kFloat));
 
-      auto ref = at::cat({a, b, c}, 1);
+    auto ref = at::cat({a, b, c}, 1);
 
-      std::vector<IValue> stack =
-          fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
-      stack.emplace_back(dim1);
-      stack.emplace_back(dim2);
-      kernel.run(stack);
+    std::vector<IValue> stack =
+        fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
+    stack.emplace_back(dim1);
+    stack.emplace_back(dim2);
+    kernel.run(stack);
 
-      auto o = stack[0].toTensor();
-      ASSERT_TRUE(at::allclose(o, ref));
-    };
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
 
-    run_kernel(10, 20);
-  }
+  run_kernel(10, 20);
   getCatWoConditionals() = old_cat_wo_conditionals;
 #endif
 }
@@ -1923,81 +1914,145 @@ TEST_F(Kernel, FuseLoopsWithVariableConcatDim) {
 #ifdef TORCH_ENABLE_LLVM
   bool old_cat_wo_conditionals = getCatWoConditionals();
   getCatWoConditionals() = true;
-  const auto graph_template = R"IR(
-      graph(%a : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=${device}),
-            %b : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=${device}),
-            %c : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=${device}),
+  const auto graph_string = R"IR(
+      graph(%a : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=cpu),
+            %b : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=cpu),
+            %c : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=cpu),
             %SS_2 : int,
             %SS_3 : int,
             %SS_4 : int,
             %SS_5 : int):
         %dim : int = prim::Constant[value=1]()
         %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
-        %r : Float(SS(-2), SS(-5), SS(-3), requires_grad=0, device=${device}) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        %r : Float(SS(-2), SS(-5), SS(-3), requires_grad=0, device=cpu) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
         return (%r))IR";
-  for (bool use_cuda : {false, true}) {
-    if (!torch::cuda::is_available() && use_cuda) {
-      continue;
-    }
-    auto device = use_cuda ? at::kCUDA : at::kCPU;
-    at::jit::TemplateEnv env;
-    env.s("device", use_cuda ? "cuda:0" : "cpu");
-    const auto graph_string = format(graph_template, env);
-    std::shared_ptr<Graph> graph = std::make_shared<Graph>();
-    torch::jit::parseIR(graph_string, graph.get());
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
 
-    std::vector<int64_t> symbolic_shape_inputs = {-2, -3, -4, -5};
+  std::vector<int64_t> symbolic_shape_inputs = {-2, -3, -4, -5};
 
-    std::vector<torch::jit::StrideInput> input_desc = {
-        torch::jit::StrideInput::TENSOR_CONT};
-    std::unordered_map<
-        const torch::jit::Value*,
-        std::vector<torch::jit::StrideInput>>
-        symbolic_strides;
-    symbolic_strides[graph->inputs().at(0)] = input_desc;
-    symbolic_strides[graph->inputs().at(1)] = input_desc;
-    symbolic_strides[graph->inputs().at(2)] = input_desc;
-    symbolic_strides[graph->outputs().at(0)] = input_desc;
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->inputs().at(2)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
 
-    TensorExprKernel kernel(
-        graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
 
-    std::ostringstream oss;
-    oss << *kernel.getCodeGenStmt();
-    const std::string& verification_pattern =
-        R"IR(
-  # CHECK: for (int64_t i
-  # CHECK-NEXT: for (int64_t j
-  # CHECK-NEXT: for (int64_t k
-  # CHECK-NOT: for (int64_t j
-  # CHECK-NOT: for (int64_t i
-        )IR";
-    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+  std::ostringstream oss;
+  oss << *kernel.getCodeGenStmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int64_t i
+# CHECK-NEXT: for (int64_t j
+# CHECK-NEXT: for (int64_t k
+# CHECK-NOT: for (int64_t j
+# CHECK-NOT: for (int64_t i
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-    auto run_kernel = [&](int dim1, int dim2, int dim3) {
-      auto a = at::rand(
-          {dim1, dim3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
-      auto b = at::rand(
-          {dim1, dim3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
-      auto c = at::rand(
-          {dim1, dim3, dim2}, at::TensorOptions(device).dtype(at::kFloat));
+  auto run_kernel = [&](int dim1, int dim2, int dim3) {
+    auto a =
+        at::rand({dim1, dim3, dim2}, at::TensorOptions(kCPU).dtype(at::kFloat));
+    auto b =
+        at::rand({dim1, dim3, dim2}, at::TensorOptions(kCPU).dtype(at::kFloat));
+    auto c =
+        at::rand({dim1, dim3, dim2}, at::TensorOptions(kCPU).dtype(at::kFloat));
 
-      auto ref = at::cat({a, b, c}, 1);
+    auto ref = at::cat({a, b, c}, 1);
 
-      std::vector<IValue> stack =
-          fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
-      stack.emplace_back(dim1);
-      stack.emplace_back(dim2);
-      stack.emplace_back(dim3);
-      stack.emplace_back(3 * dim3);
-      kernel.run(stack);
+    std::vector<IValue> stack =
+        fmap<IValue>(std::vector<at::Tensor>({a, b, c}));
+    stack.emplace_back(dim1);
+    stack.emplace_back(dim2);
+    stack.emplace_back(dim3);
+    stack.emplace_back(3 * dim3);
+    kernel.run(stack);
 
-      auto o = stack[0].toTensor();
-      ASSERT_TRUE(at::allclose(o, ref));
-    };
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
 
-    run_kernel(10, 20, 15);
-  }
+  run_kernel(10, 20, 15);
+  getCatWoConditionals() = old_cat_wo_conditionals;
+#endif
+}
+
+TEST_F(Kernel, DoNotFuseLoopsWithMismatchingVariableDims) {
+#ifdef TORCH_ENABLE_LLVM
+  bool old_cat_wo_conditionals = getCatWoConditionals();
+  getCatWoConditionals() = true;
+  const auto graph_string = R"IR(
+      graph(%a : Float(SS(-2), SS(-4), SS(-3), requires_grad=0, device=cpu),
+            %b : Float(SS(-2), SS(-5), SS(-3), requires_grad=0, device=cpu),
+            %SS_2 : int,
+            %SS_3 : int,
+            %SS_4 : int,
+            %SS_5 : int,
+            %SS_6 : int):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b)
+        %r : Float(SS(-2), SS(-6), SS(-3), requires_grad=0, device=cpu) = aten::cat(%inputs, %dim)               # new size: [5,19,2]
+        return (%r))IR";
+  std::shared_ptr<Graph> graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+  std::vector<int64_t> symbolic_shape_inputs = {-2, -3, -4, -5, -6};
+
+  std::vector<torch::jit::StrideInput> input_desc = {
+      torch::jit::StrideInput::TENSOR_CONT};
+  std::unordered_map<
+      const torch::jit::Value*,
+      std::vector<torch::jit::StrideInput>>
+      symbolic_strides;
+  symbolic_strides[graph->inputs().at(0)] = input_desc;
+  symbolic_strides[graph->inputs().at(1)] = input_desc;
+  symbolic_strides[graph->outputs().at(0)] = input_desc;
+
+  TensorExprKernel kernel(
+      graph, {}, symbolic_shape_inputs, false, symbolic_strides);
+
+  std::ostringstream oss;
+  oss << *kernel.getCodeGenStmt();
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int64_t i
+# CHECK-NEXT: for (int64_t j
+# CHECK-NEXT: for (int64_t k
+# CHECK: for (int64_t j
+# CHECK-NEXT: for (int64_t k
+# CHECK-NOT: for (int64_t j
+# CHECK-NOT: for (int64_t i
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  auto run_kernel = [&](int dim2, int dim3, int dim4, int dim5) {
+    auto a =
+        at::rand({dim2, dim4, dim3}, at::TensorOptions(kCPU).dtype(at::kFloat));
+    auto b =
+        at::rand({dim2, dim5, dim3}, at::TensorOptions(kCPU).dtype(at::kFloat));
+
+    auto ref = at::cat({a, b}, 1);
+
+    std::vector<IValue> stack = fmap<IValue>(std::vector<at::Tensor>({a, b}));
+    stack.emplace_back(dim2);
+    stack.emplace_back(dim3);
+    stack.emplace_back(dim4);
+    stack.emplace_back(dim5);
+    stack.emplace_back(dim4 + dim5);
+    kernel.run(stack);
+
+    auto o = stack[0].toTensor();
+    ASSERT_TRUE(at::allclose(o, ref));
+  };
+
+  run_kernel(10, 20, 15, 8);
   getCatWoConditionals() = old_cat_wo_conditionals;
 #endif
 }
