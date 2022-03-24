@@ -1,5 +1,4 @@
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
-
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
 #include <sstream>
@@ -8,7 +7,7 @@ namespace torch {
 namespace lazy {
 
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
-    : TsNode(
+    : BackendNode(
           ltc_device_data,
           data->shape(),
           /*num_outputs=*/1,
@@ -17,7 +16,7 @@ DeviceData::DeviceData(std::shared_ptr<BackendData> data)
 
 std::string DeviceData::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", device=" << data_->device();
+  ss << BackendNode::ToString() << ", device=" << data_->device();
   return ss.str();
 }
 

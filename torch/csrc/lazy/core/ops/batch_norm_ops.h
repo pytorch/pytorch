@@ -1,20 +1,20 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 namespace torch {
 namespace lazy {
 
 // Node for the backward batch norm operator.
-class TSNativeBatchNormBackward : public torch::lazy::TsNode {
+class NativeBatchNormBackward : public torch::lazy::BackendNode {
  public:
-  TSNativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
+  NativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
                             const torch::lazy::Value& weight, const torch::lazy::Value& running_mean,
                             const torch::lazy::Value& running_var, const torch::lazy::Value& save_mean,
                             const torch::lazy::Value& save_invstd, bool training, double eps,
                             std::array<bool, 3> output_mask);
 
-  TSNativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
+  NativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
                             const torch::lazy::Value& weight, const torch::lazy::Value& save_mean,
                             const torch::lazy::Value& save_invstd, bool training, double eps,
                             std::array<bool, 3> output_mask);
@@ -33,9 +33,9 @@ class TSNativeBatchNormBackward : public torch::lazy::TsNode {
   std::array<bool, 3> output_mask_;
 };
 
-class TSNativeBatchNormForward : public torch::lazy::TsNode {
+class NativeBatchNormForward : public torch::lazy::BackendNode {
  public:
-  TSNativeBatchNormForward(const torch::lazy::Value& input, const torch::lazy::Value& weight,
+  NativeBatchNormForward(const torch::lazy::Value& input, const torch::lazy::Value& weight,
                            const torch::lazy::Value& bias, const torch::lazy::Value& running_mean,
                            const torch::lazy::Value& running_var, bool training,
                            double momentum, double eps);

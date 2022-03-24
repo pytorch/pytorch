@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 namespace torch {
 namespace lazy {

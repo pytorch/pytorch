@@ -10,9 +10,7 @@
 #include <sstream>
 #include <unordered_map>
 
-// TODO(whc) don't have ir util depend on ts_backend
-// temporary hack to use Node shape printing from TsNode::shape()
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 namespace torch {
 namespace lazy {
@@ -135,12 +133,7 @@ std::string GenerateDotNodeLabel(
     const std::unordered_map<const Node*, size_t>& roots_ids) {
   static const size_t kMaxValueSize = 64;
   std::stringstream ss;
-  ss << node->op() << "\\n";
-  if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
-    ss << tsnode->shape();
-  } else {
-    ss << "{TODO implement Node::shape}";
-  }
+  ss << node->op() << "\\n" << node->shape();
   for (auto& tag : GetNodeTags(node)) {
     ss << "\\n" << tag.name << "=";
     if (tag.value.size() < kMaxValueSize) {
@@ -166,12 +159,7 @@ std::string GenerateDotNodeSpec(
 
 std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
   std::stringstream ss;
-  if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
-    ss << tsnode->shapes() << " ";
-  } else {
-    ss << "{TODO implement Node::shape} ";
-  }
-  ss << node->op() << "(";
+  ss << node->shapes() << " " << node->op() << "(";
   size_t count = 0;
   for (auto& output : node->operands()) {
     if (count > 0) {

@@ -1,10 +1,10 @@
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/ops/arithmetic_ir_ops.h>
 
 #include <torch/csrc/lazy/core/helpers.h>
 
 #include <memory>
 
-#include <torch/csrc/lazy/ts_backend/ops/generic.h>
+#include <torch/csrc/lazy/core/ops/generic.h>
 
 namespace torch {
 namespace lazy {

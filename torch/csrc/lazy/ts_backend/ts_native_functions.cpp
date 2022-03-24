@@ -3,6 +3,7 @@
 #include <ATen/MetaFunctions.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
+#include <torch/csrc/lazy/backend/config.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/shape_inference.h>
@@ -10,7 +11,6 @@
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
-#include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/tensor_aten_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_autograd_functions.h>
@@ -93,7 +93,7 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
   auto self_tensor = torch::lazy::TryGetLtcTensor(self);
   if (!self_tensor) {
     // providing a new 'eager' value (self) for an existing lazy tensor (dst)
-    static bool sync_update = FLAGS_torch_lazy_ts_tensor_update_sync;
+    static bool sync_update = FLAGS_torch_lazy_tensors_tensor_update_sync;
     CHECK(dst_tensor);
     dst_tensor->UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {

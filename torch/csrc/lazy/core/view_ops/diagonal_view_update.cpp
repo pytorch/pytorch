@@ -11,7 +11,7 @@ DiagonalViewUpdate::DiagonalViewUpdate(
     int64_t offset,
     int64_t dim1,
     int64_t dim2)
-    : TsNode(
+    : BackendNode(
           ltc_diagonal_view_update,
           {target, input},
           {target.shape()},
@@ -23,7 +23,7 @@ DiagonalViewUpdate::DiagonalViewUpdate(
 
 std::string DiagonalViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+  ss << BackendNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
      << ", dim2=" << dim2_;
   return ss.str();
 }

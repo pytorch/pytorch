@@ -12,12 +12,12 @@
 #include <torch/csrc/lazy/core/unique.h>
 
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
-#include <torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.h>
-#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
-#include <torch/csrc/lazy/ts_backend/ops/expand.h>
-#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
+#include <torch/csrc/lazy/core/ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/ops/expand.h>
+#include <torch/csrc/lazy/core/ops/scalar.h>
 
 #include <ATen/ScalarOps.h>
 

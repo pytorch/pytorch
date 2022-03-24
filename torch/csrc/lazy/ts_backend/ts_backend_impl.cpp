@@ -2,8 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
-#include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
-#include <torch/csrc/lazy/ts_backend/config.h>
+#include <torch/csrc/lazy/backend/config.h>
 #include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
@@ -40,7 +39,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   TSBackendImpl() : default_device_type_(at::kCPU) {
     // TODO(whc) unify how all our flags are set and parsed as envs
     static bool env_use_cuda = std::getenv("LTC_TS_CUDA") != nullptr;
-    auto type = (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
+    auto type = (env_use_cuda || FLAGS_torch_lazy_tensors_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = TSBackendDeviceType(type);
   }
   std::unique_ptr<torch::lazy::LoweringContext> CreateLoweringContext(

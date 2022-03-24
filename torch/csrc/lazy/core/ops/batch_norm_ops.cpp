@@ -1,16 +1,16 @@
-#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
+#include <torch/csrc/lazy/core/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/core/util.h>
 
 namespace torch {
 namespace lazy {
 
-TSNativeBatchNormBackward::TSNativeBatchNormBackward(
+NativeBatchNormBackward::NativeBatchNormBackward(
     const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
     const torch::lazy::Value& weight, const torch::lazy::Value& running_mean,
     const torch::lazy::Value& running_var, const torch::lazy::Value& save_mean,
     const torch::lazy::Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : torch::lazy::TsNode(
+    : torch::lazy::BackendNode(
           torch::lazy::OpKind(at::aten::native_batch_norm_backward),
           {grad_out, input, weight, running_mean, running_var, save_mean,
            save_invstd},
@@ -24,12 +24,12 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
       eps_(eps),
       output_mask_(output_mask) {}
 
-TSNativeBatchNormBackward::TSNativeBatchNormBackward(
+NativeBatchNormBackward::NativeBatchNormBackward(
     const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
     const torch::lazy::Value& weight, const torch::lazy::Value& save_mean,
     const torch::lazy::Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : torch::lazy::TsNode(
+    : torch::lazy::BackendNode(
           torch::lazy::OpKind(at::aten::native_batch_norm_backward),
           {grad_out, input, weight, save_mean, save_invstd},
           {input.shape(),
@@ -42,19 +42,19 @@ TSNativeBatchNormBackward::TSNativeBatchNormBackward(
       eps_(eps),
       output_mask_(output_mask) {}
 
-std::string TSNativeBatchNormBackward::ToString() const {
+std::string NativeBatchNormBackward::ToString() const {
   std::stringstream ss;
-  ss << torch::lazy::TsNode::ToString() << ", training=" << training_
+  ss << torch::lazy::BackendNode::ToString() << ", training=" << training_
      << ", eps=" << eps_;
   return ss.str();
 }
 
-TSNativeBatchNormForward::TSNativeBatchNormForward(
+NativeBatchNormForward::NativeBatchNormForward(
     const torch::lazy::Value& input, const torch::lazy::Value& weight,
     const torch::lazy::Value& bias, const torch::lazy::Value& running_mean,
     const torch::lazy::Value& running_var, bool training, double momentum,
     double eps)
-    : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::native_batch_norm),
+    : torch::lazy::BackendNode(torch::lazy::OpKind(at::aten::native_batch_norm),
                           {input, weight, bias, running_mean, running_var},
                           {input.shape(),
                            running_mean.shape(),
@@ -65,9 +65,9 @@ TSNativeBatchNormForward::TSNativeBatchNormForward(
       momentum_(momentum),
       eps_(eps) {}
 
-std::string TSNativeBatchNormForward::ToString() const {
+std::string NativeBatchNormForward::ToString() const {
   std::stringstream ss;
-  ss << torch::lazy::TsNode::ToString() << ", training=" << training_
+  ss << torch::lazy::BackendNode::ToString() << ", training=" << training_
      << ", momentum=" << momentum_ << ", eps=" << eps_;
   return ss.str();
 }

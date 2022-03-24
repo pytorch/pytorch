@@ -6,7 +6,7 @@ namespace torch {
 namespace lazy {
 
 Permute::Permute(const Value& input, std::vector<int64_t> dims)
-    : TsNode(
+    : BackendNode(
           OpKind(at::aten::permute),
           {input},
           /*num_outputs=*/1,
@@ -19,7 +19,7 @@ Permute::Permute(const Value& input, std::vector<int64_t> dims)
 
 std::string Permute::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dims=(" << c10::Join(", ", dims_) << ")";
+  ss << BackendNode::ToString() << ", dims=(" << c10::Join(", ", dims_) << ")";
   return ss.str();
 }
 

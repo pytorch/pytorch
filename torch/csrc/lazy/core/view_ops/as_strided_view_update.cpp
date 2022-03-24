@@ -13,7 +13,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(
     std::vector<int64_t> size,
     std::vector<int64_t> stride,
     int64_t storage_offset)
-    : TsNode(
+    : BackendNode(
           ltc_as_strided_view_update,
           {target, input},
           [&]() {
@@ -27,7 +27,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(
 
 std::string AsStridedViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
+  ss << BackendNode::ToString() << ", size=(" << c10::Join(", ", size_)
      << "), stride=(" << c10::Join(", ", stride_)
      << "), storage_offset=" << storage_offset_;
   return ss.str();

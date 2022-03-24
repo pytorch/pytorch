@@ -1,5 +1,4 @@
-#include <torch/csrc/lazy/ts_backend/ops/cast.h>
-
+#include <torch/csrc/lazy/core/internal_ops/cast.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
@@ -19,7 +18,7 @@ Cast::Cast(
     const Value& input,
     at::ScalarType dtype,
     c10::optional<at::ScalarType> stype)
-    : TsNode(
+    : BackendNode(
           ltc_cast,
           {input},
           {NodeOutputShape(input, dtype)},
@@ -30,7 +29,7 @@ Cast::Cast(
 
 std::string Cast::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString();
+  ss << BackendNode::ToString();
   ss << ", dtype=" << dtype_;
   if (stype_) {
     ss << ", stype=" << *stype_;

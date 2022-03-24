@@ -9,7 +9,7 @@ NarrowViewUpdate::NarrowViewUpdate(
     const Value& input,
     const Value& source,
     c10::ArrayRef<int64_t> base_indices)
-    : TsNode(
+    : BackendNode(
           ltc_narrow_view_update,
           {input, source},
           /*num_outputs=*/1,
@@ -20,7 +20,7 @@ NarrowViewUpdate::NarrowViewUpdate(
 
 std::string NarrowViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", base_indices=("
+  ss << BackendNode::ToString() << ", base_indices=("
      << c10::Join(", ", base_indices_) << ")";
   return ss.str();
 }

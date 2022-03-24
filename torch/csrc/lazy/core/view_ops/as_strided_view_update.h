@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 #include <vector>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API AsStridedViewUpdate : public TsNode {
+class TORCH_API AsStridedViewUpdate : public BackendNode {
  public:
   AsStridedViewUpdate(
       const Value& target,

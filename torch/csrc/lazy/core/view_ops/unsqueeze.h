@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 namespace torch {
 namespace lazy {
@@ -9,7 +9,7 @@ TORCH_API std::vector<int64_t> BuildUnsqueezedDimensions(
     c10::ArrayRef<int64_t> dimensions,
     int64_t squeeze_dim);
 
-class TORCH_API Unsqueeze : public TsNode {
+class TORCH_API Unsqueeze : public BackendNode {
  public:
   Unsqueeze(const torch::lazy::Value& input, int dim);
 

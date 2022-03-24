@@ -1,11 +1,11 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API Resize : public TsNode {
+class TORCH_API Resize : public BackendNode {
  public:
   Resize(const Value& input, std::vector<int64_t> size);
 

@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
+#include <torch/csrc/lazy/core/ops/scalar.h>
 
 #include <functional>
 #include <sstream>
@@ -11,7 +11,7 @@ namespace lazy {
 using at::operator<<;
 
 Scalar::Scalar(const at::Scalar& value, Shape shape)
-    : TsNode(
+    : BackendNode(
           OpKind(at::prim::Constant),
           std::move(shape),
           /*num_outputs=*/1,
@@ -19,7 +19,7 @@ Scalar::Scalar(const at::Scalar& value, Shape shape)
       value_(value) {}
 
 Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
-    : TsNode(
+    : BackendNode(
           OpKind(at::prim::Constant),
           {Shape(type, {})},
           /*num_outputs=*/1,
@@ -28,7 +28,7 @@ Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
 
 std::string Scalar::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", value=" << value_;
+  ss << BackendNode::ToString() << ", value=" << value_;
   return ss.str();
 }
 

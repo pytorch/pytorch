@@ -2,12 +2,12 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <torch/csrc/lazy/backend/backend_node.h>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API Cast : public TsNode {
+class TORCH_API Cast : public BackendNode {
  public:
   Cast(
       const Value& input,
