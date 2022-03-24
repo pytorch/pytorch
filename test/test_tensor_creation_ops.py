@@ -532,7 +532,7 @@ class TestTensorCreation(TestCase):
                          z, atol=1e-5, rtol=1e-5)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
             torch.complex64, torch.complex128, torch.bool)
     def test_torch_complex_floating_dtype_error(self, device, dtype):
         for op in (torch.complex, torch.polar):
