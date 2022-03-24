@@ -39,6 +39,45 @@ class GraphInputMatcher:
             real_input.append(inp)
         return real_input
 
+class ReturnValueHandler:
+    r"""
+    When _LAZYC._ltc_sync_multi is called on multi tensors, the compiled graph
+    will contain output only for unique tensors - if a tensor appears multiple
+    times in the input to _ltc_sync_multi, only the first occurance matters.
+
+    However from python level, we still expect multi tensors returned with duplciation even if the TS graph dedup the output. e.g. for method:
+
+      def forward(self, a):
+        return a, a
+
+    the TS graph captured by LTC will return a single tensor, but Python method expects 2.
+
+    This class dedup the lazy tensors first to get the index that will be used
+    to duplicate the eager tensors later.
+    """
+    def __init__(self, lazy_out_list):
+        self.index = []
+        self.total_count = len(lazy_out_list)
+
+        tensor_id_to_idx = dict()
+        for dup_idx, lazy_tensor in enumerate(lazy_out_list):
+            uniq_idx = tensor_id_to_idx.get(id(lazy_tensor), None)
+            if uniq_idx is not None:
+                self.index[uniq_idx].append(dup_idx)
+            else:
+                uniq_idx = len(self.index)
+                self.index.append([dup_idx])
+                tensor_id_to_idx[id(lazy_tensor)] = uniq_idx
+
+    def duplicate_eager_tensors(self, eager_tensor_list):
+        duplicated_list = [None] * self.total_count
+        assert len(eager_tensor_list) == len(self.index)
+
+        for uniq_idx, eager_tensor in enumerate(eager_tensor_list):
+            for dup_idx in self.index[uniq_idx]:
+                duplicated_list[dup_idx] = eager_tensor
+        return duplicated_list
+
 def force_lazy_device(model: fx.GraphModule):
     """
     Factory methods in a Fx graph may create tensors for a specific eager devices.
@@ -74,6 +113,7 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
     if not isinstance(lazy_out, (tuple, list)):
         lazy_out = (lazy_out,)
 
+    return_value_handler = ReturnValueHandler(lazy_out)
     if debug:
         print("LTC IR:", _LAZYC._get_ltc_tensors_text(lazy_out))
 
@@ -97,6 +137,6 @@ def extract_compiled_graph(model: fx.GraphModule, example_inputs) -> Callable:
         if len(lazy_out) == 0:
             return ()
         graph_input = graph_input_matcher(args)
-        return _LAZYC._run_cached_graph(graph_hash, graph_input)
+        return return_value_handler.duplicate_eager_tensors(_LAZYC._run_cached_graph(graph_hash, graph_input))
 
     return optimized_mod

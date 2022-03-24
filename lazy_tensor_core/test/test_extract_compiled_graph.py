@@ -50,6 +50,19 @@ class ModuleReturnMulti(nn.Module):
 #         b = torch.randn(2, 3, device="cpu") # eager device
 #         return a + b
 
+class ModuleReturnDupTensor(nn.Module):
+    """
+    Handle the corner case that the same tensor appears multiple times in the
+    returned tuple. torchbenck like drq will hit this corner case when running
+    thru torchdynamo..
+    """
+    def __init__(self):
+        super(ModuleReturnDupTensor, self).__init__()
+
+    def forward(self, a, b):
+        c = a + b
+        return a - b, c, a + 1, c
+
 def gen_rand_args(mod):
     args = []
     for _ in range(len(inspect.signature(mod.forward).parameters)):
@@ -105,3 +118,4 @@ class OptimizeTest(unittest.TestCase):
     test_const_scale = maketest(ModuleConstScale)
     test_addcmul = maketest(ModuleAddcmul)
     test_return_multi = maketest(ModuleReturnMulti)
+    test_return_dup_tensor = maketest(ModuleReturnDupTensor)
