@@ -514,9 +514,9 @@ class TestTensorCreation(TestCase):
         real = torch.tensor([1, 2], device=device, dtype=dtype)
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
-        complex_dtype_map = {torch.float16: torch.complex32,
+        float_to_complex_map = {torch.float16: torch.complex32,
                              torch.float: torch.complex64, torch.double: torch.complex128}
-        complex_dtype = complex_dtype_map[dtype]
+        complex_dtype = float_to_complex_map[dtype]
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes
@@ -1609,7 +1609,7 @@ class TestTensorCreation(TestCase):
         # Fails on `cpu` while executing
         # expected = torch.tensor(list(product([a], b, c)), dtype=dtype, device=device)
         # NOTE: torch.cartesian_prod works on CPU as it used copy kernel.
-        
+
         # Fails on `cuda` while executing torch.cartesian_prod
         # cartesian_prod on CUDA is implemented using cat which doesn't support complex32.
         self._test_cartesian_prod(device, dtype)
