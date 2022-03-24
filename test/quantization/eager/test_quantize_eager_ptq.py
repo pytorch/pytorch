@@ -199,6 +199,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             (16, 5)
         )
 
+    @override_qengines
     def test_int16_reference_module(self):
 
         class RefM(torch.nn.Module):
@@ -225,7 +226,9 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         data = torch.randn(*input_size, dtype=torch.float)
 
         original_ref_m = RefM()
-        torch.quantization.engine = "qnnpack"
+        qengine = torch.backends.quantized.engine
+        if qengine not in supported_qengines:
+            return
         from torch.ao.quantization.observer import MovingAverageMinMaxObserver
 
         weight_obs = MovingAverageMinMaxObserver.with_args(

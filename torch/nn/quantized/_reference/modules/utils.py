@@ -1,5 +1,9 @@
 import torch
 from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 class ReferenceQuantizedModule(torch.nn.Module):
     def _init_weight_qparams(self, weight_qparams, device):
@@ -35,6 +39,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 self.register_buffer(
                     "weight_axis", torch.tensor(0, dtype=torch.int, device=device))
         else:
+            logger.warning("unexpected supported weight dtype: {}".format(self.weight_dtype))
             # added for TorchScriptability, not used
             self.register_buffer("weight_scale", torch.tensor(1.0, dtype=torch.float, device=device))
             self.register_buffer("weight_zero_point", torch.tensor(0, dtype=torch.int, device=device))
@@ -98,7 +103,7 @@ def _quantize_weight(
         return weight
 
     if weight_qscheme == torch.per_tensor_affine:
-        if weight_dtype in [torch.quint8, torch.qint8, torch.qint32, torch.qint32]:
+        if weight_dtype in [torch.quint8, torch.qint8, torch.qint32]:
             weight = torch.quantize_per_tensor(weight, weight_scale, weight_zero_point, weight_dtype)
             return weight
     elif weight_qscheme in [torch.per_channel_affine, torch.per_channel_affine_float_qparams]:
