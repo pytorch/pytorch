@@ -231,7 +231,7 @@ def main() -> None:
 
 def copy_resource_to_dir(package: str, name: str, dest_dir: pathlib.Path) -> None:
     with pkg_resources.resource_stream(package, name) as in_file:
-        dest = dest_dir / pathlib.Path(in_file.name).name
+        dest = dest_dir / name
         with dest.open(mode="xb") as out_file:
             shutil.copyfileobj(in_file, out_file)
 
