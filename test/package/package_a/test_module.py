@@ -37,7 +37,6 @@ class ModWithSubmodAndTensor(torch.nn.Module):
 class ModWithTwoSubmodsAndTensor(torch.nn.Module):
     def __init__(self, tensor, sub_mod_0, sub_mod_1):
         super().__init__()
-        self.name = 'ModWithTwoSubmodsAndTensor'
         self.tensor = tensor
         self.sub_mod_0 = sub_mod_0
         self.sub_mod_1 = sub_mod_1
