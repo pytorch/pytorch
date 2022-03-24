@@ -146,6 +146,7 @@ void OptimizeGraph(
   UseVariadicCat(graph);
   UseVariadicStack(graph);
   EliminateTrivialEquallySplit(graph);
+  EliminateExtraPermuteOps(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(

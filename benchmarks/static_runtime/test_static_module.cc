@@ -1530,6 +1530,65 @@ TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
   }
 }
 
+TEST(EliminateExtraPermuteOps, FusesCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=-1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* sum = getNodeWithKind(graph, "aten::sum");
+  ASSERT_NE(sum, nullptr);
+  auto dim = toIValue(sum->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isIntList());
+  EXPECT_EQ(dim->toIntList(), c10::List<int64_t>{1});
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
+  const auto src = R"JIT(
+    def forward(self, x, dim: int):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=dim)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
 TEST(UseSplitAndSqueeze, Fusion) {
   const auto src = R"IR(
     graph(%x: Tensor):

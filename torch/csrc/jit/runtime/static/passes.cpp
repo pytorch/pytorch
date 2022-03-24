@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -1003,6 +1004,50 @@ void ForceNonEmptyOutputs(Graph& graph) {
   if (!none_node->hasUses()) {
     none_node->destroy();
   }
+}
+
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+  auto input_is_constant_list =
+      [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
+        auto input_opt = toIValue(node->input(input_idx));
+        if (!input_opt.has_value() || !input_opt->isIntList()) {
+          return false;
+        }
+        return input_opt->toIntList() == expected;
+      };
+
+  // SubgraphRewriter can't pattern-match on constants, so we use this
+  // extra filter to make sure the values of the `dim` arguments are
+  // correct.
+  auto dims_are_valid_constants =
+      [&input_is_constant_list](
+          const Match& match,
+          const std::unordered_map<std::string, Value*>& vmap) {
+        // Get the nodes in the real graph from the nodes in the template
+        // pattern graph
+        const auto& node_map = match.nodes_map;
+        auto* sum_node = node_map.at(vmap.at("c")->node());
+        auto* permute_node = node_map.at(vmap.at("b")->node());
+        return input_is_constant_list(sum_node, 1, c10::List<int64_t>{-1}) &&
+            input_is_constant_list(
+                   permute_node, 1, c10::List<int64_t>{0, 2, 1});
+      };
+
+  const auto pattern = R"IR(
+    graph(%a, %sum_dim, %permute_dim, %keepdim, %dtype):
+        %b = aten::permute(%a, %permute_dim)
+        %c = aten::sum(%b, %sum_dim, %keepdim, %dtype)
+        return (%c))IR";
+
+  const auto fused_pattern = R"IR(
+    graph(%a, %sum_dim, %permute_dim, %keepdim, %dtype):
+        %new_sum_dim: int[] = prim::Constant[value=[1]]()
+        %d = aten::sum(%a, %new_sum_dim, %keepdim, %dtype)
+        return (%d))IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, dims_are_valid_constants);
 }
 
 namespace {
