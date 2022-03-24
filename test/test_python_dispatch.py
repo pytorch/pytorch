@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: __torch_dispatch__"]
 
 import tempfile
 import torch
