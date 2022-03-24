@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <c10/test/util/Macros.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
 
 #include <cmath>
@@ -75,7 +76,7 @@ void test_atomic_mul() {
   for (int i = 0; i < arraysize; ++i) {
     a[i] = 2;
     sum[i] = 2;
-    answer[i] = pow(sum[i], static_cast<T>(factor));
+    answer[i] = pow(sum[i], static_cast<T>(factor + 1));
   }
 
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
@@ -98,6 +99,7 @@ void test_atomic_mul() {
 }
 
 TEST(TestAtomicOps, TestAtomicAdd) {
+  if (!at::cuda::is_available()) return;
   test_atomic_add<uint8_t>();
   test_atomic_add<int8_t>();
   test_atomic_add<int16_t>();
@@ -113,6 +115,7 @@ TEST(TestAtomicOps, TestAtomicAdd) {
 }
 
 TEST(TestAtomicOps, DISABLED_ON_WINDOWS(TestAtomicMul)) {
+  if (!at::cuda::is_available()) return;
   test_atomic_mul<at::BFloat16>();
   test_atomic_mul<at::Half>();
   test_atomic_mul<float>();
