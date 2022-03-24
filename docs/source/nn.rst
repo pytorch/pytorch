@@ -3,6 +3,8 @@
 
 torch.nn
 ===================================
+.. automodule:: torch.nn
+.. automodule:: torch.nn.modules
 
 These are the basic building blocks for graphs:
 
@@ -331,6 +333,8 @@ Shuffle Layers
 
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
+.. automodule:: torch.nn.parallel
+.. currentmodule:: torch
 
 .. autosummary::
     :toctree: generated
@@ -342,6 +346,7 @@ DataParallel Layers (multi-GPU, distributed)
 
 Utilities
 ---------
+.. automodule:: torch.nn.utils
 
 From the ``torch.nn.utils`` module
 
@@ -453,3 +458,7 @@ Lazy Modules Initialization
     :template: classtemplate.rst
 
     nn.modules.lazy.LazyModuleMixin
+
+
+.. This module is kept only for backward compatibility
+.. py:module:: torch.nn.backends

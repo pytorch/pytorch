@@ -569,6 +569,24 @@ TEST(StaticRuntime, KWargsAPI_2) {
   }
 }
 
+TEST(StaticRuntime, KWargsAPI_Optional) {
+  const auto src = R"JIT(
+    def forward(self, x, y, z: Optional[Tensor] = None):
+        return x + y
+  )JIT";
+
+  torch::jit::Module mod("mod");
+  mod.define(src);
+  torch::jit::StaticModule smod(mod);
+  const auto kwargs = std::unordered_map<std::string, IValue>{
+      {"x", at::randn({1})}, {"y", at::randn({1})}};
+
+  auto expected = mod.forward({}, kwargs).toTensor();
+  auto actual = smod({}, kwargs).toTensor();
+
+  EXPECT_TRUE(expected.equal(actual));
+}
+
 TEST(StaticRuntime, CleanUpMemory) {
   const int embedding_size = 32;
   const int num_features = 50;
@@ -889,8 +907,9 @@ TEST(
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
 
   pnode.Output(0) = values[0];
@@ -908,8 +927,9 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
-  pnode.set_values(values.data());
+  StaticNodeInfo static_node_info(
+      sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  ProcessedNode pnode(static_node_info, values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
@@ -935,9 +955,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(
         list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
@@ -949,9 +970,10 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node,
         /*enable_out_variant=*/true,
         /*check_memory_overlap */ false);
-    ProcessedNode list_unpack_pnode(
+    StaticNodeInfo list_unpack_static_node_info(
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
-    list_unpack_pnode.set_values(values.data());
+    ProcessedNode list_unpack_pnode(
+        list_unpack_static_node_info, values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
@@ -1506,4 +1528,63 @@ TEST(ForceNonEmptyOutputs, TwoSubBlocks) {
       EXPECT_EQ(sub_block->outputs().size(), 1);
     }
   }
+}
+
+TEST(EliminateExtraPermuteOps, FusesCorrectly) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=-1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_FALSE(hasNodeWithKind(graph, "aten::permute"));
+  auto* sum = getNodeWithKind(graph, "aten::sum");
+  ASSERT_NE(sum, nullptr);
+  auto dim = toIValue(sum->input(1));
+  ASSERT_TRUE(dim.has_value() && dim->isIntList());
+  EXPECT_EQ(dim->toIntList(), c10::List<int64_t>{1});
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseWrongDim) {
+  const auto src = R"JIT(
+    def forward(self, x):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=1)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
+}
+
+TEST(EliminateExtraPermuteOps, DoesNotFuseNonConstantDim) {
+  const auto src = R"JIT(
+    def forward(self, x, dim: int):
+        y = torch.permute(x, (0, 2, 1))
+        z = torch.sum(y, dim=dim)
+        return z
+  )JIT";
+  torch::jit::Module mod("m");
+  mod.define(src);
+
+  auto graph = mod.get_method("forward").graph();
+  // turn the ListConstruct(%constant) into proper constant lists
+  ConstantPropagation(graph);
+  EliminateExtraPermuteOps(graph);
+
+  EXPECT_TRUE(hasNodeWithKind(graph, "aten::permute"));
 }

@@ -2,9 +2,10 @@
 
 import copy
 import functools
+from typing import List
+
 import torch
 import torch.distributed._shard.sharding_spec as shard_spec
-from typing import List
 
 from .api import (
     _register_sharded_op,
@@ -12,12 +13,10 @@ from .api import (
     ShardedTensor,
     ShardedTensorMetadata,
     TensorProperties,
-    _PartialTensor,
 )
 from .metadata import ShardMetadata  # noqa: F401
+from .partial_tensor import _PartialTensor
 from .utils import load_with_process_group
-import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 
 def empty(sharding_spec: shard_spec.ShardingSpec,
@@ -367,7 +366,7 @@ def sharded_op_impl(func):
     parameters, the function provided will be invoked for that operator.
 
     Example::
-        >>> @custom_sharded_op(torch.nn.functional.linear)
+        >>> @sharded_op_impl(torch.nn.functional.linear)
         >>> def my_custom_sharded_linear(types, args, kwargs, process_group):
         >>>   ....
         >>>

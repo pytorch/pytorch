@@ -619,7 +619,7 @@ class {module_name}(torch.nn.Module):
                 if cls_call is not None:
                     return cls_call(self, *args, **kwargs)
                 else:
-                    return super(type(self), self).__call__(*args, **kwargs)
+                    return super(cls, self).__call__(*args, **kwargs)
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \

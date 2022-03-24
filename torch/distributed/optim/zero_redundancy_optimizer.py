@@ -1415,7 +1415,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
                     "error due to an empty parameter list"
                 )
-                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)
+                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)  # type: ignore[no-redef]
 
             # Log information about the DDP and ZeRO bucketing
             if dist.get_debug_level() != dist.DebugLevel.OFF:

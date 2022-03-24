@@ -24,7 +24,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, skipScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
+                                 skipIfUnsupportedMaxOpsetVersion)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import Dict, List, Optional, Tuple
@@ -631,8 +631,8 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Faster RCNN model is not scriptable
     def test_faster_rcnn(self):
-        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=False, min_size=200,
-                                                                                 max_size=300)
+        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=False, pretrained_backbone=True,
+                                                                                 min_size=200, max_size=300)
         model.eval()
         x1 = torch.randn(3, 200, 300, requires_grad=True)
         x2 = torch.randn(3, 200, 300, requires_grad=True)
@@ -678,8 +678,8 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_mask_rcnn(self):
-        model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=False, min_size=200,
-                                                                             max_size=300)
+        model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=False, pretrained_backbone=True,
+                                                                             min_size=200, max_size=300)
         images, test_images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
@@ -719,8 +719,8 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_keypoint_rcnn(self):
-        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=False, min_size=200,
-                                                                                     max_size=300)
+        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=False, pretrained_backbone=False,
+                                                                                     min_size=200, max_size=300)
         images, test_images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"],
@@ -754,7 +754,9 @@ class TestONNXRuntime(unittest.TestCase):
         dummy_input = torch.randn(1, 3, 224, 224)
         self.run_test(model, (dummy_input,))
 
-    @unittest.skip("Fixed in PyTorch master. RuntimeError: Error(s) in loading state_dict for QuantizableMobileNetV3")
+    @unittest.skip("Unstable loading pretrained quantized mobilenet v3: https://github.com/pytorch/vision/issues/5303")
+    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipScriptTest()
     def test_mobilenet_v3_quant(self):
         model = torchvision.models.quantization.mobilenet_v3_large(pretrained=True, quantize=True)
         from PIL import Image
@@ -2216,6 +2218,17 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LinspaceModel(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_linspace_negative_start(self):
+        class LinspaceModel(torch.nn.Module):
+            def forward(self, start, end, steps):
+                return torch.linspace(start, end, steps)
+
+        x = torch.tensor(-1, dtype=torch.float)
+        y = torch.tensor(1, dtype=torch.float)
+        z = torch.tensor(6, dtype=torch.int)
+        self.run_test(LinspaceModel(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats_out(self):
         class ArangeModelEnd(torch.nn.Module):
             def forward(self, end):
@@ -2771,8 +2784,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
-    # Enable test when fix for allowzero is in ORT
-    @skipForAllOpsetVersions()
+    @unittest.skip("Bug in ORT, skip test until rel-1.11.")
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_reshape_allowzero(self):
         class ReshapeModel(torch.nn.Module):
@@ -3553,6 +3565,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.arange(1., 6., requires_grad=True)
         self.run_test(MyModule(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_topk_int32_k(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, k):
+                return torch.topk(x, k)
+
+        x = torch.arange(1., 6.)
+        k = torch.tensor(3, dtype=torch.int32)
+        self.run_test(Model(), (x, k))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
@@ -4777,6 +4799,15 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([[1, 2], [3, 4]])
         self.run_test(RepeatsDimsModel2(), (x,))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_repeat_interleave_noop(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat_interleave(1, dim=1)
+
+        x = torch.randn(4, 1, 8)
+        self.run_test(Model(), (x,))
+
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_dynamic_repeat_interleave(self):
         class SingleDynamicModel(torch.nn.Module):
@@ -4967,6 +4998,9 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.flatten(input)
 
         x = torch.randint(10, (1, 2, 3, 4))
+        self.run_test(FlattenModel(), x)
+
+        x = torch.randn(4)
         self.run_test(FlattenModel(), x)
 
     def test_flatten2d(self):
@@ -5693,6 +5727,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(OnesModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(OnesModel(), x, remained_onnx_input_idx=[])
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()  # torch.zeros/torch.ones with size tensor of dim != 0 not scriptable.
+    def test_zeros_ones_with_tensor_input(self):
+        class ZeroAndOnes(torch.nn.Module):
+            def forward(self, x):
+                return torch.zeros(x, 1), torch.ones(x, 1)
+
+        x = torch.tensor([2])
+        self.run_test(ZeroAndOnes(), (x, ))
 
     @skipIfONNXShapeInference(True)
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -10590,8 +10634,12 @@ class TestONNXRuntime(unittest.TestCase):
     #       such that inputs and outputs do not always overflow/underflow.
     #       Otherwise test results could be inaccurate.
     @skipIfUnsupportedMinOpsetVersion(10)
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/74501")
     def test_quantized_linear(self):
         model = torch.nn.quantized.Linear(4, 8)
+        # Set non-zero bias.
+        bias = torch.arange(8).to(torch.float)
+        model.set_weight_bias(model.weight(), bias)
         input = torch.randn(4, 4)
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         # Currently, we need convert the model to ScriptModule before export.
@@ -10606,11 +10654,11 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.quantized.Conv2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
-        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.2, 0, torch.qint8)
-        bias = torch.randn(33)
+        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.5, 0, torch.qint8)
+        bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
-        q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(torch.jit.trace(model, q_input), (q_input,))
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -10625,11 +10673,11 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.intrinsic.quantized.ConvReLU2d(16, 33, 3, stride=2)
         # Manually initialize model weight and bias to random numbers.
         # By default all zeros.
-        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.2, 0, torch.qint8)
-        bias = torch.randn(33)
+        q_weight = torch.quantize_per_tensor(torch.randn(33, 16, 3, 3), 0.5, 0, torch.qint8)
+        bias = torch.arange(33).to(torch.float) - 16
         model.set_weight_bias(q_weight, bias)
         input = torch.randn(3, 16, 32, 32)
-        q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(torch.jit.trace(model, q_input), (q_input,))
 
     @skipIfUnsupportedMinOpsetVersion(10)

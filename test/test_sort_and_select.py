@@ -292,7 +292,7 @@ class TestSortAndSelect(TestCase):
     @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_msort(self, device, dtype):
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             if tensor.size() != torch.Size([]):
                 if dtype is torch.bfloat16:
                     expected = torch.from_numpy(np.msort(tensor.float().cpu().numpy())).bfloat16()

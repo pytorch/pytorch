@@ -2863,9 +2863,9 @@ def arange(g, *args):
         raise NotImplementedError("Unknown aten::arange signature taking " + str(len(args)) + " arguments.")
 
 def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
+    range_tensor = sym_help._arange_helper(g, steps, None)
     step = div(g, sub(g, end, start), sub(g, steps, g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))))
-    end_epsilon = g.op("Add", step, end)
-    return sym_help._arange_helper(g, start, end_epsilon, step, dtype, None, None, None)
+    return add(g, mul(g, range_tensor, step), start)
 
 def masked_fill(g, self, mask, value):
     mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]

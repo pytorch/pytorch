@@ -98,10 +98,22 @@ def disable_apex_o2_state_dict_hook(model):
                     module._state_dict_hooks[k] = v
 
 @contextlib.contextmanager
-def exporter_context(model, mode):
+def setup_onnx_logging(verbose):
+    is_originally_enabled = torch.onnx.is_onnx_log_enabled()
+    if is_originally_enabled or verbose:
+        torch.onnx.enable_log()
+    try:
+        yield
+    finally:
+        if not is_originally_enabled:
+            torch.onnx.disable_log()
+
+@contextlib.contextmanager
+def exporter_context(model, mode, verbose):
     with select_model_mode_for_export(model, mode) as mode_ctx, \
-            disable_apex_o2_state_dict_hook(model) as apex_ctx:
-        yield (mode_ctx, apex_ctx)
+            disable_apex_o2_state_dict_hook(model) as apex_ctx, \
+            setup_onnx_logging(verbose) as log_ctx:
+        yield (mode_ctx, apex_ctx, log_ctx)
 
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
@@ -524,6 +536,27 @@ def unpack_quantized_tensor(value):
         return (value,)
 
 
+def _assign_onnx_node_name(graph, node_names):
+    r"""Takes in ONNX graph, and mapping from torch._C.Node to node name in exported ONNX ModelProto.
+
+    Returns:
+      graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes, where each torch._C.Node gets its name
+        in exported ONNX ModelProto assigned as attribute ``onnx_name``.
+    """
+    def n_fn(n, b_fn, node_names):
+        for b in n.blocks():
+            b_fn(b, node_names)
+        if n in node_names:
+            n.s_("onnx_name", node_names[n])
+
+    def b_fn(b, node_names):
+        for n in b.nodes():
+            n_fn(n, b_fn, node_names)
+
+    b_fn(graph, node_names)
+    return graph
+
+
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
                     operator_export_type=OperatorExportTypes.ONNX,
@@ -548,11 +581,16 @@ def _model_to_graph(model, args, verbose=False,
 
     graph, params, torch_out, module = _create_jit_graph(model, args)
     params_dict = _get_named_param_dict(graph, params)
-    graph = _optimize_graph(graph, operator_export_type,
-                            _disable_torch_constant_prop=_disable_torch_constant_prop,
-                            fixed_batch_size=fixed_batch_size, params_dict=params_dict,
-                            dynamic_axes=dynamic_axes, input_names=input_names,
-                            module=module)
+
+    try:
+        graph = _optimize_graph(graph, operator_export_type,
+                                _disable_torch_constant_prop=_disable_torch_constant_prop,
+                                fixed_batch_size=fixed_batch_size, params_dict=params_dict,
+                                dynamic_axes=dynamic_axes, input_names=input_names,
+                                module=module)
+    except Exception as e:
+        torch.onnx.log("Torch IR graph at exception: ", graph)
+        raise
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     is_script = isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule))
     if is_script:
@@ -596,9 +634,6 @@ def _model_to_graph(model, args, verbose=False,
     if _export_onnx_opset_version < 9:
         torch._C._jit_pass_onnx_cast_all_constant_to_floating(graph)
 
-    if verbose:
-        print(graph)
-
     params_dict = torch._C._jit_pass_filter_non_tensor_arguments(params_dict)
     torch._C._jit_decay_packed_param_input_types(graph)
 
@@ -624,7 +659,7 @@ def export_to_pretty_string(model, args, export_params=True, verbose=False, trai
     _set_operator_export_type(operator_export_type)
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference
     _set_onnx_shape_inference(True)
-    with exporter_context(model, training):
+    with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
                                                          opset_version)
@@ -662,7 +697,7 @@ def unconvertible_ops(model, args, training=TrainingMode.EVAL, opset_version=Non
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
     operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
-    with exporter_context(model, training):
+    with exporter_context(model, training, False):
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(
             model, args,
@@ -682,6 +717,29 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         torch.jit._trace._trace_module_map = trace_module_map
         return trace_module_map
 
+    def __register_attribute_hook():
+        attr_name = "_onnx_attrs"
+
+        def _track_module_attributes_forward_pre_hook(module, input):
+            setattr(module, attr_name, _get_module_attributes(module))
+
+        def _track_module_attributes_forward_hook(module, input, output):
+            tracing_state = torch._C._get_tracing_state()
+            if not tracing_state:
+                return
+
+            graph = tracing_state.graph()
+            onnx_attrs = {}
+            if hasattr(module, attr_name):
+                onnx_attrs = getattr(module, attr_name)
+                delattr(module, attr_name)
+
+            torch._C._jit_pass_onnx_track_scope_attributes(graph, onnx_attrs)
+
+        for m in model.modules():
+            m.register_forward_hook(_track_module_attributes_forward_hook)
+            m.register_forward_pre_hook(_track_module_attributes_forward_pre_hook)
+
     if isinstance(export_modules_as_functions, bool) and export_modules_as_functions:
         trace_module_map = __setup_trace_module_map()
         export_modules_as_functions = {v for k, v in trace_module_map.items()}
@@ -698,10 +756,22 @@ def _setup_trace_module_map(model, export_modules_as_functions):
         export_modules_as_functions = module_typenames
     else:
         export_modules_as_functions = None
+
+    if export_modules_as_functions:
+        __register_attribute_hook()
+
     return export_modules_as_functions
 
 def _reset_trace_module_map():
     torch.jit._trace._trace_module_map = None
+    torch._C._jit_pass_onnx_clear_scope_records()
+
+def _get_module_attributes(module):
+    from typing import get_type_hints
+    annotations = get_type_hints(type(module))
+    base_m_annotations = get_type_hints(torch.nn.Module)
+    [annotations.pop(k, None) for k in base_m_annotations]
+    return {k : getattr(module, k) for k in annotations}
 
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
@@ -746,7 +816,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
         # (to preserve whatever the original training mode was.)
         _set_opset_version(opset_version)
         _set_operator_export_type(operator_export_type)
-        with exporter_context(model, training):
+        with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                              operator_export_type,
                                                              opset_version)
@@ -782,18 +852,20 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
-            params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(graph, params_dict,
-                                                                           training == TrainingMode.TRAINING)
+            params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(
+                graph, params_dict, getattr(model, "training", False))
             if export_params:
-                proto, export_map, val_use_external_data_format = graph._export_onnx(
+                proto, export_map, val_use_external_data_format, node_names = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
                     operator_export_type, not verbose, val_keep_init_as_ip, custom_opsets,
                     val_add_node_names, model_file_location, node_attr_to_name)
             else:
-                proto, export_map, val_use_external_data_format = graph._export_onnx(
+                proto, export_map, val_use_external_data_format, node_names = graph._export_onnx(
                     {}, opset_version, dynamic_axes, False, operator_export_type,
                     not verbose, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     model_file_location, node_attr_to_name)
+            if verbose:
+                torch.onnx.log("Exported graph: ", _assign_onnx_node_name(graph, node_names))
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
