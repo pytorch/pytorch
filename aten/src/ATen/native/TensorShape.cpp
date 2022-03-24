@@ -1561,17 +1561,15 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
       const auto idx_len = idx.numel();
 
-      // We hope that dispatch to zero_/fill_ benefits from AVX.
-      cidx.slice(0, 0, ptr_idx[0] + 1).zero_();
-      cidx.slice(0, ptr_idx[idx_len - 1] + 1, len + 1).fill_(idx_len);
+      std::fill_n(ptr_cidx, ptr_idx[0] + 1, 0);
+      std::fill_n(ptr_cidx + ptr_idx[idx_len - 1] + 1, len - ptr_idx[idx_len - 1], idx_len);
 
       at::parallel_for(0, idx_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
-          int64_t curr_idx = ptr_idx[start], next_idx;
+          auto* ptr_curr_cidx = ptr_cidx + ptr_idx[start] + 1;
           for (int64_t i = start; i < std::min(end, idx_len - 1); ++i) {
-            next_idx = ptr_idx[i + 1];
-            for (; curr_idx < next_idx; ++curr_idx) {
-              ptr_cidx[curr_idx + 1] = i + 1;
-            }
+            const auto diff = ptr_idx[i + 1] - ptr_idx[i];
+            std::fill_n(ptr_curr_cidx, diff, i + 1);
+            ptr_curr_cidx += diff;
           }
       });
 
