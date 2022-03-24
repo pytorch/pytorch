@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <c10/test/util/Macros.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAException.h>
 
 #include <cmath>
