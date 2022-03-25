@@ -4227,7 +4227,7 @@ struct to_ir {
     // of `List[T]`, use `T`. If the list is non-empty, find the
     // greatest common supertype of all the list elements (defaulting to
     // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
-    TypePtr inferred_elem_type = TensorType::getInferred();
+    TypePtr inferred_elem_type = TensorType::get();
 
     TypePtr refined_type_hint = type_hint;
 
