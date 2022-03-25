@@ -176,13 +176,11 @@ struct MetaAllocator final : public at::Allocator {
 
 static MetaAllocator g_meta_alloc;
 
-at::Allocator* GetMetaAllocator() {
-  return &g_meta_alloc;
-}
+REGISTER_ALLOCATOR(kMeta, &g_meta_alloc);
 
 TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
                      c10::optional<c10::MemoryFormat> memory_format_opt) {
-  auto *allocator = GetMetaAllocator();
+  auto *allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_generic(
       size, allocator, meta_dks, dtype, memory_format_opt);
@@ -222,7 +220,7 @@ TensorBase empty_meta(
 
 TensorBase empty_strided_meta(IntArrayRef size, IntArrayRef stride,
                               ScalarType dtype) {
-  auto *allocator = GetMetaAllocator();
+  auto *allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_strided_generic(
       size, stride, allocator, meta_dks, dtype);
