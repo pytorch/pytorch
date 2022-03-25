@@ -5,15 +5,6 @@
 namespace torch {
 namespace lazy {
 
-void TsNodeSetShapeDeferred(
-    NodePtr node, const std::function<Shape()>& shape_fn) {
-  if (auto tsnode = std::dynamic_pointer_cast<TsNode>(node)) {
-    tsnode->SetShapeDeferred(shape_fn);
-    return;
-  }
-  throw std::runtime_error("Expected TsNode but could not dynamic cast");
-}
-
 TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
                          TSLoweringContext* loctx) const {
   // TODO(whc) beginning to invert the design here.  Move to provide a Lower()

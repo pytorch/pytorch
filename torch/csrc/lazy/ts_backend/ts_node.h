@@ -13,9 +13,6 @@ namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-TORCH_API void TsNodeSetShapeDeferred(
-    NodePtr node, const std::function<Shape()>& shape_fn);
-
 class TORCH_API TsNode : public lazy::Node {
  public:
   using Node::Node;
