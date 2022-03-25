@@ -3173,6 +3173,7 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: mul_sparse
+    SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
 
@@ -3182,6 +3183,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: mul_sparse_
+    SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr_
     MkldnnCPU: mkldnn_mul_
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
@@ -3192,6 +3194,7 @@
     CPU, CUDA: mul_out
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
+    SparseCsrCPU, SparseCsrCUDA: mul_out_sparse_csr
     MkldnnCPU: mkldnn_mul_out
 
   # For C++ only, until we have conversion from C++ numbers to Tensor
@@ -5035,7 +5038,7 @@
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
-  variants: function
+  variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
     SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
@@ -9562,6 +9565,9 @@
   dispatch:
     CPU: replication_pad3d_backward_cpu
     CUDA: replication_pad3d_backward_cuda
+
+- func: _pad_circular(Tensor self, int[] pad) -> Tensor
+  python_module: nn
 
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
