@@ -87,17 +87,21 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::DictConstruct,
     prim_DictConstruct,
     [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        // prepare inputs
-        auto stack = boxInputs(*p_node);
-        // run op
-        auto* node = p_node->node();
-        dictConstruct(
-            stack,
-            node->output()->type()->expectRef<DictType>(),
-            node->inputs().size());
-        // put output back
-        p_node->Output(0) = std::move(stack[0]);
+      auto dict_type = n->output()->type()->expect<DictType>();
+      const auto num_inputs = n->inputs().size();
+      DCHECK_EQ(num_inputs % 2, 0);
+      return [dict_type = std::move(dict_type),
+              num_inputs,
+              dict_size = num_inputs / 2](ProcessedNode* p_node) {
+        auto result = c10::impl::GenericDict(
+            dict_type->containedType(0), dict_type->containedType(1));
+        result.reserve(dict_size);
+        for (size_t i = 0; i < num_inputs; i += 2) {
+          const auto& key = p_node->Input(i);
+          const auto& value = p_node->Input(i + 1);
+          result.insert_or_assign(key, value);
+        }
+        p_node->Output(0) = result;
       };
     });
 
@@ -168,16 +172,17 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::ListUnpack,
     prim_ListUnpack,
     [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        // prepare inputs
-        auto stack = boxInputs(*p_node);
-        // run op
-        size_t num_outputs = p_node->outputs().size();
-        listUnpack(stack, num_outputs);
-        // put output back
-        DCHECK_EQ(stack.size(), num_outputs);
+      const auto num_outputs = n->outputs().size();
+      return [num_outputs](ProcessedNode* p_node) {
+        const auto list = p_node->Input(0).toListRef();
+        TORCH_CHECK(
+            list.size() == num_outputs,
+            "Expected ",
+            num_outputs,
+            " elements in list but got ",
+            list.size());
         for (const auto i : c10::irange(num_outputs)) {
-          p_node->Output(i) = std::move(stack[i]);
+          p_node->Output(i) = list[i];
         }
       };
     });

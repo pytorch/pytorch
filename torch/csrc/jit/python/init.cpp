@@ -6,9 +6,6 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
-#if !(defined(FBCODE_CAFFE2) || defined(__APPLE__) || defined(_WIN32))
-#include <torch/csrc/jit/codegen/onednn/interface.h>
-#endif
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -603,6 +600,18 @@ void initJITBindings(PyObject* module) {
             auto stack = toTraceableStack(args);
             checkAliasAnnotation(g, std::move(stack), unqualified_op_name);
           })
+      .def(
+          "_jit_set_nvfuser_skip_node_kind",
+          // Args:
+          //     `op_name`: Symbol of op;
+          //     `flip`: flag indicating whether to flip the given op in the
+          //             skip list.
+          // Returns:
+          //     a bool flag indicating if `op_name` was already in the skip
+          //     list.
+          [](const std::string& op_name, bool flip = true) {
+            return fuser::cuda::skipNode(op_name, flip);
+          })
       .def("_jit_set_nvfuser_enabled", &RegisterCudaFuseGraph::registerPass)
       .def(
           "_jit_set_nvfuser_single_node_mode",
@@ -624,10 +633,6 @@ void initJITBindings(PyObject* module) {
             return oldState;
           })
       .def("_jit_nvfuser_enabled", &RegisterCudaFuseGraph::isRegistered)
-#if !(defined(FBCODE_CAFFE2) || defined(__APPLE__) || defined(_WIN32))
-      .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
-      .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
-#endif
       .def(
           "_jit_set_profiling_mode",
           [](bool profiling_flag) {
@@ -1571,6 +1576,12 @@ void initJITBindings(PyObject* module) {
       throw std::runtime_error(e.what());
     }
   });
+
+  // On exit we need to reset the print handler to default one,
+  // because otherwise prim::Print() instruction won't work for JIT modules.
+  auto atexit = py::module_::import("atexit");
+  atexit.attr("register")(
+      py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
 } // namespace jit
 } // namespace torch

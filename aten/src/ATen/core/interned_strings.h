@@ -43,8 +43,6 @@ namespace c10 {
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
-  _(prim, oneDNNFusionGroup)         \
-  _(prim, oneDNNFusionGuard)         \
   _(prim, FunctionalGraph)           \
   _(prim, add_optional)              \
   _(prim, view_copy)                 \
@@ -316,7 +314,6 @@ namespace c10 {
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
   _(attr, warn_id)                   \
-  _(attr, output_layouts)            \
   _(attr, allowzero)                 \
   _(attr, seen_none)
 
