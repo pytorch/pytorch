@@ -92,7 +92,7 @@ generate_aten(
         aten_ufunc_generated_cuda_sources("aten/src/ATen/{}") +
         ["aten/src/ATen/Declarations.yaml"]
     ),
-    generator="//tools/codegen:gen",
+    generator = "//tools/codegen:gen",
 )
 
 py_library(
