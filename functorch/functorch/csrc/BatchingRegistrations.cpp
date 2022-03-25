@@ -684,7 +684,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // still legacy because these are ridiculously complicated
   m.impl("as_strided", as_strided_batching_rule);
   m.impl("new_empty_strided", new_empty_strided_batching_rule);
-}
 
 }
+} // namespace functorch
 } // namespace at

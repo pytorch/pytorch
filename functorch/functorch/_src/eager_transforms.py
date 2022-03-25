@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, Callable, Union, Tuple, List
+from typing import Callable, Union, Tuple, List, Any
 import torch
 from functools import partial, wraps
 import contextlib
@@ -23,6 +23,12 @@ from functorch._C import (
     _jvp_decrement_nesting,
     set_fwd_grad_enabled,
     get_fwd_grad_enabled,
+    _wrap_functional_tensor,
+    _unwrap_functional_tensor,
+    _func_decrement_nesting,
+    _func_increment_nesting,
+    _assert_wrapped_functional,
+    _propagate_functional_input_mutation,
 )
 
 argnums_t = Union[int, Tuple[int, ...]]
@@ -1186,3 +1192,61 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         grad, _ = results
         return grad
     return wrapper
+
+
+def _maybe_wrap_functional_tensor(maybe_tensor, level):
+    if not isinstance(maybe_tensor, torch.Tensor):
+        return maybe_tensor
+    wrapped = _wrap_functional_tensor(maybe_tensor, level)
+    _assert_wrapped_functional(maybe_tensor, wrapped)
+    return wrapped
+
+
+def _wrap_all_tensors_to_functional(tensor_pytree, level):
+    return tree_map(partial(_maybe_wrap_functional_tensor, level=level), tensor_pytree)
+
+
+def _maybe_unwrap_functional_tensor(maybe_tensor):
+    if not isinstance(maybe_tensor, torch.Tensor):
+        return maybe_tensor
+    return _unwrap_functional_tensor(maybe_tensor)
+
+
+def _unwrap_all_tensors_from_functional(tensor_pytree):
+    return tree_map(_maybe_unwrap_functional_tensor, tensor_pytree)
+
+
+def functionalize(func: Callable) -> Callable:
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        try:
+            func_level = _func_increment_nesting()
+            func_args = _wrap_all_tensors_to_functional(args, func_level)
+            func_kwargs = _wrap_all_tensors_to_functional(kwargs, func_level)
+
+            flattened_unwrapped_args = tree_flatten(args)
+            flattened_wrapped_args = tree_flatten(func_args)
+            flattened_unwrapped_kwargs = tree_flatten(kwargs)
+            flattened_wrapped_kwargs = tree_flatten(func_kwargs)
+
+            func_outputs = func(*func_args, **func_kwargs)
+            outputs = _unwrap_all_tensors_from_functional(func_outputs)
+            flat_outputs, func_out_spec = tree_flatten(outputs)
+
+            for a in flattened_wrapped_args + flattened_wrapped_kwargs:
+                if isinstance(a, torch.Tensor):
+                    # Call sync_() on the inputs, to ensure that any pending mutations have been applied.
+                    torch._sync(a)
+
+            # And if any mutations were applied to the inputs, we need to propagate them back to the user.
+            for unwrapped, wrapped in zip(flattened_unwrapped_args, flattened_wrapped_args):
+                if isinstance(unwrapped, torch.Tensor) and isinstance(wrapped, torch.Tensor):
+                    _propagate_functional_input_mutation(unwrapped, wrapped)
+            for unwrapped, wrapped in zip(flattened_unwrapped_kwargs, flattened_wrapped_kwargs):
+                if isinstance(unwrapped, torch.Tensor) and isinstance(wrapped, torch.Tensor):
+                    _propagate_functional_input_mutation(unwrapped, wrapped)
+
+            return outputs
+        finally:
+            _func_decrement_nesting()
+    return wrapped
