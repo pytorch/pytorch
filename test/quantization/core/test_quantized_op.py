@@ -1192,10 +1192,14 @@ class TestQuantizedOps(TestCase):
     """Tests 2D cudnn max pool operation on quantized tensors."""
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=3, max_dims=4,
                                               min_side=1, max_side=10),
-                       qparams=hu.qparams(dtypes=[torch.qint8])), # cudnn's support for quantized pooling is limited to int8 currently
+                       # cudnn's support for quantized pooling is limited to
+                       # int8 currently
+                       qparams=hu.qparams(dtypes=[torch.qint8])),
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.sampled_from((None, 1, 2)),
-           dilation=st.integers(1, 1), # currently there is no support for dilation for cudnn pooling
+           # currently there is no support for dilation for cudnn 
+           # pooling
+           dilation=st.integers(1, 1),
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
