@@ -1553,7 +1553,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     // aka crow in the CSR format. Useful to get a count table in
     // a parallelized and no-sync manner.
     // TODO: this function could be very useful as a separate util.
-    const auto sorted_idx_to_cidx = [](const Tensor& idx, int64_t len) -> Tensor {
+    const auto sorted_idx_to_cidx = [](
+        const Tensor& idx,
+        int64_t len,
+        bool run_in_parallel = true) -> Tensor {
       auto cidx = at::empty({len + 1}, idx.options());
 
       const auto* ptr_idx = idx.data_ptr<int64_t>();
@@ -1564,7 +1567,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       std::fill_n(ptr_cidx, ptr_idx[0] + 1, 0);
       std::fill_n(ptr_cidx + ptr_idx[idx_len - 1] + 1, len - ptr_idx[idx_len - 1], idx_len);
 
-      at::parallel_for(0, idx_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+      const auto grain_size = run_in_parallel ? at::internal::GRAIN_SIZE : idx_len;
+      at::parallel_for(0, idx_len, grain_size, [&](int64_t start, int64_t end) {
           auto* ptr_curr_cidx = ptr_cidx + ptr_idx[start] + 1;
           for (int64_t i = start; i < std::min(end, idx_len - 1); ++i) {
             const auto diff = ptr_idx[i + 1] - ptr_idx[i];
@@ -1577,10 +1581,14 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     };
 
     const auto get_selected_indices_large_nnz_small_size = [&]() -> std::tuple<Tensor, Tensor> {
-      const auto get_counts = [&sorted_idx_to_cidx](const Tensor& t, int64_t bins, bool is_sorted = false) -> Tensor {
+      const auto get_counts = [&sorted_idx_to_cidx](
+          const Tensor& t,
+          int64_t bins,
+          bool is_sorted = false,
+          bool run_in_parallel = true) -> Tensor {
         Tensor counts;
         if (is_sorted) {
-          const auto cidx = sorted_idx_to_cidx(t, bins);
+          const auto cidx = sorted_idx_to_cidx(t, bins, run_in_parallel);
           counts = cidx.slice(0, 1, bins + 1).sub(cidx.slice(0, 0, bins));
         }
         else {
