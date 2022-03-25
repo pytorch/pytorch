@@ -3427,14 +3427,18 @@ def error_inputs_multinomial(op_info, device, **kwargs):
                      error_regex="number of categories cannot exceed")
 
     inputs = [[1., -1., 1.], [1., inf, 1.], [1., -inf, 1.], [1., 1., nan]]
-    for input in inputs:
-        yield ErrorInput(SampleInput(torch.tensor(input), kwargs={'num_samples': 2}),
-                         error_regex="probability tensor contains either `inf`, `nan` or element < 0")
+    err_msg1 = "probability tensor contains either `inf`, `nan` or element < 0"
+    err_msg2 = "invalid multinomial distribution"
 
-    rep_arg = [False, True] if device == 'cpu' else [False]
     err_msg = r"invalid multinomial distribution \(sum of probabilities <= 0\)"
 
+    rep_arg = [False, True] if device == 'cpu' else [False]
+
     for rep in rep_arg:
+        for input in inputs:
+            yield ErrorInput(SampleInput(torch.tensor(input), kwargs={'num_samples': 2, 'replacement': rep}),
+                             error_regex=err_msg1 if rep is False else err_msg2)
+
         x = torch.zeros(3, device=device)
         yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
                          error_regex=err_msg)
