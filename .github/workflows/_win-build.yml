@@ -38,12 +38,12 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
-        uses: pytorch/pytorch/.github/actions/setup-win@master
+        uses: ./.github/actions/setup-win@master
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/pytorch/.github/actions/setup-ssh
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 

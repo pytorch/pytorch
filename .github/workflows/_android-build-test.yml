@@ -28,10 +28,10 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: ./pytorch/pytorch/.github/actions/setup-linux
+        uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./pytorch/pytorch/.github/actions/setup-ssh
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
