@@ -801,6 +801,8 @@ def narrow(g, input, dim, start, length):
 @parse_args("v", "i", "i")
 def flatten(g, input, start_dim, end_dim):
     dim = sym_help._get_tensor_rank(input)
+    if dim == 1:
+        return input
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
         if (end_dim == -1 or (dim is not None and end_dim == dim - 1)):
