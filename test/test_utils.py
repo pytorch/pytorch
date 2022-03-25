@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: unknown"]
 
 import sys
 import os
@@ -592,11 +592,13 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 class TestHub(TestCase):
 
     def setUp(self):
+        super().setUp()
         self.previous_hub_dir = torch.hub.get_dir()
         self.tmpdir = tempfile.TemporaryDirectory('hub_dir')
         torch.hub.set_dir(self.tmpdir.name)
 
     def tearDown(self):
+        super().tearDown()
         torch.hub.set_dir(self.previous_hub_dir)  # probably not needed, but can't hurt
         self.tmpdir.cleanup()
 
@@ -627,6 +629,13 @@ class TestHub(TestCase):
             hub_model = hub.load('ailzhang/torchhub_example', 'mnist', pretrained=True, verbose=False)
             self.assertEqual(sum_of_state_dict(hub_model.state_dict()), SUM_OF_HUB_EXAMPLE)
             assert os.path.exists(os.path.join(tmpdir, 'ailzhang_torchhub_example_master'))
+
+        # Test that set_dir properly calls expanduser()
+        # non-regression test for https://github.com/pytorch/pytorch/issues/69761
+        new_dir = os.path.join("~", "hub")
+        torch.hub.set_dir(new_dir)
+        self.assertEqual(torch.hub.get_dir(), os.path.expanduser(new_dir))
+
 
     @retry(Exception, tries=3)
     def test_list_entrypoints(self):
