@@ -43,7 +43,7 @@ jobs:
           cuda-version: ${{ inputs.cuda-version }}
 
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/pytorch/.github/actions/setup-ssh
+        uses: pytorch/pytorch/.github/actions/setup-ssh@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
