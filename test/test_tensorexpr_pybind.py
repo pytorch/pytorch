@@ -409,7 +409,7 @@ graph(%x.1 : Float(3, 5, strides=[5, 1], requires_grad=0, device=cpu),
         graph = torch._C.parse_ir(graph_str)
 
         kernel = te.TensorExprKernel(graph)
-        res1 = kernel.run((x,y))
+        res1 = kernel.run((x, y))
         res2 = kernel.fallback((x, y))
         correct = f(x, y)
         np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)

@@ -1072,6 +1072,36 @@ class TestSparseCSR(TestCase):
         _test_spadd_shape(10, [100, 1])
         _test_spadd_shape(10, [1, 100])
 
+    @dtypes(torch.float, torch.double)
+    def test_mul(self, device, dtype):
+        def _test_spadd_shape(fn, nnz, shape):
+            x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+            y = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
+
+            res = fn(y, x)
+            expected = fn(y.to_dense(), x.to_dense()).to_sparse_csr()
+            self.assertEqual(res, expected)
+
+        _test_spadd_shape(torch.mul, 100, [100, 100])
+        _test_spadd_shape(torch.mul, 0, [100, 100])
+        _test_spadd_shape(torch.mul, 100, [100, 1])
+        _test_spadd_shape(torch.mul, 100, [1, 100])
+
+        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
+        s = s.to_sparse_csr()
+        t23 = s.to_dense()
+
+        if device == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, r"mul\(sparse_csr, dense\) is not supported"):
+                s * t23
+            with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse_csr\) is not supported"):
+                t23 * s
+        elif device == 'cuda':
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                s * t23
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                t23 * s
+
     @skipCPUIfNoMklSparse
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
@@ -1458,7 +1488,8 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
 
         for sample in samples:
-            a = sample.args[0].to_sparse_csr()
+            # TODO: Remove detach once we have autograd support for CSR input
+            a = sample.args[0].to_sparse_csr().detach()
 
             for addmm in [torch.addmm, torch.sparse.addmm]:
 
@@ -1489,7 +1520,8 @@ class TestSparseCSR(TestCase):
             raise ValueError("Expected at least one 2D tensor in samples to convert to sparse.")
 
         for sample in samples:
-            a = sample.args[0].to_sparse_csr()
+            # TODO: Remove detach once we have autograd support for CSR input
+            a = sample.args[0].to_sparse_csr().detach()
 
             def fn(c, b):
                 output = torch.addmv(c, a, b, **sample.kwargs)
@@ -1521,7 +1553,8 @@ class TestSparseCSR(TestCase):
 
         # Here we assume that the signature is op(sparse_input, dense_input) -> dense_output
         for sample in samples:
-            sparse_input = sample.input.to_sparse_csr()
+            # TODO: Remove detach once we have autograd support for CSR input
+            sparse_input = sample.input.to_sparse_csr().detach()
 
             def fn(*args):
                 output = op.gradcheck_wrapper(op.get_op(), sparse_input, *args, **sample.kwargs)
