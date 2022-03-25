@@ -6,6 +6,7 @@ from typing import Iterator
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
 from torch.utils._python_dispatch import enable_python_mode
+import re
 
 # TODO: move this into library proper
 @contextlib.contextmanager
@@ -96,7 +97,12 @@ def is_inplace_view_fn(func):
 
 # Introspection please save us
 def is_inplace(func):
-    return func.overloadpacket.__name__[-1] == '_'
+    name = func.overloadpacket.__name__
+    if re.match('__i.+__', name):
+        return True
+    if re.match('__.+__', name):
+        return False
+    return name[-1] == '_'
 
 
 class CompositeCompliantTensor(torch.Tensor):
@@ -204,7 +210,14 @@ def is_tensorlist(lst):
         return False
     if len(lst) == 0:
         return False
-    return isinstance(lst[0], torch.Tensor)
+    all_tensors = all([isinstance(elt, torch.Tensor) for elt in lst])
+    if all_tensors:
+        return True
+    exists_one_tensor = all([isinstance(elt, torch.Tensor) for elt in lst])
+    if exists_one_tensor:
+        raise RuntimeError('This test assumes that PyTorch APIs cannot take '
+                           'mixed lists of Tensor and other things')
+    return False
 
 
 def maybe_map(fn, should_map, arg):
@@ -264,7 +277,7 @@ def raise_composite_compliance_error(err, additional_info=''):
         "Otherwise, if you added a new operator, please read "
         "through the Composite Compliance section in "
         "aten/src/ATen/native/README.md for how to resolve this. "
-        ) from err
+    ) from err
 
 
 # This test checks ALL possible permutations of calling `op` with arguments
@@ -284,11 +297,24 @@ def check_all_permutations(op, args, kwargs):
 
         try:
             op(*new_args, **new_kwargs)
+        # NOTE: [What errors are Composite Compiance trying to catch?]
+        #
+        # There's two things we want to catch:
+        # - errors that would raise within the torch_dispatch impl
+        # - data_ptr accesses
+        # The first is easy to filter for (we could make the error a different
+        # error class), the second is always going to be a RuntimeError due to
+        # how it is implemented (if you try to access the data_ptr of thex
+        # wrapper Tensor, it raises you some internal RuntimeError).
+        #
+        # So the most general thing to catch here was RuntimeError. If you
+        # are here and debugging why your test failed, it's plausible that
+        # the operator itself is broken and that there are other tests failing.
         except RuntimeError as err:
             raise_composite_compliance_error(
                 err,
-               f"- wrapped_args: {which_args_are_wrapped}\n"
-               f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
+                f"- wrapped_args: {which_args_are_wrapped}\n"
+                f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
 # Checks via the usage of Python mode certain anti-patterns that
@@ -312,6 +338,7 @@ def check_with_mode(op, args, kwargs):
     try:
         with enable_python_mode(CompositeCompliantTensor):
             op(*args, **kwargs)
+    # see NOTE: [What errors are Composite Compiance trying to catch?]
     except RuntimeError as err:
         raise_composite_compliance_error(err)
 
@@ -341,11 +368,12 @@ def check_backward_formula(op, args, kwargs):
 
         try:
             results = op(*new_args, **new_kwargs)
+        # see NOTE: [What errors are Composite Compiance trying to catch?]
         except RuntimeError as err:
             raise_composite_compliance_error(
                 err,
-               f"- wrapped_args: {which_args_are_wrapped}\n"
-               f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
+                f"- wrapped_args: {which_args_are_wrapped}\n"
+                f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
         # Hack: tree_flatten doesn't handle torch.return_types yet,
@@ -364,10 +392,11 @@ def check_backward_formula(op, args, kwargs):
             try:
                 torch.autograd.grad(flat_diff_results, leaf_tensors, flat_new_grads,
                                     allow_unused=True, retain_graph=True)
+            # see NOTE: [What errors are Composite Compiance trying to catch?]
             except RuntimeError as err:
                 raise_composite_compliance_error(
                     err,
-                   f"- wrapped_args: {which_args_are_wrapped}\n"
-                   f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
-                   f"- wrapped_grads: {which_grad_is_batched}\n"
+                    f"- wrapped_args: {which_args_are_wrapped}\n"
+                    f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
+                    f"- wrapped_grads: {which_grad_is_batched}\n"
                 )

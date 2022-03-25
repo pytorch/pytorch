@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: unknown"]
 
 from collections.abc import Sequence
 from functools import partial
@@ -22,6 +22,8 @@ from torch.testing._internal.common_device_type import \
 
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal import composite_compliance
+
+TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -718,6 +720,10 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_with_mode(op, args, kwargs)
             composite_compliance.check_all_permutations(op, args, kwargs)
 
+    # There are some weird unexpected successe here that imply rocm goes down
+    # a different path than CUDA sometimes. There's not an easy way to describe
+    # this in OpInfo so we're just going to skip all ROCM tests...
+    @unittest.skipIf(TEST_ROCM, "The CUDA tests give sufficient signal")
     @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     def test_backward(self, device, dtype, op):
