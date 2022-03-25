@@ -391,4 +391,32 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   return new_tensor;
 }
 
+Tensor dense_to_sparse_csr(const Tensor& self) {
+  return self.to_sparse().to_sparse_csr();
+}
+
+Tensor csr_to_sparse_csr(const Tensor& self) {
+  return self;
+}
+
+Tensor coo_to_sparse_csr(const Tensor& self) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Only 2D tensors can be converted to the CSR format but got shape: ",
+      self.sizes());
+  auto coalesced_self = self.coalesce();
+  auto row_indices = coalesced_self.indices()[0];
+  bool out_int32 = (row_indices.scalar_type() == at::kInt);
+  auto crow_indices = at::_convert_indices_from_coo_to_csr(
+      row_indices, self.size(0), out_int32);
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      coalesced_self.indices()[1].contiguous(),
+      coalesced_self.values(),
+      coalesced_self.sizes(),
+      coalesced_self.scalar_type(),
+      c10::kSparseCsr,
+      coalesced_self.device());
+}
+
 }} // namespace at::native

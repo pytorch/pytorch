@@ -24,7 +24,7 @@ class ComputeUnboxingFunctions:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
-        if not self.selector.is_native_function_selected(f):
+        if not self.selector.is_root_operator(f"aten::{f.func.name}"):
             return ""
 
         if self.target is Target.DECLARATION:
@@ -86,7 +86,7 @@ class ComputeCodegenUnboxedKernels:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> str:
-        if not self.selector.is_native_function_selected(f):
+        if not self.selector.is_root_operator(f"aten::{f.func.name}"):
             return ""
         # We unconditionally generate function wrappers,
         sig_group = CppSignatureGroup.from_native_function(
@@ -206,7 +206,8 @@ def main() -> None:
         selector = SelectiveBuilder.get_nop_selector()
 
     native_yaml_path = os.path.join(options.source_path, "native/native_functions.yaml")
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(options.source_path, "native/tags.yaml")
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
