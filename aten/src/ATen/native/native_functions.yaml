@@ -4125,6 +4125,10 @@
   dispatch:
     CompositeExplicitAutograd: split
 
+- func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
+  variants: function, method
+  device_guard: False
+
 - func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
