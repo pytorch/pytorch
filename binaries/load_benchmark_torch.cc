@@ -60,8 +60,7 @@ int main(int argc, char** argv) {
       ".");
 
   caffe2::Timer timer;
-  std::vector<float> times;
-  auto micros = timer.MicroSeconds();
+  std::vector<long> times;
 
   for (int i = 0; i < FLAGS_iter; ++i) {
     auto start = high_resolution_clock::now();
@@ -77,18 +76,21 @@ int main(int argc, char** argv) {
     times.push_back(duration.count());
   }
 
-  micros = timer.MicroSeconds();
+  const double micros = static_cast<double>(timer.MicroSeconds());
   if (FLAGS_report_pep) {
     for (auto t : times) {
-      std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", "
-                << "\"metric\": \"latency\", \"value\": \""
-                << t << "\"}" << std::endl;
+      std::cout << R"PyTorchObserver {"type": "NET", "unit": "us", "
+                << R""metric": "latency", "value": ""
+                << t
+                << R""}"
+                << std::endl;
     }
   }
 
+  const double iters = static_cast<double>(FLAGS_iter);
   std::cout << "Main run finished. Microseconds per iter: "
-            << micros / FLAGS_iter
-            << ". Iters per second: " << 1000.0 * 1000 * FLAGS_iter / micros
+            << micros / iters
+            << ". Iters per second: " << 1000.0 * 1000 * iters / micros
             << std::endl;
 
   return 0;
