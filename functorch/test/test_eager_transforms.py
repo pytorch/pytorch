@@ -2123,9 +2123,25 @@ class TestMakeFunctional(TestCase):
                 self.linear.bias = self.bias
                 self.linear_tied = self.linear
 
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.linear_tied(x)
+                x = x + self.bias
+                return x
+
+        torch.manual_seed(1)
         mod = Foo()
-        with self.assertRaisesRegex(RuntimeError, "parameter tying"):
-            func, params = make_functional(mod)
+        func, _ = make_functional(mod)
+
+        torch.manual_seed(0)
+        mod = Foo()
+        _, params = make_functional(mod)
+        self.assertEqual(len(params), 2)
+
+        x = torch.randn(2, 3)
+        result = func(params, x)
+        expected = mod(x)
+        self.assertEqual(result, expected)
 
     def test_buffer_tying(self):
         class Foo(nn.Module):
@@ -2136,9 +2152,125 @@ class TestMakeFunctional(TestCase):
                 self.register_buffer('buffer', torch.randn(3))
                 self.register_buffer('buffer_tied', self.buffer)
 
+            def forward(self, x):
+                x = self.linear(x)
+                x = x + self.bias
+                x = x + self.buffer
+                x = x + self.buffer_tied
+                return x
+
+        torch.manual_seed(1)
         mod = Foo()
-        with self.assertRaisesRegex(RuntimeError, "parameter tying"):
-            func, params, buffers = make_functional_with_buffers(mod)
+        func, _, _ = make_functional_with_buffers(mod)
+
+        torch.manual_seed(0)
+        mod = Foo()
+        _, params, buffers = make_functional_with_buffers(mod)
+        self.assertEqual(len(params), 3)
+        self.assertEqual(len(buffers), 1)
+
+        x = torch.randn(2, 3)
+        result = func(params, buffers, x)
+        expected = mod(x)
+        self.assertEqual(result, expected)
+
+    def test_parameter_tying_grad(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.weight = self.linear.weight
+                self.bias = self.linear.bias
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = F.linear(x, self.weight, self.bias)
+                return x
+
+        x = torch.randn(2, 3)
+        torch.manual_seed(0)
+        mod = Foo()
+        loss = mod(x).sum()
+        expected = torch.autograd.grad(loss, mod.parameters())
+
+        mod = Foo()
+        fmod, _, _ = make_functional_with_buffers(mod)
+        torch.manual_seed(0)
+        mod = Foo()
+        _, params, buffers = make_functional_with_buffers(mod)
+
+        def compute_loss(params, buffers, x):
+            return fmod(params, buffers, x).sum()
+
+        result = grad(compute_loss)(params, buffers, x)
+
+        self.assertEqual(result, expected)
+
+    def test_parameter_tying_ensemble(self):
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.weight = self.linear.weight
+                self.bias = self.linear.bias
+                self.register_buffer('buffer', torch.randn(3))
+                self.register_buffer('buffer_tied', self.buffer)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = F.linear(x, self.weight, self.bias)
+                x = x + self.buffer
+                x = x + self.buffer_tied
+                return x
+
+        num_models = 2
+        xs = torch.randn(num_models, 64, 3)
+        models = [Foo() for _ in range(num_models)]
+        fmodel, _, _ = combine_state_for_ensemble(models)
+
+        torch.manual_seed(0)
+        models = [Foo() for _ in range(num_models)]
+        _, params, buffers = combine_state_for_ensemble(models)
+        result = vmap(fmodel)(params, buffers, xs)
+
+        torch.manual_seed(0)
+        models = [Foo() for _ in range(num_models)]
+        expected = torch.stack([model(x) for model, x in zip(models, xs)])
+
+        self.assertEqual(result, expected)
+
+    def test_correctness_mnist(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+                self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+                self.conv2_drop = nn.Dropout2d()
+                self.fc1 = nn.Linear(320, 50)
+                self.fc2 = nn.Linear(50, 10)
+
+            def forward(self, x):
+                x = F.relu(F.max_pool2d(self.conv1(x), 2))
+                x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+                x = x.view(-1, 320)
+                x = F.relu(self.fc1(x))
+                x = F.dropout(x, training=self.training)
+                x = self.fc2(x)
+                return F.log_softmax(x)
+
+        x = torch.randn(64, 1, 32, 32)
+        torch.manual_seed(301)
+        fnet, _ = make_functional(Net())
+
+        torch.manual_seed(0)
+        _, params = make_functional(Net())
+        result = fnet(params, x)
+
+        torch.manual_seed(0)
+        net = Net()
+        expected = net(x)
+
+        self.assertEqual(result, expected)
 
     def test_combine_state_for_ensemble_error(self):
         in_features = 2
