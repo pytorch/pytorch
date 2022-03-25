@@ -67,10 +67,6 @@ class Runtime final {
 // a static local variable.
 Runtime* runtime();
 
-// This variable only exists to trigger Runtime initialization upon application
-// loading.
-static Runtime* runtime_init = runtime();
-
 //
 // Impl
 //
