@@ -1600,6 +1600,10 @@ class TestTensorCreation(TestCase):
     def test_combinations(self, device):
         a = torch.tensor([1, 2, 3], device=device)
 
+        c = torch.combinations(a, r=0)
+        expected = torch.empty(0, dtype=a.dtype, device=device)
+        self.assertEqual(c, expected)
+
         c = torch.combinations(a, r=1)
         expected = torch.tensor(list(combinations(a, r=1)), device=device)
         self.assertEqual(c, expected)
@@ -2832,8 +2836,6 @@ class TestTensorCreation(TestCase):
         self._test_signal_window_functions(window, dtype, device)
 
     @onlyNativeDeviceTypes
-    # See https://github.com/pytorch/pytorch/issues/72630
-    @skipMeta
     @precisionOverride({torch.bfloat16: 5e-2, torch.half: 1e-3})
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     @dtypesIfCUDA(torch.float, torch.double, torch.bfloat16, torch.half, torch.long)

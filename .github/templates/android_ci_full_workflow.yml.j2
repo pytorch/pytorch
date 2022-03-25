@@ -7,23 +7,10 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default %}
-  pull_request:
-{%- endif -%}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first %}
-  push:
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
@@ -75,11 +62,10 @@ on:
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v7a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v7a"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_64" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_64"
           docker cp "${GITHUB_WORKSPACE}/build_android_install_arm_v8a" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_v8a"
-          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_arm_x86_32"
+          docker cp "${GITHUB_WORKSPACE}/build_android_install_x86_32" "${id_x86_32}:/var/lib/jenkins/workspace/build_android_install_x86_32"
 
           # run gradle buildRelease
-          # shellcheck disable=SC1105
-          ((echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec \
+          (echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh" | docker exec \
             -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
@@ -101,6 +87,7 @@ on:
 
           mkdir -p "${GITHUB_WORKSPACE}/build_android_artifacts"
           docker cp "${id_x86_32}:/var/lib/jenkins/workspace/android/artifacts.tgz" "${GITHUB_WORKSPACE}/build_android_artifacts/"
+          echo "id_x86_32=${id_x86_32}" >> "${GITHUB_ENV}"
 
       !{{ common_android.upload_android_binary_size("prebuilt", "${GITHUB_WORKSPACE}/build_android_artifacts/artifacts.tgz") }}
       - uses: !{{ common.upload_artifact_s3_action }}
@@ -111,5 +98,25 @@ on:
           if-no-files-found: error
           path:
             build_android_artifacts/artifacts.tgz
+
+      - name: Publish android snapshot
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        env:
+          SONATYPE_NEXUS_USERNAME: ${{ secrets.SONATYPE_NEXUS_USERNAME }}
+          SONATYPE_NEXUS_PASSWORD: ${{ secrets.SONATYPE_NEXUS_PASSWORD }}
+          ANDROID_SIGN_KEY: ${{ secrets.ANDROID_SIGN_KEY }}
+          ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
+        run: |
+          set -eux
+          # shellcheck disable=SC2154
+          (echo "cd workspace && ./.circleci/scripts/publish_android_snapshot.sh" | docker exec \
+            -e BUILD_ENVIRONMENT="pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-publish-snapshot" \
+            -e SONATYPE_NEXUS_USERNAME \
+            -e SONATYPE_NEXUS_PASSWORD \
+            -e ANDROID_SIGN_KEY \
+            -e ANDROID_SIGN_PASS \
+            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+            -u jenkins -i "$id_x86_32" bash) 2>&1
+
       !{{ common.teardown_ec2_linux() }}
 {%- endblock %}

@@ -8,7 +8,7 @@ namespace lazy {
 namespace {
 
 Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> output_sizes) {
-  const Shape& input_shape = GetShapeFromTsValue(input);
+  const Shape& input_shape = input.shape();
   const auto complete_output_sizes =
       at::infer_size(output_sizes, input_shape.numel());
   return Shape(input_shape.scalar_type(), complete_output_sizes);
