@@ -13,12 +13,21 @@ class TorchSchema:
     opsets: List[int]
 
     def __init__(self, schema, symbolic=False) -> None:
-        self.name = schema.name
-        self.overload_name = schema.overload_name
-        self.arguments = [arg.name for arg in schema.arguments]
-        self.optional_arguments = []
-        self.returns = [ret.name for ret in schema.returns]
-        self.opsets = []
+        if not symbolic:
+            self.name = schema.name
+            self.overload_name = schema.overload_name
+            self.arguments = [arg.name for arg in schema.arguments]
+            self.optional_arguments = []
+            self.returns = [ret.name for ret in schema.returns]
+            self.opsets = []
+        else:
+            self.name = schema
+            self.overload_name = ""
+            self.arguments = []
+            self.optional_arguments = []
+            self.returns = []
+            self.opsets = []
+
 
     def __str__(self) -> str:
         s = f"{self.name}.{self.overload_name}("
