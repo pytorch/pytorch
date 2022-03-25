@@ -42,11 +42,16 @@ class QuantizeHandler(ABC):
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
-        self.num_tensor_args = len(node.args)
+        if isinstance(node, Node):
+            self.num_tensor_args = len(node.args)
+        else:
+            self.num_tensor_args = 0
         self.all_node_args_are_tensors = True
         # the last node of the matched pattern
         self.last_node = node
 
+    # TODO: can remove after the is_dynamic flag is defined, so that we can
+    # move embedding op to backend_config_dict
     def input_output_observed(self) -> bool:
         """
         Returns True if the pattern matched to this qhandler could be
@@ -58,20 +63,16 @@ class QuantizeHandler(ABC):
         """
         Returns True if the operator works for both floating point and
         quantized input, and does some computation based on the input Tensor,
+        or the ops that only re-arranges the Tensor values or query some metadata
+        about the Tensor
         so we need to insert observer/fake_quant for the output of the
-        operator since the distribution of values is different for input and output
-        Tensors (for HistogramObserver)
-        while they share the same quantization parameters
-        Example: avgpool2d
-        """
-        return False
-
-    def is_general_tensor_shape_op(self) -> bool:
-        """ Similar to is_general_tensor_value_op, this is a check
-        for ops that works for both floating point and quantized input,
-        that only re-arranges the Tensor values or query some metadata about the Tensor
-        We don't insert observer/fake_quant for the output of these operators
-        Example: reshape, transpose, maxpool2d
+        operator (same observer instance as input)
+        since the distribution of values is different for input and output
+        Tensors (for HistogramObserver) while they share the same quantization
+        parameters
+        Example operator: avgpool2d, reshape, transpose, maxpool2d
+        Example observed operator:
+        observer_0 - avgpool2d - observer_0 (same observer instance as input)
         """
         return False
 
@@ -102,6 +103,8 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
+    # This can be removed after we move all the ops using flag to backend_config_dict
+    # since now we are doing this check in the prepare
     def is_output_quantized(self, qconfig):
         """ Returns true if the output node of convert is quantized
         when is_reference is False, we would return float node when a certain dtype
@@ -151,31 +154,10 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
 }
 
 default_op_supported_dtypes = {
-    torch.nn.ConvTranspose1d: int8_dtypes,
-    torch.nn.ConvTranspose2d: int8_dtypes,
-    torch.nn.ELU: int8_dtypes,
-    torch.nn.LeakyReLU: int8_dtypes,
-    torch.nn.Hardswish: int8_dtypes,
-    torch.nn.InstanceNorm1d: int8_dtypes,
-    torch.nn.InstanceNorm2d: int8_dtypes,
-    torch.nn.InstanceNorm3d: int8_dtypes,
-    torch.nn.LayerNorm: all_dtypes,
-    torch.nn.SiLU: fp16_dtypes,
-    torch.nn.Mish: fp16_dtypes,
     torch.nn.GELU: int8_dtypes,
-    torch.nn.Dropout: int8_dtypes,
     torch.nn.Softmax: int8_dtypes,
-    torch.nn.functional.elu: int8_dtypes,
-    torch.nn.functional.hardswish: int8_dtypes,
-    torch.nn.functional.instance_norm: int8_dtypes,
-    torch.nn.functional.layer_norm: all_dtypes,
-    torch.nn.functional.leaky_relu: int8_dtypes,
-    torch.nn.functional.silu: fp16_dtypes,
-    torch.nn.functional.mish: fp16_dtypes,
     torch.nn.functional.gelu: int8_dtypes,
     torch.nn.functional.softmax: int8_dtypes,
-    torch.nn.functional.dropout: int8_dtypes,
-    torch.sum: fp16_dtypes,
 }
 
 QAT_CONV_MODULE_CLASSES = \
@@ -392,35 +374,14 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
             modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
 
-@register_quant_pattern(torch.nn.ConvTranspose1d)
-@register_quant_pattern(torch.nn.ConvTranspose2d)
-@register_quant_pattern(torch.nn.ELU)
-@register_quant_pattern(torch.nn.LeakyReLU)
-@register_quant_pattern(torch.nn.Hardswish)
-@register_quant_pattern(torch.nn.InstanceNorm1d)
-@register_quant_pattern(torch.nn.InstanceNorm2d)
-@register_quant_pattern(torch.nn.InstanceNorm3d)
-@register_quant_pattern(torch.nn.LayerNorm)
-@register_quant_pattern(torch.nn.SiLU)
-@register_quant_pattern(torch.nn.Mish)
-@register_quant_pattern(torch.nn.Dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
 # @register_quant_pattern(torch.nn.Softmax)
-@register_quant_pattern(torch.nn.functional.elu)
-@register_quant_pattern(torch.nn.functional.hardswish)
-@register_quant_pattern(torch.nn.functional.instance_norm)
-@register_quant_pattern(torch.nn.functional.layer_norm)
-@register_quant_pattern(torch.nn.functional.leaky_relu)
-@register_quant_pattern(torch.nn.functional.silu)
-@register_quant_pattern(torch.nn.functional.mish)
-@register_quant_pattern(torch.nn.functional.dropout)
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.functional.gelu)
 # @register_quant_pattern(torch.nn.functional.softmax)
-@register_quant_pattern(torch.sum)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     """ Common quantized op, first input and first output will be quantized
     """
@@ -546,7 +507,7 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     e.g. size, and we do not insert extra observer/fake_quant
     for the output of the operator.
     """
-    def is_general_tensor_shape_op(self) -> bool:
+    def is_general_tensor_value_op(self) -> bool:
         return True
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
