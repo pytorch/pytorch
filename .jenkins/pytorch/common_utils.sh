@@ -97,3 +97,11 @@ function clone_pytorch_xla() {
     git clone --recursive -b lazy-tensor-device --single-branch https://github.com/pytorch/xla.git
   fi
 }
+
+function clone_pytorch() {
+  echo "WONJOO: clone_pytorch_xla"
+  pwd
+  PYTORCH_DIR=$1
+  XLA_DIR=$2
+  git clone --quiet https://github.com/pytorch/pytorch.git "$PYTORCH_DIR"
+}
