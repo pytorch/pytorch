@@ -306,10 +306,11 @@ class VectorizeValidator : public OptInDispatch {
     // divisible, so pick the one that has the smaller number of
     // merged domains.
 
+    const auto leaf_dom = consumer_tv->domain()->domain();
+    const auto root_dom = consumer_tv->getRootDomain();
+
     ContigIDs consumer_contig_finder(
-        consumer_tv->domain()->domain(),
-        consumer_tv->getRootDomain(),
-        consumer_tv->domain()->contiguity());
+        leaf_dom, root_dom, consumer_tv->domain()->contiguity());
 
     // info.vectorized_root_id is validated at this point to be the
     // last concrete root domain in consumer.
@@ -336,15 +337,21 @@ class VectorizeValidator : public OptInDispatch {
       TORCH_INTERNAL_ASSERT(
           consumer_within_contig_it !=
           consumer_contig_finder.withinContigIDs().end());
-      consumer_indexed_root_ids = consumer_within_contig_it->second;
+      const auto& within_ids = consumer_within_contig_it->second;
+      std::copy_if(
+          root_dom.begin(),
+          root_dom.end(),
+          std::inserter(
+              consumer_indexed_root_ids, consumer_indexed_root_ids.end()),
+          [&](IterDomain* root_id) {
+            return within_ids.find(root_id) != within_ids.end();
+          });
     }
 
     // Note: we use the consumer domain with the producer
     // contiguity.
     ContigIDs producer_contig_finder(
-        consumer_tv->domain()->domain(),
-        consumer_tv->getRootDomain(),
-        mapProducerContiguity(producer_tv, consumer_tv));
+        leaf_dom, root_dom, mapProducerContiguity(producer_tv, consumer_tv));
 
     auto producer_indexed_it =
         producer_contig_finder.rootToIndexedID().find(consumer_root_id);
@@ -362,7 +369,15 @@ class VectorizeValidator : public OptInDispatch {
       TORCH_INTERNAL_ASSERT(
           producer_within_contig_it !=
           producer_contig_finder.withinContigIDs().end());
-      producer_indexed_root_ids = producer_within_contig_it->second;
+      const auto& within_ids = producer_within_contig_it->second;
+      std::copy_if(
+          root_dom.begin(),
+          root_dom.end(),
+          std::inserter(
+              producer_indexed_root_ids, producer_indexed_root_ids.end()),
+          [&](IterDomain* root_id) {
+            return within_ids.find(root_id) != within_ids.end();
+          });
     }
 
     // Pick the smaller merged domain

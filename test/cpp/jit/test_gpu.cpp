@@ -21323,6 +21323,37 @@ TEST_F(NVFuserTest, FusionVectorizeInputToOutput_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion({t0}, {t1_misaligned}));
 }
 
+// Repro of issue #1530
+TEST_F(NVFuserTest, FusionVectorizeContigIndexValidationFail_CUDA) {
+  std::vector<int64_t> shape{1, 2, 1};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(shape.size());
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->merge(1);
+  tv1->merge(0);
+
+  auto invalid_vec_size = shape[0] * shape[1] * shape[2];
+  invalid_vec_size *= invalid_vec_size;
+
+  tv1->split(0, invalid_vec_size);
+
+  tv1->axis(1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+
+  ASSERT_ANY_THROW(fe.runFusion({t0}));
+}
+
 TEST_F(NVFuserTest, FusionContigIndexingWithBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
