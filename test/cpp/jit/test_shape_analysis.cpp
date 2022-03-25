@@ -30,7 +30,6 @@ Node* findNode(std::shared_ptr<Graph>& g, Symbol k) {
   }
   TORCH_INTERNAL_ASSERT(false, "Couldn't find node");
 }
-
 } // namespace
 
 TEST(ShapeAnalysisTest, DynamicShapesFusion) {
@@ -290,6 +289,67 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
       ->check("block1")
       ->check("FallbackGraph")
       ->run(*g);
+}
+
+namespace {
+
+void assertShapeEqual(
+    std::unique_ptr<std::vector<c10::SymbolicShape>>& actual,
+    std::vector<c10::optional<int64_t>> expected) {
+  ASSERT_TRUE(actual);
+  ASSERT_EQ(actual->size(), 1);
+  auto a_canonical = CanonicalizedSymbolicShape(actual->at(0));
+
+  auto symb_expected = c10::SymbolicShape(expected);
+  auto b_canonical = CanonicalizedSymbolicShape(symb_expected);
+  ASSERT_EQ(a_canonical, b_canonical);
+}
+
+} // namespace
+
+TEST(ShapeAnalysisTest, SymbolicShapeAPI) {
+  // Figure out how to fetch a function schema
+
+  // Ask someone else how to create a function schema / operator in C++
+  std::shared_ptr<Operator> op = getOperatorForLiteral(
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor");
+  const FunctionSchema* schema = &(op->schema());
+
+  c10::IValue const_size_1 = std::vector<int64_t>{64, 56, 56};
+  c10::IValue const_size_2 = std::vector<int64_t>{1, 56, 56};
+
+  // Check vector initializer list syntax
+  c10::optional<int64_t> sym_dim = c10::nullopt;
+  c10::SymbolicShape ss_concrete =
+      std::vector<c10::optional<int64_t>>{1, 56, 56};
+  c10::SymbolicShape ss1 = std::vector<c10::optional<int64_t>>{sym_dim, 56, 56};
+  c10::SymbolicShape ss2 =
+      std::vector<c10::optional<int64_t>>{64, sym_dim, sym_dim};
+  c10::SymbolicShape ss3 =
+      std::vector<c10::optional<int64_t>>{sym_dim, sym_dim, sym_dim, sym_dim};
+
+  auto res = calculateSymbolicShapesOnOp(
+      schema, std::vector<SSAInput>{const_size_1, const_size_1});
+  assertShapeEqual(res, {64, 56, 56});
+
+  res = calculateSymbolicShapesOnOp(
+      schema, std::vector<SSAInput>{const_size_1, const_size_2});
+  assertShapeEqual(res, {64, 56, 56});
+
+  res = calculateSymbolicShapesOnOp(
+      schema, std::vector<SSAInput>{const_size_1, ss1});
+  assertShapeEqual(res, {64, 56, 56});
+
+  res = calculateSymbolicShapesOnOp(
+      schema, std::vector<SSAInput>{const_size_2, ss1});
+  assertShapeEqual(res, {sym_dim, 56, 56});
+
+  res = calculateSymbolicShapesOnOp(
+      schema, std::vector<SSAInput>{ss_concrete, ss2});
+  assertShapeEqual(res, {64, 56, 56});
+
+  res = calculateSymbolicShapesOnOp(schema, std::vector<SSAInput>{ss2, ss3});
+  assertShapeEqual(res, {sym_dim, 64, sym_dim, sym_dim});
 }
 
 } // namespace jit

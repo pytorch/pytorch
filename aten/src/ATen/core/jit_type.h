@@ -435,6 +435,18 @@ struct TORCH_API SymbolicShape {
     return dims_;
   }
 
+  std::shared_ptr<std::vector<bool>> concreteDims() const {
+    if (!dims_) {
+      return nullptr;
+    }
+    std::shared_ptr<std::vector<bool>> concrete_dims =
+        std::make_shared<std::vector<bool>>();
+    for (const ShapeSymbol& s : *dims_) {
+      concrete_dims->push_back(s.is_static());
+    }
+    return concrete_dims;
+  }
+
   // Returns concrete sizes, or nullptr if the shape is not complete.
   std::shared_ptr<std::vector<int64_t>> concreteSizes() const {
     if (!isComplete()) {
@@ -879,7 +891,11 @@ struct TORCH_API DictType : public SharedType {
   static const TypeKind Kind = TypeKind::DictType;
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
-    switch (key->kind()) {
+    auto kind = key->kind();
+    if (auto dyn = key->castRaw<DynamicType>()) {
+      kind = dyn->dynamicKind();
+    }
+    switch (kind) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
       case TypeKind::BoolType:

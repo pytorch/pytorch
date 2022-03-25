@@ -258,22 +258,7 @@ def get_model_info(
             # Parse debug info and add begin/end markers if not present
             # to ensure that we cover the entire source code.
             debug_info_t = pickle.loads(raw_debug)
-            text_table = None
-
-            if (len(debug_info_t) == 3 and
-                    isinstance(debug_info_t[0], str) and
-                    debug_info_t[0] == 'FORMAT_WITH_STRING_TABLE'):
-                _, text_table, content = debug_info_t
-
-                def parse_new_format(line):
-                    # (0, (('', '', 0), 0, 0))
-                    num, ((text_indexes, fname_idx, offset), start, end), tag = line
-                    text = ''.join(text_table[x] for x in text_indexes)  # type: ignore[index]
-                    fname = text_table[fname_idx]  # type: ignore[index]
-                    return num, ((text, fname, offset), start, end), tag
-
-                debug_info_t = map(parse_new_format, content)
-
+            assert isinstance(debug_info_t, tuple)
             debug_info = list(debug_info_t)
             if not debug_info:
                 debug_info.append((0, (('', '', 0), 0, 0)))

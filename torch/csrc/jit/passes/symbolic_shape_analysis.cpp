@@ -87,11 +87,11 @@ struct ShapeArg
     }
   }
 
-  c10::optional<int64_t> asConstantInt() {
+  c10::optional<int64_t> asConstantInt() const {
     return this->second;
   }
 
-  c10::optional<c10::ShapeSymbol> asShapeSymbol() {
+  c10::optional<c10::ShapeSymbol> asShapeSymbol() const {
     return this->first;
   }
 
@@ -101,6 +101,17 @@ struct ShapeArg
     this->second = c10::nullopt;
   }
 };
+
+std::ostream& operator<<(std::ostream& out, const ShapeArg& sa) {
+  if (auto val = sa.asConstantInt()) {
+    out << *val;
+  } else if (auto ss = sa.asShapeSymbol()) {
+    out << *ss;
+  } else {
+    out << "UNK";
+  }
+  return out;
+}
 
 struct ShapeArguments {
   // Superset of SymbolicShape, with additional support for unknown, nonsymbolic
@@ -118,16 +129,16 @@ struct ShapeArguments {
   ShapeArguments(std::vector<ShapeArg> ss)
       : has_dim_(true), maybe_shape_symbols_(std::move(ss)) {}
 
-  bool hasDim() {
+  bool has_dim() const {
     return has_dim_;
   }
 
-  int64_t len() {
+  int64_t len() const {
     TORCH_INTERNAL_ASSERT(has_dim_, "ShapeArguments has no known dim")
     return (int64_t)maybe_shape_symbols_.size();
   }
 
-  ShapeArg at(size_t i) {
+  const ShapeArg at(size_t i) const {
     TORCH_INTERNAL_ASSERT(has_dim_, "ShapeArguments has no known dim")
     return maybe_shape_symbols_.at(i);
   }
@@ -136,6 +147,21 @@ struct ShapeArguments {
   bool has_dim_;
   std::vector<ShapeArg> maybe_shape_symbols_;
 };
+
+std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
+  if (!sa.has_dim()) {
+    os << "(*)";
+    return os;
+  }
+
+  os << "(";
+  for (size_t i = 0; i < sa.len(); i++) {
+    os << sa.at(i);
+  }
+  os << ")";
+
+  return os;
+}
 
 bool setSymbolicShapeAnalysisTestMode(bool value) {
   bool old_value = symbolic_shape_analysis_test_mode;
@@ -218,7 +244,7 @@ c10::SymbolicShape extractListShape(
   std::vector<c10::optional<int64_t>> output_shape;
   for (Value* input : list_construct->inputs()) {
     if (symbolic_shape_values.count(input)) {
-      output_shape.push_back(symbolic_shape_values[input]);
+      output_shape.emplace_back(symbolic_shape_values[input]);
     } else {
       output_shape.push_back(constant_as<int64_t>(input));
     }
@@ -244,90 +270,101 @@ c10::SymbolicShape extractListShape(
 
 using SsaArgument = c10::variant<ShapeArguments, IValue>;
 
+std::ostream& operator<<(std::ostream& out, const SsaArgument& sa) {
+  if (const IValue* iv = c10::get_if<IValue>(&sa)) {
+    out << *iv;
+  } else {
+    out << c10::get<ShapeArguments>(sa);
+  }
+  return out;
+}
+
 struct SymbolicShapeOpAnalyzer {
   std::shared_ptr<Graph> shape_compute_graph_;
   const FunctionSchema* schema_;
   std::vector<SsaArgument> inputs_;
 
-  void substituteConstantInputs() {
-    // Grab the shape compute graph
-    size_t shape_graph_initial_inputs = shape_compute_graph_->inputs().size();
+  void substituteInput(SsaArgument& argument, Value* graph_in_var) {
+    TypePtr graph_in_type = graph_in_var->type();
+    TypePtr val_type;
 
-    if (schema_->name() == "aten::cat") { // TODO: Check if this line is wrong.
-      // TODO: Add code to handle Cat here
-      /*
-
-          // Modifying the graph where _node is part of to not use the tensor
-          // construct
-
-        // When we have partially evaluate a list of Tensors like cat(tensor[])
-        // We have a few problems:
-        // - optimizing out calls to the length of the list: len(tensors)
-        // - resolving accesses of the list to the tensor symbolic sizes the
-        // corresponding list element We can solve both of these problems by
-        // replacing the partial evaluation of cat([x, y]) def cat(tensors:
-        // List[List[int]], dim: int)
-        //    body
-        // with
-        // def cat(x, y, dim: int)
-        //     tensors = [x, y]
-        //     body
-          std::vector<Value*> li_inputs;
-          Value* graph_input = shape_compute_graph->inputs().at(graph_index);
-          for (size_t j = 0; j < li_construct_node->inputs().size(); ++j) {
-            auto new_inp = shape_compute_graph->insertInput(graph_index + j);
-            new_inp->setType(ListType::ofInts());
-            li_inputs.push_back(new_inp);
-          }
-          WithInsertPoint guard(*shape_compute_graph->block()->nodes().begin());
-          auto new_li = shape_compute_graph->insertNode(
-              shape_compute_graph->createList(ListType::ofInts(), li_inputs));
-          graph_input->replaceAllUsesWith(new_li->output());
-
-          // Which input is this erasing?
-          shape_compute_graph->eraseInput(
-              node_index + li_construct_node->inputs().size());
-      */
+    if (auto cur_val = c10::get_if<ShapeArguments>(&argument)) {
+      val_type = ListType::ofInts();
+    } else {
+      val_type = c10::get<IValue>(argument).type();
     }
 
-    for (size_t op_in_index = 0; op_in_index < shape_graph_initial_inputs;
+    if (auto opt_type = graph_in_type->cast<OptionalType>()) {
+      // None will be elimited by constant substitution later.
+      if (!val_type->cast<OptionalType>() &&
+          !NoneType::get()->isSubtypeOf(*val_type)) {
+        graph_in_var->setType(opt_type->getElementType());
+      }
+    } else if (graph_in_type->cast<NumberType>()) {
+      graph_in_var->setType(val_type);
+    }
+    // We handle non-constant values in the shape propagation step
+    if (IValue* cur_val = c10::get_if<IValue>(&argument)) {
+      GRAPH_DEBUG("Substituting constant input ", *cur_val);
+      replaceWithIValue(graph_in_var, *cur_val);
+    }
+    /*
+    else {
+      // Should be unnecessary now
+      c10::SymbolicShape* shape =
+          c10::get_if<c10::SymbolicShape>(&inputs[op_in_index]);
+      TORCH_INTERNAL_ASSERT(shape, "Somehow the variant is not either type")
+      if (auto sizes = shape->concreteSizes()) {
+        replaceWithIValue(graph_in_var, *sizes);
+      }
+    }
+    */
+  }
+
+  void substituteConstantInputs() {
+    // Grab the shape compute graph
+
+    if (schema_->name() == "aten::cat") {
+      // Modifying the graph where _node is part of to not use the tensor
+      // construct
+
+      // When we have partially evaluate a list of Tensors like cat(tensor[])
+      // We have a few problems:
+      // - optimizing out calls to the length of the list: len(tensors)
+      // - resolving accesses of the list to the tensor symbolic sizes the
+      // corresponding list element We can solve both of these problems by
+      // replacing the partial evaluation of cat([x, y]) def cat(tensors:
+      // List[List[int]], dim: int)
+      //    body
+      // with
+      // def cat(x, y, dim: int)
+      //     tensors = [x, y]
+      //     body
+      uint64_t li_length = inputs_.size() - (schema_->arguments().size() - 1);
+      std::vector<Value*> li_inputs;
+      Value* graph_input = shape_compute_graph_->inputs().at(0);
+      for (size_t j = 0; j < li_length; ++j) {
+        auto new_inp = shape_compute_graph_->insertInput(j);
+        new_inp->setType(ListType::ofInts());
+        li_inputs.push_back(new_inp);
+      }
+      WithInsertPoint guard(*shape_compute_graph_->block()->nodes().begin());
+      auto new_li = shape_compute_graph_->insertNode(
+          shape_compute_graph_->createList(ListType::ofInts(), li_inputs));
+      graph_input->replaceAllUsesWith(new_li->output());
+
+      // Erase the list of lists
+      shape_compute_graph_->eraseInput(li_length);
+      // substituteInput(
+      //    inputs_[li_length], shape_compute_graph_->inputs().at(li_length));
+      // return;
+    }
+
+    for (size_t op_in_index = 0;
+         op_in_index < shape_compute_graph_->inputs().size();
          op_in_index++) {
-      // This is not correct, I need the type of the actual object
-      Value* graph_in_var = shape_compute_graph_->inputs().at(op_in_index);
-      TypePtr graph_in_type = graph_in_var->type();
-
-      TypePtr val_type;
-      if (auto cur_val = c10::get_if<ShapeArguments>(&inputs_[op_in_index])) {
-        val_type = ListType::ofInts();
-      } else {
-        val_type = c10::get<IValue>(inputs_[op_in_index]).type();
-      }
-
-      if (auto opt_type = graph_in_type->cast<OptionalType>()) {
-        // None will be elimited by constant substitution later.
-        if (!val_type->cast<OptionalType>() &&
-            !NoneType::get()->isSubtypeOf(*val_type)) {
-          graph_in_var->setType(opt_type->getElementType());
-        }
-      } else if (graph_in_type->cast<NumberType>()) {
-        graph_in_var->setType(val_type);
-      }
-      // We handle non-constant values in the shape propagation step
-      if (IValue* cur_val = c10::get_if<IValue>(&inputs_[op_in_index])) {
-        GRAPH_DEBUG("Substituting constant input ", *cur_val);
-        replaceWithIValue(graph_in_var, *cur_val);
-      }
-      /*
-      else {
-        // Should be unnecessary now
-        c10::SymbolicShape* shape =
-            c10::get_if<c10::SymbolicShape>(&inputs[op_in_index]);
-        TORCH_INTERNAL_ASSERT(shape, "Somehow the variant is not either type")
-        if (auto sizes = shape->concreteSizes()) {
-          replaceWithIValue(graph_in_var, *sizes);
-        }
-      }
-      */
+      substituteInput(
+          inputs_[op_in_index], shape_compute_graph_->inputs().at(op_in_index));
     }
   }
 
@@ -360,9 +397,13 @@ struct SymbolicShapeOpAnalyzer {
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
-    for (int64_t index = 0; index < inputs_.size(); index++) {
+    TORCH_INTERNAL_ASSERT(
+        inputs_.size() >= shape_compute_graph_->inputs().size(),
+        "Missing Arg for Shape Graph");
+    for (int64_t index = 0; index < shape_compute_graph_->inputs().size();
+         index++) {
       auto shape_arguments = c10::get_if<ShapeArguments>(&inputs_[index]);
-      if (!shape_arguments || !shape_arguments->hasDim()) {
+      if (!shape_arguments || !shape_arguments->has_dim()) {
         continue;
       }
       // Add support for testing symbolic shapes with dynamic dims
@@ -539,6 +580,7 @@ struct SymbolicShapeOpAnalyzer {
 
     inputs_ = inputs;
     substituteConstantInputs();
+    GRAPH_DEBUG(inputs_)
     return propagateShapesInGraph();
   }
 
@@ -555,13 +597,16 @@ std::shared_ptr<SsaArgument> tensorShapeArg(Value* tensor_v) {
   // partial evaluation pipeline to propagate information.
   // this is a good proxy for our ability to propagate non-complete shape
   // information.
-  if (!symbolic_shape_analysis_test_mode) {
-    if (symbolic_shapes.isComplete()) {
-      return std::make_shared<SsaArgument>(*tt->sizes().concrete_sizes());
-    }
-    if (toIValue(tensor_v)) {
-      auto size = constant_as<at::Tensor>(tensor_v)->sizes();
+  if (symbolic_shapes.isComplete() && !symbolic_shape_analysis_test_mode) {
+    return std::make_shared<SsaArgument>(*tt->sizes().concrete_sizes());
+  }
+  if (toIValue(tensor_v)) {
+    auto size = constant_as<at::Tensor>(tensor_v)->sizes();
+    if (!symbolic_shape_analysis_test_mode) {
       return std::make_shared<SsaArgument>(IValue(size));
+    } else {
+      auto sa = ShapeArguments(c10::SymbolicShape(size));
+      return std::make_shared<SsaArgument>(sa);
     }
   }
   return std::make_shared<SsaArgument>(symbolic_shapes);
@@ -593,7 +638,7 @@ std::shared_ptr<std::vector<SsaArgument>> getNodeInputShapes(
       TORCH_INTERNAL_ASSERT(
           node_->kind() == aten::cat, "TODO: generalize logic");
       /*
-      TODO: Remove or rewrite this unnecessary premature optimization
+      TODO: Remove or rewrite this optimization
       if (node_->input(node_index)->node()->kind() == prim::Constant) {
         replaceWithIValue(
             shape_compute_graph->inputs().at(graph_index),
@@ -1053,15 +1098,16 @@ TORCH_API bool isSymbolicDim(const c10::IValue& v){
 }
 */
 
-std::shared_ptr<std::vector<c10::SymbolicShape>> calculateSymbolicShapesOnOp(
-    FunctionSchema* schema,
-    std::vector<SSAInput>& inputs) {
+TORCH_API std::unique_ptr<std::vector<c10::SymbolicShape>>
+calculateSymbolicShapesOnOp(
+    const FunctionSchema* schema,
+    const std::vector<SSAInput>& inputs) {
   std::vector<SsaArgument> ssa_args;
   for (auto& arg : inputs) {
-    if (auto ival = c10::get_if<IValue>(&arg)) {
-      ssa_args.emplace_back(ival);
+    if (const IValue* ival = c10::get_if<IValue>(&arg)) {
+      ssa_args.emplace_back(*ival);
     } else {
-      c10::SymbolicShape* ss = c10::get_if<c10::SymbolicShape>(&arg);
+      const c10::SymbolicShape* ss = c10::get_if<c10::SymbolicShape>(&arg);
       ssa_args.emplace_back(ShapeArguments(*ss));
     }
   }
