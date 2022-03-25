@@ -57,18 +57,20 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   if (qa.numel() == 0) {
     return Tensor{};
   }
-  // TODO: add shape checking? I think this is contingent on whether we support broadcasting in qadd, so maybe leave this out for now?
+  // TODO: add shape checking when broadcasted add is supported. For now we assume the input tensors are the same shape
+  TORCH_CHECK(qa.sizes() == qb.sizes(), "Quantized cudnn add currently expects both input tensors to be the same shape");
+
   check_inputs(qa, qb);
 
   // cudnn expects tensors to be at least 3D. So we will prepend dummy dimensions if the input tensors are not at least 3D
   auto orig_sizes = qa.sizes().vec();
   if (qa.dim() < 3) {
-    std::vector<int64_t> new_sizes{orig_sizes};
-    while (new_sizes.size() < 3) {
-      new_sizes.emplace_back(1);
+    std::vector<int64_t> new_sizes(3, 1);
+    // cudnn expects leading dimensions to be the dummy dimensions
+    new_sizes.back() = qa.sizes().back();
+    if (qa.ndim() == 2) {
+      new_sizes[1] = qa.size(0);
     }
-    // I think cudnn expects leading dimensions to be the dummy dimensions, so we need to swap
-    std::swap(new_sizes.front(), new_sizes.back());
     qa = qa.view(new_sizes);
     qb = qb.view(new_sizes);
   }
