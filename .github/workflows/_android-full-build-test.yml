@@ -45,10 +45,10 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Setup Linux
-        uses: ./.github/actions/setup-linux
+        uses: pytorch/pytorch/.github/actions/setup-linux@master
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/pytorch/.github/actions/setup-ssh@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
