@@ -4631,6 +4631,13 @@ tensor_split(indices_or_sections, dim=0) -> List of Tensors
 See :func:`torch.tensor_split`
 """)
 
+add_docstr_all('split',
+               r"""
+split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.split`
+""")
+
 add_docstr_all('hsplit',
                r"""
 hsplit(split_size_or_sections) -> List of Tensors
