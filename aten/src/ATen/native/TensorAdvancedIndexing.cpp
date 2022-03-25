@@ -1345,6 +1345,9 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const c10::string_view reduce,
  bool include_self,
  const Tensor& out) {
+  // See issue https://github.com/pytorch/pytorch/issues/74770
+  TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.");
+
   scatter_impl</*use_new_options=*/true>(self, dim, index, src, out,
                                          scatter_reduce_stub,
                                          scatter_stub,

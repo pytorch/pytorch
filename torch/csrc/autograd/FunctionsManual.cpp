@@ -717,6 +717,22 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+at::Tensor clamp_jvp(
+  const Tensor& self_p, const Tensor& self_t,
+  const Tensor& min_p, const Tensor& min_t,
+  const Tensor& max_p, const Tensor& max_t
+) {
+  if (min_p.defined() && max_p.defined()) {
+    return where(min_p > max_p, max_t, where(self_p < min_p, min_t, where(self_p > max_p, max_t, self_t)));
+  } else if (min_p.defined()) {
+    return where(self_p > min_p, self_t, min_t);
+  } else if (max_p.defined()) {
+    return where(self_p < max_p, self_t, max_t);
+  } else {
+    return self_t;
+  }
+}
+
 Tensor convolution_jvp(
     const Tensor& input_p, const Tensor& input_t,
     const Tensor& weight_p, const Tensor& weight_t,
