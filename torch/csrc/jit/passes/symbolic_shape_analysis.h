@@ -94,7 +94,7 @@ struct TORCH_API CanonicalizedSymbolicShape {
 
   friend bool operator==(
       const CanonicalizedSymbolicShape& a,
-      const CanonicalizedSymbolicShape b) {
+      const CanonicalizedSymbolicShape& b) {
     if (a.values_.has_value() != b.values_.has_value()) {
       return false;
     }

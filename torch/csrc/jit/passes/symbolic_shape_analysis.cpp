@@ -308,22 +308,9 @@ struct SymbolicShapeOpAnalyzer {
       GRAPH_DEBUG("Substituting constant input ", *cur_val);
       replaceWithIValue(graph_in_var, *cur_val);
     }
-    /*
-    else {
-      // Should be unnecessary now
-      c10::SymbolicShape* shape =
-          c10::get_if<c10::SymbolicShape>(&inputs[op_in_index]);
-      TORCH_INTERNAL_ASSERT(shape, "Somehow the variant is not either type")
-      if (auto sizes = shape->concreteSizes()) {
-        replaceWithIValue(graph_in_var, *sizes);
-      }
-    }
-    */
   }
 
   void substituteConstantInputs() {
-    // Grab the shape compute graph
-
     if (schema_->name() == "aten::cat") {
       // Modifying the graph where _node is part of to not use the tensor
       // construct
@@ -353,11 +340,7 @@ struct SymbolicShapeOpAnalyzer {
           shape_compute_graph_->createList(ListType::ofInts(), li_inputs));
       graph_input->replaceAllUsesWith(new_li->output());
 
-      // Erase the list of lists
       shape_compute_graph_->eraseInput(li_length);
-      // substituteInput(
-      //    inputs_[li_length], shape_compute_graph_->inputs().at(li_length));
-      // return;
     }
 
     for (size_t op_in_index = 0;
@@ -637,14 +620,6 @@ std::shared_ptr<std::vector<SsaArgument>> getNodeInputShapes(
       // waiting for more use cases to decide on best generalization
       TORCH_INTERNAL_ASSERT(
           node_->kind() == aten::cat, "TODO: generalize logic");
-      /*
-      TODO: Remove or rewrite this optimization
-      if (node_->input(node_index)->node()->kind() == prim::Constant) {
-        replaceWithIValue(
-            shape_compute_graph->inputs().at(graph_index),
-            tensor_sizes_from_tensor_list(*toIValue(node_->input(node_index))));
-      } else
-      */
       if (node_->input(node_index)->node()->kind() == prim::ListConstruct &&
           !db.hasWriters(node_->input(node_index))) {
         auto li_construct_node = node_->input(node_index)->node();
@@ -744,7 +719,6 @@ std::shared_ptr<Graph> PropagateShapesWithShapeFunction(
     applyOutputShapeToGraph(n, *output_shapes);
   }
 
-  // Apply the outputs back to the node in question
   return op_analyzer.getShapeComputeGraph();
 }
 
@@ -1071,32 +1045,6 @@ PropagateShapesAndBuildLargeShapeComputeGraph(
     Node* end) {
   return SymbolicShapeGraphAnalyzer(graph, beg, end).run();
 }
-
-/*
-std::shared_ptr<EnumType> symbolic_shape_enum;
-
-TORCH_API c10::IValue newSymbolicShape(){
-  if (symbolic_shape_enum == nullptr) {
-    auto cu = std::make_shared<CompilationUnit>();
-    symbolic_shape_enum = EnumType::create(
-      "SymbolicDim",
-      IntType::get(),
-      {{"Symbolic", 0}},
-      cu
-    );
-  }
-  return c10::IValue(c10::make_intrusive<c10::ivalue::EnumHolder>(
-          symbolic_shape_enum, "Symbolic", 0));
-}
-
-TORCH_API bool isSymbolicDim(const c10::IValue& v){
-  if (! v.isEnum() ){
-    return false;
-  }
-  c10::ivalue::EnumHolder* enum_holder = v.toEnumHolder().get();
-  return enum_holder->type()->name() == "SymbolicDim";
-}
-*/
 
 TORCH_API std::unique_ptr<std::vector<c10::SymbolicShape>>
 calculateSymbolicShapesOnOp(
