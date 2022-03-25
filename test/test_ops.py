@@ -79,7 +79,7 @@ class TestCommon(TestCase):
             if dtype in allowed_backward_dtypes:
                 unsupported_backward_dtypes.append(dtype)
 
-        for dtype in get_all_dtypes(include_complex32=True):
+        for dtype in get_all_dtypes():
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
