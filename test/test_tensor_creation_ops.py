@@ -20,8 +20,7 @@ from torch.testing._internal.common_device_type import (
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta, get_all_device_types)
 from torch.testing._internal.common_dtype import (
-    get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes,
-    all_types_and_complex_and
+    get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
 )
 
 from torch.utils.dlpack import to_dlpack
@@ -1580,6 +1579,7 @@ class TestTensorCreation(TestCase):
                 torch_grids = torch.meshgrid(*tensors, **torch_kwargs)
                 numpy_grids = np.meshgrid(*(tensor.cpu().numpy() for tensor in tensors), **numpy_kwargs)
                 self.assertEqual(torch_grids, numpy_grids)
+
 
     def test_cartesian_prod(self, device):
         a = torch.tensor([1], device=device)
