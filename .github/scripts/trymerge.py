@@ -98,7 +98,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
         totalCount
       }
-      comments(last: 1) {
+      comments(last: 5) {
         nodes {
           bodyText
           author {
@@ -108,6 +108,11 @@ query ($owner: String!, $name: String!, $number: Int!) {
           editor {
             login
           }
+          databaseId
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
         }
       }
     }
@@ -170,6 +175,32 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
               }
             }
           }
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_PREV_COMMENTS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      comments(last: 100, before: $cursor) {
+        nodes {
+          bodyText
+          author {
+            login
+          }
+          authorAssociation
+          editor {
+            login
+          }
+          databaseId
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
         }
       }
     }
@@ -248,6 +279,7 @@ def parse_args() -> Any:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--comment-id", type=int)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -258,6 +290,7 @@ class GitHubComment:
     author_login: str
     author_association: str
     editor_login: Optional[str]
+    database_id: int
 
 
 class GitHubPR:
@@ -269,6 +302,7 @@ class GitHubPR:
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, str]] = None
+        self.comments: Optional[List[GitHubComment]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -416,10 +450,42 @@ class GitHubPR:
                              author_login=node["author"]["login"],
                              author_association=node["authorAssociation"],
                              editor_login=editor["login"] if editor else None,
+                             database_id=node["databaseId"]
                              )
+
+    def get_comments(self) -> List[GitHubComment]:
+        if self.comments is not None:
+            return self.comments
+        self.comments = []
+        info = self.info["comments"]
+        # Do not try to fetch more than 10K comments
+        for _ in range(100):
+            self.comments = [self._comment_from_node(node) for node in info["nodes"]] + self.comments
+            if not info["pageInfo"]["hasPreviousPage"]:
+                break
+            rc = gh_graphql(GH_GET_PR_PREV_COMMENTS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=info["pageInfo"]["startCursor"])
+            info = rc["data"]["repository"]["pullRequest"]["comments"]
+        return self.comments
 
     def get_last_comment(self) -> GitHubComment:
         return self._comment_from_node(self.info["comments"]["nodes"][-1])
+
+    def get_comment_by_id(self, database_id: int) -> GitHubComment:
+        if self.comments is None:
+            # Fastpath - try searching in partial prefetched comments
+            for node in self.info["comments"]["nodes"]:
+                comment = self._comment_from_node(node)
+                if comment.database_id == database_id:
+                    return comment
+
+        for comment in self.get_comments():
+            if comment.database_id == database_id:
+                return comment
+        raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
         rc = RE_DIFF_REV.search(self.get_body())
@@ -548,12 +614,12 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
-    comment = pr.get_last_comment()
+    comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
     if not RE_REVERT_CMD.match(comment.body_text):
         raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
     if comment.editor_login is not None:
@@ -600,7 +666,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
         except Exception as e:
             msg = f"Reverting PR {args.pr_num} failed due to {e}"
             run_url = os.getenv("GH_RUN_URL")
