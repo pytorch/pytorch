@@ -1,3 +1,14 @@
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+
+#if AT_CUDNN_ENABLED()
+
+#include <ATen/native/cudnn/Macros.h>
+
+#if HAS_CUDNN_V8()
+
+
+#include "c10/core/ScalarType.h"
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
@@ -5,10 +16,10 @@
 #include <ATen/cudnn/Types.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
 #include <vector>
-
 
 namespace at {
 namespace native {
@@ -17,6 +28,7 @@ namespace native {
 
 namespace {
 // TODO: same as that of qpool.cpp. should refactor this into quantized directory
+// so that we don't need to duplicate the function
 void check_maxpool2d_params(
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -33,8 +45,19 @@ void check_maxpool2d_params(
 }
 }
 
-// at::native functions for the native_functions.yaml
-Tensor quantized_max_pool2d(
+
+// Note currently we support 4D and 3D input (qx) tensors, the latter of which is supported for
+// legacy reasons. The first dimension of a 4D input tensor is the batch size.
+// For a 3D tensor, there is no batch size dimension -- it can be viewed as a single batch.
+// cudnn's 2D pooling operation requires the input and output to be 4D tensors, so we must cast
+// any 3D tensors to 4D prior to using cudnn
+// This implementation currently uses the v7 cudnn APIs as v8 cudnn APIs are not yet available for
+// pooling operations.
+// Consult https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnnPoolingForward for
+// documentation on the APIs
+// Note that currently, it appears there is no cudnn support for dilated pooling (only dilation = [1,1] is accepted) -- we will
+// submit a feature request for this with cudnn
+Tensor quantized_max_pool2d_cudnn(
     const Tensor& qx,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -50,27 +73,37 @@ Tensor quantized_max_pool2d(
     stride = kernel_size;
   }
   auto ndim = qx.dim();
-  // qnnpack can only handle 4D but other one can be 3D/4D. what about cudnn?
   TORCH_CHECK(
       ndim == 3 || ndim == 4, "Expecting the input tensor of rank 3 or 4.");
   TORCH_CHECK(
       kernel_size.size() == 2,
-      "qnnpack_maxpool2d(): Expected kernel_size to be 2-dimensional: got ",
+      "quantized_max_pool2d_cudnn(): Expected kernel_size to be 2-dimensional: got ",
       kernel_size.size());
   TORCH_CHECK(
       stride.size() == 2,
-      "qnnpack_maxpool2d(): Expected stride to be 2-dimensional: got ",
+      "quantized_max_pool2d_cudnn(): Expected stride to be 2-dimensional: got ",
       stride.size());
   TORCH_CHECK(
       dilation.size() == 2,
-      "qnnpack_maxpool2d(): Expected dilation to be 2-dimensional: got ",
+      "quantized_max_pool2d_cudnn(): Expected dilation to be 2-dimensional: got ",
       dilation.size());
   TORCH_CHECK(
+      dilation[0] == 1 && dilation[1] == 1,
+      "quantized_max_pool2d_cudnn(): Expected dilation=[1, 1] (cudnn does not currently support dilation[i] != 1), got",
+      dilation);
+  TORCH_CHECK(
       padding.size() == 2,
-      "qnnpack_maxpool2d(): Expected padding to be 2-dimensional: got ",
+      "quantized_max_pool2d_cudnn(): Expected padding to be 2-dimensional: got ",
       padding.size());
-  auto input = qx.contiguous(MemoryFormat::ChannelsLast);
-  int64_t batch_size = input.size(0);
+
+  auto input = qx;
+  if (ndim == 4) {
+    input = qx.contiguous(MemoryFormat::ChannelsLast);
+  } else { // 3D
+    std::vector<int64_t> new_sizes{1, qx.size(0), qx.size(1), qx.size(2)};
+    input = qx.view(new_sizes);
+  }
+  int batch_size = input.size(0);
   int64_t inC = input.size(1);
   int64_t inH = input.size(2);
   int64_t inW = input.size(3);
@@ -101,7 +134,9 @@ Tensor quantized_max_pool2d(
 
   std::vector<int64_t> output_shape;
   if (ndim == 3) {
-    output_shape = {outC, outH, outW};
+    // cudnn requires 4D input and output for 2D pooling, so we prepend a dummy dimension
+    // whose size represents the batch size (1)
+    output_shape = {1, outC, outH, outW};
   } else {
     output_shape = {batch_size, outC, outH, outW};
   }
@@ -110,47 +145,30 @@ Tensor quantized_max_pool2d(
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
       input.q_scale(),
       input.q_zero_point(),
-      MemoryFormat::ChannelsLast);
+      (ndim == 4 ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous));
 
-  // https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnnHandle_t
-  // cudnnHandle_t is a pointer to an opaque structure holding the cuDNN library context.
-  // The cuDNN library context must be created using cudnnCreate() and the returned handle
-  // must be passed to all subsequent library function calls.
-  // The context should be destroyed at the end using cudnnDestroy().
-  // The context is associated with only one GPU device,
-  // the current device at the time of the call to cudnnCreate().
-  // However, multiple contexts can be created on the same GPU device.
   cudnnHandle_t handle = getCudnnHandle();
-
-  // https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnnPoolingDescriptor_t
-  // cudnnPoolingDescriptor_t is a pointer to an opaque structure holding the description of a pooling operation.
-  // cudnnCreatePoolingDescriptor() is used to create one instance, and cudnnSetPoolingNdDescriptor() or cudnnSetPooling2dDescriptor()
-  // must be used to initialize this instance.
   cudnnPoolingDescriptor_t poolingDesc;
   AT_CUDNN_CHECK_WITH_SHAPES(cudnnCreatePoolingDescriptor(&poolingDesc));
   AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetPooling2dDescriptor(
       poolingDesc,
-      CUDNN_POOLING_MAX_DETERMINISTIC, // we also have CUDNN_POOLING_MAX which is not detemrinistic i think
+      CUDNN_POOLING_MAX_DETERMINISTIC,
       CUDNN_NOT_PROPAGATE_NAN,
       kernel_size[0], // kernel height
       kernel_size[1], // kernel width
       padding[0], // vertical padding
       padding[1], // horizontal padding
       stride[0], // vertical stride
-      stride[1])); // vertical stride
+      stride[1])); // horizontal stride
 
   auto dataType = getCudnnDataType(input);
-  Constant one(dataType, 1);
-  Constant zero(dataType, 0);
-
-  // cudnnTensorDescriptor_t xDesc;
+  float one{1};
+  float zero{0.0};
   TensorDescriptor xDesc;
   at::MemoryFormat memory_format = at::MemoryFormat::ChannelsLast; // I'm not sure what to put here? NHWC or NCHW or...?
   xDesc.set(input, memory_format); // qint8->int8 dtype is already taken care of i think
-  // cudnnTensorDescriptor_t yDesc;
   TensorDescriptor yDesc;
   yDesc.set(qy, memory_format); // qint8->int8 dtype is already taken care of i think
-
   cudnnPoolingForward(handle,
                       poolingDesc,
                       &one,
@@ -159,7 +177,9 @@ Tensor quantized_max_pool2d(
                       &zero,
                       yDesc.desc(),
                       reinterpret_cast<int8_t*>(qy.data_ptr()));
-  return qy;
+
+  // if qx was 3D, recall we casted our input and output to 4D, so we recast it back to 3D prior to returning
+  return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
 }
 
 // Keep the registry in the anonymous namespace.
@@ -175,7 +195,7 @@ class QMaxPool_arr_args final {
       std::vector<int64_t> dilation,
       bool ceil_mode) {
     TORCH_CHECK(kSpatialDim == 2, "quantized max pool is only valid for 2D")
-    return at::quantized_max_pool2d(qx, kernel_size, stride, padding,
+    return quantized_max_pool2d_cudnn(qx, kernel_size, stride, padding,
                                     dilation, ceil_mode);
   }
 };
@@ -187,3 +207,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 } // namespace
 } // namespace native
 } // namespace at
+
+#endif  // HAS_CUDNN_V8
+#endif  // AT_CUDNN_ENABLED
+#endif  // USE_CUDA
