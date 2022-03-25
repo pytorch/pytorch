@@ -592,7 +592,6 @@ class TestUnaryUfuncs(TestCase):
                                -0.000000111, 0, -0, -1, -2, -931], dtype=dtype, device=device)
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
 
-    @skipCUDAIfRocm
     @dtypes(*get_all_fp_dtypes(include_half=True, include_bfloat16=False))
     def test_frexp(self, device, dtype):
         input = make_tensor((50, 50), dtype=dtype, device=device)
@@ -606,7 +605,6 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(exponent.dtype == torch.int32)
         self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
 
-    @skipCUDAIfRocm
     def test_frexp_assert_raises(self, device):
         invalid_input_dtypes = get_all_int_dtypes() + \
             get_all_complex_dtypes() + \
@@ -1079,7 +1077,6 @@ class TestUnaryUfuncs(TestCase):
             expected = torch.from_numpy(expected).to(dtype)
             self.assertEqual(actual, expected)
 
-    @skipCUDAIfRocm  # see issue https://github.com/pytorch/pytorch/issues/46531
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
