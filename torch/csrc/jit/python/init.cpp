@@ -1576,6 +1576,12 @@ void initJITBindings(PyObject* module) {
       throw std::runtime_error(e.what());
     }
   });
+
+  // On exit we need to reset the print handler to default one,
+  // because otherwise prim::Print() instruction won't work for JIT modules.
+  auto atexit = py::module_::import("atexit");
+  atexit.attr("register")(
+      py::cpp_function([]() { setPrintHandler(getDefaultPrintHandler()); }));
 }
 } // namespace jit
 } // namespace torch
