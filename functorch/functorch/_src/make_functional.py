@@ -56,7 +56,53 @@ def raise_parameter_tying_error():
         "https://github.com/pytorch/functorch/issues/446")
 
 
-def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
+def create_names_map(named_params, tied_named_params):
+    """
+    named_params is a dictionary of tensors: {'A': A, 'B': B}
+    tied_named_params is another dictionary of tensors {'A': A, 'B': B, 'B_tied': B}
+    with potentially tied (or 'duplicated') tensors
+
+    This function creates a mapping from the names in named_params to the
+    names in tied_named_params: {'A': ['A'], 'B': ['B', 'B_tied']}.
+    """
+    named_params = {k: v for k, v in named_params}
+    tied_named_params = {k: v for k, v in tied_named_params}
+
+    tensors_dict_keys = set(named_params.keys())
+    tied_tensors_dict_keys = set(tied_named_params.keys())
+    assert tensors_dict_keys.issubset(tied_tensors_dict_keys)
+
+    tensor_to_mapping = {}
+    for key, tensor in named_params.items():
+        tensor_to_mapping[tensor] = (key, [])
+    for key, tensor in tied_named_params.items():
+        assert tensor in tensor_to_mapping
+        tensor_to_mapping[tensor][1].append(key.split('.'))
+    result = {key: value for key, value in tensor_to_mapping.values()}
+    return result
+
+
+def _extract_members(mod: nn.Module, _named_members, named_members, subclass):
+    all_named_members = tuple(_named_members(mod, remove_duplicate=False))
+    named_members = tuple(named_members())
+    names_map = create_names_map(named_members, all_named_members)
+
+    # Remove all the members in the model
+    memo = {}
+    for name, p in all_named_members:
+        if p not in memo:
+            memo[p] = subclass(torch.empty_like(p, device='meta'))
+        replacement = memo[p]
+        _set_nested_attr(mod, name.split("."), replacement)
+
+    if len(named_members) == 0:
+        names, params = (), ()
+    else:
+        names, params = zip(*named_members)
+    return params, names, names_map
+
+
+def extract_weights(mod: nn.Module):
     """
     This function removes all the Parameters from the model and
     return them as a tuple as well as their original attribute names.
@@ -65,21 +111,11 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     Note that this function modifies the model in place and after this
     call, mod.parameters() will be empty.
     """
-    num_orig_params_with_duplicates = len(tuple(_named_parameters(mod, remove_duplicate=False)))
-    orig_params = tuple(mod.parameters())
-    if len(orig_params) != num_orig_params_with_duplicates:
-        raise_parameter_tying_error()
+    return _extract_members(mod, _named_parameters, mod.named_parameters, nn.Parameter)
 
-    # Remove all the parameters in the model
-    names = []
-    for name, p in list(mod.named_parameters()):
-        replacement = nn.Parameter(torch.empty_like(p, device='meta'))
-        _set_nested_attr(mod, name.split("."), replacement)
-        names.append(name)
 
-    # Make params regular Tensors instead of nn.Parameter
-    params = tuple(p for p in orig_params)
-    return params, names
+def extract_buffers(mod: nn.Module):
+    return _extract_members(mod, _named_buffers, mod.named_buffers, lambda x: x)
 
 
 def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:
@@ -95,31 +131,15 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], a
         _set_nested_attr(mod, name.split("."), p)
 
 
-def _swap_state(mod: nn.Module, split_names: List[str], elems):
+def _swap_state(mod: nn.Module, names_map: List[str], elems):
     result = []
-    for split_name, elem in zip(split_names, elems):
-        result.append(_get_nested_attr(mod, split_name))
-        _del_nested_attr(mod, split_name)
-        _set_nested_attr(mod, split_name, elem)
+    for (_, attr_names), elem in zip(names_map.items(), elems):
+        for i, attr_name in enumerate(attr_names):
+            if i == 0:
+                result.append(_get_nested_attr(mod, attr_name))
+            _del_nested_attr(mod, attr_name)
+            _set_nested_attr(mod, attr_name, elem)
     return result
-
-
-def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
-    num_orig_params_with_duplicates = len(tuple(_named_buffers(mod, remove_duplicate=False)))
-    orig_params = tuple(mod.buffers())
-    if len(orig_params) != num_orig_params_with_duplicates:
-        raise_parameter_tying_error()
-
-    # Remove all the parameters in the model
-    names = []
-    for name, p in list(mod.named_buffers()):
-        replacement = torch.empty_like(p, device='meta')
-        _set_nested_attr(mod, name.split("."), replacement)
-        names.append(name)
-
-    # Make params regular Tensors instead of nn.Parameter
-    params = tuple(p for p in orig_params)
-    return params, names
 
 
 def load_buffers(mod: nn.Module, names: List[str], buffers: Tuple[Tensor, ...], as_params=False) -> None:
@@ -174,7 +194,7 @@ def make_functional_deprecated_v1(model: nn.Module):
     if len(buffers) > 0:
         raise RuntimeError('make_functional_deprecated_v1(model): `model` has buffers. Please use '
                            'make_functional_with_buffers_deprecated_v1(model) instead.')
-    weights, descriptors = extract_weights(model)
+    weights, descriptors, _ = extract_weights(model)
 
     def fun(weights, data):
         mutable_model = copy.deepcopy(model)
@@ -209,8 +229,8 @@ def make_functional_with_buffers_deprecated_v1(model: nn.Module):
 
     To put the state back into a model, use `load_state`.
     """
-    weights, weight_descriptors = extract_weights(model)
-    buffers, buf_descriptors = extract_buffers(model)
+    weights, weight_descriptors, _ = extract_weights(model)
+    buffers, buf_descriptors, _ = extract_buffers(model)
 
     def fun(weights, buffers, data):
         mutable_model = copy.deepcopy(model)
@@ -221,30 +241,30 @@ def make_functional_with_buffers_deprecated_v1(model: nn.Module):
     return weights, buffers, fun, weight_descriptors, buf_descriptors
 
 
-def make_split_names(lst):
-    return [name.split('.') for name in lst]
-
-
 class FunctionalModuleWithBuffers(nn.Module):
     """
     This is the callable object returned by :func:`make_functional_with_buffers`.
     """
 
-    def __init__(self, stateless_model, param_names, buffer_names):
+    def __init__(self, stateless_model, param_names, buffer_names,
+                 param_names_map, buffer_names_map):
         super(FunctionalModuleWithBuffers, self).__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
         self.buffer_names = buffer_names
-        self.split_names = make_split_names(param_names + buffer_names)
+
+        self.all_names_map = dict(param_names_map)
+        self.all_names_map.update(buffer_names_map)
 
     @staticmethod
     def _create_from(model):
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
-        params, param_names = extract_weights(model_copy)
-        buffers, buffer_names = extract_buffers(model_copy)
+        params, param_names, param_names_map = extract_weights(model_copy)
+        buffers, buffer_names, buffer_names_map = extract_buffers(model_copy)
         return (
-            FunctionalModuleWithBuffers(model_copy, param_names, buffer_names),
+            FunctionalModuleWithBuffers(model_copy, param_names, buffer_names,
+                                        param_names_map, buffer_names_map),
             params,
             buffers,
         )
@@ -253,13 +273,13 @@ class FunctionalModuleWithBuffers(nn.Module):
         # Temporarily load the state back onto self.stateless_model
         old_state = _swap_state(
             self.stateless_model,
-            self.split_names,
+            self.all_names_map,
             list(params) + list(buffers))
         try:
             return self.stateless_model(*args, **kwargs)
         finally:
             # Remove the loaded state on self.stateless_model
-            _swap_state(self.stateless_model, self.split_names, old_state)
+            _swap_state(self.stateless_model, self.all_names_map, old_state)
 
 
 class FunctionalModule(nn.Module):
@@ -267,27 +287,27 @@ class FunctionalModule(nn.Module):
     This is the callable object returned by :func:`make_functional`.
     """
 
-    def __init__(self, stateless_model, param_names):
+    def __init__(self, stateless_model, param_names, names_map):
         super(FunctionalModule, self).__init__()
         self.stateless_model = stateless_model
         self.param_names = param_names
-        self.split_names = make_split_names(param_names)
+        self.names_map = names_map
 
     @staticmethod
     def _create_from(model):
         # TODO: We don't need to copy the model to create a stateless copy
         model_copy = copy.deepcopy(model)
-        params, param_names = extract_weights(model_copy)
-        return FunctionalModule(model_copy, param_names), params
+        params, param_names, names_map = extract_weights(model_copy)
+        return FunctionalModule(model_copy, param_names, names_map), params
 
     def forward(self, params, *args, **kwargs):
         # Temporarily load the state back onto self.stateless_model
-        old_state = _swap_state(self.stateless_model, self.split_names, params)
+        old_state = _swap_state(self.stateless_model, self.names_map, params)
         try:
             return self.stateless_model(*args, **kwargs)
         finally:
             # Remove the loaded state on self.stateless_model
-            _swap_state(self.stateless_model, self.split_names, old_state)
+            _swap_state(self.stateless_model, self.names_map, old_state)
 
 
 def make_functional(model: nn.Module):
