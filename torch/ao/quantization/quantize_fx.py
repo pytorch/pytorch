@@ -7,7 +7,7 @@ from torch.fx.node import Target, Node, Argument
 from torch.nn.intrinsic import _FusedModule
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
-from .fx._convert_do_not_use import _convert_do_not_use as convert
+from .fx.convert import convert
 from .fx import get_tensorrt_backend_config_dict  # noqa: F401
 from .fx.graph_module import ObservedGraphModule
 from .fx.qconfig_utils import (
