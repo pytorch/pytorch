@@ -77,6 +77,8 @@ Value* tryConvertToType(
     }
   }
 
+  // allow temporary, unannotated list literals `[]` to match to arbitrary list
+  // types
   if (value->node()->kind() == prim::EmptyListLiteral &&
       concrete_type->cast<ListType>()) {
     value = graph.insertNode(graph.createList(concrete_type->cast<ListType>()->getElementType(), {}))->output();

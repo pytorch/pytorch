@@ -4216,7 +4216,7 @@ struct to_ir {
     // else:
     //    a.append("hi")
     // This is also the same behavior that C++ allows with {}
-    // (cannot assign to a variable typed as auot)
+    // (cannot assign to a variable typed as auto)
     if (values.size() == 0 && type_hint == nullptr) {
       auto node = graph->insertNode(graph->create(prim::EmptyListLiteral));
       node->output()->setType(ListType::ofTensors());
