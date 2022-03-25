@@ -272,7 +272,8 @@ def gen_dispatcher_registrations(
                 selector,
                 rocm=False,
                 cpp_namespace=cpp_namespace,
-                class_method_name=f'{class_name}'),
+                class_method_name=f'{class_name}',
+                skip_dispatcher_op_registration=False),
             grouped_native_functions
         )),
         'dispatch_registrations': list(concatMap(
@@ -282,7 +283,8 @@ def gen_dispatcher_registrations(
                 selector,
                 rocm=False,
                 cpp_namespace=cpp_namespace,
-                class_method_name=f'{class_name}'),
+                class_method_name=f'{class_name}',
+                skip_dispatcher_op_registration=False),
             grouped_native_functions
         )),
     })
