@@ -1197,7 +1197,7 @@ class TestQuantizedOps(TestCase):
                        qparams=hu.qparams(dtypes=[torch.qint8])),
            kernel=st.sampled_from((3, 5, 7)),
            stride=st.sampled_from((None, 1, 2)),
-           # currently there is no support for dilation for cudnn 
+           # currently there is no support for dilation for cudnn
            # pooling
            dilation=st.integers(1, 1),
            padding=st.integers(0, 2),
