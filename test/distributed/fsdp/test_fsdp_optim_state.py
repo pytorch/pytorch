@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import collections
 import sys
 from typing import Any, Dict, List, Type
 
@@ -10,7 +9,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OPTIM_TARGET_RANK,
 )
-from torch.distributed.fsdp.wrap import always_wrap_policy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -33,11 +31,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class Bias(torch.nn.Module):
-    """This adds a 1D bias with dimension ``dim``."""
+    """This module applies a 1D additive bias with dimension ``dim``."""
     def __init__(self, dim: int) -> None:
         super().__init__()
-        if dim <= 0:
-            raise ValueError(f"Invalid arg: `dim`={dim}")
+        assert dim > 0
         torch.manual_seed(0)
         self.bias = torch.nn.Parameter(torch.randn((dim,)))
 
@@ -45,92 +42,78 @@ class Bias(torch.nn.Module):
         return x + self.bias
 
 
-class LinearWithKBiases(torch.nn.Module):
+class AffineA(torch.nn.Module):
     """
-    A linear layer representing an affine transformation but using ``k``
-    biases instead of just one. This ``k`` exactly counts the number of nested
-    modules of this module.
+    This module applies an affine transformation (like ``nn.Linear``).
+    AffineA
+        Bias0
+            bias
+        weight
+        Bias1
+            bias
     """
-    def __init__(
-        self,
-        in_dim: int,
-        out_dim: int,
-        num_biases: int,
-    ) -> None:
-        if in_dim <= 0 or out_dim <= 0 or num_biases < 0:
-            raise ValueError(
-                f"Invalid args: `in_dim`={in_dim} `out_dim`={out_dim} "
-                f"`num_biases`={num_biases}"
-            )
+    def __init__(self, in_dim: int, out_dim: int) -> None:
         super().__init__()
+        assert all(v > 0 for v in (in_dim, out_dim))
+        torch.manual_seed(0)
+        self.bias_module0 = Bias(out_dim)
+        self.weight = torch.nn.Parameter(torch.randn((in_dim, out_dim)))
+        self.bias_module1 = Bias(out_dim)
+
+    def forward(self, x):
+        x = x @ self.weight
+        x = self.bias_module0(x)
+        x = self.bias_module1(x)
+        return x
+
+
+class AffineB(torch.nn.Module):
+    """
+    This module applies an affine transformation (like ``nn.Linear``).
+    AffineB
+        weight
+        Bias
+            bias
+        bias
+    """
+    def __init__(self, in_dim: int, out_dim: int) -> None:
+        super().__init__()
+        assert all(v > 0 for v in (in_dim, out_dim))
         torch.manual_seed(0)
         self.weight = torch.nn.Parameter(torch.randn((in_dim, out_dim)))
-        # NOTE: FSDP does not work if the biases are held in a
-        # `torch.nn.ModuleList`, so we set each bias manually.
-        for i in range(num_biases):
-            setattr(self, f"bias{i}", Bias(out_dim))
-        self.num_biases = num_biases
+        self.bias_module = Bias(out_dim)
+        self.bias = torch.nn.Parameter(torch.randn((out_dim,)))
 
     def forward(self, x):
-        z = x @ self.weight
-        for bias_index in range(self.num_biases):
-            bias = getattr(self, f"bias{bias_index}")
-            z = bias(z)
-        return z
+        x = x @ self.weight
+        x = self.bias_module(x)
+        x = x + self.bias
+        return x
 
 
-class JaggedModel(torch.nn.Module):
-    """
-    A model with jagged nesting to exercise the optimizer state checkpointing.
-    The structure and (unflattened) parameter IDs are as follows:
-    JaggedModel
-        linear0: LinearWithKBiases 0
-            Bias 1
-        linear1: Sequential
-            LinearWithKBiases 2
-                Bias 3
-                Bias 4
-                Bias 5
-            LinearWithKBiases 6
-                Bias 7
-        linear2: LinearWithKBiases 8
-        linear3: Sequential
-            Bias 9
-            Bias 10
-            Bias 11
-            Bias 12
-            Bias 13
-        linear4: LinearWithKBiases 14
-            Bias 15
-            Bias 16
-    """
+class AffineModel(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.linear0 = LinearWithKBiases(2, 3, 1)
-        self.linear1 = torch.nn.Sequential(
-            LinearWithKBiases(3, 5, 3),
-            LinearWithKBiases(5, 5, 1),
+        self.affine0 = AffineA(5, 7)
+        self.affine1 = AffineB(7, 7)
+        self.bias = torch.nn.Parameter(torch.randn((5,)))
+        self.affine2 = torch.nn.Sequential(
+            AffineB(7, 9),
+            AffineA(9, 9),
+            AffineB(9, 5),
         )
-        self.linear2 = LinearWithKBiases(5, 4, 0)
-        self.linear3 = torch.nn.Sequential(
-            Bias(4), Bias(4), Bias(4), Bias(4), Bias(4),
-        )
-        self.linear4 = LinearWithKBiases(4, 3, 2)
         self.relu = torch.nn.ReLU()
 
-    def forward(self, x):
-        z = x
-        for l in (
-            self.linear0, self.linear1, self.linear2, self.linear3,
-            self.linear4,
-        ):
-            z = l(z)
-            z = self.relu(z)
-        return z
+    def forward(self, x) -> torch.Tensor:
+        x = self.relu(self.affine0(x))
+        x = self.relu(self.affine1(x))
+        x = self.relu(self.affine2(x))
+        x = x + self.bias
+        return x
 
     def get_input(self, device):
-        BATCH_SIZE = 3
-        return (torch.randn((BATCH_SIZE, 2)).to(device),)
+        BATCH_SIZE = 8
+        return (torch.randn((BATCH_SIZE, 5)).to(device),)
 
     def get_loss(self, inp, output):
         return output.sum()
@@ -138,248 +121,79 @@ class JaggedModel(torch.nn.Module):
     def run_backward(self, loss):
         loss.backward()
 
-    def get_params_copy(self):
-        params = [
-            self.linear0.weight, self.linear0.bias0.bias,
-            self.linear1[0].weight, self.linear1[0].bias0.bias,
-            self.linear1[0].bias1.bias, self.linear1[0].bias2.bias,
-            self.linear1[1].weight, self.linear1[1].bias0.bias,
-            self.linear2.weight,
-            self.linear3[0].bias, self.linear3[1].bias, self.linear3[2].bias,
-            self.linear3[3].bias, self.linear3[4].bias,
-            self.linear4.weight, self.linear4.bias0.bias,
-            self.linear4.bias1.bias,
-        ]
-        return [p.detach().clone() for p in params]
-
-class WrappedJaggedModel(JaggedModel):
-    """
-    This model has the same underlying module structure as
-    :class:`JaggedModel`, except some modules have now been wrapped using
-    :class:`FullyShardedDataParallel`. The wrapping structure is as follows:
-    WrappedJaggedModel
-        linear0: LinearWithKBiases
-            Bias
-        linear1: FSDP(Sequential)
-            FSDP(LinearWithKBiases)
-                FSDP(Bias)
-                FSDP(Bias)
-                FSDP(Bias)
-            FSDP(LinearWithKBiases)
-                FSDP(Bias)
-        linear2: LinearWithKBiases
-        linear3: FSDP(Sequential)
-            Bias
-            Bias
-            Bias
-            Bias
-            Bias
-        linear4: FSDP(LinearWithKBiases)
-            Bias
-            FSDP(Bias)
-    Note that ``linear3`` has a single flattened parameter consisting of 5
-    unflattened parameters.
-    """
-    def __init__(self, group=None) -> None:
-        super().__init__()
-        self.linear1 = FSDP(
-            self.linear1, process_group=group,
-            auto_wrap_policy=always_wrap_policy,
+    @staticmethod
+    def wrap(model, group=None) -> None:
+        # Flatten Bias; then flatten weight and bias together into `affine1`
+        model.affine1.bias_module = FSDP(
+            model.affine1.bias_module, process_group=group,
         )
-        self.linear3 = FSDP(self.linear3, process_group=group)
-
-        assert self.linear4.num_biases == 2
-        has_seen_first_bias = False
-
-        def linear4_wrap_policy(module, recurse, unwrapped_params):
-            is_leaf = len(list(module.children())) == 0
-            if not is_leaf:
-                return True  # wrap the parent
-            # Do not wrap the first bias, only the second
-            nonlocal has_seen_first_bias
-            if not has_seen_first_bias:
-                has_seen_first_bias = True
-                return False
-            return True
-
-        self.linear4 = FSDP(
-            self.linear4, process_group=group,
-            auto_wrap_policy=linear4_wrap_policy,
+        model.affine1 = FSDP(model.affine1, process_group=group)
+        # Flatten Bias0; flatten Bias1; then flatten weight into `affine2[1]`
+        model.affine2[1].bias_module0 = FSDP(
+            model.affine2[1].bias_module0, process_group=group,
         )
-
-    def get_params_copy(self):
-        params = [self.linear0.weight, self.linear0.bias0.bias]
-        with self.linear1[0].summon_full_params():
-            params.append(self.linear1[0].weight.detach().clone())
-        with self.linear1[0].bias0.summon_full_params():
-            params.append(self.linear1[0].bias0.bias.detach().clone())
-        with self.linear1[0].bias1.summon_full_params():
-            params.append(self.linear1[0].bias1.bias.detach().clone())
-        with self.linear1[0].bias2.summon_full_params():
-            params.append(self.linear1[0].bias2.bias.detach().clone())
-        with self.linear1[1].summon_full_params():
-            params.append(self.linear1[1].weight.detach().clone())
-        with self.linear1[1].bias0.summon_full_params():
-            params.append(self.linear1[1].bias0.bias.detach().clone())
-        params.append(self.linear2.weight.detach().clone())
-        with self.linear3.summon_full_params():
-            params.append(self.linear3[0].bias.detach().clone())
-            params.append(self.linear3[1].bias.detach().clone())
-            params.append(self.linear3[2].bias.detach().clone())
-            params.append(self.linear3[3].bias.detach().clone())
-            params.append(self.linear3[4].bias.detach().clone())
-        with self.linear4.summon_full_params():
-            params.append(self.linear4.weight.detach().clone())
-            params.append(self.linear4.bias0.bias.detach().clone())
-            params.append(self.linear4.bias1.bias.detach().clone())
-        return params
-
-
-class AlternateWrappedJaggedModel(JaggedModel):
-    """
-    Like :class:`WrappedJaggedModel`, this model has the same underlying
-    module structure as :class:`JaggedModel`, except some modules have now
-    been wrapped using :class:`FullyShardedDataParallel`. Notably, this
-    wrapping structure is different from :class:`WrappedJaggedModel` and is as
-    follows:
-    AlternateWrappedJaggedModel
-        linear0: FSDP(LinearWithKBiases)
-            FSDP(Bias)
-        linear1: Sequential
-            LinearWithKBiases
-                Bias
-                Bias
-                Bias
-            LinearWithKBiases
-                Bias
-        linear2: LinearWithKBiases
-        linear3: Sequential
-            Bias
-            Bias
-            Bias
-            Bias
-            Bias
-        linear4: FSDP(LinearWithKBiases)
-            Bias
-            Bias
-    We use an alternate wrapping to ensure that the optimizer state dict API is
-    agnostic to the wrapping structure.
-    """
-    def __init__(self, group=None) -> None:
-        super().__init__()
-        self.linear0 = FSDP(
-            self.linear0, process_group=group,
-            auto_wrap_policy=always_wrap_policy,
+        model.affine2[1].bias_module1 = FSDP(
+            model.affine2[1].bias_module1, process_group=group,
         )
-        self.linear4 = FSDP(self.linear4, process_group=group)
+        model.affine2[1] = FSDP(model.affine2[1], process_group=group)
+        # Flatten weight, Bias, bias into `affine2[2]`
+        model.affine2[2] = FSDP(model.affine2[2], process_group=group)
 
-    def get_params_copy(self):
-        params = []
-        with self.linear0.summon_full_params():
-            params.append(self.linear0.weight.detach().clone())
-        with self.linear0.bias0.summon_full_params():
-            params.append(self.linear0.bias0.bias.detach().clone())
-        params.append(self.linear1[0].weight.detach().clone())
-        params.append(self.linear1[0].bias0.bias.detach().clone())
-        params.append(self.linear1[0].bias1.bias.detach().clone())
-        params.append(self.linear1[0].bias2.bias.detach().clone())
-        params.append(self.linear1[1].weight.detach().clone())
-        params.append(self.linear1[1].bias0.bias.detach().clone())
-        params.append(self.linear2.weight.detach().clone())
-        params.append(self.linear3[0].bias.detach().clone())
-        params.append(self.linear3[1].bias.detach().clone())
-        params.append(self.linear3[2].bias.detach().clone())
-        params.append(self.linear3[3].bias.detach().clone())
-        params.append(self.linear3[4].bias.detach().clone())
-        with self.linear4.summon_full_params():
-            params.append(self.linear4.weight.detach().clone())
-            params.append(self.linear4.bias0.bias.detach().clone())
-            params.append(self.linear4.bias1.bias.detach().clone())
-        return params
+    def param_group0(self) -> List[torch.nn.Parameter]:
+        # Use `affine1`'s parameters for the first parameter group to deviate
+        # from the `model.parameters()` order
+        return list(self.affine1.parameters())
+
+    def param_group1(self) -> List[torch.nn.Parameter]:
+        # Deviate from the `model.parameters()` order further by rearranging
+        # `affine2`'s parameters to be before `affine0`'s parameters
+        return list(self.affine2.parameters()) + \
+            list(self.affine0.parameters())
 
 
 class TestFSDPOptimState(FSDPTest):
-    def _init_wrapped(
+    def _init_affine_model(
         self,
-        model_class: str,
+        wrap: bool,
         device: torch.device = torch.device("cuda"),
         group=None,
         optim_class: Type[torch.optim.Optimizer] = torch.optim.Adam,
         use_multiple_param_groups: bool = False,
         **optim_kwargs,
     ):
-        if model_class == "jagged":
-            model = WrappedJaggedModel(group=group).to(device)
-        elif model_class == "alternate_jagged":
-            model = AlternateWrappedJaggedModel(group=group).to(device)
-        elif model_class == "transformer":
-            assert group is not None, \
-                "Transformer requires a group to be specified"
-            model = self._get_wrapped_model(group=group)
-            model.eval()  # disable dropout for determinism
-        else:
-            assert 0, f"Unsupported `model_class`: {model_class}"
+        model = AffineModel().to(device)
+        if wrap:
+            AffineModel.wrap(model, group)
         lr = optim_kwargs.pop("lr", 0.01)
         if not use_multiple_param_groups:
-            optim = optim_class(model.parameters(), lr=lr, **optim_kwargs)
-            optim_input = list(model.parameters())  # persist generator
+            optim_input = list(model.parameters())
         else:
-            if model_class != "jagged" and model_class != "alternate_jagged":
-                assert 0, f"Unsupported `model_class`: {model_class}"
-            # Manually set the parameter groups to appease the constraint that
-            # all of the unflattened parameters comprising a flattened
-            # parameter must be in the same parameter group
-            no_wd_params = list(model.linear0.parameters()) + \
-                list(model.linear1.parameters()) + \
-                list(model.linear4.parameters())
-            wd_params = list(model.linear2.parameters()) + \
-                list(model.linear3.parameters())
             optim_input = [
-                {"params": no_wd_params},
-                {"params": wd_params, "weight_decay": 0.9}
+                {"params": model.param_group0()},
+                {"params": model.param_group1(), "weight_decay": 0.9}
             ]
-            optim = optim_class(optim_input, lr=lr, **optim_kwargs)
+        optim = optim_class(optim_input, lr=lr, **optim_kwargs)
         return model, optim, optim_input
 
-    def _init_nonwrapped(
+    def _init_transformer_model(
         self,
-        model_class: str,
+        wrap: bool,
         device: torch.device = torch.device("cuda"),
         group=None,
         optim_class: Type[torch.optim.Optimizer] = torch.optim.Adam,
         use_multiple_param_groups: bool = False,
         **optim_kwargs,
     ):
-        # Both "jagged" and "alternate_jagged" share the same non-wrapped model
-        if model_class == "jagged" or model_class == "alternate_jagged":
-            model = JaggedModel().to(device)
-        elif model_class == "transformer":
-            assert group is not None, \
-                "Transformer requires a group to be specified"
-            model = self._get_nonwrapped_model(group)
-            model.eval()  # disable dropout for determinism
-        else:
-            assert 0, f"Unsupported `model_class`: {model_class}"
+        assert not use_multiple_param_groups, \
+            "Multiple parameter groups for the transformer is not implemented"
+        if group is None:
+            group = dist.distributed_c10d._get_default_group()
+        model = self._get_wrapped_model(group=group).to(device) if wrap \
+            else self._get_nonwrapped_model(group=group).to(device)
+        model.eval()  # disable dropout for determinism
         lr = optim_kwargs.pop("lr", 0.01)
-        if not use_multiple_param_groups:
-            optim = optim_class(model.parameters(), lr=lr, **optim_kwargs)
-        else:
-            if model_class != "jagged" and model_class != "alternate_jagged":
-                assert 0, f"Unsupported `model_class`: {model_class}"
-            # Manually set the parameter groups to appease the constraint that
-            # all of the unflattened parameters comprising a flattened
-            # parameter must be in the same parameter group
-            no_wd_params = list(model.linear0.parameters()) + \
-                list(model.linear1.parameters()) + \
-                list(model.linear4.parameters())
-            wd_params = list(model.linear2.parameters()) + \
-                list(model.linear3.parameters())
-            optim_input = [
-                {"params": no_wd_params},
-                {"params": wd_params, "weight_decay": 0.9}
-            ]
-            optim = optim_class(optim_input, lr=lr, **optim_kwargs)
-        return model, optim
+        optim = optim_class(model.parameters(), lr=lr, **optim_kwargs)
+        return model, optim, None
 
     def _step_model(
         self,
@@ -392,8 +206,8 @@ class TestFSDPOptimState(FSDPTest):
         ``num_iters``-many times, and returns the per-iteration losses."""
         torch.manual_seed(0)  # set seed for determinism
         losses = []
+        module = model.module if hasattr(model, "module") else model
         for _ in range(num_iters):
-            module = model.module if hasattr(model, "module") else model
             inp = module.get_input(device)
             output = model(*inp)
             loss = module.get_loss(inp, output).to(device)
@@ -402,208 +216,209 @@ class TestFSDPOptimState(FSDPTest):
             optim.step()
         return losses
 
-    def _check_same_state(
-        self,
-        osd1: Dict[str, Any],
-        osd2: Dict[str, Any],
-    ) -> None:
-        """Checks that the state of optimizer state dict ``osd1`` is the same
-        as that of optimizer state dict ``osd2``."""
-        self.assertTrue("state" in osd1)
-        self.assertTrue("state" in osd2)
-        state1 = osd1["state"]
-        state2 = osd2["state"]
-        self.assertEqual(len(state1), len(state2))
-        for param_id, param_state in state1.items():
-            for state_name, v1 in param_state.items():
-                v2 = state2[param_id][state_name]
-                self.assertEqual(type(v1), type(v2))
-                if torch.is_tensor(v1):
-                    v1 = v1.cpu()
-                    v2 = v2.cpu()
-                    if not torch.all(torch.isclose(v1, v2)) and dist.get_rank() == 0:
-                        print(f"param_id={param_id} state={state_name}")
-                        print(v1)
-                        print(v2)
-                        print()
-                self.assertEqual(v1, v2)
-
-    def _check_same_param_groups(
-        self,
-        osd1: Dict[str, Any],
-        osd2: Dict[str, Any],
-    ) -> None:
-        """Checks that the parameter groups of optimizer state dict ``osd1``
-        are the same as those of optimizer state dict ``osd2``."""
-        self.assertTrue("param_groups" in osd1)
-        self.assertTrue("param_groups" in osd2)
-        pgs1 = osd1["param_groups"]
-        pgs2 = osd2["param_groups"]
-        self.assertEqual(len(pgs1), len(pgs2))
-        for pg1, pg2 in zip(pgs1, pgs2):
-            self.assertEqual(set(pg1.keys()), set(pg2.keys()))
-            for hyperparam_name, hyperparam_value in pg1.items():
-                self.assertEqual(hyperparam_value, pg2[hyperparam_name])
-
-    def _broadcast_full_osd(self, full_osd: Dict[str, Any]):
+    def _broadcast_full_osd(self, full_osd: Dict[str, Any], group=None):
+        """Broadcasts the full optimizer state dict in place of using
+        ``torch.save()`` and ``torch.load()``."""
         obj_list = [full_osd]
-        dist.broadcast_object_list(obj_list, src=OPTIM_TARGET_RANK)
+        dist.broadcast_object_list(obj_list, src=OPTIM_TARGET_RANK, group=group)
         full_osd = obj_list[0]
         return full_osd
 
-    @skip_if_lt_x_gpu(2)
-    @parametrize("model_class", ["jagged", "transformer"])
-    @parametrize("use_multiple_param_groups", [False, True])
-    def test_full_optim_state_dict(
+    def _are_equal_states(
         self,
-        model_class: str,
-        use_multiple_param_groups: bool,
-    ):
-        """Checks that the optimizer state dict returned from
-        :meth:`full_optim_state_dict` for a model with FSDP instances matches
-        the optimizer state dict from an equivalent local model without FSDP
-        instances."""
-        if model_class != "jagged" and use_multiple_param_groups:
-            return  # skip since not supported
-        NUM_ITERS = 3
-        GROUP = dist.distributed_c10d._get_default_group()
-        wrapped_model, wrapped_optim, optim_input = self._init_wrapped(
-            model_class=model_class, group=GROUP,
-            use_multiple_param_groups=use_multiple_param_groups,
-        )
-        wrapped_losses = self._step_model(
-            wrapped_model, wrapped_optim, num_iters=NUM_ITERS,
-        )
-        full_osd = FSDP.full_optim_state_dict(
-            wrapped_model, wrapped_optim, optim_input=optim_input,
-        )
-        if self.rank != OPTIM_TARGET_RANK:
-            return
-        nonwrapped_model, nonwrapped_optim = self._init_nonwrapped(
-            model_class=model_class, group=GROUP,
-            use_multiple_param_groups=use_multiple_param_groups,
-        )
-        nonwrapped_losses = self._step_model(
-            nonwrapped_model, nonwrapped_optim, num_iters=NUM_ITERS,
-        )
-        for i, (l1, l2) in enumerate(zip(wrapped_losses, nonwrapped_losses)):
-            assert l1 == l2, f"Losses differ on iter {i}: {l1} {l2}"
-        local_osd = nonwrapped_optim.state_dict()
-        self._check_same_state(full_osd, local_osd)
-        self._check_same_param_groups(full_osd, local_osd)
+        state1: Dict[str, Any],
+        state2: Dict[str, Any],
+    ) -> bool:
+        """Checks if ``state1`` and ``state2`` contain the same mappings."""
+        if set(state1.keys()) != set(state2.keys()):
+            return False
+        for state_name, value1 in state1.items():
+            value2 = state2[state_name]
+            if type(value1) != type(value2):
+                return False
+            if torch.is_tensor(value1):  # tensor state
+                assert torch.is_tensor(value2)
+                # Check the values on CPU to be device-agnostic
+                value1 = value1.cpu()
+                value2 = value2.cpu()
+                if value1.shape != value2.shape or \
+                        not torch.all(torch.isclose(value1, value2)):
+                    return False
+            else:  # non-tensor state
+                if value1 != value2:
+                    return False
+        return True
 
-    def _test_shard_full_optim_state_dict(
+    def _check_same_state(self, full_osd, ref_osd, check_same_param_ids: bool):
+        """Checks that ``full_osd`` and ``ref_osd`` have the same "state" part,
+        allowing the parameter IDs to be different but still isomorphic."""
+        assert "state" in ref_osd
+        self.assertTrue("state" in full_osd)
+        ref_osd_state = ref_osd["state"]
+        full_osd_state = full_osd["state"]
+        # Check parameter IDs are the same
+        ref_osd_param_ids = set(ref_osd_state.keys())
+        full_osd_param_ids = set(full_osd_state.keys())
+        self.assertTrue(ref_osd_param_ids == full_osd_param_ids)
+        # Perform strict check that accounts for parameter IDs matching
+        if check_same_param_ids:
+            for param_id, param_state in full_osd_state.items():
+                for state_name, value in param_state.items():
+                    ref_value = ref_osd_state[param_id][state_name]
+                    self.assertEqual(value, ref_value)
+            return
+        # Otherwise, only require the parameter IDs to be isomorphic
+        ref_osd_states = list(ref_osd["state"].values())
+        full_osd_states = list(full_osd["state"].values())
+        assert len(ref_osd_states) == len(full_osd_states)
+        # Use brute-force quadratic-time comparison since it is hard to
+        # hash a tensor by value instead of by object
+        for full_osd_state in full_osd_states:
+            # Check for at least one match (may be > 1 in toy edge cases, e.g.
+            # multiple biases); nonetheless, each having >= 1 match and the two
+            # lists have equal length imply that the list contents are equal
+            self.assertTrue(any(
+                self._are_equal_states(full_osd_state, ref_osd_state)
+                for ref_osd_state in ref_osd_states
+            ))
+
+    def _check_same_param_groups(self, full_osd, ref_osd):
+        """Checks that ``full_osd`` and ``ref_osd`` have the same
+        "param_groups" part."""
+        assert "param_groups" in ref_osd
+        self.assertTrue("param_groups" in full_osd)
+        ref_osd_param_groups = ref_osd["param_groups"]
+        full_osd_param_groups = full_osd["param_groups"]
+        self.assertTrue(len(full_osd_param_groups), len(ref_osd_param_groups))
+        for full_osd_pg, ref_osd_pg in zip(full_osd_param_groups, ref_osd_param_groups):
+            self.assertEqual(set(full_osd_pg.keys()), set(ref_osd_pg.keys()))
+            for name, full_osd_value in full_osd_pg.items():
+                # Even if the parameter IDs map differently to parameters,
+                # "params" should still contain the same IDs and be in
+                # increasing order; thus, the two values should equal
+                self.assertEqual(full_osd_value, ref_osd_pg[name])
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_multiple_param_groups", [False, True])
+    def test_full_optim_state_dict_affine(
         self,
-        model_class: str,
-        use_new_process_group: bool,
-        use_new_model_class: bool,
         use_multiple_param_groups: bool,
-    ):
-        if model_class != "jagged" and \
-                (use_new_model_class or use_multiple_param_groups):
-            return  # skip since not supported
+    ) -> None:
+        """
+        Tests :meth:`full_optim_state_dict` by comparing the returned dict for
+        an FSDP-wrapped model with that of an equivalent non-wrapped model.
+
+        The parameter groups in the "param_groups" part and the values in the
+        "state" part should be the same, but the parameter IDs (i.e. the keys
+        in the "state" part) may be rearranged.
+        """
         NUM_ITERS = 3
-        default_group = dist.distributed_c10d._get_default_group()
-        model1, optim1, optim_input1 = self._init_wrapped(
-            model_class=model_class, group=default_group,
-            use_multiple_param_groups=use_multiple_param_groups,
+        model1, optim1, optim_input = self._init_affine_model(
+            wrap=True, use_multiple_param_groups=use_multiple_param_groups,
         )
         losses1 = self._step_model(model1, optim1, num_iters=NUM_ITERS)
-        full_osd = FSDP.full_optim_state_dict(model1, optim1, optim_input1)
-        full_osd = _recursive_copy_to_device(
-            self._broadcast_full_osd(full_osd), False, torch.device("cpu")
-        )  # copy to avoid aliasing when we step the model again
-        losses1.extend(self._step_model(model1, optim1, num_iters=NUM_ITERS))
-        if use_new_process_group:
-            new_group_ranks = [r for r in range(self.world_size) if r % 2 == 0]
-            new_group = dist.new_group(ranks=new_group_ranks)
-        else:
-            new_group_ranks = list(range(self.world_size))
-            new_group = default_group
-        new_model_class = "alternate_jagged" if use_new_model_class \
-            else model_class
-        if self.rank not in new_group_ranks:
+        full_osd = FSDP.full_optim_state_dict(model1, optim1, optim_input)
+        if self.rank != OPTIM_TARGET_RANK:
             return
-        model2, optim2, optim_input2 = self._init_wrapped(
-            model_class=new_model_class, group=new_group,
+
+        model2, optim2, _ = self._init_affine_model(
+            wrap=False, use_multiple_param_groups=use_multiple_param_groups,
+        )
+        losses2 = self._step_model(model2, optim2, num_iters=NUM_ITERS)
+        ref_osd = optim2.state_dict()
+
+        for i, (l1, l2) in enumerate(zip(losses1, losses2)):
+            assert l1 == l2, f"Losses differ on iter {i}: {l1:.5f} {l2:.5f}"
+
+        self._check_same_param_groups(full_osd, ref_osd)
+        self._check_same_state(full_osd, ref_osd, check_same_param_ids=False)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_multiple_param_groups", [False, True])
+    def test_shard_full_optim_state_dict_affine(
+        self,
+        use_multiple_param_groups: bool,
+    ) -> None:
+        """Tests :meth:`shard_full_optim_state_dict` for a non-FSDP-root model
+        with nested FSDP instances."""
+        self._test_shard_full_optim_state(
+            model_class="affine",
             use_multiple_param_groups=use_multiple_param_groups,
         )
-        losses2 = self._step_model(model2, optim2, num_iters=NUM_ITERS)
-        for i, (l1, l2) in enumerate(zip(losses1[:NUM_ITERS], losses2)):
-            assert l1 == l2, f"Losses differ on iter {i}: {l1} {l2}"
-        sharded_osd1 = FSDP.shard_full_optim_state_dict(
-            full_osd, model2, optim_input2,
-        )
-        sharded_osd2 = optim2.state_dict()
-        self._check_same_state(sharded_osd1, sharded_osd2)
-        self._check_same_param_groups(sharded_osd1, sharded_osd2)
-        optim2.load_state_dict(sharded_osd2)
-        losses2 = self._step_model(model2, optim2, num_iters=NUM_ITERS)
-        for i, (l1, l2) in enumerate(zip(losses1[NUM_ITERS:], losses2)):
-            self.assertEqual(l1, l2)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_new_process_group", [False, True])
-    @parametrize("use_new_model_class", [False, True])
-    @parametrize("use_multiple_param_groups", [False, True])
-    def test_shard_full_optim_state_dict_jagged(
+    def test_shard_full_optim_state_dict_transformer(self) -> None:
+        """Tests :meth:`shard_full_optim_state_dict` for an FSDP-root
+        transformer model with shared parameters."""
+        self._test_shard_full_optim_state(
+            model_class="transformer", use_multiple_param_groups=False,
+        )
+
+    def _test_shard_full_optim_state(
         self,
-        use_new_process_group: bool,
-        use_new_model_class: bool,
+        model_class: str,
         use_multiple_param_groups: bool,
     ):
-        """Checks that saving the full optimizer state dict of a model using
-        :meth:`full_optim_state_dict` and sharding the dict according to a new
-        model (with possibly different wrapping and/or smaller world size)
-        using :meth:`shard_full_optim_state_dict` yields the same optimizer
-        state dict as using that new model directly."""
-        self._test_shard_full_optim_state_dict(
-            "jagged", use_new_process_group, use_new_model_class,
-            use_multiple_param_groups,
+        """
+        (1) Runs a model with full world size for K iterations to generate a
+        full optimizer state dict;
+        (2) initializes a model with halved world size but the same FSDP
+        wrapping scheme;
+        (3) shards the full optimizer state dict from (1) according to the
+        halved-world-size model;
+        (4) runs the halved-world-size model for K iterations; and
+        (5) checks that the sharded optimizer state dict from (3) matches the
+        halved-world-size model's local optimizer state dict, meaning that the
+        former could have equivalently been loaded into the local optimizer.
+        """
+        NUM_ITERS = 3
+        initializer = self._init_affine_model if model_class == "affine" \
+            else self._init_transformer_model if model_class == "transformer" \
+            else None
+        assert initializer is not None, f"Unsupported model: {model_class}"
+        # Run a wrapped model with full world size for a few iterations
+        model1, optim1, optim_input1 = initializer(
+            wrap=True, use_multiple_param_groups=use_multiple_param_groups,
         )
-
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_new_process_group", [False, True])
-    def test_shard_full_optim_state_dict_transformer(
-        self,
-        use_new_process_group: bool,
-    ):
-        """Checks that saving the full optimizer state dict of an FSDP-wrapped
-        transformer model using :meth:`full_optim_state_dict` and sharding the
-        dict according to a new FSDP-wrapped version of the model (with
-        possibly smaller world size) using :meth:`shard_full_optim_state_dict`
-        yields the same optimizer state dict as using that new model
-        directly."""
-        self._test_shard_full_optim_state_dict(
-            "transformer", use_new_process_group, use_new_model_class=False,
-            use_multiple_param_groups=False,
+        self._step_model(model1, optim1, num_iters=NUM_ITERS)
+        full_osd1 = FSDP.full_optim_state_dict(model1, optim1, optim_input1)
+        # Broadcast instead of `torch.save()`/`torch.load()` so that all ranks
+        # have the full state dict
+        full_osd1 = self._broadcast_full_osd(full_osd1)
+        # Create a new process group with halved world size
+        new_group_ranks = [r for r in range(self.world_size) if r % 2 == 0]
+        new_group = dist.new_group(ranks=new_group_ranks)
+        if self.rank not in new_group_ranks:
+            return
+        # Run a wrapped model with halved world size (from scratch)
+        model2, optim2, optim_input2 = initializer(
+            wrap=True, group=new_group,
+            use_multiple_param_groups=use_multiple_param_groups,
         )
-
-
-def _recursive_copy_to_device(
-    value: Any,
-    non_blocking: bool,
-    device: torch.device,
-) -> Any:
-    """Recursively searches :class:`list` s, :class:`tuple` s, and
-    :class:`dict` s and copies tensors to device if possible. Non-tensor values
-    are passed as-is in the result."""
-    if isinstance(value, torch.Tensor):
-        return value.detach().clone().to(device, non_blocking=non_blocking)
-    if isinstance(value, (list, tuple)):
-        values = [
-            _recursive_copy_to_device(
-                val, non_blocking=non_blocking, device=device,
-            ) for val in value
-        ]
-        return values if isinstance(value, list) else tuple(values)
-    if isinstance(value, collections.abc.Mapping):
-        return {
-            key: _recursive_copy_to_device(
-                val, non_blocking=non_blocking, device=device,
-            ) for key, val in value.items()
-        }
-    return value
+        self._step_model(model2, optim2, num_iters=NUM_ITERS)
+        full_osd2 = FSDP.full_optim_state_dict(model2, optim2, optim_input2)
+        full_osd2 = self._broadcast_full_osd(full_osd2, group=new_group)
+        # As a sanity check, check that sharding the halved-world-size model's
+        # full optimizer state dict according to itself is equivalent to its
+        # local optimizer's state dict
+        local_osd2 = optim2.state_dict()
+        sharded_osd2 = FSDP.shard_full_optim_state_dict(
+            full_osd2, model2, optim_input2,
+        )
+        self._check_same_param_groups(sharded_osd2, local_osd2)
+        self._check_same_state(
+            sharded_osd2, local_osd2, check_same_param_ids=True,
+        )
+        # Check that sharding the full-world-size model's full optimizer state
+        # dict according to the halved-world-size model is equivalent to the
+        # halved-world-size model's local optimizer state dict
+        sharded_osd1 = FSDP.shard_full_optim_state_dict(
+            full_osd1, model2, optim_input2,
+        )
+        self._check_same_param_groups(sharded_osd1, local_osd2)
+        self._check_same_state(
+            sharded_osd1, local_osd2, check_same_param_ids=True,
+        )
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)

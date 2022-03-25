@@ -51,13 +51,13 @@ def _unflatten_optim_state(
             in the "state" part of the optimizer state dict.
 
     Returns:
-        unflat_param_state (List[Dict[str, Any]]): A :class:`list`
-            holding the entries in the "state" part of the optimizer state
-            dict corresponding to the unflattened parameters comprising the
+        unflat_param_state (List[Dict[str, Any]]): A :class:`list` holding
+            the entries in the "state" part of the optimizer state dict
+            corresponding to the unflattened parameters comprising the
             flattened parameter ``flat_param`` if on the target rank or an
-            empty :class:`list` otherwise. The final optimizer state dict
-            will need to map these entries using the proper unflattened
-            parameter IDs.
+            empty :class:`list` otherwise. The final optimizer state dict will
+            need to map these entries using the proper unflattened parameter
+            IDs.
     """
     assert sum(p is flat_param for p in fsdp_module.params) == 1, \
         "`fsdp_module` must own `flat_param`"
@@ -113,6 +113,12 @@ def _communicate_optim_state(
     for state_name, value in flat_param_state.items():
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:
+            # If the parameter is not sharded (e.g. world size of 1), then
+            # neither is the positive-dimension tensor state, so no need to
+            # communicate it -- we take the target rank's value
+            if not flat_param._is_sharded:
+                tensor_state[state_name] = value.cpu()
+                continue
             if tensor_buffer is None:
                 # Assume that positive-dimension tensor optimizer state
                 # has the same shape as the sharded flattened parameter
@@ -141,9 +147,8 @@ def _unflatten_communicated_optim_state(
 ) -> List[Dict[str, Any]]:
     """
     Unflattens the communicated optimizer state (given by ``tensor_state``,
-    ``non_tensor_state``, and ``zero_dim_tensor_state``) for a single
-    flattened parameter ``flat_param``. This should only be called on the
-    target rank.
+    ``non_tensor_state``, and ``zero_dim_tensor_state``) for a single flattened
+    parameter ``flat_param``. This should only be called on the target rank.
 
     Args:
         fsdp_module (FullyShardedDataParallel): FSDP module that owns
@@ -202,13 +207,12 @@ def _flatten_optim_state(
     ``unflat_param_shapes``.
 
     Args:
-        unflat_osd_state (Dict[int, Dict[str, Any]]): The "state" part
-            of the optimizer state dict corresponding to the unflattened
-            parameters.
-        unflat_param_ids (List[int]): A :class:`list` of unflattened
-            parameter IDs used in ``full_optim_state_dict`` corresponding
-            to a single flattened parameter; the :class:`list` should
-            consist of consecutive increasing non-negative integers.
+        unflat_osd_state (Dict[int, Dict[str, Any]]): The "state" part of the
+            optimizer state dict corresponding to the unflattened parameters.
+        unflat_param_ids (List[int]): A :class:`list` of unflattened parameter
+            IDs used in ``full_optim_state_dict`` corresponding to a single
+            flattened parameter; the :class:`list` should consist of
+            consecutive increasing non-negative integers.
         unflat_param_shapes (List[torch.Size]): Unflattened parameter
             shapes corresponding to the single flattened parameter.
         fsdp_module (FullyShardedDataParallel): FSDP module owning the
@@ -233,9 +237,8 @@ def _flatten_optim_state(
         bool(unflat_param_id in unflat_osd_state)
         for unflat_param_id in unflat_param_ids
     ]
-    # If none of the unflattened parameters comprising this flattened
-    # parameter have any state, then we do not want an entry in the
-    # optimizer state dict
+    # If none of the unflattened parameters comprising this flattened parameter
+    # have any state, then we do not want an entry in the optimizer state dict
     if not any(has_state):
         return {}  # no need to flatten any state
     # There may still be some unflattened parameters with state and some
@@ -285,8 +288,8 @@ def _flatten_optim_state(
             )
         if are_pos_dim_tensors:
             flat_tensor = _flatten_tensor_optim_state(
-                state_name, state_values, unflat_param_ids, unflat_param_shapes,
-                flat_param,
+                state_name, state_values, unflat_param_ids,
+                unflat_param_shapes, flat_param,
             )
             # Shard the flattened tensor immediately to minimize the max memory
             # usage
@@ -314,8 +317,8 @@ def _flatten_tensor_optim_state(
 ) -> torch.Tensor:
     """
     Flattens the positive-dimension tensor optimizer state given by the values
-    ``tensors`` for the state ``state_name`` for a single flattened
-    parameter ``flat_param`` corresponding to the unflattened parameter IDs
+    ``tensors`` for the state ``state_name`` for a single flattened parameter
+    ``flat_param`` corresponding to the unflattened parameter IDs
     ``unflat_param_ids`` and unflatted parameter shapes
     ``unflat_param_shapes``. This flattens each unflattened parameter's tensor
     state into one tensor.
@@ -520,8 +523,8 @@ def _get_flat_param_id_to_param(
             flattened parameter IDs to flattened parameters, where the
             parameter ID is implicitly the index in the :class:`list`.
     """
-    # Assume the standard case of passing `model.parameters()` to the
-    # optimizer if `optim_input` is not specified
+    # Assume the standard case of passing `model.parameters()` to the optimizer
+    # if `optim_input` is not specified
     if optim_input is None:
         return list(model.parameters())
     try:
@@ -554,8 +557,8 @@ def _get_flat_param_id_to_param(
             "A parameter group should map \"params\" to a list of the " \
             "parameters in the group"
         for param in param_group["params"]:  # type: ignore[index]
-            # Implicitly map `flat_param_id` (current length of the list)
-            # to `param`
+            # Implicitly map `flat_param_id` (current length of the list) to
+            # `param`
             flat_param_id_to_param.append(param)
     return flat_param_id_to_param  # type: ignore[return-value]
 

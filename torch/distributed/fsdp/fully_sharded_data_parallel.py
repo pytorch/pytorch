@@ -15,6 +15,7 @@ from typing import (
     Dict,
     Generator,
     Iterable,
+    Iterator,
     List,
     NamedTuple,
     Optional,
@@ -40,14 +41,15 @@ from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import (
     FLAT_PARAM,
+    FPW_MODULE,
     FlatParameter,
     FlattenParamsWrapper,
 )
 from .optim_utils import (
+    OPTIM_TARGET_RANK,
     _flatten_optim_state,
     _get_flat_param_id_to_param,
     _unflatten_optim_state,
-    OPTIM_TARGET_RANK,
 )
 from .utils import _apply_to_tensors, _replace_by_prefix
 from .wrap import _recursive_wrap
@@ -57,6 +59,7 @@ if TYPE_CHECKING:
 
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
+FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 
 class ShardingStrategy(Enum):
@@ -1371,6 +1374,26 @@ class FullyShardedDataParallel(nn.Module):
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
 
+    def named_parameters(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Overrides :meth:`named_parameters()` to intercept parameter names and
+        remove all occurrences of the FSDP-specific flattened parameter prefix
+        when inside the :meth:`summon_full_params` context manager.
+        """
+        # Determine which logic to use based on the context at call time
+        in_summon_full_params = getattr(self, "training_state", None) == \
+            TrainingState_.SUMMON_FULL_PARAMS
+        for param_name, param in super().named_parameters(*args, **kwargs):
+            if in_summon_full_params:
+                # Remove any instances of the FSDP-specific prefix; there can
+                # be multiple in the case of nested FSDP modules
+                param_name = param_name.replace(FSDP_PREFIX, "")
+            yield (param_name, param)
+
     def _register_pre_backward_hooks(self, outputs: Any) -> Any:
         """Register pre-backward hook to run before the wrapped module's
         backward. Hooks should be attached to all outputs from the forward.
@@ -2082,7 +2105,8 @@ class FullyShardedDataParallel(nn.Module):
                         full_osd_state[unflat_param_id] = unflat_param_state
                         unflat_param_ids.append(unflat_param_id)
                         unflat_param_id += 1
-            elif to_save:  # do not need to unflatten
+            # For parameters from non-FSDP modules, do not need to unflatten
+            elif to_save:
                 # Do not `deepcopy()` to avoid unnecessarily duplicating
                 # tensor storage
                 full_osd_state[unflat_param_id] = \

@@ -119,8 +119,9 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   py::tuple py_args;
   if (args == nullptr) {
     py_args = py::make_tuple();
-  }
-  else {
+  } else if (PyList_CheckExact(args)) {
+    py_args = py::reinterpret_steal<py::tuple>(PyList_AsTuple(args));
+  } else {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   }
 
@@ -145,8 +146,9 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
   py::tuple py_args;
   if (args == nullptr) {
     py_args = py::make_tuple();
-  }
-  else {
+  } else if (PyList_CheckExact(args)) {
+    py_args = py::reinterpret_steal<py::tuple>(PyList_AsTuple(args));
+  } else {
     py_args = py::reinterpret_borrow<py::tuple>(args);
   }
 
@@ -169,7 +171,9 @@ PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
       // included in AFTER, so it is included in the negation (and that's
       // correct: we want to exclude Python key and everything BEFORE it.)
   );
-  return PyObject_Call(func, py_args.ptr(), kwargs);
+  auto r = PyObject_Call(func, py_args.ptr(), kwargs);
+  if (r == nullptr) throw python_error();
+  return r;
   END_HANDLE_TH_ERRORS
 }
 
