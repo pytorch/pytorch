@@ -1,4 +1,4 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: __torch_dispatch__"]
 
 import tempfile
 import torch
@@ -134,7 +134,7 @@ $5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
                 return "arf"
 
         # Wobbles depending on NDEBUG mode of pybind11
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
         self.assertRaisesRegexp(
@@ -660,6 +660,25 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         y = torch.randn(2)
         self.assertEqual(SubTensor(x) + SubTensor(y), x + y)
         self.assertEqual(called, [torch.ops.aten.add.Tensor])
+
+    def test_dispatch_super_call_list_arg(self):
+        called = []
+
+        class SubTensorWithListArg(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem)
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                return super().__torch_dispatch__(func, types, list(args), kwargs)
+
+        x = torch.randn(2)
+        self.assertEqual(SubTensorWithListArg(x).neg(), x.neg())
+        self.assertEqual(called, [torch.ops.aten.neg.default])
 
     def test_dispatch_super_dont_autograd(self):
         called = []
