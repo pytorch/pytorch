@@ -773,11 +773,11 @@ TEST_F(Kernel, OptimizeConditionals) {
 
 TEST_F(Kernel, Stack) {
   const auto graph_string =
-      R"IR(graph(%x.1 : Float(3, 5, strides=[5, 1], requires_grad=0, device=cpu),
-      %y.1 : Float(3, 5, strides=[5, 1], requires_grad=0, device=cpu)):
-  %1 : int = prim::Constant[value=1]()
+      R"IR(graph(%x.1 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu),
+      %y.1 : Float(5, 3, 3, 6, strides=[54, 18, 6, 1], requires_grad=0, device=cpu)):
+  %1 : int = prim::Constant[value=2]()
   %5 : Tensor[] = prim::ListConstruct(%x.1, %y.1)
-  %z.2 : Float(3, 2, 5, strides=[10, 5, 1], requires_grad=0, device=cpu) = aten::stack(%5, %1) # local/stack.py:39:12
+  %z.2 : Float(5, 3, 2, 3, 6, strides=[108, 36, 18, 6, 1], requires_grad=0, device=cpu) = aten::stack(%5, %1) # local/stack.py:39:12
   return (%z.2))IR";
 
   auto graph = std::make_shared<Graph>();
@@ -793,13 +793,15 @@ TEST_F(Kernel, Stack) {
       R"IR(
 # CHECK: for
 # CHECK-NEXT: for
-# CHECK-NEXT: aten_stack[Ramp(5ll * (j + 2ll * i), 1ll, 4)] = (Broadcast(j, 4))==(Broadcast(1ll, 4)) ? (ty_1[Ramp(5ll * i, 1ll, 4)]) : (tx_1[Ramp(5ll * i, 1ll, 4)]))IR";
+# CHECK-NEXT: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_stack)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
   // Check the correctness
-  auto a = at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto b = at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat));
-  auto ref = at::stack({a, b}, 1);
+  auto a = at::rand({5, 3, 3, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b = at::rand({5, 3, 3, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::stack({a, b}, 2);
 
   std::vector<at::Tensor> inputs = {a, b};
   std::vector<IValue> stack = fmap<IValue>(inputs);
