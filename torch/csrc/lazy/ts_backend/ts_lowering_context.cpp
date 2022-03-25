@@ -31,9 +31,9 @@ TSLoweringContext::TSLoweringContext(
 void TSLoweringContext::AssignOutputOp(
     const Output& output,
     torch::jit::Value* op) {
-  auto ts_node = NodeCast<TsNode>(output.node, output.node->op());
-  if (!ts_node->getPythonStacktrace().empty()) {
-    op->node()->s_(c10::Symbol::attr("source"), ts_node->getPythonStacktrace());
+  auto node = output.node;
+  if (!node->getPythonStacktrace().empty()) {
+    op->node()->s_(c10::Symbol::attr("source"), node->getPythonStacktrace());
   }
   emitted_outputs_[output] = op;
 }

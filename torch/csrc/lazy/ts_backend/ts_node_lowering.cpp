@@ -48,13 +48,10 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     } else if (auto* tensor_list = dynamic_cast<const torch::lazy::TensorList*>(node)) {
       // Then check if we're lowering a tensor list
       ops = LowerTensorList(node);
-    } else if (auto* bnode = dynamic_cast<const torch::lazy::Node*>(node)) {
+    } else {
       // Then fall back to legacy lowering code, which should be gradually
       // removed
       ops = LowerNonCodegenOps(node);
-    } else {
-      throw std::runtime_error(
-          "Expected torch::lazy::Node but could not dynamic cast");
     }
 
     if (ops.empty()) {
@@ -423,6 +420,7 @@ TSOpVector LowerTSBuiltin(
   }
   return {sv->getValue()};
 }
+
 
 }  // namespace lazy
 }  // namespace torch
