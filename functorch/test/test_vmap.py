@@ -3105,6 +3105,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nonzero'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.rrelu'),  # random?
+        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
     }
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
