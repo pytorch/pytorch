@@ -322,7 +322,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
     // NB: since our requires_grad setting is only a heuristic we might end
     // up wanting to differentiate through integral tensors, which is
     // generally a hard error in autograd.
-    if (at::isFloatingType(output.scalar_type())) {
+    if (at::isFloatingType(output.scalar_type()) ||
+        at::isComplexType(output.scalar_type())) {
       autograd::create_gradient_edge(output, shared_from_this());
       output.set_requires_grad(true);
     } else {
@@ -914,10 +915,6 @@ void runNondiffOptimization(
   // Run custom post-fusion passes
   for (const auto& passPair : getCustomPostPasses()) {
     passPair.first(graph);
-  }
-  if(tensorExprFuserEnabled()){
-      RemoveTensorTypeSpecializations(graph);
-      GRAPH_DEBUG("After RemoveTensorTypeSpecializations\n", *graph);
   }
   GRAPH_DEBUG(
       "After customPostPassses (end of runNondiffOptimization)\n", *graph);

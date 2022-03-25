@@ -699,16 +699,32 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   /**
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
+   *
+   * NOTE: sizes() is only `TENSORIMPL_MAYBE_VIRTUAL` for backward
+   * compatibility. See `set_sizes_customization_policy` for the
+   * encouraged customization point.
+   *
+   * NOTE: Currently, CustomizableMethodPolicy::CustomBehavior is not
+   * supported due to a lack of use case, but it can easily be added.
    */
   TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   {
+    if (C10_UNLIKELY(
+            sizes_customization_policy_ !=
+            static_cast<uint8_t>(CustomizableMethodPolicy::Default))) {
+      return sizes_nondefault_policy_impl();
+    }
     return sizes_and_strides_.sizes_arrayref();
   }
 #else
       ;
 #endif
 
+ private:
+  IntArrayRef sizes_nondefault_policy_impl() const;
+
+ public:
   /**
    * Return a reference to the strides of this tensor.  This reference remains
    * valid as long as the tensor is live and not restrided.
@@ -838,10 +854,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::SparseCPU) ||
-        key_set_.has(DispatchKey::SparseCUDA) ||
-        key_set_.has(DispatchKey::SparseHIP) ||
-        key_set_.has(DispatchKey::SparseXPU);
+    return key_set_.has(DispatchKey::Sparse);
   }
 
   // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR
@@ -854,9 +867,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_quantized() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::QuantizedCPU) ||
-        key_set_.has(DispatchKey::QuantizedCUDA) ||
-        key_set_.has(DispatchKey::QuantizedXPU);
+    return key_set_.has(DispatchKey::Quantized);
   }
 
   bool is_meta() const {
@@ -868,53 +879,46 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_cpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::CPU) ||
-        key_set_.has(DispatchKey::SparseCPU) ||
+    return key_set_.has_backend(BackendComponent::CPUBit) ||
         key_set_.has(DispatchKey::SparseCsrCPU) ||
-        key_set_.has(DispatchKey::QuantizedCPU) ||
         key_set_.has(DispatchKey::MkldnnCPU);
   }
 
   bool is_cuda() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::CUDA) ||
-        key_set_.has(DispatchKey::SparseCUDA) ||
-        key_set_.has(DispatchKey::SparseCsrCUDA) ||
-        key_set_.has(DispatchKey::QuantizedCUDA);
+    return key_set_.has_backend(BackendComponent::CUDABit) ||
+        key_set_.has(DispatchKey::SparseCsrCUDA);
   }
 
   bool is_xpu() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::XPU) ||
-        key_set_.has(DispatchKey::SparseXPU) ||
-        key_set_.has(DispatchKey::QuantizedXPU);
+    return key_set_.has_backend(BackendComponent::XPUBit);
   }
 
   bool is_xla() const {
-    return key_set_.has(DispatchKey::XLA);
+    return key_set_.has_backend(BackendComponent::XLABit);
   }
 
   bool is_hpu() const {
-    return key_set_.has(DispatchKey::HPU);
+    return key_set_.has_backend(BackendComponent::HPUBit);
   }
 
   bool is_lazy() const {
-    return key_set_.has(DispatchKey::Lazy);
+    return key_set_.has_backend(BackendComponent::LazyBit);
   }
 
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::HIP) ||
-        key_set_.has(DispatchKey::SparseHIP);
+    return key_set_.has_backend(BackendComponent::HIPBit);
   }
 
   bool is_ve() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
-    return key_set_.has(DispatchKey::VE) || key_set_.has(DispatchKey::SparseVE);
+    return key_set_.has_backend(BackendComponent::VEBit);
   }
 
   bool is_mkldnn() const {
@@ -935,6 +939,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_ort() const {
     return key_set_.has(DispatchKey::ORT);
+  }
+
+  bool is_nested() const {
+    return key_set_.has(DispatchKey::NestedTensor);
   }
 
   // TODO: remove this once we don't automatically enabled Autograd dispatch
@@ -1550,13 +1558,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::CPU) || ts.has(DispatchKey::CUDA) ||
-          ts.has(DispatchKey::HIP) || ts.has(DispatchKey::XPU);
+      constexpr auto dense_backends = DispatchKeySet(
+          {BackendComponent::CPUBit,
+           BackendComponent::CUDABit,
+           BackendComponent::HIPBit,
+           BackendComponent::XPUBit});
+      constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
+      return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
     auto is_sparse = [](DispatchKeySet ts) {
-      return ts.has(DispatchKey::SparseCPU) ||
-          ts.has(DispatchKey::SparseCUDA) || ts.has(DispatchKey::SparseHIP) ||
-          ts.has(DispatchKey::SparseXPU);
+      constexpr auto sparse_backends = DispatchKeySet(
+          {BackendComponent::CPUBit,
+           BackendComponent::CUDABit,
+           BackendComponent::HIPBit,
+           BackendComponent::XPUBit});
+      constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
+      return ts.has_any(sparse_k) && ts.has_any(sparse_backends);
     };
     return (key_set_ == from) || (is_dense(key_set_) && is_dense(from)) ||
         (is_sparse(key_set_) && is_sparse(from));
@@ -2408,22 +2425,31 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
  protected:
-  // Policy for adjusting the behavior of is_contiguous(). Allows
-  // subclass customization while still being able to inline
-  // is_contiguous() in the common case.
-  enum class HasContiguityPolicy : uint8_t {
-    // Default behavior: check is_contiguous_ and similar bitflags.
+  // Policy for adjusting the behavior of customizable methods like
+  // is_contiguous() and sizes(). Allows subclass customization while
+  // still being able to inline the methods in the common case.
+  enum class CustomizableMethodPolicy : uint8_t {
+    // Default behavior.
     Default,
     // Throw a generic error message that this tensor type does not
-    // support is_contiguous.
-    ContiguityNotSupported,
-    // Call virtual is_contiguous_custom method to implement custom
-    // is_contiguous behavior.
+    // support the method in question.
+    NotSupported,
+    // For backward compatibility.
+    ContiguityNotSupported = NotSupported,
+    // Call virtual foo_custom method to implement custom foo
+    // behavior.
     CustomBehavior,
   };
 
-  void set_has_contiguity_policy(HasContiguityPolicy p) {
+  // For backward compatibility.
+  using HasContiguityPolicy = CustomizableMethodPolicy;
+
+  void set_has_contiguity_policy(CustomizableMethodPolicy p) {
     has_contiguity_ = static_cast<uint8_t>(p);
+  }
+
+  void set_sizes_customization_policy(CustomizableMethodPolicy p) {
+    sizes_customization_policy_ = static_cast<uint8_t>(p);
   }
 
   Storage storage_;
@@ -2536,7 +2562,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // or -std=gnu++2a
   inline void init_bitfields() {
     is_contiguous_ = true;
-    has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
+    has_contiguity_ = static_cast<uint8_t>(CustomizableMethodPolicy::Default);
 
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
@@ -2547,6 +2573,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     allow_tensor_metadata_change_ = true;
     reserved_ = false;
     owns_pyobj_ = false;
+    sizes_customization_policy_ =
+        static_cast<uint8_t>(CustomizableMethodPolicy::Default);
     storage_access_should_throw_ = false;
   }
 
@@ -2606,6 +2634,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // Python object's refcount goes to zero, we flip the ownership
   // direction (to make sure the pyobj stays live).
   bool owns_pyobj_ : 1;
+
+  // Customization policy for the sizes() virtual method.
+  /* CustomizableMethodPolicy */ uint8_t sizes_customization_policy_ : 2;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

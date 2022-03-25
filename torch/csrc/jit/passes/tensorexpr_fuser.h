@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
 #include <memory>
 
 namespace torch {

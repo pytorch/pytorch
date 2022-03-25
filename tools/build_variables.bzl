@@ -42,6 +42,13 @@ GENERATED_CPP = [
     "autograd/generated/python_variable_methods.cpp",
 ]
 
+# This is duplicated in caffe2/CMakeLists.txt for now and not yet used in buck
+GENERATED_LAZY_TS_CPP = [
+    "lazy/generated/LazyNativeFunctions.cpp",
+    "lazy/generated/RegisterAutogradLazy.cpp",
+    "lazy/generated/RegisterLazy.cpp",
+]
+
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
@@ -148,6 +155,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/profiler/api.cpp",
+    "torch/csrc/profiler/collection.cpp",
     "torch/csrc/profiler/kineto_shim.cpp",
     "torch/csrc/profiler/nvtx_observer.cpp",
     "torch/csrc/monitor/counters.cpp",
@@ -298,6 +306,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/variadic_ops.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
+    "torch/csrc/jit/passes/utils/check_tensor_specializations.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/utils/optimization_utils.cpp",
@@ -341,6 +350,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/cpp_codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
+    "torch/csrc/jit/tensorexpr/external_functions_core.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_registry.cpp",
     "torch/csrc/jit/tensorexpr/graph_opt.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
@@ -432,6 +442,9 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/unsqueeze.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
+    # We should better segment the sources, but for now there are actually dependencies
+    # from some core files on some of these ts_backend files
+    # so we continue to build these parts of ts_backend in all build configs
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/cast.cpp",
@@ -440,6 +453,20 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
     "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
+]
+
+# We can't build all of the ts backend under certain build configurations, e.g. mobile,
+# since it depends on things like autograd, meta functions, which may be disabled
+lazy_tensor_ts_sources = [
+    "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ts_autograd_functions.cpp",
+    "torch/csrc/lazy/ts_backend/ts_backend_impl.cpp",
+    "torch/csrc/lazy/ts_backend/ts_lowering_context.cpp",
+    "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node_lowering.cpp",
+    "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ts_eager_fallback.cpp",
 ]
 
 lazy_tensor_core_python_sources = [
@@ -873,6 +900,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
     "torch/csrc/jit/passes/onnx/function_extraction.cpp",
+    "torch/csrc/jit/passes/onnx/onnx_log.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
@@ -1159,7 +1187,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qconcat.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv_prepack.cpp",
-    "aten/src/ATen/native/quantized/cpu/qconv_unpack.cpp",
+    "aten/src/ATen/native/quantized/cpu/qconv_unpack_impl.cpp",
     "aten/src/ATen/native/quantized/cpu/qelu.cpp",
     "aten/src/ATen/native/quantized/cpu/qembeddingbag.cpp",
     "aten/src/ATen/native/quantized/cpu/qembeddingbag_prepack.cpp",
@@ -1171,7 +1199,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp",
-    "aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp",
+    "aten/src/ATen/native/quantized/cpu/qlinear_unpack_impl.cpp",
     "aten/src/ATen/native/quantized/cpu/qmatmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qmul.cpp",
     "aten/src/ATen/native/quantized/cpu/qnormalization.cpp",
@@ -1195,7 +1223,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/fake_quant_per_channel_affine.cpp",
     "aten/src/ATen/native/quantized/fake_quant_per_tensor_affine.cpp",
     "aten/src/ATen/native/quantized/library.cpp",
+    "aten/src/ATen/native/quantized/cpu/ruy_utils.cpp",
     "aten/src/ATen/native/quantized/cpu/xnnpack_utils.cpp",
+    "aten/src/ATen/native/quantized/qlinear_unpack.cpp",
     "aten/src/ATen/quantized/QTensorImpl.cpp",
     "aten/src/ATen/quantized/Quantizer.cpp",
     "aten/src/ATen/native/Activation.cpp",
@@ -1215,7 +1245,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/CPUBlas.cpp",
     "aten/src/ATen/native/ChanelShuffle.cpp",
     "aten/src/ATen/native/Col2Im.cpp",
-    "aten/src/ATen/native/ConstantPadNd.cpp",
+    "aten/src/ATen/native/PadNd.cpp",
     "aten/src/ATen/native/Convolution.cpp",
     "aten/src/ATen/native/ConvolutionMM2d.cpp",
     "aten/src/ATen/native/ConvolutionMM3d.cpp",
