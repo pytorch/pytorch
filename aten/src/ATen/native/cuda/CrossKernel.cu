@@ -1,7 +1,9 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/detail/KernelUtils.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Cross.h>
+#include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/Dispatch.h>
+#include <ATen/core/Tensor.h>
 
 namespace at { namespace native {
 

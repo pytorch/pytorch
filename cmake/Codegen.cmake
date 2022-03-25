@@ -103,6 +103,44 @@ if(INTERN_BUILD_ATEN_OPS)
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
 
+  # Codegen unboxing
+  if(USE_LIGHTWEIGHT_DISPATCH)
+    file(GLOB_RECURSE all_unboxing_script "${CMAKE_CURRENT_LIST_DIR}/../tools/jit/*.py")
+    list(APPEND CUSTOM_BUILD_FLAGS --skip_dispatcher_op_registration)
+    set(GEN_UNBOXING_COMMAND
+        "${PYTHON_EXECUTABLE}" -m tools.jit.gen_unboxing
+        --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+        --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+        )
+    set("GEN_UNBOXING_COMMAND_sources"
+        ${GEN_UNBOXING_COMMAND}
+        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
+        )
+    message(STATUS "Generating sources for lightweight dispatch")
+    execute_process(
+        COMMAND ${GEN_UNBOXING_COMMAND_sources} --dry-run
+        RESULT_VARIABLE RETURN_VALUE
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+    if(NOT RETURN_VALUE EQUAL 0)
+      message(FATAL_ERROR "Failed to get generated_unboxing_sources list")
+    endif()
+
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake")
+    add_custom_command(
+        COMMENT "Generating ATen unboxing sources"
+        OUTPUT
+        ${generated_unboxing_sources}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_unboxing_sources.cmake
+        COMMAND ${GEN_UNBOXING_COMMAND_sources}
+        DEPENDS ${all_unboxing_script} ${sources_templates}
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
+  else() # Otherwise do not generate or include sources into build.
+    set(generated_unboxing_sources "")
+  endif()
+
   set(GEN_PER_OPERATOR_FLAG)
   if(USE_PER_OPERATOR_HEADERS)
     list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
@@ -150,6 +188,7 @@ if(INTERN_BUILD_ATEN_OPS)
 
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
     include("${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake")
 
@@ -161,10 +200,12 @@ if(INTERN_BUILD_ATEN_OPS)
         ${generated_${gen_type}}
         ${cuda_generated_${gen_type}}
         ${core_generated_${gen_type}}
+        ${cpu_vec_generated_${gen_type}}
         ${ops_generated_${gen_type}}
         ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/ops_generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/cpu_vec_generated_${gen_type}.cmake
         ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
       COMMAND ${GEN_COMMAND_${gen_type}}
       DEPENDS ${all_python} ${${gen_type}_templates}
@@ -177,9 +218,9 @@ if(INTERN_BUILD_ATEN_OPS)
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
   # on building the generated ATen files to workaround.
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
-      ${generated_headers} ${core_generated_headers} ${ops_generated_headers}
-      ${generated_sources} ${core_generated_sources} ${ops_generated_sources}
-      ${generated_declarations_yaml})
+      ${generated_headers} ${core_generated_headers} ${cpu_vec_generated_headers} ${ops_generated_headers}
+      ${generated_sources} ${core_generated_sources} ${cpu_vec_generated_sources} ${ops_generated_sources}
+      ${generated_declarations_yaml} ${generated_unboxing_sources})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
@@ -260,12 +301,11 @@ if(INTERN_BUILD_ATEN_OPS)
   # The sources list might get reordered later based on the capabilites.
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
-    foreach(IMPL ${cpu_kernel_cpp_in})
-      file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
+    function(process_vec NAME)
       list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
       set(NEW_IMPL ${CMAKE_BINARY_DIR}/aten/src/ATen/${NAME}.${CPU_CAPABILITY}.cpp)
       configure_file("${PROJECT_SOURCE_DIR}/cmake/IncludeSource.cpp.in" ${NEW_IMPL})
-      set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
+      set(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp} PARENT_SCOPE) # Create list of copies
       list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
       if(MSVC)
         set(EXTRA_FLAGS "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
@@ -284,6 +324,14 @@ if(INTERN_BUILD_ATEN_OPS)
         endif()
       endif()
       set_source_files_properties(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${EXTRA_FLAGS}")
+    endfunction()
+    foreach(IMPL ${cpu_kernel_cpp_in})
+      file(RELATIVE_PATH NAME "${PROJECT_SOURCE_DIR}/aten/src/ATen/" "${IMPL}")
+      process_vec("${NAME}")
+    endforeach()
+    foreach(IMPL ${cpu_vec_generated_sources})
+      file(RELATIVE_PATH NAME "${CMAKE_BINARY_DIR}/aten/src/ATen/" "${IMPL}")
+      process_vec("${NAME}")
     endforeach()
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
