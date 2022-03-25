@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -225,6 +226,33 @@ C10_UNUSED void ClipRangesToGatherToOffsets(
   fuse.runOnGraph(graph);
 }
 
+C10_UNUSED void ToLengthsToOffsets(std::shared_ptr<torch::jit::Graph>& graph) {
+  std::string pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy, %memoryformat)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy, %memoryformat):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph);
+
+  std::string pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = aten::to(%a, %dtype, %nonblocking, %copy)
+        %y1 : Tensor = fb::lengths_to_offsets(%y0, %includelastoffset)
+        return (%y1))IR";
+  std::string fused_pattern2 = R"IR(
+    graph(%a, %includelastoffset, %dtype, %nonblocking, %copy):
+        %y0 : Tensor = fb::to_lengths_to_offsets(%a, %includelastoffset, %dtype)
+        return (%y0))IR";
+  fuse.RegisterRewritePattern(pattern2, fused_pattern2);
+  fuse.runOnGraph(graph);
+}
+
 C10_UNUSED
 void ClipRangesGatherSigridHash(std::shared_ptr<torch::jit::Graph>& graph) {
   // TODO:: check restrictions for inputs; outputs not used elsewhere
@@ -334,6 +362,8 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 
     ClipRangesToGatherToOffsets(graph);
   }
+
+  ToLengthsToOffsets(graph);
 #endif
 }
 
@@ -832,37 +862,6 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   }
 } // namespace jit
 
-void EnableStaticRuntimeLayerNorm(std::shared_ptr<torch::jit::Graph>& graph) {
-  const c10::Symbol static_runtime_layer_norm_symbol =
-      fromQualString("static_runtime::layer_norm");
-  auto nodes = graph->nodes();
-  std::vector<std::pair<Node*, Node*>> replacement;
-  DepthFirstGraphNodeIterator graph_it(graph);
-  for (auto old_node = graph_it.next(); old_node != nullptr;
-       old_node = graph_it.next()) {
-    if (!old_node->matches(torch::schema(
-            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"))) {
-      continue;
-    }
-    TORCH_CHECK(old_node->outputs().size() == 1);
-    auto* new_node = graph->create(
-        static_runtime_layer_norm_symbol,
-        /*layer_norm*/ 1 + /*mean*/ 1 + /*rst=*/1);
-    for (auto* input : old_node->inputs()) {
-      new_node->addInput(input);
-    }
-    replacement.emplace_back(old_node, new_node);
-  }
-  for (const auto& p : replacement) {
-    auto* old_node = p.first;
-    auto* new_node = p.second;
-    new_node->insertBefore(old_node);
-    new_node->output(0)->copyMetadata(old_node->output(0));
-    old_node->output(0)->replaceAllUsesWith(new_node->output(0));
-    old_node->destroy();
-  }
-}
-
 void RemoveImmutableInputDictLookups(
     std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
@@ -1034,6 +1033,50 @@ void ForceNonEmptyOutputs(Graph& graph) {
   if (!none_node->hasUses()) {
     none_node->destroy();
   }
+}
+
+void EliminateExtraPermuteOps(std::shared_ptr<Graph>& graph) {
+  auto input_is_constant_list =
+      [](Node* node, size_t input_idx, const c10::List<int64_t>& expected) {
+        auto input_opt = toIValue(node->input(input_idx));
+        if (!input_opt.has_value() || !input_opt->isIntList()) {
+          return false;
+        }
+        return input_opt->toIntList() == expected;
+      };
+
+  // SubgraphRewriter can't pattern-match on constants, so we use this
+  // extra filter to make sure the values of the `dim` arguments are
+  // correct.
+  auto dims_are_valid_constants =
+      [&input_is_constant_list](
+          const Match& match,
+          const std::unordered_map<std::string, Value*>& vmap) {
+        // Get the nodes in the real graph from the nodes in the template
+        // pattern graph
+        const auto& node_map = match.nodes_map;
+        auto* sum_node = node_map.at(vmap.at("c")->node());
+        auto* permute_node = node_map.at(vmap.at("b")->node());
+        return input_is_constant_list(sum_node, 1, c10::List<int64_t>{-1}) &&
+            input_is_constant_list(
+                   permute_node, 1, c10::List<int64_t>{0, 2, 1});
+      };
+
+  const auto pattern = R"IR(
+    graph(%a, %sum_dim, %permute_dim, %keepdim, %dtype):
+        %b = aten::permute(%a, %permute_dim)
+        %c = aten::sum(%b, %sum_dim, %keepdim, %dtype)
+        return (%c))IR";
+
+  const auto fused_pattern = R"IR(
+    graph(%a, %sum_dim, %permute_dim, %keepdim, %dtype):
+        %new_sum_dim: int[] = prim::Constant[value=[1]]()
+        %d = aten::sum(%a, %new_sum_dim, %keepdim, %dtype)
+        return (%d))IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, fused_pattern);
+  fuse.runOnGraph(graph, dims_are_valid_constants);
 }
 
 } // namespace jit
