@@ -35,12 +35,12 @@
 #include <c10/util/Optional.h>
 #include <c10/util/hash.h>
 
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type.h>
 #include <atomic>
 #include <climits>
 #include <set>
 #include <stack>
-#include "ATen/core/interned_strings.h"
-#include "ATen/core/jit_type.h"
 
 namespace torch {
 namespace jit {
