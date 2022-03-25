@@ -30,7 +30,7 @@ from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
-from jit.test_save_load import TestSaveLoad  # noqa: F401
+from jit.test_save_load import TestSaveLoad, TestSaveLoadFlatbuffer  # noqa: F401
 from jit.test_save_load_for_op_version import TestSaveLoadForOpVersion  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
 from jit.test_python_bindings import TestPythonBindings  # noqa: F401
@@ -77,6 +77,7 @@ from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 from jit.test_tensor_methods import TestTensorMethods  # noqa: F401
+from jit.test_dataclasses import TestDataclasses  # noqa: F401
 
 # Torch
 from torch import Tensor
