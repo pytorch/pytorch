@@ -7,7 +7,6 @@
 
 #if HAS_CUDNN_V8()
 
-#include "c10/core/ScalarType.h"
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
@@ -15,6 +14,7 @@
 #include <ATen/cudnn/Types.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/TensorIterator.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
