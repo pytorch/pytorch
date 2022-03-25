@@ -79,6 +79,7 @@ class LaunchConfig:
     max_restarts: int = 3
     monitor_interval: float = 30
     start_method: str = "spawn"
+    sigterm_timeout: float = 30
     log_dir: Optional[str] = None
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
@@ -226,7 +227,10 @@ def launch_agent(
     )
 
     agent = LocalElasticAgent(
-        spec=spec, start_method=config.start_method, log_dir=config.log_dir
+        spec=spec,
+        start_method=config.start_method,
+        sigterm_timeout=config.sigterm_timeout,
+        log_dir=config.log_dir,
     )
 
     shutdown_rdzv = True

@@ -88,6 +88,7 @@ def start_processes(
     args: Dict[int, Tuple],
     envs: Dict[int, Dict[str, str]],
     log_dir: str,
+    sigterm_timeout: float = 30.0,
     start_method: str = "spawn",
     redirects: Union[Std, Dict[int, Std]] = Std.NONE,
     tee: Union[Std, Dict[int, Std]] = Std.NONE,
@@ -179,6 +180,8 @@ def start_processes(
         envs: env vars to each replica
         log_dir: directory used to write log files
         nprocs: number of copies to create (one on each process)
+        sigterm_timeout: time before a sigterm is escalated to a sigkill,
+                         useful to delay killing to clean up
         start_method: multiprocessing start method (spawn, fork, forkserver)
                       ignored for binaries
         redirects: which std streams to redirect to a log file
@@ -252,6 +255,7 @@ def start_processes(
             tee_stdouts=tee_stdouts,
             tee_stderrs=tee_stderrs,
             error_files=error_files,
+            sigterm_timeout=sigterm_timeout,
         )
     else:
         context = MultiprocessContext(
@@ -265,6 +269,7 @@ def start_processes(
             tee_stderrs=tee_stderrs,
             error_files=error_files,
             start_method=start_method,
+            sigterm_timeout=sigterm_timeout,
         )
 
     try:

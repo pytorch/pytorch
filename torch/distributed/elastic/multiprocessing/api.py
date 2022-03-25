@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import time
+import warnings
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import IntFlag
@@ -194,6 +195,8 @@ class PContext(abc.ABC):
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
                  tee is implemented as a redirect + tail -f <stdout/stderr.log>
+    .. warning:: `timeout` parameter in close() is being deprecated in favour of
+                 self.sigterm_timeout so it can be set at initialisation or any point
     """
 
     def __init__(
@@ -207,6 +210,7 @@ class PContext(abc.ABC):
         tee_stdouts: Dict[int, str],
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
+        sigterm_timeout: float,
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
@@ -222,6 +226,7 @@ class PContext(abc.ABC):
         self.stderrs = stderrs
         self.error_files = error_files
         self.nprocs = nprocs
+        self.sigterm_timeout = sigterm_timeout
 
         self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout)
         self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr)
@@ -306,7 +311,7 @@ class PContext(abc.ABC):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+    def _close(self, death_sig: signal.Signals) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
@@ -314,7 +319,9 @@ class PContext(abc.ABC):
         raise NotImplementedError()
 
     def close(
-        self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
+        self,
+        death_sig: Optional[signal.Signals] = None,
+        timeout: Optional[float] = None,
     ) -> None:
         r"""
         Terminates all processes managed by this context and cleans up any
@@ -322,12 +329,17 @@ class PContext(abc.ABC):
 
         Args:
             death_sig: Death signal to terminate porcesses.
-            timeout: Time to wait for processes to finish, if process is
+            timeout: DEPRECATED Time to wait for processes to finish, if process is
                 still alive after this time, it will be terminated via SIGKILL.
         """
         if not death_sig:
             death_sig = _get_default_signal()
-        self._close(death_sig=death_sig, timeout=timeout)
+        if timeout is not None:
+            warnings.warn(
+                "`timeout` has been deprecated PContext.close(). Set PContext.sigterm_timeout now",
+            )
+            self.sigterm_timeout = timeout
+        self._close(death_sig=death_sig)
         if self._stdout_tail:
             self._stdout_tail.stop()
         if self._stderr_tail:
@@ -388,6 +400,7 @@ class MultiprocessContext(PContext):
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
         start_method: str,
+        sigterm_timeout: float,
     ):
         super().__init__(
             name,
@@ -399,6 +412,7 @@ class MultiprocessContext(PContext):
             tee_stdouts,
             tee_stderrs,
             error_files,
+            sigterm_timeout,
         )
 
         self.start_method = start_method
@@ -514,7 +528,7 @@ class MultiprocessContext(PContext):
         assert self._pc is not None  # assertion for mypy type checking
         return {local_rank: pid for local_rank, pid in enumerate(self._pc.pids())}
 
-    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+    def _close(self, death_sig: signal.Signals) -> None:
         if not self._pc:
             return
         for proc in self._pc.processes:
@@ -526,7 +540,7 @@ class MultiprocessContext(PContext):
                     # If the process exited because of some reason,
                     # `ProcessLookupError` will be rasied, it is safe to ignore it.
                     pass
-        end = time.monotonic() + timeout
+        end = time.monotonic() + self.sigterm_timeout
         for proc in self._pc.processes:
             time_to_wait = end - time.monotonic()
             if time_to_wait <= 0:
@@ -606,6 +620,7 @@ class SubprocessContext(PContext):
         tee_stdouts: Dict[int, str],
         tee_stderrs: Dict[int, str],
         error_files: Dict[int, str],
+        sigterm_timeout: float,
     ):
         super().__init__(
             name,
@@ -617,6 +632,7 @@ class SubprocessContext(PContext):
             tee_stdouts,
             tee_stderrs,
             error_files,
+            sigterm_timeout,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
@@ -689,7 +705,7 @@ class SubprocessContext(PContext):
             for local_rank, sh in self.subprocess_handlers.items()
         }
 
-    def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
+    def _close(self, death_sig: signal.Signals) -> None:
         if not self.subprocess_handlers:
             return
         for handler in self.subprocess_handlers.values():
@@ -698,7 +714,7 @@ class SubprocessContext(PContext):
                     f"Sending process {handler.proc.pid} closing signal {death_sig.name}"
                 )
                 handler.close(death_sig=death_sig)
-        end = time.monotonic() + timeout
+        end = time.monotonic() + self.sigterm_timeout
         for handler in self.subprocess_handlers.values():
             time_to_wait = end - time.monotonic()
             if time_to_wait <= 0:

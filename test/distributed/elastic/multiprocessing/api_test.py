@@ -165,6 +165,21 @@ def dummy_compute() -> torch.Tensor:
     return torch.rand(100, 100)
 
 
+def sigterm_delay(delay: float) -> None:
+    """Process sleeps for time 10*delay, and sleeps
+    for delay when recieving a sigterm."""
+    rank = int(os.environ["RANK"])
+
+    def wait_delay(*_args):
+        print(f"rank {rank} recieved sigterm")
+        time.sleep(delay)
+        print(f"rank {rank} synchronised")
+
+    signal.signal(signal.SIGTERM, wait_delay)
+    print(f"rank {rank} started")
+    time.sleep(60)
+
+
 def redirects_oss_test() -> List[Std]:
     return [
         Std.NONE,
@@ -248,6 +263,13 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 actual = fp.readlines()
                 for line in expected:
                     self.assertIn(line, actual)
+
+        def assert_not_in_file(self, not_expected: List[str], filename: str) -> None:
+            not_expected = [f"{line.rstrip()}\n" for line in not_expected]
+            with open(filename, "r") as fp:
+                actual = fp.readlines()
+                for line in not_expected:
+                    self.assertNotIn(line, actual)
 
         def assert_pids_noexist(self, pids: Dict[int, int]):
             for local_rank, pid in pids.items():
@@ -539,6 +561,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 tee_stderrs={0: "tee_stderr"},
                 error_files={0: "test_file"},
                 start_method="spawn",
+                sigterm_timeout=30.0,
             )
             mp_context._pc = mock.Mock()
             # Using mock since we cannot just set exitcode on process
@@ -655,6 +678,39 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assertFalse(pc.stdouts[1])
             self.assertTrue(pc._stderr_tail.stopped())
             self.assertTrue(pc._stdout_tail.stopped())
+
+        def test_shutdown_delay(self):
+            for start_method in self._start_methods:
+                print("Running test_shutdown_delay")
+                pc = start_processes(
+                    name="delayed_shutdown",
+                    entrypoint=sigterm_delay,
+                    args={
+                        0: (1.0,),
+                        1: (10.0,),
+                    },
+                    envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
+                    log_dir=self.log_dir(),
+                    start_method=start_method,
+                    tee={0: Std.OUT, 1: Std.OUT},
+                    sigterm_timeout=3.0,
+                )
+
+                pc.wait(timeout=1.0, period=0.1)
+                pc.close(signal.SIGTERM)
+
+                self.assert_in_file(
+                    [
+                        "rank 0 started",
+                        "rank 0 recieved sigterm",
+                        "rank 0 synchronised",
+                    ],
+                    pc.stdouts[0],
+                )
+                self.assert_in_file(
+                    ["rank 1 started", "rank 1 recieved sigterm"], pc.stdouts[1]
+                )
+                self.assert_not_in_file(["rank 1 synchronised"], pc.stdouts[1])
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
