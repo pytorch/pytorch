@@ -384,7 +384,6 @@ class TestTracer(JitTestCase):
         x = torch.randn(2, 3, 4)
         y = torch.randn(4, 5, 6)
 
-        # Check that it behaves as expected
         traced_fn = torch.jit.trace(fn, x)
         self.assertEqual(traced_fn(y), fn(y))
         self.assertEqual(traced_fn(x), fn(x))
