@@ -71,14 +71,20 @@ class TestMathOps(ShardedTensorTestBase):
                 self.assertEqual(output, global_output)
 
             # test basic math ops between ShardedTensor and scalar
-            sharded_output = g["f"](sharded_lhs, 3)
-            output = torch.empty((12, 3)) if current_rank == 0 else None
-            sharded_output.gather(dst=0, out=output)
+            sharded_output_lhs = g["f"](sharded_lhs, 3)
+            output_lhs = torch.empty((12, 3)) if current_rank == 0 else None
+            sharded_output_lhs.gather(dst=0, out=output_lhs)
+
+            sharded_output_rhs = g["f"](3, sharded_lhs)
+            output_rhs = torch.empty((12, 3)) if current_rank == 0 else None
+            sharded_output_rhs.gather(dst=0, out=output_rhs)
 
             if current_rank == 0:
-                global_output = g["f"](global_lhs, 3)
+                global_output_lhs = g["f"](global_lhs, 3)
+                global_output_rhs = g["f"](3, global_lhs)
 
-                self.assertEqual(output, global_output)
+                self.assertEqual(output_lhs, global_output_lhs)
+                self.assertEqual(output_rhs, global_output_rhs)
 
 
 

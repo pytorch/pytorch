@@ -796,6 +796,9 @@ class ShardedTensor(object):
     def __add__(self, other):
         return handle_torch_function(torch.Tensor.__add__, (self, other), self, other)
 
+    def __radd__(self, other):
+        return handle_torch_function(torch.Tensor.__radd__, (self, other), self, other)
+
     def __sub__(self, other):
         return handle_torch_function(torch.Tensor.__sub__, (self, other), self, other)
 
@@ -804,6 +807,9 @@ class ShardedTensor(object):
 
     def __mul__(self, other):
         return handle_torch_function(torch.Tensor.__mul__, (self, other), self, other)
+
+    def __rmul__(self, other):
+        return handle_torch_function(torch.Tensor.__rmul__, (self, other), self, other)
 
     def __div__(self, other):
         return handle_torch_function(torch.Tensor.__div__, (self, other), self, other)
