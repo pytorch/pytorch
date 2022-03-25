@@ -29,6 +29,7 @@ from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
 from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
+from functorch.experimental import functionalize
 from functorch._src.custom_function import custom_vjp
 
 # NB: numpy is a testing dependency!
@@ -2604,6 +2605,57 @@ class TestExamplesCorrectness(TestCase):
         self.assertEqual(result_grads, expected_grads, atol=1e-3, rtol=1.)
 
 
+class TestFunctionalize(TestCase):
+    def _check_functionalize_correctness(self, f, inpt):
+        inpt1 = inpt.clone()
+        inpt2 = inpt.clone()
+
+        expected_outputs = f(inpt1)
+        actual_outputs = vmap(functionalize(f))(inpt2.unsqueeze(0))[0].squeeze()
+        # Check that outputs are the same
+        self.assertEqual(actual_outputs, expected_outputs)
+
+    def test_simple_view(self, device):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            tmp = torch.ones(2, device=device)
+            y = x.view(4, 2)
+            y.add_(tmp)
+            return x
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_multioutput_view(self, device):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            tmp = torch.ones(2, device=device)
+            y1, y2 = x.split(2)
+            y1_view = y1.diagonal()
+            y1_view.add_(tmp)
+            return x
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_inplace_view(self, device):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            tmp = torch.ones(4, device=device)
+            y = x + x
+            y2 = y.transpose(1, 0)
+            z = y2[0]
+            z.add_(tmp)
+            return y
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+    def test_multioutput_inplace_slice_view(self, device):
+        def f(x: torch.Tensor) -> torch.Tensor:
+            tmp = torch.ones(2, 2, device=device)
+            y = x.view(8)
+            z0 = y.reshape(2, 4)
+            z1 = z0.transpose(1, 0)
+            z1.unsqueeze_(0)
+            z1.squeeze_()
+            z2, z3 = z1.split(2)
+            z2.add_(tmp)
+            return x
+        self._check_functionalize_correctness(f, torch.zeros(4, 2, device=device))
+
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
     TestGradTransform,
@@ -2637,6 +2689,11 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestFunctionalize,
     globals(),
     only_for=only_for,
 )

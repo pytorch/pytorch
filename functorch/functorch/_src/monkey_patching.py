@@ -22,6 +22,11 @@ def _functorch_str(tensor):
     if level == -1:
         return _old_str(tensor)
 
+    if _C.is_functionaltensor(tensor):
+        # Since we're unwrapping the FunctionalTensorWrapper, we need to make sure
+        # that it's up to date first
+        torch._sync(tensor)
+
     value = _C.get_unwrapped(tensor)
     dl_enabled = _C.tls_set_is_included()
     try:
@@ -48,6 +53,8 @@ def _functorch_str(tensor):
             f'{prep_value(value_repr)}\n'
             f')'
         )
+    if _C.is_functionaltensor(tensor):
+        return f'FunctionalTensor(lvl={level}, value=\\\n{value_repr})'
 
     raise ValueError("We don't know how to print this, please file us an issue")
 

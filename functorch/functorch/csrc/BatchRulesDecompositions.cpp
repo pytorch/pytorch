@@ -5,12 +5,13 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <functorch/csrc/BatchRulesHelper.h>
 #include <ATen/Operators.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <functorch/csrc/PlumbingHelper.h>
-#include <functorch/csrc/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <functorch/csrc/BatchRulesHelper.h>
+#include <functorch/csrc/BatchedFallback.h>
+#include <functorch/csrc/DynamicLayer.h>
+#include <functorch/csrc/PlumbingHelper.h>
 
 namespace at { namespace functorch {
 
@@ -52,8 +53,13 @@ void decompose_functional(const c10::OperatorHandle& op, torch::jit::Stack* stac
   }
 
   // Step 2: set up TLS such that we hit the functionalization kernels before the batching rules.
-  // Note: this relies on the fact that Functionalization > BatchMode in DispatchKey.h
-  c10::impl::IncludeDispatchKeyGuard include_guard(c10::DispatchKeySet{c10::DispatchKey::Functionalize});
+  // Note: this relies on the fact that Functionalize > FuncTorchBatched in DispatchKey.h.
+  // Also, adding Functionalize to the include set isn't enough: we also need to remove it from the exclude set.
+  // That's because functorch DynamicLayer logic may have added Functionalize to the exclude set beforehand.
+  auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+  local_keyset.excluded_ = local_keyset.excluded_.remove(c10::DispatchKey::Functionalize);
+  local_keyset.included_ = local_keyset.included_.add(c10::DispatchKey::Functionalize);
+  c10::impl::ForceDispatchKeyGuard guard(local_keyset);
 
   // Step 3: redispatch to native kernel
   // TODO: this is technically kind of sketchy, since we're relying on the fact
