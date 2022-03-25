@@ -98,7 +98,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
         }
         totalCount
       }
-      comments(last: 1) {
+      comments(last: 5) {
         nodes {
           bodyText
           author {
@@ -108,6 +108,11 @@ query ($owner: String!, $name: String!, $number: Int!) {
           editor {
             login
           }
+          databaseId
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
         }
       }
     }
@@ -170,6 +175,32 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
               }
             }
           }
+        }
+      }
+    }
+  }
+}
+"""
+
+GH_GET_PR_PREV_COMMENTS = """
+query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      comments(last: 100, before: $cursor) {
+        nodes {
+          bodyText
+          author {
+            login
+          }
+          authorAssociation
+          editor {
+            login
+          }
+          databaseId
+        }
+        pageInfo {
+          startCursor
+          hasPreviousPage
         }
       }
     }
@@ -247,8 +278,19 @@ def parse_args() -> Any:
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--revert", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--comment-id", type=int)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
+
+
+@dataclass
+class GitHubComment:
+    body_text: str
+    author_login: str
+    author_association: str
+    editor_login: Optional[str]
+    database_id: int
 
 
 class GitHubPR:
@@ -260,6 +302,7 @@ class GitHubPR:
         self.info = gh_get_pr_info(org, project, pr_num)
         self.changed_files: Optional[List[str]] = None
         self.conclusions: Optional[Dict[str, str]] = None
+        self.comments: Optional[List[GitHubComment]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -400,18 +443,49 @@ class GitHubPR:
     def get_pr_url(self) -> str:
         return f"https://github.com/{self.org}/{self.project}/pull/{self.pr_num}"
 
-    def get_comment_body(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["bodyText"])
+    @staticmethod
+    def _comment_from_node(node: Any) -> GitHubComment:
+        editor = node["editor"]
+        return GitHubComment(body_text=node["bodyText"],
+                             author_login=node["author"]["login"],
+                             author_association=node["authorAssociation"],
+                             editor_login=editor["login"] if editor else None,
+                             database_id=node["databaseId"]
+                             )
 
-    def get_comment_author_login(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["author"]["login"])
+    def get_comments(self) -> List[GitHubComment]:
+        if self.comments is not None:
+            return self.comments
+        self.comments = []
+        info = self.info["comments"]
+        # Do not try to fetch more than 10K comments
+        for _ in range(100):
+            self.comments = [self._comment_from_node(node) for node in info["nodes"]] + self.comments
+            if not info["pageInfo"]["hasPreviousPage"]:
+                break
+            rc = gh_graphql(GH_GET_PR_PREV_COMMENTS,
+                            name=self.project,
+                            owner=self.org,
+                            number=self.pr_num,
+                            cursor=info["pageInfo"]["startCursor"])
+            info = rc["data"]["repository"]["pullRequest"]["comments"]
+        return self.comments
 
-    def get_comment_editor_login(self, num: int = -1) -> Optional[str]:
-        rc = self.info["comments"]["nodes"][num]["editor"]
-        return rc["login"] if rc is not None else None
+    def get_last_comment(self) -> GitHubComment:
+        return self._comment_from_node(self.info["comments"]["nodes"][-1])
 
-    def get_comment_author_association(self, num: int = -1) -> str:
-        return cast(str, self.info["comments"]["nodes"][num]["authorAssociation"])
+    def get_comment_by_id(self, database_id: int) -> GitHubComment:
+        if self.comments is None:
+            # Fastpath - try searching in partial prefetched comments
+            for node in self.info["comments"]["nodes"]:
+                comment = self._comment_from_node(node)
+                if comment.database_id == database_id:
+                    return comment
+
+        for comment in self.get_comments():
+            if comment.database_id == database_id:
+                return comment
+        raise RuntimeError(f"Comment with id {database_id} not found")
 
     def get_diff_revision(self) -> Optional[str]:
         rc = RE_DIFF_REV.search(self.get_body())
@@ -426,7 +500,7 @@ class GitHubPR:
             return False
         return checks[checkrun_name] != "SUCCESS"
 
-    def merge_ghstack_into(self, repo: GitRepo) -> None:
+    def merge_ghstack_into(self, repo: GitRepo, force: bool) -> None:
         assert self.is_ghstack_pr()
         approved_by = self.get_approved_by()
         # For ghstack, cherry-pick commits based from origin
@@ -447,7 +521,7 @@ class GitHubPR:
                     continue
                 approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
-                find_matching_merge_rule(pr, repo)
+                find_matching_merge_rule(pr, repo, force=force)
 
             # Adding the url here makes it clickable within the Github UI
             approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
@@ -456,9 +530,9 @@ class GitHubPR:
             msg += f"\nApproved by: {approved_by_urls}\n"
             repo.amend_commit_message(msg)
 
-    def merge_into(self, repo: GitRepo, dry_run: bool = False) -> None:
+    def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(self, repo)
+        find_matching_merge_rule(self, repo, force=force)
         if self.has_internal_changes():
             raise RuntimeError("This PR must be landed via phabricator")
         if repo.current_branch() != self.default_branch():
@@ -474,7 +548,7 @@ class GitHubPR:
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
         else:
-            self.merge_ghstack_into(repo)
+            self.merge_ghstack_into(repo, force)
 
         repo.push(self.default_branch(), dry_run)
 
@@ -499,7 +573,7 @@ def read_merge_rules(repo: GitRepo) -> List[MergeRule]:
 
 
 
-def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
+def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception"""
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
@@ -516,7 +590,8 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
         if rule.mandatory_checks_name is not None:
             pass_checks = True
             checks = pr.get_checkrun_conclusions()
-            for checkname in rule.mandatory_checks_name:
+            # HACK: We don't want to skip CLA check, even when forced
+            for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
                 if checkname not in checks or checks[checkname] != "SUCCESS":
                     if checkname not in checks:
                         print(f"Skipping rule {rule_name} as mandatory check {checkname} is not in {checks.keys()}")
@@ -539,24 +614,25 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo) -> MergeRule:
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
-    if not RE_REVERT_CMD.match(pr.get_comment_body()):
-        raise RuntimeError(f"Comment {pr.get_comment_body()} does not seem to be a valid revert command")
-    if pr.get_comment_editor_login() is not None:
+    comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
+    if not RE_REVERT_CMD.match(comment.body_text):
+        raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
+    if comment.editor_login is not None:
         return post_comment("Don't want to revert based on edited command")
-    author_association = pr.get_comment_author_association()
-    author_login = pr.get_comment_author_login()
+    author_association = comment.author_association
+    author_login = comment.author_login
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     expected_association = "CONTRIBUTOR" if pr.is_base_repo_private() else "MEMBER"
     if author_association != expected_association and author_association != "OWNER":
         return post_comment(f"Will not revert as @{author_login} is not a {expected_association}, but {author_association}")
 
-    # Raises exception if matching rule is not found
-    find_matching_merge_rule(pr, repo)
+    # Raises exception if matching rule is not found, but ignores all status checks
+    find_matching_merge_rule(pr, repo, force=True)
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
@@ -590,7 +666,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
         except Exception as e:
             msg = f"Reverting PR {args.pr_num} failed due to {e}"
             run_url = os.getenv("GH_RUN_URL")
