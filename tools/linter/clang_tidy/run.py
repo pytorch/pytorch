@@ -265,7 +265,7 @@ async def _run_clang_tidy(
     commands = []
     for f in files:
         print(">>><<< processing file :")
-        print(file)
+        print(f)
         command = list(base) + [map_filename(options.compile_commands_dir, f)]
         commands.append((command, f))
 
@@ -491,10 +491,10 @@ async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
         return CommandResult(0, "", ""), []
 
     print("<<<>>> linefilterslist")
-    header_filter = {}
+    header_filter = Dict[str, Any]
     header_filter['name'] = '.h'
-    header_filter['lines'] = [0,99]
-    line_filters+=header_filter
+    header_filter['lines'] = [0, 99]
+    line_filters.append(header_filter)
     print(line_filters)
 
     result = await _run_clang_tidy(options, line_filters, files)
