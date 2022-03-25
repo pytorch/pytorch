@@ -11,7 +11,7 @@ Diagonal::Diagonal(
     int64_t offset,
     int64_t dim1,
     int64_t dim2)
-    : BackendNode(
+    : Node(
           OpKind(at::aten::diagonal),
           {input},
           [&]() {
@@ -25,7 +25,7 @@ Diagonal::Diagonal(
 
 std::string Diagonal::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+  ss << Node::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
      << ", dim2=" << dim2_;
   return ss.str();
 }

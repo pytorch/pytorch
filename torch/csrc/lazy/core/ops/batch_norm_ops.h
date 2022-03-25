@@ -1,12 +1,12 @@
 #pragma once
 
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 namespace torch {
 namespace lazy {
 
 // Node for the backward batch norm operator.
-class NativeBatchNormBackward : public torch::lazy::BackendNode {
+class NativeBatchNormBackward : public torch::lazy::Node {
  public:
   NativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
                             const torch::lazy::Value& weight, const torch::lazy::Value& running_mean,
@@ -33,7 +33,7 @@ class NativeBatchNormBackward : public torch::lazy::BackendNode {
   std::array<bool, 3> output_mask_;
 };
 
-class NativeBatchNormForward : public torch::lazy::BackendNode {
+class NativeBatchNormForward : public torch::lazy::Node {
  public:
   NativeBatchNormForward(const torch::lazy::Value& input, const torch::lazy::Value& weight,
                            const torch::lazy::Value& bias, const torch::lazy::Value& running_mean,

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 namespace torch {
 namespace lazy {
@@ -10,7 +10,7 @@ namespace lazy {
 // metadata should not be using this class TORCH_API (and have the metadata
 // captured by the LowerFn), but they should instead create a dedicated IR node.
 // Doing the former would limit IR introspection.
-class TORCH_API Generic : public BackendNode {
+class TORCH_API Generic : public Node {
  public:
   Generic(
       OpKind op,

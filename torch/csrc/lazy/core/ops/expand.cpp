@@ -7,7 +7,7 @@ Expand::Expand(
     const Value& input,
     std::vector<int64_t> size,
     bool is_scalar_expand)
-    : BackendNode(
+    : Node(
           OpKind(at::aten::expand),
           {input},
           /*num_outputs=*/1,
@@ -20,7 +20,7 @@ Expand::Expand(
 
 std::string Expand::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", size=(" << c10::Join(", ", size_)
+  ss << Node::ToString() << ", size=(" << c10::Join(", ", size_)
      << "), is_scalar_expand=" << is_scalar_expand_;
   return ss.str();
 }

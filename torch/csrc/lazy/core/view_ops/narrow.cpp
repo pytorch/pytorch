@@ -9,7 +9,7 @@ Narrow::Narrow(
     const Value& input,
     c10::ArrayRef<int64_t> base_indices,
     c10::ArrayRef<int64_t> sizes)
-    : BackendNode(
+    : Node(
           OpKind(at::aten::narrow),
           {input},
           /*num_outputs=*/1,
@@ -23,7 +23,7 @@ Narrow::Narrow(
 
 std::string Narrow::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", base_indices=("
+  ss << Node::ToString() << ", base_indices=("
      << c10::Join(", ", base_indices_) << "), sizes=("
      << c10::Join(", ", sizes_) << ")";
   return ss.str();

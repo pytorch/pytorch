@@ -10,7 +10,7 @@ NativeBatchNormBackward::NativeBatchNormBackward(
     const torch::lazy::Value& running_var, const torch::lazy::Value& save_mean,
     const torch::lazy::Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : torch::lazy::BackendNode(
+    : torch::lazy::Node(
           torch::lazy::OpKind(at::aten::native_batch_norm_backward),
           {grad_out, input, weight, running_mean, running_var, save_mean,
            save_invstd},
@@ -29,7 +29,7 @@ NativeBatchNormBackward::NativeBatchNormBackward(
     const torch::lazy::Value& weight, const torch::lazy::Value& save_mean,
     const torch::lazy::Value& save_invstd, bool training, double eps,
     std::array<bool, 3> output_mask)
-    : torch::lazy::BackendNode(
+    : torch::lazy::Node(
           torch::lazy::OpKind(at::aten::native_batch_norm_backward),
           {grad_out, input, weight, save_mean, save_invstd},
           {input.shape(),
@@ -44,7 +44,7 @@ NativeBatchNormBackward::NativeBatchNormBackward(
 
 std::string NativeBatchNormBackward::ToString() const {
   std::stringstream ss;
-  ss << torch::lazy::BackendNode::ToString() << ", training=" << training_
+  ss << torch::lazy::Node::ToString() << ", training=" << training_
      << ", eps=" << eps_;
   return ss.str();
 }
@@ -54,7 +54,7 @@ NativeBatchNormForward::NativeBatchNormForward(
     const torch::lazy::Value& bias, const torch::lazy::Value& running_mean,
     const torch::lazy::Value& running_var, bool training, double momentum,
     double eps)
-    : torch::lazy::BackendNode(torch::lazy::OpKind(at::aten::native_batch_norm),
+    : torch::lazy::Node(torch::lazy::OpKind(at::aten::native_batch_norm),
                           {input, weight, bias, running_mean, running_var},
                           {input.shape(),
                            running_mean.shape(),
@@ -67,7 +67,7 @@ NativeBatchNormForward::NativeBatchNormForward(
 
 std::string NativeBatchNormForward::ToString() const {
   std::stringstream ss;
-  ss << torch::lazy::BackendNode::ToString() << ", training=" << training_
+  ss << torch::lazy::Node::ToString() << ", training=" << training_
      << ", momentum=" << momentum_ << ", eps=" << eps_;
   return ss.str();
 }

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 namespace torch {
 namespace lazy {
@@ -10,7 +10,7 @@ namespace lazy {
 // Even though a Constant could have been used, for simple scalars broadcasted
 // to big shapes, the Constant leads to big literals expanded within the
 // computation graph.
-class TORCH_API Scalar : public BackendNode {
+class TORCH_API Scalar : public Node {
  public:
   Scalar(const at::Scalar& value, Shape shape);
   Scalar(const at::Scalar& value, c10::ScalarType type);

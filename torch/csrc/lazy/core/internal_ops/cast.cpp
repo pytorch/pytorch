@@ -18,7 +18,7 @@ Cast::Cast(
     const Value& input,
     at::ScalarType dtype,
     c10::optional<at::ScalarType> stype)
-    : BackendNode(
+    : Node(
           ltc_cast,
           {input},
           {NodeOutputShape(input, dtype)},
@@ -29,7 +29,7 @@ Cast::Cast(
 
 std::string Cast::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString();
+  ss << Node::ToString();
   ss << ", dtype=" << dtype_;
   if (stype_) {
     ss << ", stype=" << *stype_;

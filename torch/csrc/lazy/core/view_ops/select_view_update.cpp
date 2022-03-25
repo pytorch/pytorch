@@ -14,7 +14,7 @@ SelectViewUpdate::SelectViewUpdate(
     int64_t start,
     int64_t end,
     int64_t stride)
-    : BackendNode(
+    : Node(
           ltc_select_view_update,
           {target, source},
           {target.shape()},
@@ -27,7 +27,7 @@ SelectViewUpdate::SelectViewUpdate(
 
 std::string SelectViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", dim=" << dim_ << ", start=" << start_
+  ss << Node::ToString() << ", dim=" << dim_ << ", start=" << start_
      << ", end=" << end_ << ", stride=" << stride_;
   return ss.str();
 }

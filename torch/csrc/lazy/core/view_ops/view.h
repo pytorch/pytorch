@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 #include <vector>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API View : public BackendNode {
+class TORCH_API View : public Node {
  public:
   View(const Value& input, std::vector<int64_t> output_size);
 

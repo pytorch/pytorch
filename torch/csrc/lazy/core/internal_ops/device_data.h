@@ -1,12 +1,12 @@
 #pragma once
 
 #include <torch/csrc/lazy/backend/backend_data.h>
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API DeviceData : public BackendNode {
+class TORCH_API DeviceData : public Node {
  public:
   explicit DeviceData(std::shared_ptr<BackendData> data);
 

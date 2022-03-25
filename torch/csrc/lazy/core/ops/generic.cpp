@@ -9,7 +9,7 @@ Generic::Generic(
     Shape shape,
     size_t num_outputs,
     hash_t hash_seed)
-    : BackendNode(op, operands, {std::move(shape)}, num_outputs, hash_seed),
+    : Node(op, operands, {std::move(shape)}, num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
 Generic::Generic(
@@ -18,7 +18,7 @@ Generic::Generic(
     const std::function<Shape()>& shape_fn,
     size_t num_outputs,
     hash_t hash_seed)
-    : BackendNode(op, operands, shape_fn, num_outputs, hash_seed),
+    : Node(op, operands, shape_fn, num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
 Generic::Generic(
@@ -26,10 +26,10 @@ Generic::Generic(
     OpList operands,
     size_t num_outputs,
     hash_t hash_seed)
-    : BackendNode(op, operands, num_outputs, hash_seed), hash_seed_(hash_seed) {}
+    : Node(op, operands, num_outputs, hash_seed), hash_seed_(hash_seed) {}
 
 Generic::Generic(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : BackendNode(op, std::move(shape), num_outputs, hash_seed),
+    : Node(op, std::move(shape), num_outputs, hash_seed),
       hash_seed_(hash_seed) {}
 
 } // namespace lazy

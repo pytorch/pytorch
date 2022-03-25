@@ -12,7 +12,7 @@ Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> size) {
 } // namespace
 
 Resize::Resize(const Value& input, std::vector<int64_t> size)
-    : BackendNode(
+    : Node(
           OpKind(at::aten::resize),
           {input},
           [&]() { return NodeOutputShape(input, size); },
@@ -22,7 +22,7 @@ Resize::Resize(const Value& input, std::vector<int64_t> size)
 
 std::string Resize::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", size=(" << c10::Join(", ", size_) << ")";
+  ss << Node::ToString() << ", size=(" << c10::Join(", ", size_) << ")";
   return ss.str();
 }
 

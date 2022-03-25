@@ -1,11 +1,11 @@
 #pragma once
 
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API NarrowViewUpdate : public BackendNode {
+class TORCH_API NarrowViewUpdate : public Node {
  public:
   NarrowViewUpdate(
       const Value& input,

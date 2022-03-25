@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/ArrayRef.h>
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -16,9 +16,9 @@ using TSOpVector = std::vector<torch::jit::Value*>;
 TORCH_API void TsNodeSetShapeDeferred(
     NodePtr node, const std::function<Shape()>& shape_fn);
 
-class TORCH_API TsNode : public lazy::BackendNode {
+class TORCH_API TsNode : public lazy::Node {
  public:
-  using BackendNode::BackendNode;
+  using Node::Node;
 
   // Lower is a backend-specific method since it returns a backend specific
   // type. hence, it is convenient to define it differently per-backend rather

@@ -7,7 +7,7 @@ namespace torch {
 namespace lazy {
 
 DeviceData::DeviceData(std::shared_ptr<BackendData> data)
-    : BackendNode(
+    : Node(
           ltc_device_data,
           data->shape(),
           /*num_outputs=*/1,
@@ -16,7 +16,7 @@ DeviceData::DeviceData(std::shared_ptr<BackendData> data)
 
 std::string DeviceData::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", device=" << data_->device();
+  ss << Node::ToString() << ", device=" << data_->device();
   return ss.str();
 }
 

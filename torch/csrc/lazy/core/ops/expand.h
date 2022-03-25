@@ -1,13 +1,13 @@
 #pragma once
 
-#include <torch/csrc/lazy/backend/backend_node.h>
+#include <torch/csrc/lazy/core/ir.h>
 
 #include <vector>
 
 namespace torch {
 namespace lazy {
 
-class TORCH_API Expand : public BackendNode {
+class TORCH_API Expand : public Node {
  public:
   Expand(const Value& input, std::vector<int64_t> size, bool is_scalar_expand);
 

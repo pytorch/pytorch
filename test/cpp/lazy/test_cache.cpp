@@ -24,11 +24,8 @@ class CacheNode : public Node {
   const Output& operand(size_t i) const override {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of test node");
   }
-  const Shape& shape(size_t i) const override { return shape_; }
-  c10::ArrayRef<Shape> shapes() const override { return {shape_}; }
  private:
   std::string str_;
-  Shape shape_;
 };
 
 TEST(CacheTest, BasicTest) {
@@ -66,15 +63,7 @@ TEST(CacheTest, BasicTest) {
 class CacheNodeWithShape : public TsNode {
  public:
   explicit CacheNodeWithShape(const Shape& shape)
-      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0),
-        shape_(shape) {}
-
-  const Shape& getShape() const {
-    return shape_;
-  }
-
- private:
-  Shape shape_;
+      : TsNode(OpKind(), shape, /* num_outputs */ 1, /* seed */ 0) {}
 };
 
 TEST(CacheTest, ShapeCacheTestForDynamicShape) {
@@ -89,8 +78,8 @@ TEST(CacheTest, ShapeCacheTestForDynamicShape) {
    * Make sure the cached shape for node (2, 4) is not used for node (4, 2)
    */
   for (auto& node : nodes) {
-    EXPECT_EQ(node.getShape(), node.GetOpShape([&]() {
-      return node.getShape();
+    EXPECT_EQ(node.shape(), node.GetOpShape([&]() {
+      return node.shape();
     }));
   }
 

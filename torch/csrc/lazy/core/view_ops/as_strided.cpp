@@ -13,7 +13,7 @@ AsStrided::AsStrided(
     std::vector<int64_t> size,
     std::vector<int64_t> stride,
     int64_t storage_offset)
-    : BackendNode(
+    : Node(
           OpKind(at::aten::as_strided),
           {input},
           [&]() {
@@ -27,7 +27,7 @@ AsStrided::AsStrided(
 
 std::string AsStrided::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", size=(" << c10::Join(", ", size_)
+  ss << Node::ToString() << ", size=(" << c10::Join(", ", size_)
      << "), stride=(" << c10::Join(", ", stride_)
      << "), storage_offset=" << storage_offset_;
   return ss.str();

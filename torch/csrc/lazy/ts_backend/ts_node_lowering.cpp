@@ -12,6 +12,7 @@
 #include <torch/csrc/lazy/core/ops/scalar.h>
 #include <torch/csrc/lazy/core/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
+#include <torch/csrc/lazy/core/tensor_list.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
 #include <torch/csrc/lazy/core/view_ops/narrow.h>
@@ -47,13 +48,13 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     } else if (auto* tensor_list = dynamic_cast<const torch::lazy::TensorList*>(node)) {
       // Then check if we're lowering a tensor list
       ops = LowerTensorList(node);
-    } else if (auto* bnode = dynamic_cast<const torch::lazy::BackendNode*>(node)) {
+    } else if (auto* bnode = dynamic_cast<const torch::lazy::Node*>(node)) {
       // Then fall back to legacy lowering code, which should be gradually
       // removed
       ops = LowerNonCodegenOps(node);
     } else {
       throw std::runtime_error(
-          "Expected torch::lazy::BackendNode but could not dynamic cast");
+          "Expected torch::lazy::Node but could not dynamic cast");
     }
 
     if (ops.empty()) {

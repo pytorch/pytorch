@@ -17,7 +17,7 @@ Shape NodeOutputShape(const Value& input, c10::ArrayRef<int64_t> output_sizes) {
 } // namespace
 
 View::View(const Value& input, std::vector<int64_t> output_size)
-    : BackendNode(
+    : Node(
           OpKind(at::aten::view),
           {input},
           {NodeOutputShape(input, output_size)},
@@ -27,7 +27,7 @@ View::View(const Value& input, std::vector<int64_t> output_size)
 
 std::string View::ToString() const {
   std::stringstream ss;
-  ss << BackendNode::ToString() << ", output_size=(" << c10::Join(", ", output_size_)
+  ss << Node::ToString() << ", output_size=(" << c10::Join(", ", output_size_)
      << ")";
   return ss.str();
 }

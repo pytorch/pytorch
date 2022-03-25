@@ -14,7 +14,7 @@ std::vector<int64_t> BuildUnsqueezedDimensions(
 }
 
 Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
-    : torch::lazy::BackendNode(
+    : torch::lazy::Node(
           torch::lazy::OpKind(at::aten::unsqueeze),
           {input},
           /*num_outputs=*/1,
@@ -30,7 +30,7 @@ Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
 
 std::string Unsqueeze::ToString() const {
   std::stringstream ss;
-  ss << torch::lazy::BackendNode::ToString() << ", dim=" << dim_;
+  ss << torch::lazy::Node::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 
