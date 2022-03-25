@@ -22,6 +22,39 @@ concurrency:
           }
 {%- endmacro -%}
 
+{%- macro gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_labels, branches = ['master', 'main', 'release/*'], enable_doc_jobs = True) -%}
+on:
+{%- if on_pull_request %}
+  pull_request:
+{%- endif %}
+  push:
+{%- if enable_doc_jobs and is_scheduled %}
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+{%- endif %}
+{%- for label in ciflow_labels | sort %}
+  {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
+    tags:
+  {%- endif %}
+  {%- if label != "ciflow/default" %}
+      - '!{{ label }}/*'
+  {%- endif %}
+{%- endfor %}
+{%- if not is_scheduled %}
+    branches:
+{%- for branch in branches %}
+      - !{{ branch }}
+{%- endfor %}
+{%- endif %}
+{%- if is_scheduled %}
+  schedule:
+    - cron: !{{ is_scheduled }}
+{%- endif %}
+  workflow_dispatch:
+{%- endmacro -%}
+
 {%- macro display_ec2_information() -%}
       - name: Display EC2 information
         shell: bash
@@ -57,20 +90,25 @@ concurrency:
         if: !{{ when }}
         env:
           AWS_DEFAULT_REGION: us-east-1
+          GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: !{{ build_environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 {%- if needs_credentials %}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 {%- endif %}
         shell: bash
         run: |
+          set -x
           python3 -m pip install -r requirements.txt
           python3 -m pip install boto3==1.19.12
+          GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
+          export GHA_WORKFLOW_JOB_ID
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
