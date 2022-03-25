@@ -994,12 +994,22 @@ Tensor& narrow_copy_dense_cpu_out(
   return output;
 }
 
+Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return narrow_copy(self, dim, start, c10::SymInt{length});
+}
+
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length){
   // TODO: we should also fix `narrow` to accept `SymInt`
   // When we do introduce SymIntNode, real symints can flow
   // into this function
   const int64_t length = sym_length.expect_int();
   return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+}
+
+Tensor& narrow_copy_dense_cpu_symint_out(
+  const Tensor& self, int64_t dim, int64_t start, int64_t sym_length, Tensor& output
+) {
+  return narrow_copy_dense_cpu_out(self, dim, start, sym_length, output);
 }
 
 Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, SymInt length){
