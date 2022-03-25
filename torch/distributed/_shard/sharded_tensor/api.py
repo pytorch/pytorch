@@ -5,8 +5,7 @@ from typing import (
     Dict,
     List,
     Optional,
-    Sequence,
-    Union
+    Sequence
 )
 import weakref
 
