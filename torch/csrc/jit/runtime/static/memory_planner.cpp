@@ -610,7 +610,6 @@ void PrecomputedOffsetsMemoryPlanner::allocateManagedTensors() {
     auto offset = managed_tensor.offset;
     auto* storage_impl = managed_tensor.storage_impl;
 
-    // TODO factor out into function
     DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
     storage_impl->set_data_ptr_noswap(
