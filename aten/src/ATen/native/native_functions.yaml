@@ -9563,6 +9563,9 @@
     CPU: replication_pad3d_backward_cpu
     CUDA: replication_pad3d_backward_cuda
 
+- func: _pad_circular(Tensor self, int[] pad) -> Tensor
+  python_module: nn
+
 - func: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
