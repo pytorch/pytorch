@@ -2638,6 +2638,27 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 
 REGISTER_OPERATOR_FUNCTOR(
+    aten::special_log_ndtr,
+    aten_special_log_ndtr,
+    [](Node* n) -> SROperator {
+      if (n->matches(
+              torch::schema("aten::special_log_ndtr(Tensor self) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::cpu::special_log_ndtr(self);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::cpu::special_log_ndtr_out(out, self);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
     aten::special_erfcx,
     aten_special_erfcx,
     [](Node* n) -> SROperator {

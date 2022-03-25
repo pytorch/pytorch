@@ -276,6 +276,15 @@ const auto ndtri_string = jiterator_stringify(
   }
 ); // ndtri_string
 
+const auto log_ndtr_string = jiterator_stringify(
+
+  template <typename T>
+  T log_ndtr(T x) {
+    
+  }
+); // log_ndtr_string
+
+
 const auto gcd_string = jiterator_stringify(
   template <typename T>
   T gcd(const T a_in, const T b_in) {

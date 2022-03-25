@@ -1653,6 +1653,12 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   return x;
 }
 
+// TODO: add header here
+template <typename T>
+static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
+  
+}
+
 /* The next function is taken from http://ab-initio.mit.edu/Faddeev */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology
