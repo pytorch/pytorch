@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 #include <fstream>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -659,6 +660,10 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::MMBatchSide:
     case prim::BroadcastSizes:
     case prim::ChunkSizes:
+    // this should never be seen outside of initial compilation
+    // but because of some dependencies with closure invoking alias
+    // db needs to be handled here
+    case prim::EmptyListLiteral:
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:

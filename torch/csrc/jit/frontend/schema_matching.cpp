@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -74,6 +75,11 @@ Value* tryConvertToType(
       return tryConvertToType(
           loc, graph, op->getElementType(), value, allow_conversions);
     }
+  }
+
+  if (value->node()->kind() == prim::EmptyListLiteral &&
+      concrete_type->cast<ListType>()) {
+    value = graph.insertNode(graph.createList(concrete_type->cast<ListType>()->getElementType(), {}))->output();
   }
 
   if (auto value_tuple = value->type()->cast<TupleType>()) {

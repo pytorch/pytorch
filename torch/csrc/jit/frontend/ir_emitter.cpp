@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
@@ -38,6 +39,8 @@
 #include <climits>
 #include <set>
 #include <stack>
+#include "ATen/core/interned_strings.h"
+#include "ATen/core/jit_type.h"
 
 namespace torch {
 namespace jit {
@@ -634,6 +637,7 @@ struct WithLoopStatus {
   LoopStatus* prev_ptr_;
   LoopStatus prev_value_;
 };
+
 
 struct to_ir {
   to_ir(
@@ -4199,11 +4203,31 @@ struct to_ir {
   Value* emitListLiteral(ListLiteral ll, const TypePtr& type_hint) {
     auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
 
+    // Empty List Literals that are not assigned to variables
+    // may match to any list type in schema matching,
+    // but still default to List[Tensor] if assigned to a variable
+    // or returned from a function
+    // Restricting empty list matching to temporary values
+    // avoids difficult to handle cases such as
+    // a = []
+    // b = a
+    // if cond:
+    //    b.append(2)
+    // else:
+    //    a.append("hi")
+    // This is also the same behavior that C++ allows with {}
+    // (cannot assign to a variable typed as auot)
+    if (values.size() == 0 && type_hint == nullptr) {
+      auto node = graph->insertNode(graph->create(prim::EmptyListLiteral));
+      node->output()->setType(ListType::ofTensors());
+      return node->output();
+    }
+
     // Determine the element type of the list. If we have a type hint
     // of `List[T]`, use `T`. If the list is non-empty, find the
     // greatest common supertype of all the list elements (defaulting to
     // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
-    TypePtr inferred_elem_type = TensorType::get();
+    TypePtr inferred_elem_type = TensorType::getInferred();
 
     TypePtr refined_type_hint = type_hint;
 
@@ -5450,12 +5474,38 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
+
+void eraseListLiterals(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+  Node* n = nullptr;
+
+  for (auto next_node = it.next(); next_node != nullptr;) {
+    Node* node = next_node;
+    next_node = it.next();
+
+    if (node->kind() == prim::EmptyListLiteral) {
+      if (node->hasUses()) {
+        TORCH_INTERNAL_ASSERT(node->output()->type()->isSubtypeOf(ListType::ofTensors()));
+        auto li = graph->createList(TensorType::get(), {});
+        li->insertBefore(node);
+        node->replaceAllUsesWith(li);
+      }
+      node->destroy();
+    }
+  }
+}
+
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
+
+
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
+
+  // these exist temporarily in initial compilation
+  eraseListLiterals(to_clean);
 
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);

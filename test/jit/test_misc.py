@@ -228,6 +228,28 @@ class TestMisc(JitTestCase):
         self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
             set(torch.jit.export_opnames(scripted_M_mod))))
 
+    def test_list_literal_infer(self):
+        def expects_intlist(x: List[int]):
+            x.append(3)
+            return x
+
+        def foo():
+            return expects_intlist([])
+
+        self.checkScript(foo, ())
+
+        def annotated_list_fail():
+            return expects_intlist(torch.jit.annotate([], List[Tensor]))
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(annotated_list_fail)
+
+        @torch.jit.script
+        def test_return():
+            return []
+
+        FileCheck().check("Tensor[] = prim::ListConstruct").run(test_return.graph)
+
     def test_broadcasting_list(self):
         """
         Test BroadcastingList and torch.nn._size_N_t alias
