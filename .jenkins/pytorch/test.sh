@@ -13,7 +13,8 @@ TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/t
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
-XLA_DIR="$(pwd)/xla"
+PYTORCH_DIR="$(pwd)/pytorch"
+XLA_DIR="$PYTORCH_DIR/xla"
 
 BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
@@ -426,30 +427,31 @@ test_torch_function_benchmark() {
 
 build_xla() {
   echo "WONJOO: build_xla"
+  pushd pytorch
   pwd
-  ls
-  echo $XLA_DIR
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  install_deps_pytorch_xla $XLA_DIR
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" build_torch_xla $XLA_DIR
+  install_deps_pytorch_xla "$XLA_DIR"
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" build_torch_xla "$XLA_DIR"
   assert_git_not_dirty
+  popd
 }
 
 test_xla() {
   echo "WONJOO: test_xla"
+  pushd pytorch
   pwd
-  ls
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$PYTORCH_DIR" "$XLA_DIR"
   assert_git_not_dirty
+  popd
 }
 
 # Do NOT run this test before any other tests, like test_python_shard, etc.
@@ -553,6 +555,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
+  clone_pytorch "$PYTORCH_DIR" "$XLA_DIR"
   build_xla
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
