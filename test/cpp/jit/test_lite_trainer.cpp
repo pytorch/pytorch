@@ -233,12 +233,16 @@ TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
   // Read them back and check that they survived the trip.
   auto output_params = _load_parameters(data);
   EXPECT_EQ(output_params.size(), 2);
-  EXPECT_EQ(
-      output_params["four_by_ones"].item<int>(),
-      (4 * torch::ones({})).item<int>());
-  EXPECT_EQ(
-      output_params["three_by_ones"].item<int>(),
-      (3 * torch::ones({})).item<int>());
+  {
+    auto four_by_ones = 4 * torch::ones({});
+    EXPECT_EQ(
+        output_params["four_by_ones"].item<int>(), four_by_ones.item<int>());
+  }
+  {
+    auto three_by_ones = 3 * torch::ones({});
+    EXPECT_EQ(
+        output_params["three_by_ones"].item<int>(), three_by_ones.item<int>());
+  }
 }
 #else // !defined(ENABLE_FLATBUFFER)
 TEST(MobileTest, LoadParametersFailsWithoutFlatbufferSupport) {
