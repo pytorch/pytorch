@@ -111,12 +111,20 @@ VkQueue acquire_queue(
 
 } // namespace
 
-Context::Context(const VkInstance instance, size_t adapter_i)
-    : instance_(instance),
-      adapter_i_(adapter_i),
+Context::Context(const Adapter& adapter)
+    : adapter_(adapter),
+      device_(
+          create_device(
+              adapter.handle,
+              adapter.compute_queue_family_index),
+          &VK_DELETER(Device)),
+      queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
       shader_(gpu()),
       pipeline_(gpu()),
       threadcontext_(gpu()) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_,
+      "Invalid Vulkan device!");
 }
 
 Context::~Context() {
@@ -155,7 +163,12 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
-      return new Context(runtime()->instance(), runtime()->default_adapter_i());
+      const Adapter adapter = runtime()->select([](const Adapter& adapter) {
+        // Select the first adapter.
+        return true;
+      });
+
+      return new Context(adapter);
     }
     catch (const std::exception& e) {
       TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());

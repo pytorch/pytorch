@@ -32,11 +32,7 @@
 #define VK_CHECK(function)                                  \
   do {                                                      \
     const VkResult result = (function);                     \
-    TORCH_CHECK(                                            \
-        VK_SUCCESS == result,                               \
-        C10_STRINGIZE(__FILE__), " [",                      \
-        C10_STRINGIZE(__LINE__), "] "                       \
-        "VkResult:", result);                               \
+    TORCH_CHECK(VK_SUCCESS == result, "VkResult:", result); \
   } while (false)
 
 #define VK_CHECK_RELAXED(function)                          \
@@ -65,7 +61,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-class Adapter;
+struct Adapter;
 struct Command;
 class Context;
 struct Descriptor;
@@ -75,7 +71,6 @@ class Runtime;
 struct Shader;
 
 struct GPU final {
-  VkInstance instance;
   const Adapter* adapter;
   VkDevice device;
   VkQueue queue;
