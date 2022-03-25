@@ -180,9 +180,6 @@ if sys.version_info >= (3, 8):
                 torch/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
                 caffe2/some_cool_file.py:3:17: error: Incompatible types in assignment (expression has type "None", variable has type "str")  [assignment]
                 caffe2/some_cool_file.py:4:17: error: Incompatible types in assignment (expression has type "float", variable has type "str")  [assignment]
-                torch/_C/__init__.pyi:1749:59: error: Name 'SymInt' is not defined  [name-defined]
-                torch/_VF.pyi:1103:64: error: Name 'SymInt' is not defined  [name-defined]
-                torch/_C/_VariableFunctions.pyi:1103:64: error: Name 'SymInt' is not defined  [name-defined]
             """  # noqa: B950
             ).lstrip(
                 "\n"
