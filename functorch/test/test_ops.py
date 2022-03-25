@@ -971,6 +971,7 @@ class TestOperators(TestCase):
         xfail('double', 'channels_last'),
         xfail('masked_select'),
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
+        xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('nn.functional.glu'),
         xfail('as_strided'),
         skip('nn.functional.fractional_max_pool2d'),  # generator works on cpu, fails on cuda
