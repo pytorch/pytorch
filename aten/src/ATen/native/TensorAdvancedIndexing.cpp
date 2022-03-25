@@ -1284,6 +1284,7 @@ Tensor scatter_reduce_two_cpu(const Tensor& self,
   TORCH_WARN_ONCE("scatter_reduce() is an early prototype and the API may change at any time.")
   // TODO: Add documentation.
 
+
   TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
       "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
 
