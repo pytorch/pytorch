@@ -224,8 +224,6 @@ async def _run_clang_tidy_in_parallel(
 
         coros = [
             run_shell_command(cmd, on_completed, filename)
-            print("<><> command : ")
-            print(command)
             for (cmd, filename) in commands
         ]
         return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
@@ -274,6 +272,8 @@ async def _run_clang_tidy(
     if options.dry_run:
         return CommandResult(0, str([c for c, _ in commands]), "")
 
+    print(">>>all commands being execed : ")
+    print(commands)
     return await _run_clang_tidy_in_parallel(commands, options.disable_progress_bar)
 
 
@@ -491,6 +491,10 @@ async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
         return CommandResult(0, "", ""), []
 
     print("<<<>>> linefilterslist")
+    header_filter = {}
+    header_filter['name'] = '.h'
+    header_filter['lines'] = [0,99]
+    line_filters+=header_filter
     print(line_filters)
 
     result = await _run_clang_tidy(options, line_filters, files)
