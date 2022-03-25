@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Owner(s): ["module: autograd"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -302,7 +303,7 @@ class TestPublicBindings(TestCase):
 
             # verifies that each API has the correct module name and naming semantics
             # depending on whether it's public or private
-            def verify_correct_modulename(elem, modname, mod, private_api):
+            def looks_public(elem, modname, mod, private_api):
                 obj = getattr(mod, elem)
                 if not (isinstance(obj, Callable) or inspect.isclass(obj)):
                     return
@@ -311,23 +312,23 @@ class TestPublicBindings(TestCase):
                 if private_api:
                     # elem's name must begin with an `_` and it's module name
                     # should NOT start with it's current module since it's a private API
-                    if not elem.startswith('_') or elem_modname_starts_with_modname:
+                    if elem_modname_starts_with_modname:
                         failure_list.append((modname, elem, elem_module))
                 else:
                     # elem's name must NOT begin with an `_` and it's module name
                     # SHOULD start with it's current module since it's a public API
-                    if elem.startswith('_') or not elem_modname_starts_with_modname:
+                    if elem.startswith('_') and not elem_modname_starts_with_modname:
                         failure_list.append((modname, elem, elem_module))
 
             if hasattr(modname, '__all__'):
                 public_api = mod.__all__
                 all_api = dir(modname)
                 for elem in all_api:
-                    verify_correct_modulename(elem, modname, elem not in public_api)
+                    looks_public(elem, modname, elem not in public_api)
             else:
                 all_api = dir(mod)
                 for elem in all_api:
-                    verify_correct_modulename(elem, modname, mod, elem.startswith('_'))
+                    looks_public(elem, modname, mod, elem.startswith('_'))
 
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
