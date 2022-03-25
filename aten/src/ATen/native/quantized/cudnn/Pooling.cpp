@@ -7,7 +7,6 @@
 
 #if HAS_CUDNN_V8()
 
-
 #include "c10/core/ScalarType.h"
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
@@ -23,11 +22,8 @@
 
 namespace at {
 namespace native {
-
-// DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
-
 namespace {
-// TODO: same as that of qpool.cpp. should refactor this into quantized directory
+// TODO: This function is the same as that of qpool.cpp. We should refactor this into quantized directory
 // so that we don't need to duplicate the function
 void check_maxpool2d_params(
     IntArrayRef kernel_size,
@@ -45,8 +41,7 @@ void check_maxpool2d_params(
 }
 }
 
-
-// Note currently we support 4D and 3D input (qx) tensors, the latter of which is supported for
+// Currently we support 4D and 3D input (qx) tensors, the latter of which is supported for
 // legacy reasons. The first dimension of a 4D input tensor is the batch size.
 // For a 3D tensor, there is no batch size dimension -- it can be viewed as a single batch.
 // cudnn's 2D pooling operation requires the input and output to be 4D tensors, so we must cast
@@ -55,7 +50,7 @@ void check_maxpool2d_params(
 // pooling operations.
 // Consult https://docs.nvidia.com/deeplearning/cudnn/api/index.html#cudnnPoolingForward for
 // documentation on the APIs
-// Note that currently, it appears there is no cudnn support for dilated pooling (only dilation = [1,1] is accepted) -- we will
+// Currently, it appears there is no cudnn support for dilated pooling -- we will
 // submit a feature request for this with cudnn
 Tensor quantized_max_pool2d_cudnn(
     const Tensor& qx,
@@ -165,10 +160,10 @@ Tensor quantized_max_pool2d_cudnn(
   float one{1};
   float zero{0.0};
   TensorDescriptor xDesc;
-  at::MemoryFormat memory_format = at::MemoryFormat::ChannelsLast; // I'm not sure what to put here? NHWC or NCHW or...?
-  xDesc.set(input, memory_format); // qint8->int8 dtype is already taken care of i think
+  at::MemoryFormat memory_format = (ndim == 4 ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous);
+  xDesc.set(input, memory_format);
   TensorDescriptor yDesc;
-  yDesc.set(qy, memory_format); // qint8->int8 dtype is already taken care of i think
+  yDesc.set(qy, memory_format);
   cudnnPoolingForward(handle,
                       poolingDesc,
                       &one,
@@ -178,7 +173,7 @@ Tensor quantized_max_pool2d_cudnn(
                       yDesc.desc(),
                       reinterpret_cast<int8_t*>(qy.data_ptr()));
 
-  // if qx was 3D, recall we casted our input and output to 4D, so we recast it back to 3D prior to returning
+  // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
 }
 
