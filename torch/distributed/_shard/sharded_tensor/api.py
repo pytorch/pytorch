@@ -743,7 +743,7 @@ class ShardedTensor(ShardedTensorInterface):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         # Access attributes as is usually done on Tensors
-        if func.__name__ in ["__get__"]:
+        if func.__name__ in ["__get__", "size"]:
             return super().__torch_function__(func, types, args, kwargs)
 
         if func in _SHARDED_OPS:
@@ -775,30 +775,6 @@ class ShardedTensor(ShardedTensorInterface):
         """
         return self._local_shards
 
-    def size(self, dim: int = None) -> Union[torch.Size, int]:
-        """
-        Returns a :Union:`[torch.Size, int]` which represents the size of the tensor.
-            The dimension can be specified.
-
-        Args:
-            dim (int, optional): the dimension over which the size represents.
-                If specified, it returns the size of the given dimension.
-                If not, it returns a subclass of tuple.
-                Default: ``None``
-
-        Returns:
-            A :Union:`[torch.Size, int]` represents the size of the tensor.
-        """
-        size = self._metadata.size
-        if dim is None:
-            return size
-        if dim < 0 or dim >= len(size):
-            raise ValueError(
-                f"Argument ``dim`` must be within the range of tensor dimensions [0, {len(size)})"
-            )
-        return size[dim]
-
-
     def is_pinned(self) -> bool:
         """
         Returns True if the sharded tensor (each local shard) resides in pinned memory.
@@ -828,9 +804,6 @@ class ShardedTensor(ShardedTensorInterface):
                 'ShardedTensor created with init_rrefs=False, no RRefs to remote shards available'
             )
         return self._remote_shards
-
-    def __hash__(self):
-        return id(self)
 
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
