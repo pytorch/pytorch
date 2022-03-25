@@ -270,19 +270,6 @@ class DeviceCheckType(Enum):
     NoCheck = 0
     ExactSame = 1
 
-class Tag(Enum):
-    inplace_view = 0
-
-    def __str__(self) -> str:
-        return self.name
-
-    @staticmethod
-    def parse(value: str) -> 'Tag':
-        for k, v in Tag.__members__.items():
-            if k == value:
-                return v
-        raise AssertionError(f'unknown tag {value}')
-
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
 # functions and legacy TH functions.  The legacy TH functions are gone,
@@ -390,8 +377,7 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    # For now operators have at most one tag.
-    tag: Optional['Tag']
+    tags: Set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -401,7 +387,8 @@ class NativeFunction:
     @staticmethod
     def from_yaml(
             ei: Dict[str, object],
-            loc: 'Location'
+            loc: 'Location',
+            valid_tags: Set[str]
     ) -> Tuple['NativeFunction', Dict[DispatchKey, Dict['OperatorName', 'BackendMetadata']]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
@@ -470,9 +457,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tag_str = e.pop('tags', None)
-        assert tag_str is None or isinstance(tag_str, str), f'not a str: {tag_str}'
-        tag = Tag.parse(tag_str) if tag_str else None
+        tags_s = e.pop('tags', '')
+        assert isinstance(tags_s, str)
+        tags: Set[str] = set()
+        if len(tags_s) > 0:
+            assert len(valid_tags) > 0
+            for t in tags_s.split(', '):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f'illegal tag {t}')
+        assert isinstance(tags, set)
 
         from tools.codegen.api import cpp
 
@@ -589,7 +585,7 @@ class NativeFunction:
             is_abstract=is_abstract,
             has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
             has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-            tag=tag,
+            tags=tags,
         ), backend_metadata
 
 
@@ -645,7 +641,7 @@ class NativeFunction:
     def is_view_op(self) -> bool:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
-        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        is_inplace_view = 'inplace_view' in self.tags
         is_wildcard_view = any(inp.annotation is not None and
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
