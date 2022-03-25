@@ -290,16 +290,11 @@ class TestPublicBindings(TestCase):
         failure_list = []
 
         def test_module(modname):
-            is_a_private_module = False
             split_strs = modname.split('.')
             mod = sys.modules.get(modname)
             for elem in split_strs:
                 if elem.startswith("_"):
-                    is_a_private_module = True
-                    break
-
-            if is_a_private_module:
-                return
+                    return
 
             # verifies that each API has the correct module name and naming semantics
             # depending on whether it's public or private
