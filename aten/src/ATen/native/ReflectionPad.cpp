@@ -286,14 +286,17 @@ void reflection_pad1d_out_template_helper(const Tensor& input_, IntArrayRef padd
   nplane = input_.size(dim_plane);
   input_w = input_.size(dim_w);
   output_w  = input_w + pad_l + pad_r;
+  
   TORCH_CHECK(pad_l < input_w && pad_r < input_w, "Argument #4: Padding size "
     "should be less than the corresponding input dimension, but got: padding (",
     pad_l, ", ", pad_r, ") at dimension ", dim_w, " of input ", input_.sizes());
 
   TORCH_CHECK(output_w >= 1 , 2,
     "input (W: ", input_w, ")is too small. Calculated output W: ", output_w);
+
   /* get contiguous input */
   input = input_.contiguous();
+  /* resize output */
   if (input.ndimension() == 2) {
     output.resize_({nplane, output_w});
   } else {
@@ -315,7 +318,6 @@ void reflection_pad1d_out_template(
   reflection_pad1d_out_template_helper(input_, padding, nbatch,
                                        pad_l, pad_r, nplane, input_w, output_w,
                                        input, output);
-  /* resize output */
   if (input.ndimension() == 2) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
       reflection_pad1d_out_frame<scalar_t>(
