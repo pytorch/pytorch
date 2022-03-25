@@ -4790,6 +4790,8 @@ class DistributedTest:
 
         def _test_post_localSGD_optimizer_parity(self, averager, grad_is_view):
             learning_rate = 0.03
+            period = 4
+            warmup_steps = 10
 
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
@@ -4797,15 +4799,23 @@ class DistributedTest:
                 gradient_as_bucket_view=grad_is_view,
             )
             opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
+            averager = averagers.PeriodicModelAverager(
+                period=period, warmup_steps=warmup_steps
+            )
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank],
                 gradient_as_bucket_view=grad_is_view,
             )
+            # Cannot deepcopy averager on Windows.
+            # See: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496
+            averager2 = averagers.PeriodicModelAverager(
+                period=period, warmup_steps=warmup_steps
+            )            
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
                 optim=torch.optim.SGD(net_using_post_localSGD_opt.parameters(), lr=learning_rate),
-                averager=averager
+                averager=averager2,
             )
 
             input = torch.randn(dist.get_world_size() * 2, 2).cuda()
@@ -4828,6 +4838,9 @@ class DistributedTest:
 
                 for p1, p2 in zip(net.parameters(), net_using_post_localSGD_opt.parameters()):
                     self.assertEqual(p1.data, p2.data)
+
+            # Also check if the built-in step counters are the same to prevent a bug like #74737.
+            self.assertEqual(averager.step, averager2.step)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
