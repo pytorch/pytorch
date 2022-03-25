@@ -467,7 +467,7 @@ class TestFX(JitTestCase):
                 return x if val is None else x + val
 
         f = Foo()
-        traced = torch.fx.symbolic_trace(f, concrete_args={'val':None})
+        traced = torch.fx.symbolic_trace(f, concrete_args={'val' : None})
         with self.assertRaisesRegex(AssertionError, 'val has been specialized to have value None'):
             traced(torch.randn(5), torch.randn(5))
 
