@@ -224,6 +224,8 @@ async def _run_clang_tidy_in_parallel(
 
         coros = [
             run_shell_command(cmd, on_completed, filename)
+            print("<><> command : ")
+            print(command)
             for (cmd, filename) in commands
         ]
         return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
@@ -264,6 +266,8 @@ async def _run_clang_tidy(
     # Apply per-file options
     commands = []
     for f in files:
+        print(">>><<< processing file :")
+        print(file)
         command = list(base) + [map_filename(options.compile_commands_dir, f)]
         commands.append((command, f))
 
