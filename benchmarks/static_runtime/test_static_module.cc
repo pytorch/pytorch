@@ -1303,6 +1303,92 @@ void checkStorageGroups(
   EXPECT_GE(num_reused, min_reused_tensors);
 }
 
+struct MemoryPlannerTestingData {
+  MemoryPlannerTestingData(
+      const std::string& src,
+      FastMap<std::string, at::Tensor>& managed_tensor_name_to_tensor) {
+    graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(src, graph.get(), vmap);
+
+    for (auto& key_value : managed_tensor_name_to_tensor) {
+      const auto& tensor_name = key_value.first;
+      auto* tensor_value = vmap.at(tensor_name);
+      managed_tensor_values.insert(tensor_value);
+      tensor_value_to_tensor.emplace(tensor_value, &key_value.second);
+    }
+
+    AliasDb alias_db(graph);
+    ranges =
+        ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
+  }
+
+  std::shared_ptr<Graph> graph;
+  FastSet<const Value*> managed_tensor_values;
+  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+  ManagedTensorRanges ranges;
+};
+
+std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>
+constructManagedTensors(const MemoryPlannerTestingData& data) {
+  std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor> result;
+  result.reserve(data.managed_tensor_values.size());
+
+  for (const auto* tensor_value : data.managed_tensor_values) {
+    auto* tensor = data.tensor_value_to_tensor.at(tensor_value);
+    result.emplace_back(
+        tensor,
+        tensor_value,
+        /*storage_impl=*/nullptr,
+        /*size=*/tensor->nbytes(),
+        /*offset=*/0);
+  }
+
+  return result;
+}
+
+bool tensorsAreDisjoint(
+    const PrecomputedOffsetsMemoryPlanner::ManagedTensor& a,
+    const PrecomputedOffsetsMemoryPlanner::ManagedTensor& b) {
+  auto a_start = a.offset;
+  auto a_end = a.offset + a.size;
+
+  auto b_start = b.offset;
+  auto b_end = b.offset + b.size;
+
+  return b_end <= a_start || a_end <= b_start;
+}
+
+void checkOffsetsAreValid(
+    const std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
+        managed_tensors,
+    const ManagedTensorRanges& ranges) {
+  for (const auto i : c10::irange(managed_tensors.size() - 1)) {
+    for (const auto j : c10::irange(i + 1, managed_tensors.size())) {
+      auto& a = managed_tensors[i];
+      auto& b = managed_tensors[j];
+
+      if (ranges.lifetimesOverlap(a.value, b.value)) {
+        EXPECT_TRUE(tensorsAreDisjoint(a, b));
+      }
+    }
+  }
+}
+
+void testOffsetAssignmentAlgorithm(
+    const std::string& src,
+    FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
+    const std::function<size_t(
+        std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&,
+        const ManagedTensorRanges&)>& strategy) {
+  MemoryPlannerTestingData data(src, managed_tensor_name_to_tensor);
+  ASSERT_EQ(
+      data.managed_tensor_values.size(), data.tensor_value_to_tensor.size());
+  auto managed_tensors = constructManagedTensors(data);
+  strategy(managed_tensors, data.ranges);
+  checkOffsetsAreValid(managed_tensors, data.ranges);
+}
+
 // A convenience function for testing assignStorageToManagedTensors. It
 // takes in an IR graph as well as a map from managed tensor name to tensor
 // value. It constructs all of the necessary data structures, invokes
@@ -1312,30 +1398,13 @@ void testAssignStorageToManagedTensors(
     const std::string& src,
     FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
     size_t min_reused_tensors) {
-  auto graph = std::make_shared<Graph>();
-  std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
-
-  FastSet<const Value*> managed_tensor_values;
-  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
-
-  for (auto& key_value : managed_tensor_name_to_tensor) {
-    const auto& tensor_name = key_value.first;
-    auto vmap_it = vmap.find(tensor_name);
-    ASSERT_TRUE(vmap_it != vmap.end());
-    managed_tensor_values.insert(vmap_it->second);
-    tensor_value_to_tensor.emplace(vmap_it->second, &key_value.second);
-  }
-  ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
-
-  AliasDb alias_db(graph);
-  auto ranges =
-      ManagedTensorRanges(*graph->block(), alias_db, managed_tensor_values);
+  MemoryPlannerTestingData data(src, managed_tensor_name_to_tensor);
+  ASSERT_EQ(
+      data.managed_tensor_values.size(), data.tensor_value_to_tensor.size());
   auto groups = assignStorageToManagedTensors(
-      graph->block()->nodes(), ranges, tensor_value_to_tensor);
-
+      data.graph->block()->nodes(), data.ranges, data.tensor_value_to_tensor);
   checkStorageGroups(
-      groups, ranges, tensor_value_to_tensor, min_reused_tensors);
+      groups, data.ranges, data.tensor_value_to_tensor, min_reused_tensors);
 }
 
 } // namespace
@@ -1382,6 +1451,73 @@ TEST(AssignStorageToManagedTensors, Aliases) {
   const size_t min_reused_tensors = 1;
   testAssignStorageToManagedTensors(
       src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+TEST(AssignOffsetsNaive, NoAliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %e : Tensor = aten::mul(%b, %d)
+      %output : Tensor = aten::mul(%e, %e)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({1})},
+      {"d", at::randn({1})},
+      {"e", at::randn({1})}};
+  testOffsetAssignmentAlgorithm(
+      src,
+      std::move(managed_tensor_name_to_tensor),
+      [](std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
+             managed_tensors,
+         const ManagedTensorRanges&) {
+        return assignOffsetsNaive(managed_tensors);
+      });
+}
+
+TEST(AssignOffsetsOptimized, NoAliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %e : Tensor = aten::mul(%b, %d)
+      %output : Tensor = aten::mul(%e, %e)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({32})},
+      {"d", at::randn({128})},
+      {"e", at::randn({64})}};
+  testOffsetAssignmentAlgorithm(
+      src, std::move(managed_tensor_name_to_tensor), assignOffsetsOptimized);
+}
+
+TEST(AssignOffsetsOptimized, Aliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %c_size : int[] = aten::size(%c)
+      %c_alias : Tensor = aten::view(%c, %c_size)
+      %e : Tensor = aten::mul(%b, %d)
+      %f : Tensor = aten::mul(%c_alias, %c_alias)
+      %output : Tensor = aten::mul(%e, %f)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({128})},
+      {"d", at::randn({64})},
+      {"e", at::randn({4})},
+      {"f", at::randn({2})}};
+  testOffsetAssignmentAlgorithm(
+      src, std::move(managed_tensor_name_to_tensor), assignOffsetsOptimized);
 }
 
 namespace {

@@ -248,5 +248,56 @@ class StandardMemoryPlanner : public MemoryPlanner {
   std::vector<StorageGroup> managed_tensors_{};
 };
 
+class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
+ public:
+  PrecomputedOffsetsMemoryPlanner(
+      BlockRunner* block_runner,
+      const BlockInfo& block_info,
+      bool enable_out_variant,
+      bool managed_output_tensors,
+      bool optimize_memory);
+
+  struct ManagedTensor {
+    ManagedTensor(
+        at::Tensor* tensor_,
+        const Value* value_,
+        at::StorageImpl* storage_impl_,
+        size_t size_,
+        size_t offset_)
+        : tensor(tensor_),
+          value(value_),
+          storage_impl(storage_impl_),
+          size(size_),
+          offset(offset_) {}
+    at::Tensor* tensor;
+    const Value* value;
+    at::StorageImpl* storage_impl;
+    size_t size;
+    size_t offset;
+  };
+
+ protected:
+  void allocateManagedTensors() override;
+  void deallocateManagedTensors() override;
+
+  const ManagedTensorRanges& ranges_;
+  FastMap<at::Tensor*, const Value*> tensor_to_tensor_value_;
+
+  size_t num_managed_tensors_{0};
+  bool optimize_memory_;
+
+  std::vector<ManagedTensor> managed_tensors_;
+};
+
+// Strategies used by PrecomputedOffsetsMemoryPlanner, exposed here for testing
+TORCH_API size_t assignOffsetsOptimized(
+    std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
+        managed_tensors,
+    const ManagedTensorRanges& ranges);
+
+TORCH_API size_t assignOffsetsNaive(
+    std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
+        managed_tensors);
+
 } // namespace jit
 } // namespace torch

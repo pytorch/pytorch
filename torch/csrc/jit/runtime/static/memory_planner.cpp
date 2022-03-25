@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
+#include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -23,10 +24,10 @@ bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
       pnode.Output(output_idx).isNone();
 }
 
-FastMap<const Value*, at::Tensor*> tensorValueToTensor(
+void mapOverManagedTensors(
     const std::vector<ProcessedNode>& nodes,
-    const FastSet<const Value*>& managed_tensor_values) {
-  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+    const FastSet<const Value*>& managed_tensor_values,
+    const std::function<void(const Value*, at::Tensor*)>& action) {
   for (auto& pnode : nodes) {
     auto* node = pnode.node();
     for (const auto output_idx : c10::irange(node->outputs().size())) {
@@ -44,14 +45,35 @@ FastMap<const Value*, at::Tensor*> tensorValueToTensor(
           (ival.isNone() && isUnmanagedSpecialCase(pnode, output_idx)));
 
       if (ival.isTensor()) {
-        tensor_value_to_tensor.emplace(
+        action(
             output,
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
             const_cast<at::Tensor*>(&ival.toTensor()));
       }
     }
   }
-  return tensor_value_to_tensor;
+}
+
+FastMap<const Value*, at::Tensor*> tensorValueToTensor(
+    const std::vector<ProcessedNode>& nodes,
+    const FastSet<const Value*>& managed_tensor_values) {
+  FastMap<const Value*, at::Tensor*> result;
+  auto action = [&result](const Value* value, at::Tensor* tensor) mutable {
+    result.emplace(value, tensor);
+  };
+  mapOverManagedTensors(nodes, managed_tensor_values, action);
+  return result;
+}
+
+FastMap<at::Tensor*, const Value*> tensorToTensorValue(
+    const std::vector<ProcessedNode>& nodes,
+    const FastSet<const Value*>& managed_tensor_values) {
+  FastMap<at::Tensor*, const Value*> result;
+  auto action = [&result](const Value* value, at::Tensor* tensor) mutable {
+    result.emplace(tensor, value);
+  };
+  mapOverManagedTensors(nodes, managed_tensor_values, action);
+  return result;
 }
 
 // Don't change the size if it is already aligned, otherwise increase the size
@@ -67,6 +89,91 @@ at::DataPtr allocate_buffer(size_t size) {
 }
 
 } // namespace
+
+size_t assignOffsetsNaive(
+    std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
+        managed_tensors) {
+  size_t managed_bytes = 0;
+  for (auto& tensor : managed_tensors) {
+    tensor.offset = managed_bytes;
+    managed_bytes += tensor.size;
+  }
+  return managed_bytes;
+}
+
+// [Precomputed Offsets Memory Planning Algorithm]
+// This algorithm is taken from this paper "Efficient Memory Management for Deep
+// Neural Net Inference" [arXiv:2001.03288] in the "Greedy by Size for Offset
+// Calculation" section. Generally, this algorithm performs better than the one
+// implemented in the standard memory planner. However, there are tradeoffs:
+//
+// 1) The complexity of computing the offsets is roughly O(n^2), which makes the
+//    first iteration longer
+//
+// 2) Since re-computing offsets is slow, this
+//    implementation does not change the offsets once they have
+//    been set. This means that warming up with tensors that are too small can
+//    cause performance to degrade due to dynamic allocations.
+//    TODO(mikeiovine): we should fall back to the standard algorithm if we
+//    detect too many reallocations.
+//
+// It is therefore best to use this algorithm in cases where you are able to
+// to warm up the model with the largest possible inputs.
+size_t assignOffsetsOptimized(
+    std::vector<PrecomputedOffsetsMemoryPlanner::ManagedTensor>&
+        managed_tensors,
+    const ManagedTensorRanges& ranges) {
+  size_t managed_bytes = 0;
+  // offset -> (tensor size, tensor value) collection, sorted by offset.
+  std::map<size_t, std::vector<std::pair<size_t, const Value*>>>
+      processed_tensors;
+
+  std::sort(
+      managed_tensors.begin(),
+      managed_tensors.end(),
+      [](const auto& lhs, const auto& rhs) { return lhs.size > rhs.size; });
+
+  for (auto& managed_tensor : managed_tensors) {
+    const auto size = managed_tensor.size;
+    auto* tensor = managed_tensor.value;
+
+    size_t prev_offset = 0;
+    c10::optional<size_t> best_offset = c10::nullopt;
+    size_t smallest_gap = std::numeric_limits<size_t>::max();
+
+    for (auto& size_and_tensors : processed_tensors) {
+      auto x_offset = size_and_tensors.first;
+      auto& tensors = size_and_tensors.second;
+      for (auto& tensor_size_and_tensor : tensors) {
+        auto x_size = tensor_size_and_tensor.first;
+        auto* x = tensor_size_and_tensor.second;
+
+        if (!ranges.lifetimesOverlap(x, tensor)) {
+          continue;
+        }
+
+        if (x_offset < prev_offset) {
+          prev_offset = std::max(prev_offset, x_offset + x_size);
+          continue;
+        }
+
+        const auto gap = x_offset - prev_offset;
+        if (gap >= size && gap < smallest_gap) {
+          smallest_gap = gap;
+          best_offset = prev_offset;
+        }
+        prev_offset = std::max(prev_offset, x_offset + x_size);
+      }
+    }
+
+    const auto new_offset =
+        best_offset.has_value() ? *best_offset : prev_offset;
+    managed_tensor.offset = new_offset;
+    processed_tensors[new_offset].emplace_back(size, tensor);
+    managed_bytes = std::max(managed_bytes, new_offset + size);
+  }
+  return managed_bytes;
+}
 
 std::vector<StorageGroup> assignStorageToManagedTensors(
     graph_node_list nodes,
@@ -469,6 +576,107 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
 
   DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
   VLOG(1) << "managed_bytes: " << managed_bytes_;
+}
+
+PrecomputedOffsetsMemoryPlanner::PrecomputedOffsetsMemoryPlanner(
+    BlockRunner* block_runner,
+    const BlockInfo& block_info,
+    bool enable_out_variant,
+    bool manage_output_tensors,
+    bool optimize_memory)
+    : MemoryPlanner(
+          block_runner,
+          block_info,
+          enable_out_variant,
+          manage_output_tensors),
+      ranges_(block_info.managed_tensor_ranges()),
+      optimize_memory_(optimize_memory) {
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
+  tensor_to_tensor_value_ =
+      tensorToTensorValue(block_runner->nodes(), managed_tensor_values);
+}
+
+void PrecomputedOffsetsMemoryPlanner::allocateManagedTensors() {
+  if (managed_bytes_ == 0) {
+    return;
+  }
+  uint8_t* start = allocateBuffer(managed_bytes_);
+
+  for (auto& managed_tensor : managed_tensors_) {
+    auto tensor_size = managed_tensor.size;
+    if (tensor_size == 0) {
+      continue;
+    }
+    auto offset = managed_tensor.offset;
+    auto* storage_impl = managed_tensor.storage_impl;
+
+    // TODO factor out into function
+    DCHECK_LE(offset + tensor_size, managed_bytes_);
+    void* src = static_cast<void*>(start + offset);
+    storage_impl->set_data_ptr_noswap(
+        at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
+    storage_impl->set_nbytes(tensor_size);
+    if (storage_impl->nbytes() < managed_tensor.tensor->nbytes()) {
+      LOG(INFO) << storage_impl->nbytes() << " < "
+                << managed_tensor.tensor->nbytes();
+    }
+  }
+}
+
+void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
+  const bool first_time = managed_tensor_storage_impls_.empty();
+  if (C10_UNLIKELY(first_time)) {
+    managed_tensor_storage_impls_.reserve(tensor_to_tensor_value_.size());
+    for (auto& tensor_and_value : tensor_to_tensor_value_) {
+      auto* tensor = tensor_and_value.first;
+      auto* value = tensor_and_value.second;
+      const auto& storage = tensor->storage();
+      size_t current_size = compute_aligned_tensor_size(storage.nbytes());
+      auto* storage_impl = storage.unsafeGetStorageImpl();
+
+      storage_impl->reset();
+      managed_tensor_storage_impls_.emplace_back(
+          current_size, std::move(*storage_impl));
+      auto* new_impl = &managed_tensor_storage_impls_.back().second;
+      managed_tensors_.emplace_back(
+          tensor,
+          value,
+          new_impl,
+          current_size,
+          0); // compute the offsets after collecting all tensors
+
+      tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+          c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
+              new_impl, 1)));
+    }
+
+    if (optimize_memory_) {
+      managed_bytes_ = assignOffsetsOptimized(managed_tensors_, ranges_);
+    } else {
+      managed_bytes_ = assignOffsetsNaive(managed_tensors_);
+    }
+
+    VLOG(1) << "managed_bytes: " << managed_bytes_;
+  } else {
+    for (auto& managed_tensor : managed_tensors_) {
+      auto* tensor = managed_tensor.tensor;
+      if (tensor->nbytes() > managed_tensor.size) {
+        // When we allocate this tensor on the next run, we'll need to set
+        // the StorageImpl's nbytes to managed_tensor.size. We can't let
+        // tensor->nbytes() be greater than the size of its storage impl,
+        // so shrink it if it got bigger.
+        at::native::resize_(*tensor, {0});
+      }
+      auto* expected_storage_impl = managed_tensor.storage_impl;
+      auto* actual_storage_impl = tensor->storage().unsafeGetStorageImpl();
+      if (C10_UNLIKELY(actual_storage_impl != expected_storage_impl)) {
+        tensor->storage().unsafeGetStorageImpl()->reset();
+        tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+            c10::intrusive_ptr<at::StorageImpl>::
+                unsafe_adapt_non_heap_allocated(expected_storage_impl, 1)));
+      }
+    }
+  }
 }
 
 } // namespace jit

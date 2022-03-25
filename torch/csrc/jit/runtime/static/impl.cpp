@@ -938,12 +938,21 @@ void BlockRunner::set_inputs(
 
 void BlockRunner::create_memory_planner() {
   if (!planner_) {
-    planner_ = std::make_unique<StandardMemoryPlanner>(
-        this,
-        block_info_,
-        static_module_.opts().enable_out_variant,
-        manage_output_tensors_enabled_,
-        static_module_.opts().optimize_memory);
+    if (static_module_.opts().precompute_offsets) {
+      planner_ = std::make_unique<PrecomputedOffsetsMemoryPlanner>(
+          this,
+          block_info_,
+          static_module_.opts().enable_out_variant,
+          manage_output_tensors_enabled_,
+          static_module_.opts().optimize_memory);
+    } else {
+      planner_ = std::make_unique<StandardMemoryPlanner>(
+          this,
+          block_info_,
+          static_module_.opts().enable_out_variant,
+          manage_output_tensors_enabled_,
+          static_module_.opts().optimize_memory);
+    }
   }
 }
 

@@ -181,6 +181,10 @@ struct TORCH_API StaticModuleOptions {
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
+  // If true, use the precomputed offsets memory planning algorithm. Only
+  // meaningful if enable_out_variant == true.
+  // See [Precomputed Offsets Memory Planning Algorithm] for details.
+  bool precompute_offsets{false};
 };
 
 /// The static runime supports two execution modes.
