@@ -123,11 +123,14 @@ def calcOpsCoverage(ops):
     with open(coverage_out_path, "w") as f:
         yaml.safe_dump(
             {
+<<<<<<< HEAD
                 "_covered_ops": len(covered_ops),
                 "_production_ops": len(production_ops),
                 "_generated_ops": len(all_generated_ops),
                 "_uncovered_ops": len(uncovered_ops),
                 "_coverage": round(coverage, 2),
+=======
+>>>>>>> 00b461b60d4 (update model generation script and add android test)
                 "uncovered_ops": sorted(list(uncovered_ops)),
                 "covered_ops": sorted(list(covered_ops)),
                 "all_generated_ops": sorted(list(all_generated_ops)),
@@ -201,6 +204,7 @@ def main(argv):
     if argv is None or len(argv) != 1:
         print(
             """
+<<<<<<< HEAD
 This script generates models for mobile test. For each model we have a "checked-in" version
 and an "on-the-fly" version. The "on-the-fly" version will be generated during test (with a
 "_temp" suffix in name), and should not be committed to the repo.
@@ -210,6 +214,18 @@ run on master branch in the next 6 months).
 - use 'python gen_test_model.py ios-test' to generate on-the-fly test models for ios
 - use 'python gen_test_model.py all' to update all checked-in models
 - use 'python gen_test_model.py <model_name_no_suffix>' to update the given checked-in model
+=======
+This script generate models for mobile test. For each model we have a "storage" version
+and an "on-the-fly" version. The "on-the-fly" version will be generated during test,and
+should not be committed to the repo.
+The "storage" version is for back compatibility # test (a model generated today should
+run on master branch in the next 6 months). We can use this script to update a model that
+is no longer supported.
+- use 'python gen_test_model.py android-test' to generate on the fly models for android
+- use 'python gen_test_model.py ios-test' to generate on the fly models for ios
+- use 'python gen_test_model.py all' to update all storage models
+- use 'python gen_test_model.py <model_name_no_suffix>' to update the given storage model
+>>>>>>> 00b461b60d4 (update model generation script and add android test)
 """
         )
         return

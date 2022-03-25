@@ -383,7 +383,11 @@ public abstract class PytorchTestBase {
         try {
             final Module module = loadModel("mobilenet_v2.ptl");
             final IValue inputs = module.runMethod("get_all_bundled_inputs");
+<<<<<<< HEAD
             assertTrue(inputs.isList());
+=======
+            // assertTrue(input.isList());
+>>>>>>> 00b461b60d4 (update model generation script and add android test)
             final IValue input = inputs.toList()[0];
             assertTrue(input.isTuple());
             module.forward(input.toTuple()[0]);
