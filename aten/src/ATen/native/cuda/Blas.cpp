@@ -128,6 +128,7 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
       return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
     case Activation::GELU:
       return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
+  }
 }
 #endif
 
