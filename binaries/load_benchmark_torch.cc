@@ -79,11 +79,9 @@ int main(int argc, char** argv) {
   const double micros = static_cast<double>(timer.MicroSeconds());
   if (FLAGS_report_pep) {
     for (auto t : times) {
-      std::cout << R"PyTorchObserver {"type": "NET", "unit": "us", "
-                << R""metric": "latency", "value": ""
-                << t
-                << R""}"
-                << std::endl;
+      std::cout << R"(PyTorchObserver {"type": "NET", "unit": "us", )"
+                << R"("metric": "latency", "value": ")"
+                << t << R"("})" << std::endl;
     }
   }
 
