@@ -12,7 +12,6 @@
          "torch/csrc/jit/serialization/export.*",
          "torch/csrc/jit/serialization/onnx.*",
          "torch/csrc/onnx/**",
-         "torch/jit/onnx_supported_ops.py",
          "torch/onnx/**"
       ],
       "approved_by": ["BowenBao", "garymm"],

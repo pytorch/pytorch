@@ -5,7 +5,7 @@ docs/source/onnx_supported_aten_list.rst and rendered on a proper public format
 """
 
 import os
-from torch.jit import onnx_supported_ops
+from torch.onnx import onnx_supported_ops
 
 # Constants
 BUILD_DIR = 'build'
