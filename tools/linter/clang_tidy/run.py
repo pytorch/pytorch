@@ -492,7 +492,8 @@ async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
 
     print("<<<>>> linefilterslist")
     line_filters += [
-            {"name": ".h"}
+            {"name": ".h"},
+            {"lines": [0,99]}
         ]
     print(line_filters)
 
