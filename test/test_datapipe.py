@@ -1675,7 +1675,7 @@ class TestTyping(TestCase):
 
     @skipTyping
     def test_subtype(self):
-        from torch.utils.data._typing import issubtype
+        from torch.utils.data.datapipes._typing import issubtype
 
         basic_type = (int, str, bool, float, complex,
                       list, tuple, dict, set, T_co)
@@ -1723,7 +1723,7 @@ class TestTyping(TestCase):
 
     @skipTyping
     def test_issubinstance(self):
-        from torch.utils.data._typing import issubinstance
+        from torch.utils.data.datapipes._typing import issubinstance
 
         basic_data = (1, '1', True, 1., complex(1., 0.))
         basic_type = (int, str, bool, float, complex)
@@ -1793,7 +1793,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP1, IterDataPipe))
         dp1 = DP1(10)
-        self.assertTrue(DP1.type.issubtype(dp1.type) and dp1.type.issubtype(DP1.type))
+        self.assertTrue(DP1.type.issubtype(dp1.type) and dp1.type.issubtype(DP1.type))  # type: ignore[attr-defined]
         dp1_ = DP1(5)
         self.assertEqual(dp1.type, dp1_.type)
 
@@ -1809,7 +1809,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP2, IterDataPipe))
         dp2 = DP2()  # type: ignore[var-annotated]
-        self.assertTrue(DP2.type.issubtype(dp2.type) and dp2.type.issubtype(DP2.type))
+        self.assertTrue(DP2.type.issubtype(dp2.type) and dp2.type.issubtype(DP2.type))  # type: ignore[attr-defined]
         dp2_ = DP2()  # type: ignore[var-annotated]
         self.assertEqual(dp2.type, dp2_.type)
 
@@ -1825,7 +1825,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP3, IterDataPipe))
         dp3 = DP3(range(10))  # type: ignore[var-annotated]
-        self.assertTrue(DP3.type.issubtype(dp3.type) and dp3.type.issubtype(DP3.type))
+        self.assertTrue(DP3.type.issubtype(dp3.type) and dp3.type.issubtype(DP3.type))  # type: ignore[attr-defined]
         dp3_ = DP3(5)  # type: ignore[var-annotated]
         self.assertEqual(dp3.type, dp3_.type)
 
@@ -1847,7 +1847,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
         dp5 = DP5()
-        from torch.utils.data._typing import issubtype
+        from torch.utils.data.datapipes._typing import issubtype
         self.assertTrue(issubtype(dp5.type.param, Any) and issubtype(Any, dp5.type.param))
 
         class DP6(IterDataPipe[int]):
@@ -1864,13 +1864,13 @@ class TestTyping(TestCase):
             r""" DataPipe with abstract base class"""
 
         self.assertTrue(issubclass(DP7, IterDataPipe))
-        self.assertTrue(DP7.type.param == Awaitable[T_co])
+        self.assertTrue(DP7.type.param == Awaitable[T_co])  # type: ignore[attr-defined]
 
         class DP8(DP7[str]):
             r""" DataPipe subclass from a DataPipe with abc type"""
 
         self.assertTrue(issubclass(DP8, IterDataPipe))
-        self.assertTrue(DP8.type.param == Awaitable[str])
+        self.assertTrue(DP8.type.param == Awaitable[str])  # type: ignore[attr-defined]
 
     @skipTyping
     def test_construct_time(self):
