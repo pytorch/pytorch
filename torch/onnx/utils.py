@@ -4,6 +4,7 @@ These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
 """
 from __future__ import annotations
+from ast import increment_lineno
 
 import contextlib
 import copy
@@ -492,6 +493,7 @@ def export(
         keep_initializers_as_inputs=keep_initializers_as_inputs,
         custom_opsets=custom_opsets,
         export_modules_as_functions=export_modules_as_functions,
+        inline_autograd=inline_autograd,
     )
 
 
@@ -540,6 +542,7 @@ def _optimize_graph(
     dynamic_axes=None,
     input_names=None,
     module=None,
+    inline_autograd=False,
 ):
     # Inline everything
     _C._jit_pass_inline(graph)
@@ -568,7 +571,9 @@ def _optimize_graph(
     _C._jit_pass_fuse_addmm(graph)
     _C._jit_pass_lint(graph)
 
-    _C._jit_pass_onnx_autograd_function_process(graph)
+    if inline_autograd:
+        symbolic_helper._set_inline_autograd(inline_autograd)
+        _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_peephole(graph, True)
     _C._jit_pass_lower_all_tuples(graph)
     # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
@@ -1027,6 +1032,7 @@ def _model_to_graph(
     fixed_batch_size=False,
     training=_C_onnx.TrainingMode.EVAL,
     dynamic_axes=None,
+    inline_autograd=False,
 ) -> Tuple[
     _C.Graph,
     Dict[str, torch.Tensor],
@@ -1061,6 +1067,7 @@ def _model_to_graph(
             dynamic_axes=dynamic_axes,
             input_names=input_names,
             module=module,
+            inline_autograd=inline_autograd,
         )
     except Exception as e:
         torch.onnx.log("Torch IR graph at exception: ", graph)
@@ -1344,6 +1351,7 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
+    inline_autograd=False,
 ):
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
@@ -1420,6 +1428,7 @@ def _export(
                 fixed_batch_size=fixed_batch_size,
                 training=training,
                 dynamic_axes=dynamic_axes,
+                inline_autograd=inline_autograd,
             )
 
             # TODO: Don't allocate a in-memory string for the protobuf
@@ -1727,6 +1736,7 @@ def _run_symbolic_function(
             domain = "caffe2"
         else:
             domain = ns
+        inline_autograd = symbolic_helper._inline_autograd
 
         if symbolic_registry.is_registered_op(op_name, domain, opset_version):
             symbolic_fn = _find_symbolic_in_registry(

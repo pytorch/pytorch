@@ -43,7 +43,8 @@ class _BaseTestCase(TestCase):
                         training=TrainingMode.EVAL,
                         operator_export_type=OperatorExportTypes.ONNX,
                         input_names=None,
-                        dynamic_axes=None):
+                        dynamic_axes=None,
+                        inline_autograd=False):
         if training == torch.onnx.TrainingMode.TRAINING:
             model.train()
         elif training == torch.onnx.TrainingMode.EVAL:
@@ -57,7 +58,8 @@ class _BaseTestCase(TestCase):
                                                               operator_export_type=operator_export_type,
                                                               training=training,
                                                               input_names=input_names,
-                                                              dynamic_axes=dynamic_axes)
+                                                              dynamic_axes=dynamic_axes,
+                                                              inline_autograd=inline_autograd)
         _set_onnx_shape_inference(True)
         return graph, params_dict, torch_out
 
@@ -89,12 +91,23 @@ class TestAutogradFuns_opset9(_BaseTestCase):
 
         graph, _, __ = self._model_to_graph(model, (input, ),
                                             input_names=["x"],
-                                            dynamic_axes={"x": [0]})
+                                            dynamic_axes={"x": [0]},
+                                            inline_autograd=True)
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "onnx::Constant")
         self.assertEqual(next(iter).kind(), "onnx::Add")
         self.assertEqual(next(iter).kind(), "onnx::Exp")
         self.assertEqual(next(iter).kind(), "onnx::Log")
+
+        graph_non_autograd, _, __ = self._model_to_graph(model, (input, ),
+                                                         input_names=["x"],
+                                                         dynamic_axes={"x": [0]})
+        iter_na = graph_non_autograd.nodes()
+        self.assertEqual(next(iter_na).kind(), "onnx::Constant")
+        self.assertEqual(next(iter_na).kind(), "onnx::Add")
+        python_op_node = next(iter_na)
+        self.assertEqual(python_op_node.kind(), "prim::PythonOp")
+        self.assertEqual(python_op_node.hasAttribute("Subgraph"), True)                              
 
 
     def test_multi_output(self):
@@ -120,10 +133,93 @@ class TestAutogradFuns_opset9(_BaseTestCase):
 
         graph, _, __ = self._model_to_graph(model, (input, ),
                                             input_names=["x"],
-                                            dynamic_axes={"x": [0, 1]})
+                                            dynamic_axes={"x": [0, 1]},
+                                            inline_autograd=True)
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "onnx::Exp")
         self.assertEqual(next(iter).kind(), "onnx::Log")
+
+        graph_non_autograd, _, __ = self._model_to_graph(model, (input, ),
+                                                         input_names=["x"],
+                                                         dynamic_axes={"x": [0]})
+        iter_na = graph_non_autograd.nodes()
+        python_op_node = next(iter_na)
+        self.assertEqual(python_op_node.kind(), "prim::PythonOp")
+        self.assertEqual(python_op_node.hasAttribute("Subgraph"), True)   
+
+
+    def test_grad_mutliply(self):
+        class GradMultiply(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, scale):
+                ctx.scale = scale
+                res = x.new(x)
+                ctx.mark_shared_storage((x, res))
+                return res
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * ctx.scale, None
+
+        class Caller(torch.nn.Module):
+            def forward(self, input, scale):
+                return GradMultiply.apply(input, scale)
+
+        model = Caller()
+        input = torch.ones(1, 5)
+        scale = torch.ones(1)
+
+        graph, _, __ = self._model_to_graph(model, (input, scale),
+                                            input_names=["x", "y"],
+                                            dynamic_axes={"x": [0, 1]},
+                                            inline_autograd=True)
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "onnx::Identity")
+        
+        graph_non_autograd, _, __ = self._model_to_graph(model, (input, scale),
+                                                         input_names=["x", "y"],
+                                                         dynamic_axes={"x": [0, 1]})
+        iter_na = graph_non_autograd.nodes()
+        python_op_node = next(iter_na)
+        self.assertEqual(python_op_node.kind(), "prim::PythonOp")
+        self.assertEqual(python_op_node.hasAttribute("Subgraph"), True)
+
+
+    def test_aten_unsupported(self):
+        class Erf(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                erf_out = torch.special.erf(x)
+                ctx.save_for_backward(erf_out)
+                return erf_out
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                result = ctx.saved_tensors
+                return torch.special.erfinv(result), None
+
+        class Caller(torch.nn.Module):
+            def forward(self, input):
+                return Erf.apply(input)
+
+        model = Caller()
+        input = torch.ones(1, 5)
+
+        graph_non_autograd, _, __ = self._model_to_graph(model, (input, ),
+                                                         input_names=["x"],
+                                                         dynamic_axes={"x": [0, 1]})
+
+        iter_na = graph_non_autograd.nodes()
+        python_op_node = next(iter_na)
+        self.assertEqual(python_op_node.kind(), "prim::PythonOp")
+        self.assertEqual(python_op_node.hasAttribute("Subgraph"), True)
+
+        graph, _, __ = self._model_to_graph(model, (input, ),
+                                            input_names=["x"],
+                                            dynamic_axes={"x": [0, 1]},
+                                            inline_autograd=True)
+        iter = graph.nodes()
+        self.assertEqual(next(iter).kind(), "aten::special_erf")
 
 
 class TestAutogradFuns_opset10(TestAutogradFuns_opset9):
