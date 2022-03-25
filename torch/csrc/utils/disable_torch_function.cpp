@@ -2,14 +2,22 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 namespace torch {
   static thread_local bool enable_torch_function = true;
+  static thread_local bool skip_next_torch_function = false;
   PyObject* disabled_torch_function = nullptr;
   PyObject* disabled_torch_dispatch = nullptr;
 
   bool torch_function_enabled() {
       return enable_torch_function;
+  }
+
+  bool should_skip_torch_function() {
+    const bool ret = skip_next_torch_function;
+    skip_next_torch_function = false;
+    return ret;
   }
 
   PyObject* disabled_torch_function_impl() {
@@ -136,6 +144,42 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *a) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_skip_one_hop_torch_function(PyObject */*self*/, PyObject *a) {
+  HANDLE_TH_ERRORS
+  PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
+  if (!PyArg_ParseTuple(a, "OOOO", &func, &types, &args, &kwargs)) {
+    return nullptr;
+  }
+  py::tuple py_args;
+  if (args == Py_None) {
+    py_args = py::make_tuple();
+  } else {
+    py_args = py::reinterpret_borrow<py::tuple>(args);
+  }
+
+  // PyObject_Call allows kwargs to be nullptr.
+  if (kwargs == Py_None) {
+    kwargs = nullptr;
+  } else {
+    TORCH_CHECK_TYPE(PyDict_Check(kwargs), "kwargs must be a dictionary");
+  }
+
+  // These are all C-API calls so no exceptions will be raised
+  // and therefore no need for RAII approach to storing
+  // the old value.
+  TORCH_CHECK(!torch::skip_next_torch_function,
+              "skip_one_hop_torch_function called but skip_next_torch_function was already true!");
+  torch::skip_next_torch_function = true;
+  PyObject *result = PyObject_Call(func, py_args.ptr(), kwargs);
+  if (C10_UNLIKELY(torch::skip_next_torch_function)) {
+    torch::skip_next_torch_function = false;
+    TORCH_CHECK(false,
+                "skip_one_hop_torch_function called on a function that doesn't use has_torch_function! ");
+  }
+  return result;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_disable_torch_dispatch(PyObject *self, PyObject *a) {
   HANDLE_TH_ERRORS
   PyObject *func=nullptr, *types=nullptr, *args=nullptr, *kwargs=nullptr;
@@ -224,6 +268,24 @@ auto check_has_torch_function(PyObject* obj) -> bool
     has_torch_function_attr(obj)
   );
 }
+
+bool has_torch_function(PyObject *obj) {
+  return (
+    !torch::should_skip_torch_function() &&
+    torch::check_has_torch_function(obj));
+}
+
+bool has_torch_function(c10::ArrayRef<PyObject*> args) {
+  if (torch::should_skip_torch_function()) {
+    return false;
+  }
+  for (const auto obj: args) {
+    if (check_has_torch_function(obj)) {
+      return true;
+    }
+  }
+  return false;
+}
 } // namespace torch
 
 inline bool sequence_has_torch_function(PyObject* args) {
@@ -247,7 +309,13 @@ inline bool array_has_torch_function(PyObject *const *args, Py_ssize_t nargs) {
   return false;
 }
 
+using torch::autograd::utils::wrap;
+
 PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
+  if (torch::should_skip_torch_function()) {
+    Py_RETURN_FALSE;
+  }
+
   bool result;  // NOLINT(cppcoreguidelines-init-variables)
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
@@ -262,23 +330,16 @@ PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg) {
     result = sequence_has_torch_function(args.ptr());
   }
 
-  if (result) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  return wrap(result);
 }
 
 PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj) {
   // Special case `THPModule_has_torch_function` for the single arg case.
-  if (torch::check_has_torch_function(obj)) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  return wrap(torch::has_torch_function(obj));
 }
 
 PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs) {
-  if (array_has_torch_function(args, nargs)) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  return wrap(
+    !torch::should_skip_torch_function() &&
+    array_has_torch_function(args, nargs));
 }

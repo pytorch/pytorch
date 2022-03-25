@@ -271,7 +271,9 @@ inline PythonArgs PythonArgParser::parse(PyObject* self, ParsedArgs<0>& dst) {
 }
 
 inline bool PythonArgs::has_torch_function(){
-  return !this->signature.overloaded_args.empty();
+  return (
+    !torch::should_skip_torch_function() &&
+    !this->signature.overloaded_args.empty());
 }
 
 inline std::string PythonArgs::get_func_name(){

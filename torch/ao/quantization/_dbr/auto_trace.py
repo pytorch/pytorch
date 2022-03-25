@@ -495,7 +495,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     func, args, kwargs, parent_module)  # type: ignore[arg-type]
 
                 # forward
-                output = super().__torch_function__(func, types, args, kwargs)
+                with torch._C.DisableTorchFunction():
+                    output = func(*args, **kwargs)
+
                 # after hooks
                 output = qstate.op_convert_after_hook(
                     func, output, global_op_idx)
@@ -510,10 +512,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     else:
                         new_args.append(arg)
                 args = tuple(new_args)
-                output = super().__torch_function__(func, types, args, kwargs)
+                with torch._C.DisableTorchFunction():
+                    output = super().__torch_function__(func, types, args, kwargs)
 
             else:  # HookType.NONE
-                output = super().__torch_function__(func, types, args, kwargs)
+                with torch._C.DisableTorchFunction():
+                    output = super().__torch_function__(func, types, args, kwargs)
 
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
