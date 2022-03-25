@@ -206,8 +206,6 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.conv = nn.ConvTranspose2d(1, 1, 1)
-                self.conv.weight = torch.nn.Parameter(torch.randn_like(self.conv.weight), requires_grad=False)
-                self.conv.bias = torch.nn.Parameter(torch.randn_like(self.conv.bias), requires_grad=False)
                 self.quant1 = QuantStub()
                 self.dequant1 = DeQuantStub()
                 self.quant2 = QuantStub()
@@ -226,6 +224,11 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         data = torch.randn(*input_size, dtype=torch.float)
 
         original_ref_m = RefM()
+        rand_w = torch.randn_like(original_ref_m.conv.weight)
+        rand_b = torch.randn_like(original_ref_m.conv.bias)
+        original_ref_m.conv.weight = torch.nn.Parameter(rand_w, requires_grad=False)
+        original_ref_m.conv.bias = torch.nn.Parameter(rand_b, requires_grad=False)
+
         qengine = torch.backends.quantized.engine
         if qengine not in supported_qengines:
             return
@@ -254,7 +257,17 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         ref_m(torch.randn(*input_size, dtype=torch.float))
 
         ref_m = convert(ref_m, is_reference=True)
-        self.assertNotEqual(ref_m.conv.weight_scale, 1.0)
+
+        myobs = MovingAverageMinMaxObserver(averaging_constant=0.5,
+                                            dtype=torch.qint32,
+                                            # set qmin and qmax to represent qint16
+                                            quant_min=-1 * (2 ** 15),
+                                            quant_max=(2 ** 15) - 1,
+                                            qscheme=torch.per_tensor_symmetric,
+                                            )
+        result = myobs(rand_w)
+        qparams = myobs.calculate_qparams()
+        self.assertEqual(ref_m.conv.weight_scale, qparams[0])
 
 
     def _test_activation_op_impl(
