@@ -194,11 +194,6 @@ std::string show_config() {
   if (hasORT()) {
     ss << detail::getORTHooks().showConfig();
   }
-  /* TODO?
-  if (hasIPU()) {
-    ss << deail::getIPUHooks().showConfig();
-  }
-  */
 
   ss << "  - Build settings: ";
   for (const auto& pair : caffe2::GetBuildOptions()) {

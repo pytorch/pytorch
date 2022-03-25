@@ -25,7 +25,6 @@ Tensor make_feature_noise(const Tensor& input) {
   return input.new_empty(sizes);
 }
 
-//TODO: for ipu?
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
   return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
 }
