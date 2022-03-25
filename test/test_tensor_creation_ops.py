@@ -1581,12 +1581,12 @@ class TestTensorCreation(TestCase):
                 numpy_grids = np.meshgrid(*(tensor.cpu().numpy() for tensor in tensors), **numpy_kwargs)
                 self.assertEqual(torch_grids, numpy_grids)
 
-    def _test_cartesian_prod(self, device, dtype):
-        a = torch.tensor([1], device=device, dtype=dtype)
-        b = torch.tensor([1, 2, 3], device=device, dtype=dtype)
-        c = torch.tensor([1, 2], device=device, dtype=dtype)
+    def test_cartesian_prod(self, device):
+        a = torch.tensor([1], device=device)
+        b = torch.tensor([1, 2, 3], device=device)
+        c = torch.tensor([1, 2], device=device)
         prod = torch.cartesian_prod(a, b, c)
-        expected = torch.tensor(list(product([a], b, c)), dtype=dtype, device=device)
+        expected = torch.tensor(list(product([a], b, c)), device=device)
         self.assertEqual(expected, prod)
 
         # test 0 size input
@@ -1598,21 +1598,6 @@ class TestTensorCreation(TestCase):
         # test single input
         prod = torch.cartesian_prod(b)
         self.assertEqual(b, prod)
-
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
-    def test_cartesian_product(self, device, dtype):
-        self._test_cartesian_prod(device, dtype)
-
-    @unittest.expectedFailure
-    @dtypes(torch.complex32)
-    def test_cartesian_product_complex32(self, device, dtype):
-        # Fails on `cpu` while executing
-        # expected = torch.tensor(list(product([a], b, c)), dtype=dtype, device=device)
-        # NOTE: torch.cartesian_prod works on CPU as it used copy kernel.
-
-        # Fails on `cuda` while executing torch.cartesian_prod
-        # cartesian_prod on CUDA is implemented using cat which doesn't support complex32.
-        self._test_cartesian_prod(device, dtype)
 
     def test_combinations(self, device):
         a = torch.tensor([1, 2, 3], device=device)
