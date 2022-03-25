@@ -1553,6 +1553,10 @@ class TestSparseCSR(TestCase):
         def run_test(shape, nnz, index_type):
             a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
             self.assertEqual(a.sum(), a.values().sum())
+            if dtype in get_all_fp_dtypes():
+                a.requires_grad_(True)
+                with self.assertRaisesRegex(RuntimeError, "Function SumBackward0 returned an invalid gradient at index 0 - expected layout SparseCsr but got Strided"):
+                    a.sum().backward()
         for shape, index_dtype in itertools.product(
                 [(10, 5), (10, 10)],
                 [torch.int32, torch.int64]):
