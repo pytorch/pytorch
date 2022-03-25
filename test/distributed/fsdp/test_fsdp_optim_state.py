@@ -424,6 +424,9 @@ class TestFSDPOptimState(FSDPTest):
         self._check_same_state(
             sharded_osd1, local_osd2, check_same_param_ids=True,
         )
+        # As a sanity check, check that we can load and run a few iterations
+        optim2.load_state_dict(sharded_osd1)
+        self._step_model(model2, optim2, num_iters=NUM_ITERS)
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)
