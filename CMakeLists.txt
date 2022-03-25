@@ -282,6 +282,7 @@ option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
+option(USE_VULKAN_PRELOAD_CONTEXT "Vulkan - Trigger the Vulkan context to load upon application start" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 set(XNNPACK_MIN_CMAKE_VER 3.12)
 cmake_dependent_option(
@@ -731,6 +732,10 @@ if(USE_VULKAN)
 
   if(USE_VULKAN_SHADERC_RUNTIME)
     string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
+  endif()
+
+  if(USE_VULKAN_PRELOAD_CONTEXT)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_PRELOAD_CONTEXT")
   endif()
 endif()
 
