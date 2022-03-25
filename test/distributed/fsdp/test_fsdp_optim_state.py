@@ -44,7 +44,8 @@ class Bias(torch.nn.Module):
 
 class AffineA(torch.nn.Module):
     """
-    This module applies an affine transformation (like ``nn.Linear``).
+    This module applies an affine transformation (like ``nn.Linear``). It is
+    used to define interesting nested structure for FSDP wrapping.
     AffineA
         Bias0
             bias
@@ -69,7 +70,8 @@ class AffineA(torch.nn.Module):
 
 class AffineB(torch.nn.Module):
     """
-    This module applies an affine transformation (like ``nn.Linear``).
+    This module applies an affine transformation (like ``nn.Linear``). It is
+    used to define interesting nested structure for FSDP wrapping.
     AffineB
         weight
         Bias
@@ -218,9 +220,11 @@ class TestFSDPOptimState(FSDPTest):
 
     def _broadcast_full_osd(self, full_osd: Dict[str, Any], group=None):
         """Broadcasts the full optimizer state dict in place of using
-        ``torch.save()`` and ``torch.load()``."""
+        ``torch.save()`` and ``torch.load()`` so that all ranks can have it."""
         obj_list = [full_osd]
-        dist.broadcast_object_list(obj_list, src=OPTIM_TARGET_RANK, group=group)
+        dist.broadcast_object_list(
+            obj_list, src=OPTIM_TARGET_RANK, group=group,
+        )
         full_osd = obj_list[0]
         return full_osd
 
@@ -251,7 +255,8 @@ class TestFSDPOptimState(FSDPTest):
 
     def _check_same_state(self, full_osd, ref_osd, check_same_param_ids: bool):
         """Checks that ``full_osd`` and ``ref_osd`` have the same "state" part,
-        allowing the parameter IDs to be different but still isomorphic."""
+        allowing the parameter IDs to be different but still isomorphic if
+        ``check_same_param_ids=False``."""
         assert "state" in ref_osd
         self.assertTrue("state" in full_osd)
         ref_osd_state = ref_osd["state"]
