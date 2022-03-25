@@ -491,10 +491,9 @@ async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
         return CommandResult(0, "", ""), []
 
     print("<<<>>> linefilterslist")
-    header_filter = Dict[str, Any]
-    header_filter['name'] = '.h'
-    header_filter['lines'] = [0, 99]
-    line_filters.append(header_filter)
+    line_filters += [
+            {"name": ".h"}
+        ]
     print(line_filters)
 
     result = await _run_clang_tidy(options, line_filters, files)
