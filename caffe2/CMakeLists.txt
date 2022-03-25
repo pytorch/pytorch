@@ -1143,7 +1143,7 @@ endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-    FILES_MATCHING PATTERN "*.h")
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
@@ -1351,8 +1351,14 @@ if(USE_DISTRIBUTED)
     else()
       if(BUILD_SPLIT_CUDA)
         target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda_cpp PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       else()
         target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       endif()
     endif()
   endif()
