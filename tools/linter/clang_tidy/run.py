@@ -479,6 +479,7 @@ async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
 
+    print("<<<>>> debugtext")
     print(files)
     # clang-tidy errors when it does not get input files.
     if not files:
