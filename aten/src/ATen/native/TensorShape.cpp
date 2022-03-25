@@ -1582,42 +1582,42 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
     const auto get_selected_indices_large_nnz_small_size = [&]() -> std::tuple<Tensor, Tensor> {
       const auto get_counts = [&sorted_idx_to_cidx](
+          // Writes into counts (must be preallocated and zero)
+          // and allows to use external buffers.
+          Tensor& counts,
           const Tensor& t,
           int64_t bins,
           bool is_sorted = false,
-          bool run_in_parallel = true) -> Tensor {
-        Tensor counts;
+          bool run_in_parallel = true) -> void {
         if (is_sorted) {
           const auto cidx = sorted_idx_to_cidx(t, bins, run_in_parallel);
-          counts = cidx.slice(0, 1, bins + 1).sub(cidx.slice(0, 0, bins));
+          at::sub_out(counts, cidx.slice(0, 1, bins + 1), cidx.slice(0, 0, bins));
         }
         else {
-          counts = at::zeros({bins}, t.options());
           auto* ptr_counts = counts.data_ptr<int64_t>();
           const auto* ptr_vals = t.data_ptr<int64_t>();
           for (const auto i : c10::irange(t.numel())) {
             ++ptr_counts[*ptr_vals++];
           }
         }
-
-        return counts;
       };
 
-      const auto dim_indices_counts = get_counts(indices[dim], /*bins=*/size,
+      auto dim_indices_counts = at::zeros({size}, index.options());
+      get_counts(dim_indices_counts, indices[dim], /*bins=*/size,
           // When self is coalesced and dim == 0, indices[dim] is sorted.
           /*is_sorted=*/self.is_coalesced() && dim == 0);
 
-      Tensor index_sorted, index_counts;
-      std::tie(index_sorted, index_counts) = [&get_counts](const Tensor& index, int64_t size)
-        -> std::tuple<Tensor, Tensor> {
+      auto index_counts = at::zeros({size}, index.options());
+      const auto index_sorted = [&get_counts, &index_counts](
+          const Tensor& index, int64_t size) -> Tensor {
         int64_t index_len = index.numel();
-        Tensor index_sorted, index_counts;
+        Tensor index_sorted;
         // TODO: find a better threshold based on actual runtime benchmarking.
         // Here we switch between count sort and merge/quick sort based on
         // algorithmic complexity.
         if (size < std::log2(index_len) * index_len) {
           // no assumptions on sorted index in general
-          index_counts = get_counts(index, /*bins=*/size, /*is_sorted=*/false);
+          get_counts(index_counts, index, /*bins=*/size, /*is_sorted=*/false);
           const auto perm = at::arange(size, index.options());
           // do count sort in O(size)
           index_sorted = at::repeat_interleave(perm, index_counts);
@@ -1625,9 +1625,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         else {
           // do merge/quick sort in O(index_len * log(index_len))
           index_sorted = std::get<0>(index.sort());
-          index_counts = get_counts(index_sorted, /*bins=*/size, /*is_sorted=*/true);
+          get_counts(index_counts, index_sorted, /*bins=*/size, /*is_sorted=*/true);
         }
-        return std::make_tuple(index_sorted, index_counts);
+        return index_sorted;
       }(nneg_index, size);
 
       // find res_dim_indices
