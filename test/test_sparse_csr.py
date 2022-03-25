@@ -1549,6 +1549,21 @@ class TestSparseCSR(TestCase):
 
     @skipMeta
     @dtypes(*get_all_dtypes())
+    def test_sum(self, device, dtype):
+        def run_test(shape, nnz, index_type):
+            a = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            print("a: ", a)
+            print("a.sum(): ", a.sum())
+        for shape, index_dtype in itertools.product(
+                [(10, 5), (10, 10)],
+                [torch.int32, torch.int64]):
+            run_test(shape, 0, index_dtype)
+            run_test(shape, max(shape), index_dtype)
+            run_test(shape, shape[0] * shape[1], index_dtype)
+
+
+    @skipMeta
+    @dtypes(*get_all_dtypes())
     def test_transpose(self, device, dtype):
 
         def run_test(shape, nnz, index_type, dim0, dim1):

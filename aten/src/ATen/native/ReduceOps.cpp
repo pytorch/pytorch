@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cfloat>
 #include <type_traits>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -1048,6 +1049,15 @@ TORCH_IMPL_FUNC(sum_out)
   } else {
     sum_stub(iter.device_type(), iter);
   }
+}
+
+Tensor& sum_csr_out(const Tensor& self,
+ IntArrayRef dim,
+ bool keepdim,
+ optional<ScalarType> opt_dtype,
+ Tensor& result) {
+  std::cout << "00 sum_out_csr result.sizes(): " << result.sizes() << std::endl;
+  return result;
 }
 
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {

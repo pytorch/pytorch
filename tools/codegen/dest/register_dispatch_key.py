@@ -86,11 +86,13 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     return [f"""
 Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
   {runtime_empty_supported_check}
+  if ({empty_options}.layout() == c10::kSparseCsr) {{
+      return {empty_impl}(sizes, {empty_options}.layout(c10::kSparse));
+  }}
   if (strides.empty()) {{
       return {empty_impl}(sizes, {empty_options});
-  }} else {{
-      return {empty_strided_impl}(sizes, strides, {empty_options});
   }}
+  return {empty_strided_impl}(sizes, strides, {empty_options});
 }}
 """]
 
