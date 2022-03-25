@@ -244,6 +244,14 @@ class TestMisc(JitTestCase):
         with self.assertRaises(RuntimeError):
             torch.jit.script(annotated_list_fail)
 
+        def non_temporary_fail():
+            a = []
+            return expects_intlist(a)
+
+        with self.assertRaises(RuntimeError):
+            torch.jit.script(non_temporary_fail)
+
+
         @torch.jit.script
         def test_return():
             return []
