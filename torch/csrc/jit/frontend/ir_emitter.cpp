@@ -37,6 +37,7 @@
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <atomic>
 #include <climits>
 #include <set>
@@ -3320,7 +3321,7 @@ struct to_ir {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
-      return emitApplySpecialForm(special_form->form(), apply, type_hint);
+      return emitApplySpecialForm(special_form->form(), apply, sv, type_hint);
     }
     auto args = getNamedValues(apply.inputs(), true);
     auto kwargs = emitAttributes(apply.attributes());
@@ -3335,6 +3336,7 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplySpecialForm(
       Symbol form,
       Apply& apply,
+      std::shared_ptr<SugaredValue> sv,
       const TypePtr& type_hint = nullptr) {
     switch (form) {
       case prim::fork: {
@@ -3438,6 +3440,71 @@ struct to_ir {
         });
         return std::make_shared<SimpleValue>(
             graph->insertNode(graph->createTuple(inp_values))->output());
+      }
+      case prim::LegacyTypedConstructor: {
+        // see legacy_tensor_generic_ctor_new
+        // These legacy constructors do not follow schemas that can be
+        // typed in native_functions.yaml / JIT type signature and are handled
+        // here. Only the two common cases are handled initially:
+        // "new(IntArrayRef size, *, Device? device=None)",
+        // "new(PyObject* data, *, Device? device=None)",
+        // Note: device argument is unused in the kernel
+        auto args = getValues(apply.inputs(), true);
+        auto kwargs = emitAttributes(apply.attributes());
+        auto get_base_error_msg = [&]() {
+          std::stringstream base_error_msg;
+          base_error_msg
+              << "Legacy Tensor Constructor only supports two schemas in TorchScript: \n";
+          base_error_msg
+              << "'new(IntArrayRef size, *, Device? device=None)',\n";
+          base_error_msg << "'new(PyObject* data, *, Device? device=None)\n'";
+          return base_error_msg;
+        };
+        if (kwargs.size() == 1 && kwargs[0].name() != "device") {
+          throw ErrorReport(apply)
+              << get_base_error_msg().str() << "Got kwarg " << kwargs[0].name();
+        }
+        if (kwargs.size() > 1) {
+          throw ErrorReport(apply)
+              << get_base_error_msg().str() << "Got multiple kwargs\n";
+        }
+        auto dtype = dynamic_cast<LegacyTensorConstructor*>(sv.get())->dtype();
+        auto dtype_ivalue = graph->insertConstant(dtype);
+
+        // supporting "new(IntArrayRef size, *, Device? device=None)", through
+        // empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout?
+        // layout=None, Device? device=None, bool? pin_memory=None,
+        // MemoryFormat? memory_format=None) -> Tensor
+        bool all_ints = std::all_of(args.begin(), args.end(), [](Value* v) {
+          return v->type()->cast<IntType>();
+        });
+        if (args.size() == 0) {
+          // empty inputs == torch.tensor([], dtype=....)
+          auto inp_list =
+              graph->insertNode(graph->createList(IntType::get(), {}))
+                  ->output();
+          return std::make_shared<SimpleValue>(graph->insert(
+              aten::tensor,
+              {inp_list},
+              {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
+        } else if (all_ints) {
+          auto inp_list =
+              graph->insertNode(graph->createList(IntType::get(), args))
+                  ->output();
+          return std::make_shared<SimpleValue>(graph->insert(
+              aten::empty,
+              {inp_list},
+              {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
+        } else if (args.size() == 1) {
+          return std::make_shared<SimpleValue>(graph->insert(
+              aten::tensor,
+              {args[0]},
+              {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
+        } else {
+          throw ErrorReport(apply)
+              << get_base_error_msg().str()
+              << "Got multiple positional arguments that were not all integers";
+        }
       }
       case prim::isinstance: {
         checkApplyNumInputs(apply, 2);

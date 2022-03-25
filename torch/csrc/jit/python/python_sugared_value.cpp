@@ -12,6 +12,8 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include "ATen/core/interned_strings.h"
+#include "c10/core/ScalarType.h"
 
 #include <Python.h>
 
@@ -1159,6 +1161,23 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (auto callee = as_module(obj)) {
     throw ErrorReport(loc) << "Cannot call a ScriptModule that is not"
                            << " a submodule of the caller";
+  }
+  std::vector<std::pair<const char*, at::ScalarType>> tensor_names = {
+      {"BoolTensor", at::ScalarType::Bool},
+      {"LongTensor", at::ScalarType::Long},
+      {"ByteTensor", at::ScalarType::Byte},
+      {"CharTensor", at::ScalarType::Char},
+      {"DoubleTensor", at::ScalarType::Double},
+      {"FloatTensor", at::ScalarType::Float},
+      {"IntTensor", at::ScalarType::Int},
+      {"ShortTensor", at::ScalarType::Short},
+      {"HalfTensor", at::ScalarType::Half},
+  };
+  for (const auto& name : tensor_names) {
+    if (obj.ptr() == py::module::import("torch").attr(name.first).ptr()) {
+      return LegacyTensorConstructor::create(
+          prim::LegacyTypedConstructor, name.second, at::kCPU);
+    }
   }
 
   py::object builtin_name =

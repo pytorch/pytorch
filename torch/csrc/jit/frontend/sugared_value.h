@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include "c10/util/Optional.h"
 
 #include <ATen/core/symbol.h>
 #include <caffe2/serialize/versions.h>
@@ -616,6 +617,25 @@ struct TORCH_API SpecialFormValue : public SugaredValue {
 
  private:
   Symbol form_;
+};
+
+struct TORCH_API LegacyTensorConstructor : public SpecialFormValue {
+  LegacyTensorConstructor(Symbol form, at::ScalarType dtype, at::Device device)
+      : SpecialFormValue(form), device_(device), dtype_(dtype) {}
+
+  static std::shared_ptr<LegacyTensorConstructor> create(
+      Symbol form,
+      at::ScalarType dtype,
+      at::Device device) {
+    return std::make_shared<LegacyTensorConstructor>(form, dtype, device);
+  }
+  at::ScalarType dtype() const {
+    return dtype_;
+  }
+
+ private:
+  at::Device device_;
+  at::ScalarType dtype_;
 };
 
 // matched against for special handling of range expressions
