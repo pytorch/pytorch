@@ -3431,20 +3431,21 @@ def error_inputs_multinomial(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(torch.tensor(input), kwargs={'num_samples': 2}),
                          error_regex="probability tensor contains either `inf`, `nan` or element < 0")
 
-    rep_arg = True if device == 'cpu' else False
+    rep_arg = [False, True] if device == 'cpu' else [False]
     err_msg = r"invalid multinomial distribution \(sum of probabilities <= 0\)"
 
-    x = torch.zeros(3, device=device)
-    yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep_arg}),
-                     error_regex=err_msg)
+    for rep in rep_arg:
+        x = torch.zeros(3, device=device)
+        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
+                         error_regex=err_msg)
 
-    x = torch.zeros(3, 3, device=device)
-    yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep_arg}),
-                     error_regex=err_msg)
+        x = torch.zeros(3, 3, device=device)
+        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
+                         error_regex=err_msg)
 
-    x[1, :] = 1
-    yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep_arg}),
-                     error_regex=err_msg)
+        x[1, :] = 1
+        yield ErrorInput(SampleInput(x, kwargs={'num_samples': 2, 'replacement': rep}),
+                         error_regex=err_msg)
 
 def error_inputs_gradient(op_info, device, **kwargs):
     for dtype in [torch.long, torch.float32, torch.complex64]:
