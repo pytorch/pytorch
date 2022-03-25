@@ -9085,6 +9085,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',
@@ -11529,7 +11531,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Problem, needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-            ),
+           ),
            supports_out=False),
     OpInfo('nn.functional.bilinear',
            aten_name='bilinear',
@@ -13525,7 +13527,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Problem, needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-            ),
+           ),
            sample_inputs_func=sample_inputs_put),
     OpInfo('take',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
