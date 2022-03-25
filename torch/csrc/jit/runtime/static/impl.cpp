@@ -938,7 +938,7 @@ void BlockRunner::set_inputs(
 
 void BlockRunner::create_memory_planner() {
   if (!planner_) {
-    planner_ = std::make_unique<MemoryPlanner>(
+    planner_ = std::make_unique<StandardMemoryPlanner>(
         this,
         block_info_,
         static_module_.opts().enable_out_variant,
