@@ -105,13 +105,17 @@ bool CommonIndexKey::operator==(const CommonIndexKey& other) const {
     return false;
   }
 
+  // Check if both CommonIndexKeys use the same loops. If not, it's
+  // still valid to share the same hoisted index as long as: 1) each
+  // loop pair is mapped with the CA index map, and 2) they are not
+  // instantiated as actual loops.
   for (const auto i : c10::irange(used_loops_.size())) {
     auto lhs_loop = used_loops_.at(i);
     auto rhs_loop = other.used_loops_.at(i);
     if (lhs_loop == rhs_loop) {
       continue;
     }
-    if (gpu_lower->caLoopMap().areMapped(
+    if (gpu_lower->caIndexMap().areMapped(
             lhs_loop->iter_domain(), rhs_loop->iter_domain()) &&
         lhs_loop->isTrivial() && rhs_loop->isTrivial()) {
       continue;

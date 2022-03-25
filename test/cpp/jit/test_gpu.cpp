@@ -21069,8 +21069,6 @@ TEST_F(NVFuserTest, FusionTestGridComm_CUDA) {
 }
 
 // See issue https://github.com/csarofeen/pytorch/issues/1497
-// TODO: Enable
-#if 0
 TEST_F(NVFuserTest, FusionTestGridComm2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -21115,7 +21113,6 @@ TEST_F(NVFuserTest, FusionTestGridComm2_CUDA) {
 
   testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
-#endif
 
 // Vectorized reset test for double buffered registers
 TEST_F(NVFuserTest, FusionDoubleBufferVector_CUDA) {
