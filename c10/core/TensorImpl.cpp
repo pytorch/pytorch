@@ -192,7 +192,7 @@ TensorImpl::TensorImpl(
 
   // TODO: be more explicit about the full key set at call sites so we
   // don't have to keep recomputing it here
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
+  auto k = key_set.highestBackendKey();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
