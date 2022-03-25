@@ -7,7 +7,7 @@
 #undef _XOPEN_SOURCE
 #undef _POSIX_C_SOURCE
 
-// #include <Python.h>
+#include <Python.h>
 #include <structseq.h>
 
 #pragma pop_macro("_XOPEN_SOURCE")
