@@ -2086,9 +2086,15 @@ class FullyShardedDataParallel(nn.Module):
         for flat_param_id, param in enumerate(flat_param_id_to_param):  # type: ignore[assignment]
             if to_save:
                 unflat_param_ids = flat_to_unflat_param_ids[flat_param_id]  # alias
-            # Do not include parameters without state to avoid empty mappings
+            # Do not include parameters without state to avoid empty mappings;
+            # however, still increment `unflat_param_id` to avoid changing
+            # the parameter ID mapping if those parameters get state later
             if flat_param_id not in osd_state:
-                if to_save:
+                if not to_save:
+                    continue
+                num_unflat_params = param._num_unflattened_params \
+                    if isinstance(param, FlatParameter) else 1
+                for _ in range(num_unflat_params):
                     unflat_param_ids.append(unflat_param_id)
                     unflat_param_id += 1
             elif isinstance(param, FlatParameter):
