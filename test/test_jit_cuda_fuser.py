@@ -3661,6 +3661,68 @@ class TestCudaFuser(JitTestCase):
             run(t)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_overlapped_input(self):
+        x = torch.randn(8, device="cuda").as_strided((2, 4), (1, 1))
+
+        with nvfuser_singleton_fusion(True):
+            def t(x):
+                return x + 1.0
+
+            t_jit = torch.jit.script(t)
+            self._run_helper(t_jit, t, x)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_skip_parser(self):
+        x = torch.randn(4, 12, device="cuda")
+
+        with nvfuser_singleton_fusion(True):
+            def fn(x):
+                t1 = x + 1.0
+                return t1.relu()
+
+            fn_jit = torch.jit.script(fn)
+            self._run_helper(fn_jit, fn, x)
+
+            # add node should have been merged into fusion
+            self.assertGraphContains(fn_jit.graph_for(x), FUSION_GUARD)
+            self.assertGraphContainsExactly(fn_jit.graph_for(x), 'aten::add', 0)
+
+            # flips skip parse for `aten::add`, following fusion should skip the
+            # add node
+            self.assertFalse(torch._C._jit_set_nvfuser_skip_node_kind("aten::add", True))
+
+            def fn_1(x):
+                t1 = x + 2.0  # change const value so we'll not reuse plan
+                return t1.relu()
+
+            fn_1_jit = torch.jit.script(fn_1)
+            self._run_helper(fn_1_jit, fn_1, x)
+
+            # add node should have been merged into fusion
+            self.assertGraphContains(fn_1_jit.graph_for(x), FUSION_GUARD)
+            self.assertGraphContainsExactly(fn_1_jit.graph_for(x), 'aten::add', 1)
+
+            # flips skip parse for `aten::add`, next fusion should fuse add node
+            self.assertTrue(torch._C._jit_set_nvfuser_skip_node_kind("aten::add", True))
+
+            def fn_2(x):
+                t1 = x + 2.0  # change const value so we'll not reuse plan
+                return t1.relu()
+
+            fn_2_jit = torch.jit.script(fn_2)
+            self._run_helper(fn_2_jit, fn_2, x)
+
+            # add node should have been merged into fusion
+            self.assertGraphContains(fn_2_jit.graph_for(x), FUSION_GUARD)
+            self.assertGraphContainsExactly(fn_2_jit.graph_for(x), 'aten::add', 0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_nvfuser_comparison_callbacks_with_fallback(self):
         try:
             fused_result = None
@@ -3696,6 +3758,9 @@ class TestCudaFuser(JitTestCase):
         finally:
             torch._C._jit_nvfuser_clear_comparison_callback()
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_nvfuser_comparison_callbacks_without_fallback(self):
         try:
