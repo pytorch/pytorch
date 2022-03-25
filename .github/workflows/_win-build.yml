@@ -38,7 +38,7 @@ jobs:
           no-sudo: true
 
       - name: Setup Windows
-        uses: ./.github/actions/setup-win@master
+        uses: ./.github/actions/setup-win
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
