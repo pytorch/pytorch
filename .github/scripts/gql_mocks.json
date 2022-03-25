@@ -24168,5 +24168,598 @@
         }
       }
     }
+  },
+  "query_sha=ccad1f1d86477cccc3056031c2f47dc393ff40a373782e7ee351ec79881bc716 name=pytorch number=74649 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": false,
+          "isCrossRepository": false,
+          "author": {
+            "login": "malfet"
+          },
+          "title": "This should fail flake8",
+          "body": "Test issue for GHF mandatory checks",
+          "headRefName": "malfet-patch-8",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nshulga@fb.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "57c86ff1c5ab948888fd329986c9d55796680e33",
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "app": {
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "Facebook CLA Check",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHbPrQ=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "Netlify",
+                          "databaseId": 13473
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Azure Pipelines",
+                          "databaseId": 9426
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Dependabot",
+                          "databaseId": 29110
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Codecov",
+                          "databaseId": 254
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "PyTorch Bot",
+                          "databaseId": 40112
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "clang-tidy",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "clang-format",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "flake8-py3",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "shellcheck",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (with_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "py2-setup-validate-errormsg",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "toc",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHbRHs=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHbQBU=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pull"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "linux-xenial-py3.7-clang7-asan / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm4.5-py3.7 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-clang7-onnx / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHbRuo=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "CANCELLED"
+                      }
+                    ],
+                    "pageInfo": {
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVhWeyQ=",
+                      "hasNextPage": false
+                    }
+                  }
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nshulga@fb.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "6c3c3de6a5c1183d9a08f3c54148bc0b5de11bb4",
+                  "checkSuites": {
+                    "nodes": [
+                      {
+                        "app": {
+                          "name": "Facebook GitHub Tools",
+                          "databaseId": 12274
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "Facebook CLA Check",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHsK3w=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SUCCESS"
+                      },
+                      {
+                        "app": {
+                          "name": "Netlify",
+                          "databaseId": 13473
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Azure Pipelines",
+                          "databaseId": 9426
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Dependabot",
+                          "databaseId": 29110
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "Codecov",
+                          "databaseId": 254
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "PyTorch Bot",
+                          "databaseId": 40112
+                        },
+                        "workflowRun": null,
+                        "checkRuns": {
+                          "nodes": [],
+                          "pageInfo": {
+                            "endCursor": null,
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": null
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "Lint"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "clang-format",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "clang-tidy",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "cmakelint",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "flake8-py3",
+                              "conclusion": "FAILURE"
+                            },
+                            {
+                              "name": "mypy",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (with_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test collect_env (without_torch)",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "Test tools",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "py2-setup-validate-errormsg",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "quick-checks",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHsMNU=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": "FAILURE"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "TorchBench CI (pytorch-linux-py3.7-cu102)"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "run-torchbench",
+                              "conclusion": "NEUTRAL"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHsLW0=",
+                            "hasNextPage": false
+                          }
+                        },
+                        "conclusion": "SKIPPED"
+                      },
+                      {
+                        "app": {
+                          "name": "GitHub Actions",
+                          "databaseId": 15368
+                        },
+                        "workflowRun": {
+                          "workflow": {
+                            "name": "pull"
+                          }
+                        },
+                        "checkRuns": {
+                          "nodes": [
+                            {
+                              "name": "pytorch-xla-linux-bionic-py3.7-clang8",
+                              "conclusion": "NEUTRAL"
+                            },
+                            {
+                              "name": "linux-vulkan-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-py3.7-clang9 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-bionic-rocm4.5-py3.7 / build",
+                              "conclusion": null
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                              "conclusion": null
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4 / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-py3.7-gcc5.4-mobile-lightweight-dispatch-build / build",
+                              "conclusion": "SUCCESS"
+                            },
+                            {
+                              "name": "linux-xenial-cuda11.3-py3.7-gcc7-bazel-test / build-and-test",
+                              "conclusion": null
+                            },
+                            {
+                              "name": "linux-xenial-py3-clang5-mobile-custom-build-static / build",
+                              "conclusion": "SUCCESS"
+                            }
+                          ],
+                          "pageInfo": {
+                            "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVHsaNA=",
+                            "hasNextPage": true
+                          }
+                        },
+                        "conclusion": null
+                      }
+                    ],
+                    "pageInfo": {
+                      "endCursor": "Y3Vyc29yOnYyOpHPAAAAAVhlkGU=",
+                      "hasNextPage": false
+                    }
+                  }
+                }
+              }
+            ],
+            "totalCount": 2
+          },
+          "changedFiles": 1,
+          "files": {
+            "nodes": [
+              {
+                "path": "torch/nn/cpp.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "seemethere"
+                },
+                "state": "APPROVED"
+              }
+            ],
+            "totalCount": 1
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "\ud83d\udd17 Helpful links\n\n\ud83e\uddea \u00a0See artifacts and rendered test results at hud.pytorch.org/pr/74649\n\u21a9\ufe0f \u00a0[fb-only] Re-run with SSH instructions\nNeed help or want to give feedback on the CI? Visit our office hours\n\n\ud83d\udc8a CI failures summary and remediations\nAs of commit 6c3c3de (more details on the Dr. CI page):\n\n\n1/1 failures introduced in this PR\n\n\n1 failure not recognized by patterns:\n\n\n\nJob\nStep\nAction\n\n\n\n\n Lint / flake8-py3\nFail if there were any warnings\n\ud83d\udd01 rerun\n\n\n\n\nThis comment was automatically generated by Dr. CI (expand for details).\nPlease report bugs/suggestions to the (internal) Dr. CI Users group.\nClick here  to manually regenerate this comment.",
+                "author": {
+                  "login": "facebook-github-bot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": {
+                  "login": "facebook-github-bot"
+                },
+                "databaseId": 1076891218
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOQDAOUg==",
+              "hasPreviousPage": false
+            }
+          }
+        }
+      }
+    }
   }
 }
