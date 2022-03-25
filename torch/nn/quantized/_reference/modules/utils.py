@@ -20,32 +20,26 @@ class ReferenceQuantizedModule(torch.nn.Module):
             None, torch.per_tensor_affine, torch.per_channel_affine,
             torch.per_channel_affine_float_qparams], \
             Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}")
-        if self.weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]:
-            zero_point_dtype = weight_qparams["zero_point"].dtype if \
-                isinstance(weight_qparams["zero_point"], torch.Tensor) else \
-                torch.int
+        assert self.weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32], \
+            Exception(f"qscheme: {self.weight_dtype} is not supported")
+
+        zero_point_dtype = weight_qparams["zero_point"].dtype if \
+            isinstance(weight_qparams["zero_point"], torch.Tensor) else \
+            torch.int
+        self.register_buffer(
+            "weight_scale",
+            torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
+        self.register_buffer(
+            "weight_zero_point",
+            torch.tensor(weight_qparams["zero_point"], dtype=zero_point_dtype, device=device))
+        if self.weight_qscheme in [torch.per_channel_affine, torch.per_channel_affine_float_qparams]:
             self.register_buffer(
-                "weight_scale",
-                torch.tensor(weight_qparams["scale"], dtype=torch.float, device=device))
-            self.register_buffer(
-                "weight_zero_point",
-                torch.tensor(weight_qparams["zero_point"], dtype=zero_point_dtype, device=device))
-            if self.weight_qscheme in [torch.per_channel_affine, torch.per_channel_affine_float_qparams]:
-                self.register_buffer(
-                    "weight_axis",
-                    torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
-            else:
-                # added for TorchScriptability, not used
-                self.register_buffer(
-                    "weight_axis", torch.tensor(0, dtype=torch.int, device=device))
+                "weight_axis",
+                torch.tensor(weight_qparams["axis"], dtype=torch.int, device=device))
         else:
-            logger.warning("unexpected supported weight dtype: {}".format(self.weight_dtype))
             # added for TorchScriptability, not used
-            self.register_buffer("weight_scale", torch.tensor(1.0, dtype=torch.float, device=device))
-            self.register_buffer("weight_zero_point", torch.tensor(0, dtype=torch.int, device=device))
             self.register_buffer(
                 "weight_axis", torch.tensor(0, dtype=torch.int, device=device))
-
 
     def get_weight(self):
         """
@@ -55,25 +49,28 @@ class ReferenceQuantizedModule(torch.nn.Module):
         model
         """
         # suppress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
-        # assert isinstance(self.weight_qscheme, torch.qscheme)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
         return _quantize_and_dequantize_weight(
-            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
+            self.weight,  # type: ignore[arg-type]
+            self.weight_qscheme,
+            self.weight_dtype,
+            self.weight_scale,
             self.weight_zero_point, self.weight_axis)
 
     def get_quantized_weight(self):
         # suppress mypy warning
-        assert isinstance(self.weight, torch.Tensor)
-        # assert isinstance(self.weight_qscheme, torch.Tensor)
         assert isinstance(self.weight_scale, torch.Tensor)
         assert isinstance(self.weight_zero_point, torch.Tensor)
         assert isinstance(self.weight_axis, torch.Tensor)
         return _quantize_weight(
-            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
-            self.weight_zero_point, self.weight_axis)
+            self.weight,  # type: ignore[arg-type]
+            self.weight_qscheme,
+            self.weight_dtype,
+            self.weight_scale,
+            self.weight_zero_point,
+            self.weight_axis)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)
