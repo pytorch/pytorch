@@ -6,6 +6,7 @@
 
 #include <torch/extension.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
@@ -30,9 +31,52 @@ static bool has_level(const Tensor& self, int64_t level) {
   return batched->level() >= level;
 }
 
+static bool has_functional_level(const Tensor& self, int64_t level) {
+  if (!at::functionalization::impl::isFunctionalTensor(self)) {
+    return false;
+  }
+  const auto* functional = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+  return functional->level() >= level;
+}
+
 Tensor _add_batch_dim(const Tensor& self, int64_t batch_dim, int64_t level) {
   return addBatchDim(self, batch_dim, level);
 }
+
+Tensor _wrap_functional_tensor(const Tensor& self, int64_t level) {
+  auto t = at::functionalization::impl::to_functional_tensor(self);
+  at::functionalization::impl::unsafeGetFunctionalWrapper(t)->set_level(level);
+  return t;
+}
+
+void _assert_wrapped_functional(const Tensor& unwrapped, const Tensor& wrapped) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(wrapped));
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(unwrapped));
+  auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(wrapped);
+  auto& wrapped_inner = wrapped_impl->value();
+  TORCH_INTERNAL_ASSERT(unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl())
+}
+
+void _propagate_functional_input_mutation(const Tensor& unwrapped, const Tensor& wrapped) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(wrapped));
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(unwrapped));
+  auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(wrapped);
+  // Ensure that the input is up to date by committing any pending updates to the alias.
+  wrapped_impl->apply_updates();
+  wrapped_impl->regenerate_from_base();
+  auto& wrapped_inner = wrapped_impl->value();
+  // It would probably be more reasonable to check that the two tensors are aliased,
+  // but we can't do that unless we give BatchedTensorImpl a notion of storage.
+  if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
+  } else {
+      TORCH_INTERNAL_ASSERT(unwrapped.nbytes() == wrapped_inner.nbytes());
+      TORCH_INTERNAL_ASSERT(unwrapped.sizes() == wrapped_inner.sizes(),
+          "An inplace-mutation op (like transpose_() was called on an input to the functionalization pass."
+          " Propagating those mutations to the input is currently not supported.");
+      unwrapped.copy_(wrapped_inner);
+  }
+}
+
 
 static std::pair<Tensor,int64_t> remove_existing_batch_dim(
     const BatchedTensorImpl* batched, int64_t level) {
@@ -98,6 +142,17 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(batched, level);
   auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
   return result;
+}
+
+Tensor _unwrap_functional_tensor(const Tensor& self) {
+  auto* functional = dynamic_cast<FunctionalTensorWrapper*>(self.unsafeGetTensorImpl());
+  // We only ever call that after popping out of a functionalize() call, in which case the current tensors
+  // should always be wrapped in a FunctionalTensorWrapper.
+  TORCH_INTERNAL_ASSERT(functional != nullptr);
+  // Ensure that the input is up to date by committing any pending updates to the alias.
+  functional->apply_updates();
+  functional->regenerate_from_base();
+  return functional->value();
 }
 
 Tensor _wrap_for_grad(const Tensor& self, int64_t level) {
@@ -190,6 +245,16 @@ int64_t _vmap_decrement_nesting() {
   return layer.layerId();
 }
 
+int64_t _func_increment_nesting() {
+  return initAndPushDynamicLayer(DispatchKey::Functionalize);
+}
+
+int64_t _func_decrement_nesting() {
+  auto layer = popDynamicLayerAndDeleteMetadata();
+  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Functionalize);
+  return layer.layerId();
+}
+
 static bool is_batchedtensor(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   return batched != nullptr;
@@ -200,6 +265,10 @@ static bool is_gradtrackingtensor(const Tensor& tensor) {
   return wrapped != nullptr;
 }
 
+static bool is_functionaltensor(const Tensor& tensor) {
+  return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Functionalize);
+}
+
 static Tensor get_unwrapped(const Tensor& tensor) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
@@ -208,6 +277,10 @@ static Tensor get_unwrapped(const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     return wrapped->value();
+  }
+  auto* functional = dynamic_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());
+  if (functional) {
+    return functional->value();
   }
   TORCH_CHECK(false, "No wrappers present!");
 }
@@ -224,6 +297,10 @@ static int64_t maybe_get_level(const Tensor& tensor) {
     }
     // TODO: this is a weird special case...
     return -2;
+  }
+  auto* functional = dynamic_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());
+  if (functional) {
+      return functional->level();
   }
   return -1;
 }
@@ -285,8 +362,14 @@ namespace at { namespace functorch {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_add_batch_dim", &at::functorch::_add_batch_dim, "add batch dim");
   m.def("_remove_batch_dim", &at::functorch::_remove_batch_dim, "remove batch dim");
+  m.def("_wrap_functional_tensor", &at::functorch::_wrap_functional_tensor, "add functional tensor");
+  m.def("_assert_wrapped_functional", &at::functorch::_assert_wrapped_functional, "assert wrapped functional");
+  m.def("_propagate_functional_input_mutation", &at::functorch::_propagate_functional_input_mutation, "propagate functional input mutations");
+  m.def("_unwrap_functional_tensor", &at::functorch::_unwrap_functional_tensor, "remove functional tensor");
   m.def("_vmap_increment_nesting", &at::functorch::_vmap_increment_nesting, "remove batch dim");
   m.def("_vmap_decrement_nesting", &at::functorch::_vmap_decrement_nesting, "remove batch dim");
+  m.def("_func_increment_nesting", &at::functorch::_func_increment_nesting, "functionalization start");
+  m.def("_func_decrement_nesting", &at::functorch::_func_decrement_nesting, "functionalization end");
   m.def("_grad_increment_nesting", &at::functorch::_grad_increment_nesting, "remove batch dim");
   m.def("_grad_decrement_nesting", &at::functorch::_grad_decrement_nesting, "remove batch dim");
   m.def("_jvp_increment_nesting", &at::functorch::_jvp_increment_nesting);
@@ -305,6 +388,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   // on Tensors?
   m.def("is_batchedtensor", &at::functorch::is_batchedtensor);
   m.def("is_gradtrackingtensor", &at::functorch::is_gradtrackingtensor);
+  m.def("is_functionaltensor", &at::functorch::is_functionaltensor);
   m.def("get_unwrapped", &at::functorch::get_unwrapped);
   m.def("maybe_get_level", &at::functorch::maybe_get_level);
   m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
