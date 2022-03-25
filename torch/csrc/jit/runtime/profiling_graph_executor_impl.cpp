@@ -424,7 +424,6 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
   // runNondiffOptimization
   {
     // Run custom passes that different backends can register.
-    // e.g. NVFuser
     for (const auto& passPair : getCustomPrePasses()) {
       passPair.first(graph);
     }
@@ -473,6 +472,7 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     }
 
     // Run custom post-fusion passes
+    // e.g. NVFuser
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
