@@ -454,12 +454,16 @@ inline void reflection_pad2d_out_loop(
   });
 }
 
-void reflection_pad2d_out_template(
-    Tensor &output, const Tensor &input_, IntArrayRef padding) {
+namespace {
+void reflection_pad2d_out_template_helper(const Tensor& input_, IntArrayRef padding,
+  int64_t& nbatch, int64_t& pad_l, int64_t& pad_r, int64_t& pad_t, int64_t& nplane,
+  int64_t& input_w, int64_t& input_h, int64_t& output_w, int64_t& output_h,
+  Tensor& input, const Tensor& output) {
+
   int dim_w = 2;
   int dim_h = 1;
   int dim_slices = 0;
-  int64_t nbatch = 1;
+  nbatch = 1;
 
   bool valid_dims = input_.size(1) != 0 && input_.size(2) != 0;
   TORCH_CHECK(
@@ -475,16 +479,13 @@ void reflection_pad2d_out_template(
   }
 
   /* sizes */
-  int64_t pad_l = padding[0];
-  int64_t pad_r = padding[1];
-  int64_t pad_t = padding[2];
   int64_t pad_b = padding[3];
 
-  int64_t nplane = input_.size(dim_slices);
-  int64_t input_h = input_.size(dim_h);
-  int64_t input_w = input_.size(dim_w);
-  int64_t output_h = input_h + pad_t + pad_b;
-  int64_t output_w  = input_w + pad_l + pad_r;
+  nplane = input_.size(dim_slices);
+  input_h = input_.size(dim_h);
+  input_w = input_.size(dim_w);
+  output_h = input_h + pad_t + pad_b;
+  output_w  = input_w + pad_l + pad_r;
 
   TORCH_CHECK(pad_l < input_w && pad_r < input_w,
     "Argument #4: Padding size should be less than the corresponding "
@@ -501,11 +502,35 @@ void reflection_pad2d_out_template(
     "output H: ", output_h, " W: ", output_w);
 
   /* get contiguous input */
-  Tensor input = input_.contiguous();
-
+  input = input_.contiguous();
+  /* resize output */
   if (input.ndimension() == 3) {
-    /* resize output */
     output.resize_({nplane, output_h, output_w});
+  } else {
+    output.resize_({nbatch, nplane, output_h, output_w});
+  }
+}
+} // anoymous namespace
+
+void reflection_pad2d_out_template(
+    Tensor &output, const Tensor &input_, IntArrayRef padding) {
+
+  int64_t nbatch;
+  int64_t pad_l;
+  int64_t pad_r;
+  int64_t pad_t;
+  /* sizes */
+  int64_t nplane;
+  int64_t input_w;
+  int64_t input_h;
+  int64_t output_w;
+  int64_t output_h;
+  Tensor input;
+  reflection_pad2d_out_template_helper(input_, padding, nbatch,
+                                       pad_l, pad_r, pad_t, nplane, input_w,
+                                       input_h, output_w, output_h,
+                                       input, output);
+  if (input.ndimension() == 3) {
     if (input.is_quantized()) {
       AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
         reflection_pad2d_out_frame(
@@ -524,8 +549,63 @@ void reflection_pad2d_out_template(
       });
     }
   } else {
-    /* resize output */
-    output.resize_({nbatch, nplane, output_h, output_w});
+    if (input.is_quantized()) {
+      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
+        reflection_pad2d_out_loop(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nbatch, nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+        reflection_pad2d_out_loop(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nbatch, nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    }
+  }
+}
+
+void reflection_pad2d_out_quantized_template(
+    Tensor &output, const Tensor &input_, IntArrayRef padding) {
+
+  int64_t nbatch;
+  int64_t pad_l;
+  int64_t pad_r;
+  int64_t pad_t;
+  /* sizes */
+  int64_t nplane;
+  int64_t input_w;
+  int64_t input_h;
+  int64_t output_w;
+  int64_t output_h;
+  Tensor input;
+  reflection_pad2d_out_template_helper(input_, padding, nbatch,
+                                       pad_l, pad_r, pad_t, nplane, input_w,
+                                       input_h, output_w, output_h,
+                                       input, output);
+  if (input.ndimension() == 3) {
+    if (input.is_quantized()) {
+      AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
+        reflection_pad2d_out_frame(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    } else {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+        reflection_pad2d_out_frame(
+          input.data_ptr<scalar_t>(), output.data_ptr<scalar_t>(),
+          nplane,
+          input_w, input_h, output_w, output_h,
+          pad_l, pad_t);
+      });
+    }
+  } else {
     if (input.is_quantized()) {
       AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&] {
         reflection_pad2d_out_loop(
@@ -934,6 +1014,12 @@ Tensor& reflection_pad2d_out_cpu(const Tensor& input, IntArrayRef padding,
   return output;
 }
 
+Tensor& reflection_pad2d_out_quantized_cpu(const Tensor& input, IntArrayRef padding,
+    Tensor& output) {
+  reflection_pad2d_out_quantized_template(output, input, padding);
+  return output;
+}
+
 Tensor reflection_pad2d_cpu(const Tensor& input, IntArrayRef padding) {
   Tensor output = at::empty({0}, input.options());
   reflection_pad2d_out_template(output, input, padding);
@@ -945,7 +1031,7 @@ Tensor reflection_pad2d_quantized_cpu(const Tensor& input, IntArrayRef padding) 
   Tensor output = at::_empty_affine_quantized({0}, input.options(),
                                            input.q_scale(),
                                            input.q_zero_point());
-  reflection_pad2d_out_template(output, input, padding);
+  reflection_pad2d_out_quantized_template(output, input, padding);
   return output;
 }
 
