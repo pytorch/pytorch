@@ -123,14 +123,24 @@ It is imperative that all processes specify the same number of interfaces in thi
 Other NCCL environment variables
 """"""""""""""""""""""""""""""""
 
-NCCL has also provided a number of environment variables for fine-tuning purposes.
+**Debugging** - in case of NCCL failure, you can set ``NCCL_DEBUG=INFO`` to print an explicit
+warning message as well as basic NCCL initialization information.
 
-Commonly used ones include the following for debugging purposes:
+You may also use ``NCCL_DEBUG_SUBSYS`` to get more details about a specific
+aspect of NCCL. For example, ``NCCL_DEBUG_SUBSYS=COLL`` would print logs of
+collective calls, which may be helpful when debugging hangs, especially those
+caused by collective type or message size mismatch. In case of topology
+detection failure, it would be helpful to set ``NCCL_DEBUG_SUBSYS=GRAPH``
+to inspect the detailed detection result and save as reference if further help
+from NCCL team is needed.
 
-- ``export NCCL_DEBUG=INFO``
-- ``export NCCL_DEBUG_SUBSYS=ALL``
+**Performance tuning** - NCCL performs automatic tuning based on its topology detection to save users'
+tuning effort. On some socket-based systems, users may still try tuning
+``NCCL_SOCKET_NTHREADS`` and ``NCCL_NSOCKS_PERTHREAD`` to increase socket
+network bandwidth. These two environment variables have been pre-tuned by NCCL
+for some cloud providers, such as AWS or GCP.
 
-For the full list of NCCL environment variables, please refer to
+For a full list of NCCL environment variables, please refer to
 `NVIDIA NCCL's official documentation <https://docs.nvidia.com/deeplearning/sdk/nccl-developer-guide/docs/env.html>`_
 
 
