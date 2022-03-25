@@ -1056,7 +1056,9 @@ Tensor& sum_csr_out(const Tensor& self,
  bool keepdim,
  optional<ScalarType> opt_dtype,
  Tensor& result) {
-  std::cout << "00 sum_out_csr result.sizes(): " << result.sizes() << std::endl;
+  TORCH_CHECK(dim.size() == 0, "sum_csr_out currently only supports full reductions. Got dim ", dim, " instead.");
+  TORCH_INTERNAL_ASSERT(result.layout() == c10::kStrided, "Expected result to have strided layout.");
+  result.copy_(self.values().sum());
   return result;
 }
 
