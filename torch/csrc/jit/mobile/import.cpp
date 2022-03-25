@@ -576,36 +576,11 @@ mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  auto format = getFileFormat(filename);
-  switch (format) {
-    case FileFormat::ZipFileFormat: {
-      std::unique_ptr<FileAdapter> rai =
-          std::make_unique<FileAdapter>(filename);
-      auto module = _load_for_mobile(std::move(rai), device, extra_files);
-      return module;
-    }
-#if defined(ENABLE_FLATBUFFER)
-    case FileFormat::FlatbufferFileFormat: {
-      std::shared_ptr<char> data;
-      size_t size = 0;
-      std::tie(data, size) = get_file_content(filename.c_str());
-      auto* flatbuffer_module =
-          mobile::serialization::GetMutableModule(data.get());
-      mobile::Module m = initialize_mobile_module(flatbuffer_module);
-      parseExtraFiles(flatbuffer_module, extra_files);
-      return m;
-    }
-#else
-    case FileFormat::FlatbufferFileFormat: {
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-    }
-#endif
-    default: {
-      TORCH_CHECK(false, "Format error");
-    }
-  }
+  return _load_for_mobile(
+      filename,
+      device,
+      extra_files,
+      /*module_load_options=*/_default_mobile_module_load_options);
 }
 
 mobile::Module _load_for_mobile(
