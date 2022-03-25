@@ -814,37 +814,6 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
-    def test_split_module_with_buffer(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer('buffer', torch.randn(5, 5))
-
-            def forward(self, x):
-                x = torch.relu(x)
-                x = x + self.buffer
-                x = torch.sigmoid(x)
-                return x
-
-        f = Foo()
-        traced = torch.fx.symbolic_trace(f)
-        seen_relu = False
-
-        def split_callback(n):
-            nonlocal seen_relu
-            if n.op == torch.relu:
-                seen_relu = True
-
-            if seen_relu:
-                return 0
-            else:
-                return 1
-        split = split_module(traced, f, split_callback)
-
-        print([k for k, v in f.named_buffers()])
-        print([k for k, v in traced.named_buffers()])
-        print([k for k, v in split.named_buffers()])
-
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
         # Smoke test trivially splitting resnet into 1 partition works

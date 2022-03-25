@@ -185,7 +185,7 @@ class TestFSDPStateDict(FSDPTest):
         except KeyError:
             raise ValueError(f"No state_dict type for {state_dict_type}")
 
-        with model.state_dict_type(enum_val):
+        with FSDP.state_dict_type(model, enum_val):
             return model.state_dict()
 
     @staticmethod
@@ -197,7 +197,7 @@ class TestFSDPStateDict(FSDPTest):
         except KeyError:
             raise ValueError(f"No state_dict for {state_dict_type}")
 
-        with model.state_dict_type(enum_val):
+        with FSDP.state_dict_type(model, enum_val):
             return model.load_state_dict(state_dict)
 
     def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
