@@ -166,6 +166,9 @@ def build_constructor_arg_db():
         torch.nn.UpsamplingBilinear2d: ((), {}),
         torch.nn.UpsamplingNearest2d: ((), {}),
         torch.nn.ZeroPad2d: ((0,), {}),
+        torch.nn.qat.Conv1d: ((3, 3, 3), {
+            'qconfig': torch.ao.quantization.default_qconfig,
+        }),
         torch.nn.qat.Conv2d: ((3, 3, 3), {
             'qconfig': torch.ao.quantization.default_qconfig,
         }),
@@ -206,7 +209,7 @@ def build_constructor_arg_db():
         torch.nn.quantized.EmbeddingBag: ((10, 3), {
             'factory_kwargs': {},
         }),
-        torch.nn.quantized.GroupNorm: ((2, 3, torch.nn.Parameter(torch.tensor(2.)),
+        torch.nn.quantized.GroupNorm: ((2, 4, torch.nn.Parameter(torch.tensor(2.)),
                                         torch.nn.Parameter(torch.tensor(2.)), 0.1, 0), {}),
         torch.nn.quantized.Hardswish: ((0.1, 0,), {}),
         torch.nn.quantized.InstanceNorm1d: ((2, torch.nn.Parameter(torch.tensor(2.)),

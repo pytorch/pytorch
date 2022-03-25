@@ -4683,6 +4683,8 @@ def fold(
                                   f"are supported (got {input.dim()}D)")
 
 
+# NOTE: Do not edit. This code will be removed once the forward-compatibility
+#       period is over for PR #73410
 def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
     """Circularly pads tensor.
 
