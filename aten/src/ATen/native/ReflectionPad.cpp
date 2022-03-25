@@ -479,6 +479,9 @@ void reflection_pad2d_out_template_helper(const Tensor& input_, IntArrayRef padd
   }
 
   /* sizes */
+  pad_l = padding[0];
+  pad_r = padding[1];
+  pad_t = padding[2];
   int64_t pad_b = padding[3];
 
   nplane = input_.size(dim_slices);
