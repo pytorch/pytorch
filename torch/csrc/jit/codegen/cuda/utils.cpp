@@ -24,7 +24,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::CudaToFile, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
-      {DebugDumpOption::PrintRuntimeArgs, false},
+      {DebugDumpOption::FusionArgs, false},
+      {DebugDumpOption::KernelArgs, false},
       {DebugDumpOption::EffectiveBandwidth, false},
       {DebugDumpOption::FusionSegmentsDrawing, false},
       {DebugDumpOption::PrintPtxasLog, false},
@@ -54,8 +55,10 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
         options_map[DebugDumpOption::FusionSegments] = true;
-      } else if (token == "print_args") {
-        options_map[DebugDumpOption::PrintRuntimeArgs] = true;
+      } else if (token == "fusion_args") {
+        options_map[DebugDumpOption::FusionArgs] = true;
+      } else if (token == "kernel_args") {
+        options_map[DebugDumpOption::KernelArgs] = true;
       } else if (token == "dump_eff_bandwidth") {
         options_map[DebugDumpOption::EffectiveBandwidth] = true;
       } else if (token == "draw_segmented_fusion") {
@@ -77,10 +80,10 @@ auto parseDebugDumpOptions() {
             token,
             "'\nAvailable options:\n",
             "\tfusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full,\n",
-            "\tcuda_to_file, launch_param, segmented_fusion, print_args,\n",
-            "\tdump_eff_bandwidth, draw_segmented_fusion, scheduler_params\n",
-            "\tparallel_dimensions, buffer_reuse_verbose, ptxas_verbose\n",
-            "\thalo\n");
+            "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
+            "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
+            "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
+            "\tptxas_verbose, halo\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)

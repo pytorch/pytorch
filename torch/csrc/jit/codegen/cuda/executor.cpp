@@ -634,6 +634,26 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
       !opt_code.has_value() || outputs.empty(),
       "short cut input cache is not compatible with pre-allocated output");
 
+  if (isDebugDumpEnabled(DebugDumpOption::FusionArgs)) {
+    std::cout << "Arguments for fusion" << fusion_id_ << ":" << std::endl
+              << "Inputs:" << std::endl;
+    for (const auto& input : inputs) {
+      if (input.isTensor()) {
+        const auto& input_tensor = input.toTensor();
+        std::cout << "  " << input_tensor.scalar_type() << " "
+                  << input.toTensor().sizes()
+                  << " (strides = " << input.toTensor().strides() << ")"
+                  << std::endl;
+      }
+    }
+    std::cout << "Outputs:" << std::endl;
+    for (const auto& output : outputs) {
+      std::cout << "  " << output.scalar_type() << " " << output.sizes()
+                << " (strides = " << output.strides() << ")" << std::endl;
+    }
+    std::cout << launch_constraints.toString();
+  }
+
   ExecutorEntry* executor_entry = nullptr;
   if (opt_code.has_value()) {
     executor_entry = &executor_entry_lookup_[*opt_code];
@@ -859,7 +879,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     launch_params.print();
   }
 
-  if (isDebugDumpEnabled(DebugDumpOption::PrintRuntimeArgs)) {
+  if (isDebugDumpEnabled(DebugDumpOption::KernelArgs)) {
     std::cout << "Arguments for kernel" << fusion_id_ << ":" << std::endl
               << "Inputs:" << std::endl;
     for (const auto& input : inputs) {

@@ -30,7 +30,8 @@ enum class DebugDumpOption {
   CudaToFile, //!< Dump CUDA Strings to File
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
-  PrintRuntimeArgs, //!< Print the runtime arguments when launching kernels
+  FusionArgs, //!< Print the runtime fusion arguments
+  KernelArgs, //!< Print the runtime kernel arguments when launching kernels
   EffectiveBandwidth, //! Measure kernel performance and print effective
                       //! bandwidth
   FusionSegmentsDrawing, //!< Dump Segmented Fusion Graph
