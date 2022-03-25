@@ -877,8 +877,20 @@ const Tensor &as_strided_(const Tensor& self, IntArrayRef size, IntArrayRef stri
   return self;
 }
 
-Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
-  const int64_t length = sym_length.expect_int();
+Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length) {
+  return narrow_copy(self, dim, start, sym_length.expect_int());
+}
+
+Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+}
+
+Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  auto output = at::empty_like(self);
+  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
+}
+
+Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   int64_t allDim = self.dim();
   int64_t end = start+length;
   TORCH_CHECK(allDim > 0, "narrow() cannot be applied to a 0-dim tensor.");
@@ -913,13 +925,12 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, SymInt
 }
 
 Tensor& narrow_copy_dense_cpu_out(
-  const Tensor& self, int64_t dim, int64_t start, SymInt sym_length, Tensor& output
+  const Tensor& self, int64_t dim, int64_t start, int64_t length, Tensor& output
 ) {
 
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(self.dtype() == output.dtype());
 
-  const int64_t length = sym_length.expect_int();
   auto self_contig = self.expect_contiguous();
   const auto self_sizes = self_contig->sizes();
 
@@ -992,29 +1003,6 @@ Tensor& narrow_copy_dense_cpu_out(
         local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
   }
   return output;
-}
-
-Tensor narrow_copy_symint(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  return narrow_copy(self, dim, start, c10::SymInt{length});
-}
-
-Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, SymInt sym_length){
-  // TODO: we should also fix `narrow` to accept `SymInt`
-  // When we do introduce SymIntNode, real symints can flow
-  // into this function
-  const int64_t length = sym_length.expect_int();
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
-}
-
-Tensor& narrow_copy_dense_cpu_symint_out(
-  const Tensor& self, int64_t dim, int64_t start, int64_t sym_length, Tensor& output
-) {
-  return narrow_copy_dense_cpu_out(self, dim, start, sym_length, output);
-}
-
-Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, SymInt length){
-  auto output = at::empty_like(self);
-  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
