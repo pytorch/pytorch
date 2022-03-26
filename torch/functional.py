@@ -102,7 +102,7 @@ def broadcast_shapes(*shapes):
         RuntimeError: If shapes are incompatible.
     """
     # This wrapper exists to support variadic args.
-    # TODO Movie this to C++ once the jit has better support for torch.Size.
+    # TODO Move this to C++ once the jit has better support for torch.Size.
     if not torch.jit.is_tracing():
         max_len = 0
         for shape in shapes:
