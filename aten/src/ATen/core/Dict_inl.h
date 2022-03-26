@@ -83,7 +83,19 @@ Dict<Key, Value>::Dict(TypePtr keyType, TypePtr valueType)
 }
 
 template<class Key, class Value>
+Dict<Key, Value>::Dict(Dict&& rhs) noexcept: impl_(std::move(rhs.impl_)) {
+  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
+}
+
+template<class Key, class Value>
 Dict<Key, Value>::Dict(c10::intrusive_ptr<detail::DictImpl>&& impl): impl_(std::move(impl)) {}
+
+template<class Key, class Value>
+Dict<Key, Value>& Dict<Key, Value>::operator=(Dict&& rhs) noexcept {
+  impl_ = std::move(rhs.impl_);
+  rhs.impl_ = make_intrusive<detail::DictImpl>(detail::DictImpl::dict_map_type(), impl_->elementTypes);
+  return *this;
+}
 
 template<class Key, class Value>
 Dict<Key, Value> Dict<Key, Value>::copy() const {
