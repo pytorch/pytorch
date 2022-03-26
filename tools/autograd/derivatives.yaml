@@ -1575,10 +1575,7 @@
 # See [Note: Sometimes view derivatives]
 # - name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
 #
-- name: _sparse_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-  self: to_dense_backward(grad, self)
-
-- name: _mkldnn_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+- name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_dense_backward(grad, self)
 
 - name: to_sparse(Tensor self) -> Tensor
