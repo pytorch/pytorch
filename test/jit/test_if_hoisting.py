@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: jit"]
 
 import torch
 from torch.testing import FileCheck

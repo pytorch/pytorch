@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
+#include <aten/src/ATen/core/jit_type.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/api/include/torch/python.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
@@ -198,6 +200,9 @@ void initPythonIRBindings(PyObject* module_) {
           [&](AliasDb& db, Value* v1, Value* v2) {
             return db.mayContainAlias(v1, v2);
           })
+      .def(
+          "has_writers",
+          [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
       .def("__str__", &AliasDb::toString);
 
 #define GS(name) def(#name, &Graph ::name)
@@ -215,9 +220,14 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("enabled") = true)
       .def(
           "alias_db",
-          [](std::shared_ptr<Graph> g) {
-            return std::make_shared<AliasDb>(std::move(g));
-          })
+          [](std::shared_ptr<Graph> g,
+             bool isFrozen = false,
+             bool descend_function_calls = false) {
+            return std::make_shared<AliasDb>(
+                std::move(g), isFrozen, descend_function_calls);
+          },
+          py::arg("isFrozen") = false,
+          py::arg("descend_function_calls") = false)
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -245,11 +255,13 @@ void initPythonIRBindings(PyObject* module_) {
             RawDataExportMap export_map;
             SymbolDimMap symbol_map;
             bool val_use_external_data_format = false;
+            NodeNameMap onnx_node_names;
             std::tie(
                 model_proto,
                 export_map,
                 symbol_map,
-                val_use_external_data_format) =
+                val_use_external_data_format,
+                onnx_node_names) =
                 export_onnx(
                     g,
                     initializers,
@@ -279,7 +291,8 @@ void initPythonIRBindings(PyObject* module_) {
             return std::make_tuple(
                 py::bytes(graph),
                 python_serialized_export_map,
-                val_use_external_data_format);
+                val_use_external_data_format,
+                onnx_node_names);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
@@ -363,6 +376,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("addInput", [](Graph& g) { return g.addInput(); })
       .def("copy", [](Graph& g) { return g.copy(); })
       .GS(eraseInput)
+      .GS(eraseOutput)
       .GS(registerOutput)
       .def(
           "create",
@@ -415,6 +429,45 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .GS(appendNode)
       .GS(prependNode)
+      // NB: insert_point_guard defined over direct modification of insert point
+      .def(
+          "insert_point_guard",
+          [](Graph& g, Node* n) {
+            return py::module::import("torch.jit._ir_utils")
+                .attr("insert_point_guard")(g, n);
+          })
+      .def(
+          "insert_point_guard",
+          [](Graph& g, Block* b) {
+            return py::module::import("torch.jit._ir_utils")
+                .attr("insert_point_guard")(g, b);
+          })
+      .GS(insertPoint)
+      .def("setInsertPoint", [](Graph& g, Node* n) { g.setInsertPoint(n); })
+      .def("setInsertPoint", [](Graph& g, Block* n) { g.setInsertPoint(n); })
+      .def(
+          "insertGraph",
+          [](Graph& g, Graph& callee, std::vector<Value*> inputs) {
+            return insertGraph(g, callee, inputs);
+          })
+      .def(
+          "insertGraph",
+          [](Graph& g,
+             Graph& callee,
+             std::vector<Value*> inputs,
+             std::unordered_map<Value*, Value*> value_map) {
+            return insertGraph(g, callee, inputs, value_map);
+          })
+      .def(
+          "insert",
+          [](Graph& g, Symbol opname, std::vector<Value*> args) {
+            std::vector<NamedValue> args_named;
+            args_named.reserve(args.size());
+            for (Value* v : args) {
+              args_named.emplace_back(v);
+            }
+            return g.insert(opname, args_named);
+          })
       .def(
           "makeMultiOutputIntoTuple",
           [](Graph& g) {
@@ -429,6 +482,7 @@ void initPythonIRBindings(PyObject* module_) {
           "insertConstant",
           [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
       .GS(lint)
+      .def("block", [](Graph& g) { return g.block(); })
       .GS(insertNode);
 #undef GS
 
@@ -537,6 +591,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("prev", [](Node& n) { return n.prev(); })
+      .def("matches", [](Node& n, const char* s) { return n.matches(s); })
       .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
@@ -639,6 +695,7 @@ void initPythonIRBindings(PyObject* module_) {
       .CREATE_ACCESSOR(Ints, is)
       .CREATE_ACCESSOR(Graph, g)
       .CREATE_ACCESSOR(Graphs, gs)
+      .CREATE_ACCESSOR(IValue, ival)
 #undef CREATE_ACCESSOR
       // Tensor (t_) -- manually written to unwrap the variable into a tensor.
       .def(
@@ -816,6 +873,26 @@ void initPythonIRBindings(PyObject* module_) {
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
+          "device",
+          [](Type& t) -> py::object {
+            auto device = t.expectRef<TensorType>().device();
+            if (!device) {
+              return py::none();
+            }
+            PyObject* thp_device = THPDevice_New(device.value());
+            return py::reinterpret_borrow<py::object>(thp_device);
+            // return toPyObject(device.value());
+          })
+      .def(
+          "with_device",
+          [](Type& t, py::object device) -> py::object {
+            at::Device c_device = python::detail::py_object_to_device(device);
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withDevice(c_device));
+            }
+            return py::none();
+          })
+      .def(
           "dtype",
           [](Type& t) -> py::object {
             auto scalar_type = t.expectRef<TensorType>().scalarType();
@@ -860,6 +937,9 @@ void initPythonIRBindings(PyObject* module_) {
           [](const TypePtr& self) {
             return self->castRaw<InterfaceType>() != nullptr;
           })
+      .def(
+          "requires_grad",
+          [](const TypePtr& self) -> bool { return self->requires_grad(); })
       .def_property_readonly(
           "annotation_str", [](const std::shared_ptr<Type>& self) {
             return self->annotation_str();

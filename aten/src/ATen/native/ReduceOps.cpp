@@ -221,7 +221,7 @@ ScalarType get_result_or_self_value_dtype(
   if (result.defined()) {
     return result.scalar_type();
   } else {
-    return dtype.value_or(toValueType(self.scalar_type()));
+    return dtype.value_or(toRealValueType(self.scalar_type()));
   }
 }
 
@@ -264,6 +264,34 @@ TORCH_META_FUNC(aminmax)
   const auto options = self.options();
   this->set_output(0, shape, options);
   this->set_output(1, shape, options);
+}
+
+TORCH_META_FUNC(amax)
+(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  auto maybe_result = maybe_get_output();
+  if (maybe_result.defined()) {
+    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+            self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+  }
+  if (self.numel() == 0) {
+    at::native::zero_numel_check_dims(self, dim, "amax()");
+  }
+  const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
+}
+
+TORCH_META_FUNC(amin)
+(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  auto maybe_result = maybe_get_output();
+  if (maybe_result.defined()) {
+    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
+                self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+  }
+  if (self.numel() == 0) {
+    at::native::zero_numel_check_dims(self, dim, "amin()");
+  }
+  const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 } // namespace meta
@@ -841,13 +869,17 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
     "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
   }
   TORCH_CHECK(edge_order == 1 || edge_order == 2, "torch.gradient only supports edge_order=1 and edge_order=2.");
-  for (const auto i : c10::irange(self.dim())) {
-    TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
-  }
   if (dim.has_value()) {
     // The following function get called to check whether dim argument satisfies prerequisites.
     // The output of the function is not used for the computation of gradient.
     dim_list_to_bitset(dim.value(), self.dim());
+    for (const auto i : c10::irange(dim.value().size())) {
+      TORCH_CHECK(self.size(dim.value()[i]) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+    }
+  } else {
+    for (const auto i : c10::irange(self.dim())) {
+      TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+    }
   }
 }
 
@@ -1411,42 +1443,20 @@ TORCH_IMPL_FUNC(any_all_out)(const Tensor& self, const Tensor& result) {
   allany_impl<0>(self, result, {}, false, or_stub);
 }
 
-Tensor &amin_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
-  if (self.numel() == 0) {
-    zero_numel_check_dims(self, dim, "amin()");
-  }
-
-  auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
+TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+  auto iter =
+      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     min_values_stub(iter.device_type(), iter);
   }
-  return result;
 }
 
-Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::amin_out(result, self, dim, keepdim);
-}
-
-Tensor &amax_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-              self.scalar_type(), " for input's dtype and ",  result.scalar_type(), " for out's dtype.");
-  if (self.numel() == 0) {
-    zero_numel_check_dims(self, dim, "amax()");
-  }
-
-  auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
+TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+  auto iter =
+      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
   if (iter.numel() != 0) {
     max_values_stub(iter.device_type(), iter);
   }
-  return result;
-}
-
-Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::amax_out(result, self, dim, keepdim);
 }
 
 template <class Stub>
@@ -1565,7 +1575,7 @@ static Tensor& std_var_out(
   if (at::isComplexType(self.scalar_type())) {
     // For complex, calculate variance of real and imaginary components
     // seperately then add to get overall variance.
-    ScalarType dtype = c10::toValueType(get_dtype_from_result(result, {}));
+    ScalarType dtype = c10::toRealValueType(get_dtype_from_result(result, {}));
     Tensor real_in = at::real(self);
     Tensor real_out = at::empty({0}, self.options().dtype(dtype));
     std_var_out(
@@ -1630,7 +1640,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
               fname, " only supports strided layout, got: ", self.layout());
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               fname, " only support floating point and complex dtypes");
-  TORCH_CHECK(result1.scalar_type() == c10::toValueType(result2.scalar_type()),
+  TORCH_CHECK(result1.scalar_type() == c10::toRealValueType(result2.scalar_type()),
               fname, " expected result1 to be real and match the precision of result2. Got ",
               result1.scalar_type(), " and ", result2.scalar_type(), ".");
 
@@ -1638,7 +1648,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     // For complex, calculate for real and imaginary components seperately then combine as:
     // variance = var_real + var_imag
     // mean = mean_real + j * mean_imag
-    ScalarType dtype = c10::toValueType(get_dtype_from_result(result1, {}));
+    ScalarType dtype = c10::toRealValueType(get_dtype_from_result(result1, {}));
     Tensor real_in = at::real(self);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
@@ -1720,7 +1730,7 @@ std::tuple<Tensor&, Tensor&> var_mean_out(
 
 static TensorOptions options_to_value_type(TensorOptions opts) {
   auto scalar_type = typeMetaToScalarType(opts.dtype());
-  return opts.dtype(c10::toValueType(scalar_type));
+  return opts.dtype(c10::toRealValueType(scalar_type));
 }
 
 std::tuple<Tensor, Tensor> var_mean(

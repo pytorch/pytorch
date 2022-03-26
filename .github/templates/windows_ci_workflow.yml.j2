@@ -18,19 +18,7 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: !{{ build_environment }}
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  push:
-    branches:
-      - master
-      - release/*
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
@@ -65,15 +53,13 @@ env:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
       http_proxy: "!{{ common. squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-    if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
@@ -81,7 +67,7 @@ jobs:
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.display_ec2_information() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
@@ -97,6 +83,10 @@ jobs:
         run: |
           .circleci/scripts/windows_cudnn_install.sh
 {%- endif %}
+      - uses: actions/setup-python@v2
+        name: Setup Python3
+        with:
+          python-version: '3.x'
       !{{ common.parse_ref() }}
       - name: Build
         shell: bash
@@ -113,7 +103,7 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      !{{ wait_and_kill_ssh() }}
+      !{{ common.wait_and_kill_ssh_windows() }}
       - name: Cleanup build-results and workspaces
         if: always()
         shell: bash
@@ -124,67 +114,38 @@ jobs:
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
           rm -rf ./*
 
-  generate-test-matrix:
-    needs: build
-    runs-on: ubuntu-18.04
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      NUM_TEST_SHARDS_ON_PULL_REQUEST: !{{ num_test_shards_on_pull_request }}
-      PR_BODY: ${{ github.event.pull_request.body }}
-      NOGPU_RUNNER_TYPE: windows.4xlarge
-      ENABLE_FORCE_ON_CPU_TEST: !{{ enable_force_on_cpu_test }}
-      RUN_SMOKE_TESTS_ONLY_ON_PR: !{{ only_run_smoke_tests_on_pull_request }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    timeout-minutes: !{{ common.timeout_minutes }}
+  {%- for test_job in test_jobs %}
+  !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: !{{ test_job.name }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-test
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      TEST_CONFIG: ${{ matrix.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
+      TEST_CONFIG: !{{ test_job.config }}
       http_proxy: "!{{ common.squid_proxy }}"
       https_proxy: "!{{ common.squid_proxy }}"
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-    needs: [build, generate-test-matrix]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+    needs: build
+    runs-on: !{{ test_job.runner }}
     steps:
       !{{ common.display_ec2_information() }}
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
-{%- if cuda_version != "cpu" %}
+{%- if cuda_version != "cpu" and not test_job.config == 'force_on_cpu' %}
       - name: Install Cuda
-        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cuda_install.sh
       - name: Install Cudnn
-        if: ${{ matrix.config != 'force_on_cpu' }}
         shell: bash
         run: |
           .circleci/scripts/windows_cudnn_install.sh
@@ -207,14 +168,14 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
             .jenkins/pytorch/win-test.sh
-      !{{ common.upload_downloaded_files(name='windows') }}
-      !{{ common.upload_test_reports(name='windows') }}
+      !{{ common.upload_downloaded_files(name='windows', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='windows', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
       !{{ common.render_test_results() }}
-      !{{ wait_and_kill_ssh() }}
+      !{{ common.wait_and_kill_ssh_windows() }}
       !{{ common.parse_ref() }}
       !{{ common.upload_test_statistics(build_environment) }}
       - name: Cleanup workspace
@@ -223,3 +184,4 @@ jobs:
         # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf ./*
+  {%- endfor %}

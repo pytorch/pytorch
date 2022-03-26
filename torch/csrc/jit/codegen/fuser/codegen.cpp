@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 
 #include <ATen/ATen.h>
+#include <ATen/code_template.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/fuser/cpu/resource_strings.h>
@@ -23,7 +23,7 @@ namespace jit {
 namespace fuser {
 
 // Template for computing the offset into the tensor to access a value
-static auto dim_calc = CodeTemplate(R"(
+static auto dim_calc = at::jit::CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
 ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
@@ -136,7 +136,7 @@ static std::string typeCastedValueName(
 }
 
 // Writes RHS of special handling "simple mappable" ops
-static std::string encodeSpecialRHS(const Node* n, TemplateEnv& env) {
+static std::string encodeSpecialRHS(const Node* n, at::jit::TemplateEnv& env) {
   // special case for clamp fusion on missing min/max inputs
   // Note: It may seem unusual to have the bounds as the first case below,
   // this is so that if min or max is NaN, they are "ignored"
@@ -260,7 +260,7 @@ static std::string encodeRHS(const Node* n) {
       {aten::where, "(${0} ? ${1} : ${2})"},
   };
 
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
 
   if (simple_map_ops.find(n->kind()) == simple_map_ops.end()) {
     return encodeSpecialRHS(n, env);
@@ -298,7 +298,7 @@ static void emitIndexingFor(
     const std::string& tensor,
     const int ndim,
     const bool last_is_cont) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("tensor", tensor);
   out << format("IndexType ${tensor}_offset = 0;\n", env);
   out << format("IndexType ${tensor}_linearIndex = linearIndex;\n", env);
@@ -322,7 +322,7 @@ static void emitCheckFor(
     const std::string& tensor,
     const int ndim,
     const TensorDesc& desc) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("tensor", tensor);
   env.s("scalar_type", scalarTypeName(desc.scalar_type));
 
@@ -368,7 +368,7 @@ std::string generateKernel(
         inputs,
     const std::vector<std::pair<const Value*, const TensorDesc>>& outputs,
     const bool use_cuda) {
-  TemplateEnv env;
+  at::jit::TemplateEnv env;
   env.s("kernelName", name);
   env.s(
       "IndexType",

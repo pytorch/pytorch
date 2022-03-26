@@ -7,29 +7,25 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: !{{ test_runner_type }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
-      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
-      LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
-    if: !{{ ciflow_config.root_job_condition }}
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     steps:
       - name: print labels
         run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.checkout() }}
       !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
-          !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -73,7 +69,7 @@ on:
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
       !{{ common.parse_ref() }}
-      !{{ common_android.upload_androind_binary_size("", "")}}
+      !{{ common_android.upload_android_binary_size("", "")}}
       - name: Test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
@@ -87,6 +83,7 @@ on:
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
+            -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
             -e IN_CI \
             -e SHARD_NUMBER \
             -e NUM_TEST_SHARDS \

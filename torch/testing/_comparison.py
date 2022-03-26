@@ -1,11 +1,10 @@
 import abc
 import cmath
 import collections.abc
-from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tuple, Any
+import contextlib
+from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tuple, Any, Collection
 
 import torch
-
-from ._core import _unravel_index
 
 try:
     import numpy as np
@@ -29,20 +28,15 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
-    @staticmethod
-    def id_to_itemstr(id: Tuple[Any, ...]) -> str:
-        return "".join(str([item]) for item in id)
-
     def to_error(self) -> Exception:
         msg = self.msg
         if self.id:
-            msg += f"\n\nThe failure occurred for item {self.id_to_itemstr(self.id)}"
+            msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
         return self.type(msg)
 
 
-# This is copy-pasted from torch.testing._internal.common_utils.TestCase.dtype_precisions. With this we avoid a
-# dependency on torch.testing._internal at import. See
-# https://github.com/pytorch/pytorch/pull/54769#issuecomment-813174256 for details.
+# Some analysis of tolerance by logging tests from test_torch.py can be found in
+# https://github.com/pytorch/pytorch/pull/32538.
 # {dtype: (rtol, atol)}
 _DTYPE_PRECISIONS = {
     torch.float16: (0.001, 1e-5),
@@ -53,6 +47,14 @@ _DTYPE_PRECISIONS = {
     torch.complex64: (1.3e-6, 1e-5),
     torch.complex128: (1e-7, 1e-7),
 }
+# The default tolerances of torch.float32 are used for quantized dtypes, because quantized tensors are compared in
+# their dequantized and floating point representation. For more details see `TensorLikePair._compare_quantized_values`
+_DTYPE_PRECISIONS.update(
+    {
+        dtype: _DTYPE_PRECISIONS[torch.float32]
+        for dtype in (torch.quint8, torch.quint2x4, torch.quint4x2, torch.qint8, torch.qint32)
+    }
+)
 
 
 def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float, float]:
@@ -213,6 +215,18 @@ def make_tensor_mismatch_msg(
             as callable in which case it will be called by the default value to create the description at runtime.
             Defaults to "Tensor-likes".
     """
+    def unravel_flat_index(flat_index: int) -> Tuple[int, ...]:
+        if not mismatches.shape:
+            return ()
+
+        inverse_index = []
+        for size in mismatches.shape[::-1]:
+            div, mod = divmod(flat_index, size)
+            flat_index = div
+            inverse_index.append(mod)
+
+        return tuple(inverse_index[::-1])
+
     number_of_elements = mismatches.numel()
     total_mismatches = torch.sum(mismatches).item()
     extra = (
@@ -238,10 +252,10 @@ def make_tensor_mismatch_msg(
         identifier=identifier,
         extra=extra,
         abs_diff=max_abs_diff.item(),
-        abs_diff_idx=_unravel_index(max_abs_diff_flat_idx.item(), mismatches.shape),
+        abs_diff_idx=unravel_flat_index(int(max_abs_diff_flat_idx)),
         atol=atol,
         rel_diff=max_rel_diff.item(),
-        rel_diff_idx=_unravel_index(max_rel_diff_flat_idx.item(), mismatches.shape),
+        rel_diff_idx=unravel_flat_index(int(max_rel_diff_flat_idx)),
         rtol=rtol,
     )
 
@@ -302,13 +316,19 @@ class Pair(abc.ABC):
         """Compares the inputs and returns an :class`ErrorMeta` in case they mismatch."""
 
     def extra_repr(self) -> Sequence[Union[str, Tuple[str, Any]]]:
+        """Returns extra information that will be included in the representation.
+
+        Should be overwritten by all subclasses that use additional options. The representation of the object will only
+        be surfaced in case we encounter an unexpected error and thus should help debug the issue. Can be a sequence of
+        key-value-pairs or attribute names.
+        """
         return []
 
     def __repr__(self) -> str:
         head = f"{type(self).__name__}("
         tail = ")"
         body = [
-            f"    {name}={value},"
+            f"    {name}={value!s},"
             for name, value in [
                 ("id", self.id),
                 ("actual", self.actual),
@@ -368,11 +388,15 @@ class BooleanPair(Pair):
         actual, expected = self._process_inputs(actual, expected, id=id)
         super().__init__(actual, expected, **other_parameters)
 
-    def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
+    @property
+    def _supported_types(self) -> Tuple[Type, ...]:
         cls: List[Type] = [bool]
         if NUMPY_AVAILABLE:
             cls.append(np.bool_)
-        self._check_inputs_isinstance(actual, expected, cls=tuple(cls))
+        return tuple(cls)
+
+    def _process_inputs(self, actual: Any, expected: Any, *, id: Tuple[Any, ...]) -> Tuple[bool, bool]:
+        self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         actual, expected = [self._to_bool(bool_like, id=id) for bool_like in (actual, expected)]
         return actual, expected
 
@@ -446,13 +470,17 @@ class NumberPair(Pair):
         self.equal_nan = equal_nan
         self.check_dtype = check_dtype
 
+    @property
+    def _supported_types(self) -> Tuple[Type, ...]:
+        cls = list(self._NUMBER_TYPES)
+        if NUMPY_AVAILABLE:
+            cls.append(np.number)
+        return tuple(cls)
+
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
-        number_types = list(self._NUMBER_TYPES)
-        if NUMPY_AVAILABLE:
-            number_types.append(np.number)
-        self._check_inputs_isinstance(actual, expected, cls=tuple(number_types))
+        self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         actual, expected = [self._to_number(number_like, id=id) for number_like in (actual, expected)]
         return actual, expected
 
@@ -559,23 +587,19 @@ class TensorLikePair(Pair):
         if not allow_subclasses and type(actual) is not type(expected):
             raise UnsupportedInputs()
 
-        actual, expected = [self._to_tensor(input, id=id) for input in (actual, expected)]
+        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
         for tensor in (actual, expected):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    def _to_tensor(self, tensor_like: Any, *, id: Tuple[Any, ...]) -> torch.Tensor:
+    def _to_tensor(self, tensor_like: Any) -> torch.Tensor:
         if isinstance(tensor_like, torch.Tensor):
             return tensor_like
 
         try:
             return torch.as_tensor(tensor_like)
-        except Exception as error:
-            raise ErrorMeta(
-                ValueError,
-                f"Constructing a tensor from {type(tensor_like)} failed with \n{error}.",
-                id=id,
-            ) from error
+        except Exception:
+            raise UnsupportedInputs()
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
@@ -585,8 +609,10 @@ class TensorLikePair(Pair):
         actual, expected = self.actual, self.expected
 
         self._compare_attributes(actual, expected)
-        actual, expected = self._equalize_attributes(actual, expected)
+        if any(input.device.type == "meta" for input in (actual, expected)):
+            return
 
+        actual, expected = self._equalize_attributes(actual, expected)
         self._compare_values(actual, expected)
 
     def _compare_attributes(
@@ -600,13 +626,12 @@ class TensorLikePair(Pair):
 
         - the :attr:`~torch.Tensor.shape`,
         - whether both inputs are quantized or not,
-         - and if they are the quantization scheme.
+        - and if they use the same quantization scheme.
 
         Checks for
 
         - :attr:`~torch.Tensor.layout`,
         - :meth:`~torch.Tensor.stride`,
-        - :meth:`~torch.Tensor.is_coalesced`,
         - :attr:`~torch.Tensor.device`, and
         - :attr:`~torch.Tensor.dtype`
 
@@ -630,15 +655,8 @@ class TensorLikePair(Pair):
         if actual.layout != expected.layout:
             if self.check_layout:
                 raise_mismatch_error("layout", actual.layout, expected.layout)
-        else:
-            if actual.layout == torch.strided and self.check_stride and actual.stride() != expected.stride():
-                raise_mismatch_error("stride()", actual.stride(), expected.stride())
-            elif (
-                actual.layout == torch.sparse_coo
-                and self.check_is_coalesced
-                and actual.is_coalesced() != expected.is_coalesced()
-            ):
-                raise_mismatch_error("is_coalesced()", actual.is_coalesced(), expected.is_coalesced())
+        elif actual.layout == torch.strided and self.check_stride and actual.stride() != expected.stride():
+            raise_mismatch_error("stride()", actual.stride(), expected.stride())
 
         if self.check_device and actual.device != expected.device:
             raise_mismatch_error("device", actual.device, expected.device)
@@ -655,7 +673,6 @@ class TensorLikePair(Pair):
         - ... not of the same ``dtype``, they are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`).
         - ... not of the same ``layout``, they are converted to strided tensors.
-        - ... both sparse COO tensors but only one is coalesced, the other one is coalesced.
 
         Args:
             actual (Tensor): Actual tensor.
@@ -677,9 +694,6 @@ class TensorLikePair(Pair):
             # These checks are needed, since Tensor.to_dense() fails on tensors that are already strided
             actual = actual.to_dense() if actual.layout != torch.strided else actual
             expected = expected.to_dense() if expected.layout != torch.strided else expected
-        elif actual.is_sparse and actual.is_coalesced() != expected.is_coalesced():
-            actual = actual.coalesce()
-            expected = expected.coalesce()
 
         return actual, expected
 
@@ -691,15 +705,22 @@ class TensorLikePair(Pair):
         elif actual.is_sparse_csr:
             compare_fn = self._compare_sparse_csr_values
         else:
-            compare_fn = self._compare_regular_values
+            compare_fn = self._compare_regular_values_close
 
         compare_fn(actual, expected, rtol=self.rtol, atol=self.atol, equal_nan=self.equal_nan)
 
     def _compare_quantized_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> None:
-        """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness."""
-        return self._compare_regular_values(
+        """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness.
+
+        .. note::
+
+            A detailed discussion about why only the dequantized variant is checked for closeness rather than checking
+            the individual quantization parameters for closeness and the integer representation for equality can be
+            found in https://github.com/pytorch/pytorch/issues/68548.
+        """
+        return self._compare_regular_values_close(
             actual.dequantize(),
             expected.dequantize(),
             rtol=rtol,
@@ -713,10 +734,20 @@ class TensorLikePair(Pair):
     ) -> None:
         """Compares sparse COO tensors by comparing
 
+        - the number of sparse dimensions,
         - the number of non-zero elements (nnz) for equality,
         - the indices for equality, and
         - the values for closeness.
         """
+        if actual.sparse_dim() != expected.sparse_dim():
+            raise self._make_error_meta(
+                AssertionError,
+                (
+                    f"The number of sparse dimensions in sparse COO tensors does not match: "
+                    f"{actual.sparse_dim()} != {expected.sparse_dim()}"
+                ),
+            )
+
         if actual._nnz() != expected._nnz():
             raise self._make_error_meta(
                 AssertionError,
@@ -726,15 +757,12 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual._indices(),
             expected._indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse COO indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual._values(),
             expected._values(),
             rtol=rtol,
@@ -748,11 +776,21 @@ class TensorLikePair(Pair):
     ) -> None:
         """Compares sparse CSR tensors by comparing
 
+        - the shape
         - the number of non-zero elements (nnz) for equality,
         - the col_indices for equality,
         - the crow_indices for equality, and
         - the values for closeness.
         """
+        def raise_mismatch_error(attribute_name: str, actual_value: Any, expected_value: Any) -> NoReturn:
+            raise self._make_error_meta(
+                AssertionError,
+                f"The values for attribute '{attribute_name}' do not match: {actual_value} != {expected_value}.",
+            )
+
+        if actual.shape != expected.shape:
+            raise_mismatch_error("shape", actual.shape, expected.shape)
+
         if actual._nnz() != expected._nnz():
             raise self._make_error_meta(
                 AssertionError,
@@ -762,23 +800,17 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.crow_indices(),
             expected.crow_indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse CSR crow_indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.col_indices(),
             expected.col_indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse CSR col_indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual.values(),
             expected.values(),
             rtol=rtol,
@@ -787,7 +819,18 @@ class TensorLikePair(Pair):
             identifier="Sparse CSR values",
         )
 
-    def _compare_regular_values(
+    def _compare_regular_values_equal(
+            self,
+            actual: torch.Tensor,
+            expected: torch.Tensor,
+            *,
+            equal_nan: bool = False,
+            identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    ) -> None:
+        """Checks if the values of two tensors are equal."""
+        self._compare_regular_values_close(actual, expected, rtol=0, atol=0, equal_nan=equal_nan, identifier=identifier)
+
+    def _compare_regular_values_close(
         self,
         actual: torch.Tensor,
         expected: torch.Tensor,
@@ -799,14 +842,14 @@ class TensorLikePair(Pair):
     ) -> None:
         """Checks if the values of two tensors are close up to a desired tolerance."""
         actual, expected = self._promote_for_comparison(actual, expected)
-        mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
-        if not torch.any(mismatches):
+        matches = torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        if torch.all(matches):
             return
 
         if actual.shape == torch.Size([]):
             msg = make_scalar_mismatch_msg(actual.item(), expected.item(), rtol=rtol, atol=atol, identifier=identifier)
         else:
-            msg = make_tensor_mismatch_msg(actual, expected, mismatches, rtol=rtol, atol=atol, identifier=identifier)
+            msg = make_tensor_mismatch_msg(actual, expected, ~matches, rtol=rtol, atol=atol, identifier=identifier)
         raise self._make_error_meta(AssertionError, msg)
 
     def _promote_for_comparison(
@@ -845,6 +888,8 @@ def originate_pairs(
     expected: Any,
     *,
     pair_types: Sequence[Type[Pair]],
+    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
     id: Tuple[Any, ...] = (),
     **options: Any,
 ) -> List[Pair]:
@@ -858,6 +903,8 @@ def originate_pairs(
         expected (Any): Expected input.
         pair_types (Sequence[Type[Pair]]): Sequence of pair types that will be tried to construct with the inputs.
             First successful pair will be used.
+        sequence_types (Tuple[Type, ...]): Optional types treated as sequences that will be checked elementwise.
+        mapping_types (Tuple[Type, ...]): Optional types treated as mappings that will be checked elementwise.
         id (Tuple[Any, ...]): Optional id of a pair that will be included in an error message.
         **options (Any): Options passed to each pair during construction.
 
@@ -875,9 +922,9 @@ def originate_pairs(
     # We explicitly exclude str's here since they are self-referential and would cause an infinite recursion loop:
     # "a" == "a"[0][0]...
     if (
-        isinstance(actual, collections.abc.Sequence)
+        isinstance(actual, sequence_types)
         and not isinstance(actual, str)
-        and isinstance(expected, collections.abc.Sequence)
+        and isinstance(expected, sequence_types)
         and not isinstance(expected, str)
     ):
         actual_len = len(actual)
@@ -889,10 +936,20 @@ def originate_pairs(
 
         pairs = []
         for idx in range(actual_len):
-            pairs.extend(originate_pairs(actual[idx], expected[idx], pair_types=pair_types, id=(*id, idx), **options))
+            pairs.extend(
+                originate_pairs(
+                    actual[idx],
+                    expected[idx],
+                    pair_types=pair_types,
+                    sequence_types=sequence_types,
+                    mapping_types=mapping_types,
+                    id=(*id, idx),
+                    **options,
+                )
+            )
         return pairs
 
-    elif isinstance(actual, collections.abc.Mapping) and isinstance(expected, collections.abc.Mapping):
+    elif isinstance(actual, mapping_types) and isinstance(expected, mapping_types):
         actual_keys = set(actual.keys())
         expected_keys = set(expected.keys())
         if actual_keys != expected_keys:
@@ -908,9 +965,24 @@ def originate_pairs(
                 id=id,
             )
 
+        keys: Collection = actual_keys
+        # Since the origination aborts after the first failure, we try to be deterministic
+        with contextlib.suppress(Exception):
+            keys = sorted(keys)
+
         pairs = []
-        for key in sorted(actual_keys):
-            pairs.extend(originate_pairs(actual[key], expected[key], pair_types=pair_types, id=(*id, key), **options))
+        for key in keys:
+            pairs.extend(
+                originate_pairs(
+                    actual[key],
+                    expected[key],
+                    pair_types=pair_types,
+                    sequence_types=sequence_types,
+                    mapping_types=mapping_types,
+                    id=(*id, key),
+                    **options,
+                )
+            )
         return pairs
 
     else:
@@ -929,7 +1001,7 @@ def originate_pairs(
             # what happened. If applicable, the exception should be expected in the future.
             except Exception as error:
                 raise RuntimeError(
-                    f"Originating a {pair_type.__name__}() at item {ErrorMeta.id_to_itemstr(id)} with\n\n"
+                    f"Originating a {pair_type.__name__}() at item {''.join(str([item]) for item in id)} with\n\n"
                     f"{type(actual).__name__}(): {actual}\n\n"
                     f"and\n\n"
                     f"{type(expected).__name__}(): {expected}\n\n"
@@ -948,7 +1020,13 @@ def originate_pairs(
 
 
 def assert_equal(
-    actual: Any, expected: Any, *, pair_types: Sequence[Type[Pair]] = (ObjectPair,), **options: Any
+    actual: Any,
+    expected: Any,
+    *,
+    pair_types: Sequence[Type[Pair]] = (ObjectPair,),
+    sequence_types: Tuple[Type, ...] = (collections.abc.Sequence,),
+    mapping_types: Tuple[Type, ...] = (collections.abc.Mapping,),
+    **options: Any,
 ) -> None:
     """Asserts that inputs are equal.
 
@@ -960,13 +1038,22 @@ def assert_equal(
         expected (Any): Expected input.
         pair_types (Sequence[Type[Pair]]): Sequence of :class:`Pair` types that will be tried to construct with the
             inputs. First successful pair will be used. Defaults to only using :class:`ObjectPair`.
+        sequence_types (Tuple[Type, ...]): Optional types treated as sequences that will be checked elementwise.
+        mapping_types (Tuple[Type, ...]): Optional types treated as mappings that will be checked elementwise.
         **options (Any): Options passed to each pair during construction.
     """
     # Hide this function from `pytest`'s traceback
     __tracebackhide__ = True
 
     try:
-        pairs = originate_pairs(actual, expected, pair_types=pair_types, **options)
+        pairs = originate_pairs(
+            actual,
+            expected,
+            pair_types=pair_types,
+            sequence_types=sequence_types,
+            mapping_types=mapping_types,
+            **options,
+        )
     except ErrorMeta as error_meta:
         # Explicitly raising from None to hide the internal traceback
         raise error_meta.to_error() from None
@@ -1009,7 +1096,6 @@ def assert_close(
     check_dtype: bool = True,
     check_layout: bool = True,
     check_stride: bool = False,
-    check_is_coalesced: bool = True,
     msg: Optional[str] = None,
 ):
     r"""Asserts that ``actual`` and ``expected`` are close.
@@ -1020,16 +1106,19 @@ def assert_close(
 
         \lvert \text{actual} - \text{expected} \rvert \le \texttt{atol} + \texttt{rtol} \cdot \lvert \text{expected} \rvert
 
-    and they have the same :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``), same ``dtype`` (if
-    ``check_dtype`` is ``True``), and the same stride (if ``check_stride`` is ``True``). Non-finite values
-    (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are only considered equal
-    to each other if ``equal_nan`` is ``True``.
+    Non-finite values (``-inf`` and ``inf``) are only considered close if and only if they are equal. ``NaN``'s are
+    only considered equal to each other if ``equal_nan`` is ``True``.
+
+    In addition, they are only considered close if they have the same
+    - :attr:`~torch.Tensor.device` (if ``check_device`` is ``True``),
+    - ``dtype`` (if ``check_dtype`` is ``True``),
+    - ``layout`` (if ``check_layout`` is ``True``), and
+    - stride (if ``check_stride`` is ``True``).
+    If either ``actual`` or ``expected`` is a meta tensor, only the attribute checks will be performed.
 
     If ``actual`` and ``expected`` are sparse (either having COO or CSR layout), their strided members are
     checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,
     are always checked for equality whereas the values are checked for closeness according to the definition above.
-    Sparse COO tensors are only considered close if both are either coalesced or uncoalesced (if
-    ``check_is_coalesced`` is ``True``).
 
     If ``actual`` and ``expected`` are quantized, they are considered close if they have the same
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
@@ -1067,14 +1156,13 @@ def assert_close(
             check is disabled, tensors with different ``layout``'s are converted to strided tensors before being
             compared.
         check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
-        check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
-            ``actual`` and ``expected`` are either coalesced or uncoalesced. If this check is disabled, tensors are
-            :meth:`~torch.Tensor.coalesce`'ed before being compared.
         msg (Optional[str]): Optional error message to use in case a failure occurs during the comparison.
 
     Raises:
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
         ValueError: If only ``rtol`` or ``atol`` is specified.
+        NotImplementedError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the
+            future.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If ``allow_subclasses`` is ``False``, but corresponding inputs are not Python scalars and have
             different types.
@@ -1083,13 +1171,12 @@ def assert_close(
         AssertionError: If corresponding tensors do not have the same :attr:`~torch.Tensor.shape`.
         AssertionError: If ``check_layout`` is ``True``, but corresponding tensors do not have the same
             :attr:`~torch.Tensor.layout`.
+        AssertionError: If only one of corresponding tensors is quantized.
         AssertionError: If corresponding tensors are quantized, but have different :meth:`~torch.Tensor.qscheme`'s.
         AssertionError: If ``check_device`` is ``True``, but corresponding tensors are not on the same
             :attr:`~torch.Tensor.device`.
         AssertionError: If ``check_dtype`` is ``True``, but corresponding tensors do not have the same ``dtype``.
         AssertionError: If ``check_stride`` is ``True``, but corresponding strided tensors do not have the same stride.
-        AssertionError: If ``check_is_coalesced``  is ``True``, but corresponding sparse COO tensors are not both
-            either coalesced or uncoalesced.
         AssertionError: If the values of corresponding tensors are not close according to the definition above.
 
     The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. In case of mismatching
@@ -1111,6 +1198,16 @@ def assert_close(
     | :attr:`~torch.complex64`  | ``1.3e-6`` | ``1e-5`` |
     +---------------------------+------------+----------+
     | :attr:`~torch.complex128` | ``1e-7``   | ``1e-7`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.quint8`     | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.quint2x4`   | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.quint4x2`   | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.qint8`      | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.qint32`     | ``1.3e-6`` | ``1e-5`` |
     +---------------------------+------------+----------+
     | other                     | ``0.0``    | ``0.0``  |
     +---------------------------+------------+----------+
@@ -1231,6 +1328,5 @@ def assert_close(
         check_dtype=check_dtype,
         check_layout=check_layout,
         check_stride=check_stride,
-        check_is_coalesced=check_is_coalesced,
         msg=msg,
     )

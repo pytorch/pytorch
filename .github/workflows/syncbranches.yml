@@ -18,11 +18,12 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
 
-      - name: Setup commiter id
+      - name: Setup committer id
         run: |
-          git config --global user.email "pytorchbot@users.noreply.github.com"
-          git config --global user.name "PyTorch Bot"
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
+          git config --global user.name "PyTorch MergeBot"
       - name: Sync branches
         run: |
-          python3 .github/scripts/syncbranches.py
+          python3 .github/scripts/syncbranches.py --sync-branch="${GITHUB_REF#refs/heads/}" --default-branch=master

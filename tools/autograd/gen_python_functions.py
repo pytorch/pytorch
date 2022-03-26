@@ -160,9 +160,9 @@ def is_py_special_function(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
+def gen(out: str, native_yaml_path: str, tags_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
@@ -219,6 +219,7 @@ def create_python_bindings(
 ) -> None:
     """Generates Python bindings to ATen functions"""
     py_methods: List[str] = []
+    ops_headers: List[str] = []
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
@@ -229,9 +230,11 @@ def create_python_bindings(
         py_methods.append(method_impl(name, module, overloads, method=method))
         py_method_defs.append(method_def(name, module, overloads, method=method))
         py_forwards.extend(forward_decls(name, overloads, method=method))
+        ops_headers.append(f'#include <ATen/ops/{name.base}.h>')
 
     fm.write_with_template(filename, filename, lambda: {
         'generated_comment': '@' + f'generated from {fm.template_dir}/{filename}',
+        'ops_headers': ops_headers,
         'py_forwards': py_forwards,
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
@@ -278,15 +281,17 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]) -> str:
-        return str(kv[0])
+        return kv[0].base
 
     def env_func(
         kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
     ) -> Dict[str, List[str]]:
+        name, fn_pairs = kv
         return {
-            'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
-            'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
-            'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
+            'ops_headers': [f'#include <ATen/ops/{name.base}.h>'],
+            'py_forwards': list(forward_decls(name, fn_pairs, method=method)),
+            'py_methods': [method_impl(name, module, fn_pairs, method=method)],
+            'py_method_defs': [method_def(name, module, fn_pairs, method=method)],
         }
 
     fm.write_sharded(
@@ -299,7 +304,7 @@ def create_python_bindings_sharded(
         key_fn=key_func,
         env_callable=env_func,
         num_shards=num_shards,
-        sharded_keys={'py_forwards', 'py_methods', 'py_method_defs'}
+        sharded_keys={'ops_headers', 'py_forwards', 'py_methods', 'py_method_defs'}
     )
 
 def load_signatures(

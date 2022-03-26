@@ -45,6 +45,10 @@ namespace c10 {
   _(prim, CudaFusionGuard)           \
   _(prim, FunctionalGraph)           \
   _(prim, add_optional)              \
+  _(prim, view_copy)                 \
+  _(prim, reshape_copy)              \
+  _(prim, squeeze_copy)              \
+  _(prim, unsqueeze_copy)            \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
   _(prim, TensorExprDynamicGroup)    \
@@ -92,6 +96,7 @@ namespace c10 {
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
+  _(prim, IfThenElse)                \
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
@@ -101,14 +106,8 @@ namespace c10 {
   _(aten, Float)                     \
   _(aten, Complex)                   \
   _(aten, str)                       \
-  _(aten, is_pinned)                 \
   _(aten, Delete)                    \
-  _(aten, relu_)                     \
   _(aten, gelu_)                     \
-  _(aten, relu6)                     \
-  _(aten, relu6_)                    \
-  _(aten, dropout_)                  \
-  _(aten, sigmoid_)                  \
   _(prim, device)                    \
   _(prim, dtype)                     \
   _(prim, layout)                    \
@@ -175,123 +174,19 @@ namespace c10 {
   _(prim, rpc_sync)                  \
   _(prim, rpc_remote)                \
   _(prim, is_cuda)                   \
-  _(aten, abs_)                      \
-  _(aten, absolute)                  \
-  _(aten, absolute_)                 \
-  _(aten, acos)                      \
-  _(aten, acos_)                     \
-  _(aten, arccos)                    \
-  _(aten, arccos_)                   \
-  _(aten, acosh)                     \
-  _(aten, acosh_)                    \
-  _(aten, adjoint)                   \
-  _(aten, arccosh)                   \
-  _(aten, arccosh_)                  \
-  _(aten, asin)                      \
-  _(aten, asin_)                     \
-  _(aten, arcsin)                    \
-  _(aten, arcsin_)                   \
-  _(aten, asinh)                     \
-  _(aten, asinh_)                    \
-  _(aten, arcsinh)                   \
-  _(aten, arcsinh_)                  \
-  _(aten, atan)                      \
-  _(aten, atan_)                     \
-  _(aten, arctan)                    \
-  _(aten, arctan_)                   \
-  _(aten, atan2)                     \
-  _(aten, atan2_)                    \
-  _(aten, arctan2)                   \
-  _(aten, arctan2_)                  \
-  _(aten, atanh)                     \
-  _(aten, atanh_)                    \
-  _(aten, arctanh)                   \
-  _(aten, arctanh_)                  \
-  _(aten, clamp)                     \
-  _(aten, clamp_)                    \
-  _(aten, clip)                      \
-  _(aten, clip_)                     \
-  _(aten, linalg_cross)              \
-  _(aten, det)                       \
-  _(aten, linalg_det)                \
-  _(aten, matrix_power)              \
-  _(aten, mT)                        \
-  _(aten, mH)                        \
-  _(aten, linalg_matrix_power)       \
-  _(aten, chain_matmul)              \
-  _(aten, linalg_multi_dot)          \
-  _(aten, linalg_norm)               \
-  _(aten, linalg_vector_norm)        \
-  _(aten, linalg_matrix_norm)        \
-  _(aten, matmul)                    \
-  _(aten, linalg_matmul)             \
-  _(aten, linalg_matrix_exp)         \
   _(aten, append)                    \
-  _(aten, item)                      \
+  _(aten, as_tensor)                 \
+  _(aten, adaptive_avg_pool2d_backward) \
+  _(aten, dim)                       \
   _(aten, format)                    \
   _(aten, percentFormat)             \
   _(aten, __not__)                   \
   _(aten, __is__)                    \
   _(aten, __isnot__)                 \
-  _(aten, copy)                      \
-  _(aten, copy_)                     \
-  _(aten, div)                       \
-  _(aten, div_)                      \
-  _(aten, divide)                    \
-  _(aten, divide_)                   \
-  _(aten, true_divide)               \
-  _(aten, true_divide_)              \
-  _(aten, t_)                        \
-  _(aten, addbmm_)                   \
-  _(aten, addcdiv_)                  \
-  _(aten, addcmul_)                  \
-  _(aten, addmv_)                    \
-  _(aten, addr_)                     \
-  _(aten, baddbmm_)                  \
-  _(aten, ge)                        \
-  _(aten, ge_)                       \
-  _(aten, greater_equal)             \
-  _(aten, greater_equal_)            \
-  _(aten, gt)                        \
-  _(aten, gt_)                       \
-  _(aten, greater)                   \
-  _(aten, greater_)                  \
-  _(aten, le)                        \
-  _(aten, le_)                       \
-  _(aten, less_equal)                \
-  _(aten, less_equal_)               \
-  _(aten, lerp_)                     \
-  _(aten, lt)                        \
-  _(aten, lt_)                       \
-  _(aten, less)                      \
-  _(aten, less_)                     \
-  _(aten, isnan)                     \
-  _(aten, mul)                       \
-  _(aten, mul_)                      \
-  _(aten, multiply)                  \
-  _(aten, multiply_)                 \
-  _(aten, ne)                        \
-  _(aten, ne_)                       \
-  _(aten, not_equal)                 \
-  _(aten, not_equal_)                \
-  _(aten, nonzero)                   \
-  _(aten, argwhere)                  \
   _(aten, _ger)                      \
-  _(aten, ger)                       \
-  _(aten, outer)                     \
-  _(aten, orgqr)                     \
-  _(aten, linalg_householder_product)\
-  _(aten, transpose)                 \
-  _(aten, transpose_)                \
-  _(aten, trapz)                     \
-  _(aten, trapezoid)                 \
-  _(aten, cumulative_trapezoid)      \
-  _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
   _(aten, manual_seed)               \
-  _(aten, set_)                      \
-  _(aten, index_put_)                \
   _(aten, device)                    \
   _(aten, hash)                      \
   _(aten, len)                       \
@@ -299,110 +194,26 @@ namespace c10 {
   _(aten, dict)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
-  _(aten, sub)                       \
-  _(aten, sub_)                      \
-  _(aten, subtract)                  \
-  _(aten, subtract_)                 \
   _(aten, keys)                      \
   _(aten, ord)                       \
   _(aten, chr)                       \
   _(aten, hex)                       \
   _(aten, oct)                       \
   _(aten, clear)                     \
-  _(aten, trunc)                     \
-  _(aten, trunc_)                    \
-  _(aten, fix)                       \
-  _(aten, fix_)                      \
-  _(aten, to_mkldnn)                 \
-  _(aten, positive)                  \
-  _(aten, neg)                       \
-  _(aten, neg_)                      \
-  _(aten, negative)                  \
-  _(aten, negative_)                 \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
-  _(aten, _cat)                      \
-  _(aten, cat)                       \
-  _(aten, concat)                    \
-  _(aten, vstack)                    \
-  _(aten, row_stack)                 \
+  _(aten, tensor)                    \
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
   _(prim, grad)                      \
-  _(aten, zero_)                     \
-  _(aten, fill_)                     \
-  _(aten, masked_fill_)              \
   _(cuda, _set_device)               \
   _(cuda, set_stream)                \
   _(cuda, _current_device)           \
   _(cuda, synchronize)               \
-  _(aten, swapaxes)                  \
-  _(aten, swapaxes_)                 \
-  _(aten, swapdims)                  \
-  _(aten, swapdims_)                 \
-  _(aten, movedim)                   \
-  _(aten, moveaxis)                  \
-  _(aten, polygamma)                 \
-  _(aten, special_polygamma)         \
-  _(aten, lgamma)                    \
-  _(aten, special_gammaln)           \
-  _(aten, logsumexp)                 \
-  _(aten, special_logsumexp)         \
-  _(aten, digamma)                   \
-  _(aten, special_psi)               \
-  _(aten, special_digamma)           \
-  _(aten, erf)                       \
-  _(aten, special_erf)               \
-  _(aten, erfc)                      \
-  _(aten, special_erfc)              \
-  _(aten, special_erfcx)             \
-  _(aten, erfinv)                    \
-  _(aten, special_erfinv)            \
-  _(aten, logit)                     \
-  _(aten, special_logit)             \
-  _(aten, sigmoid)                   \
-  _(aten, special_expit)             \
-  _(aten, expm1)                     \
-  _(aten, special_expm1)             \
-  _(aten, exp2)                      \
-  _(aten, special_exp2)              \
-  _(aten, log1p)                     \
-  _(aten, special_log1p)             \
-  _(aten, round)                     \
-  _(aten, special_round)             \
-  _(aten, sinc)                      \
-  _(aten, special_sinc)              \
-  _(aten, i0)                        \
-  _(aten, special_i0)                \
-  _(aten, special_i0e)               \
-  _(aten, special_i1)                \
-  _(aten, special_i1e)               \
-  _(aten, xlogy)                     \
-  _(aten, special_xlogy)             \
-  _(aten, special_xlog1py)           \
-  _(aten, log_softmax)               \
-  _(aten, special_log_softmax)       \
-  _(aten, special_zeta)              \
-  _(aten, igamma)                    \
-  _(aten, igamma_)                   \
-  _(aten, special_gammainc)          \
-  _(aten, igammac)                   \
-  _(aten, igammac_)                  \
-  _(aten, special_gammaincc)         \
-  _(aten, mvlgamma)                  \
-  _(aten, special_multigammaln)      \
-  _(aten, softmax)                   \
-  _(aten, special_softmax)           \
   _(aten, has_torch_function)        \
-  _(aten, hardswish)                 \
-  _(aten, hardswish_)                \
-  _(aten, hardsigmoid_)              \
-  _(aten, hardtanh_)                 \
-  _(aten, quantize_per_tensor)       \
-  _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -473,8 +284,10 @@ namespace c10 {
   _(attr, df_input_captured_outputs) \
   _(attr, df_output_vjps)            \
   _(attr, axes)                      \
-  _(attr, axis)                      \
   _(attr, symbolic_shape_inputs)     \
+  _(attr, allow_stack_outputs)       \
+  _(attr, striding_inputs_desc)      \
+  _(attr, striding_outputs_desc)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \
@@ -484,14 +297,12 @@ namespace c10 {
   _(attr, num_none)                  \
   _(attr, num_present)               \
   _(attr, perm)                      \
-  _(attr, sizes)                     \
   _(attr, starts)                    \
   _(attr, profiled_type)             \
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \
-  _(attr, a)                         \
-  _(attr, b)                         \
+  _(attr, module)                    \
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \
@@ -503,7 +314,8 @@ namespace c10 {
   _(attr, cache_id)                  \
   _(attr, new_axis)                  \
   _(attr, warn_id)                   \
-  _(attr, allowzero)
+  _(attr, allowzero)                 \
+  _(attr, seen_none)
 
 enum class _keys : unique_t {
     #define DEFINE_KEY(ns, s) ns##_##s,

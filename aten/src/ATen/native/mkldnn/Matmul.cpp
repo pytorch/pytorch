@@ -19,14 +19,14 @@ void mkldnn_matmul(
 bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const c10::optional<Tensor>& result_opt){
+    const Tensor& result_opt){
   return false;
 }
 
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_EBABLED
+#else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
@@ -126,9 +126,7 @@ inline bool checksize(const Tensor& mat1, const Tensor& mat2){
 bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
-    const c10::optional<Tensor>& result_opt) {
-  c10::MaybeOwned<Tensor> result_maybe_owned = at::borrow_from_optional_tensor(result_opt);
-  const Tensor& result = *result_maybe_owned;
+    const Tensor& result) {
   return (
     at::globalContext().userEnabledMkldnn() &&
     mat1.scalar_type() == kBFloat16 &&
@@ -143,4 +141,4 @@ bool use_mkldnn_bf16_matmul(
 } // namespace native
 } // namespace at
 
-#endif // AT_MKLDNN_EBABLED
+#endif // AT_MKLDNN_ENABLED

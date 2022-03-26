@@ -16,6 +16,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#endif
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -44,6 +47,8 @@ CompilationOptions getOptionsFromGlobal() {
       BytecodeEmitMode::is_default_args_before_out_args_enabled();
   compilation_options.enable_default_value_for_unspecified_arg =
       BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled();
+  compilation_options.enable_emit_promoted_ops =
+      BytecodeEmitMode::is_emit_promoted_ops_enabled();
   compilation_options.incl_interface_call = getMobileInterfaceCallExport();
   compilation_options.model_version =
       caffe2::serialize::kProducedBytecodeVersion;
@@ -108,7 +113,11 @@ std::pair<IValue, IValue> getFunctionTuple(
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
 
-  for (const TypePtr& t : mobile_code.types_) {
+  for (const TypePtr& ty : mobile_code.types_) {
+    auto t = ty;
+    if (auto dyn = t->castRaw<c10::DynamicType>()) {
+      t = dyn->fallback();
+    }
     std::string type_str = t->annotation_str();
     if (t->kind() == TypeKind::TupleType) {
       TORCH_CHECK(
@@ -166,7 +175,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
-          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
           "define a pytorch class (class Foo(torch.nn.Module)). The problematic type is: ",
@@ -216,9 +225,13 @@ std::pair<IValue, IValue> getFunctionTuple(
         arg.type()->annotation_str(type_printer) => mangled unique name of the
         module/submodule
       */
+      auto arg_type = arg.type();
+      if (auto dyn = arg_type->castRaw<c10::DynamicType>()) {
+        arg_type = dyn->fallback();
+      }
       argTables.emplace_back(Table({
           {"name", arg.name()},
-          {"type", arg.type()->annotation_str(type_printer)},
+          {"type", arg_type->annotation_str(type_printer)},
           {"default_value", arg.default_value()},
       }));
     }
@@ -498,8 +511,12 @@ void ScriptModuleSerializer::writeArchive(
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
 
   for (const auto& td : data_pickle.tensorData()) {
-    WriteableTensorData writable_td = getWriteableTensorData(td);
     std::string tensor_name = tensor_names[i++];
+    if (td.is_meta()) {
+      writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
+      continue;
+    }
+    WriteableTensorData writable_td = getWriteableTensorData(td);
     if (use_storage_context && serialized_tensors.count(tensor_name)) {
       // storage has been serialzed already, skip
       continue;
@@ -698,6 +715,24 @@ void ScriptModuleSerializer::writeByteCode(
   }
 }
 
+namespace {
+
+c10::optional<std::string> type_printer(
+    const c10::Type& type,
+    torch::jit::TypeNameUniquer& type_name_uniquer) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(
+        [&](auto&& t) { return type_printer(t, type_name_uniquer); });
+  }
+  auto namedType = type.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return type_name_uniquer.getUniqueName(namedType).qualifiedName();
+  }
+  return c10::nullopt;
+}
+
+} // namespace
+
 void ScriptModuleSerializer::convertNamedType(
     const c10::NamedTypePtr& class_type) {
   if (converted_types_.count(class_type)) {
@@ -708,20 +743,15 @@ void ScriptModuleSerializer::convertNamedType(
   std::string qualifier = qualname.prefix();
   PythonPrint* pp = file_streams_.find(qualifier);
 
-  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
-    auto namedType = t.cast<c10::NamedType>();
-    if (namedType && namedType->name()) {
-      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-    }
-    return c10::nullopt;
-  };
   if (!pp) {
     pp = &file_streams_.insert(
         std::move(qualifier),
         PythonPrint(
             constant_table_,
             class_deps_,
-            type_printer,
+            [&](const c10::Type& t) {
+              return type_printer(t, type_name_uniquer_);
+            },
             /*enforce_importable=*/true));
   }
   pp->printNamedType(class_type);
@@ -761,20 +791,45 @@ SerializationStorageContext& ScriptModuleSerializer::storage_context() {
   return storage_context_;
 }
 
+#if defined(ENABLE_FLATBUFFER)
+void save_mobile_module_to(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  CompilationOptions options = getOptionsFromGlobal();
+  mobile::Module mod = jitModuleToMobile(module, options);
+  auto buffer = save_mobile_module_to_bytes(mod, extra_files);
+  writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
+}
+#endif
+
 void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(
-      [&](const void* buf, size_t nbytes) -> size_t {
-        out.write(static_cast<const char*>(buf), nbytes);
-        return !out ? 0 : nbytes;
-      });
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+    out.write(static_cast<const char*>(buf), nbytes);
+    return !out ? 0 : nbytes;
+  };
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -782,11 +837,29 @@ void ExportModule(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(filename);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
+      std::fstream ofile(filename, std::ios::binary | std::ios::out);
+      ofile.write(static_cast<const char*>(buf), nbytes);
+      ofile.close();
+      return !ofile ? 0 : nbytes;
+    };
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(filename);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 void ExportModule(
@@ -794,11 +867,23 @@ void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_mobile_debug_info) {
-  caffe2::serialize::PyTorchStreamWriter writer(writer_func);
-  ScriptModuleSerializer serializer(writer);
-  serializer.serialize(
-      module, extra_files, bytecode_format, save_mobile_debug_info);
+    bool save_mobile_debug_info,
+    bool use_flatbuffer) {
+  if (use_flatbuffer) {
+#if defined(ENABLE_FLATBUFFER)
+    save_mobile_module_to(
+        module, extra_files, save_mobile_debug_info, writer_func);
+#else
+    TORCH_CHECK(
+        false,
+        "Trying to export as flatbuffer file but the build hasn't enabled flatbuffer");
+#endif
+  } else {
+    caffe2::serialize::PyTorchStreamWriter writer(writer_func);
+    ScriptModuleSerializer serializer(writer);
+    serializer.serialize(
+        module, extra_files, bytecode_format, save_mobile_debug_info);
+  }
 }
 
 namespace {
@@ -841,6 +926,15 @@ bool BytecodeEmitMode::is_default_args_before_out_args_enabled() {
 }
 void BytecodeEmitMode::set_default_args_before_out_args_enabled(bool enabled) {
   emitDefautlArgsWithOutArgs = enabled;
+}
+
+thread_local bool emitDefaultEmitPromotedOps =
+    caffe2::serialize::kProducedBytecodeVersion <= 7 ? false : true;
+bool BytecodeEmitMode::is_emit_promoted_ops_enabled() {
+  return emitDefaultEmitPromotedOps;
+}
+void BytecodeEmitMode::set_default_emit_promoted_ops_enabled(bool enabled) {
+  emitDefaultEmitPromotedOps = enabled;
 }
 
 } // namespace jit

@@ -40,7 +40,7 @@ void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);
 void debugSetAutodiffSubgraphInlining(bool state);
-bool getAutodiffSubgraphInlining();
+bool TORCH_API getAutodiffSubgraphInlining();
 
 void debugSetFusionGroupInlining(bool state);
 bool getFusionGroupInlining();

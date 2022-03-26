@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <ATen/core/grad_mode.h>
@@ -14,8 +15,8 @@ OptionalTypePtr OptionalType::create(TypePtr contained) {
   return OptionalTypePtr(new OptionalType(std::move(contained)));
 }
 
-OptionalTypePtr OptionalType::ofTensor() {
-  static auto value = OptionalType::create(TensorType::get());
+TypePtr OptionalType::ofTensor() {
+  static auto value = TypeFactory::create<OptionalType>(TensorType::get());
   return value;
 }
 

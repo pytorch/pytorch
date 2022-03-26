@@ -69,7 +69,7 @@ template <
     typename Func>
 __device__ void gridReduceLastBlock(
     T& out,
-    const T* in,
+    const volatile T* in,
     const nvfuser_index_t
         grid_reduction_segment_size, // Number of reductions across
                                      // grid reduce dimensions

@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "1"
+    output: "onnx::Upsample_1"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -18,7 +18,7 @@ graph {
   }
   node {
     input: "x"
-    input: "1"
+    input: "onnx::Upsample_1"
     output: "2"
     name: "Upsample_1"
     op_type: "Upsample"
@@ -28,7 +28,7 @@ graph {
       type: STRING
     }
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "x"
     type {

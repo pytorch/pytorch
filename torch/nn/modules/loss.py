@@ -1031,14 +1031,14 @@ class CrossEntropyLoss(_WeightedLoss):
     This is particularly useful when you have an unbalanced training set.
 
     The `input` is expected to contain raw, unnormalized scores for each class.
-    `input` has to be a Tensor of size either :math:`(minibatch, C)` or
-    :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
-    `K`-dimensional case. The latter is useful for higher dimension inputs, such
+    `input` has to be a Tensor of size :math:`(C)` for unbatched input,
+    :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
+    `K`-dimensional case. The last being useful for higher dimension inputs, such
     as computing cross entropy loss per-pixel for 2D images.
 
     The `target` that this criterion expects should contain either:
 
-    - Class indices in the range :math:`[0, C-1]` where :math:`C` is the number of classes; if
+    - Class indices in the range :math:`[0, C)` where :math:`C` is the number of classes; if
       `ignore_index` is specified, this loss also accepts this class index (this index
       may not necessarily be in the class range). The unreduced (i.e. with :attr:`reduction`
       set to ``'none'``) loss for this case can be described as:
@@ -1119,16 +1119,20 @@ class CrossEntropyLoss(_WeightedLoss):
             `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
 
     Shape:
-        - Input: :math:`(N, C)` where `C = number of classes`, or
-          :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+        - Input: Shape :math:`(C)`, :math:`(N, C)` or :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`(N)` where each value is
-          :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-          same shape as the input.
-        - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
-          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
-          Otherwise, scalar.
+        - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
+          :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
+          If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
+        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+
+        where:
+
+        .. math::
+            \begin{aligned}
+                C ={} & \text{number of classes} \\
+                N ={} & \text{batch size} \\
+            \end{aligned}
 
     Examples::
 
@@ -1447,7 +1451,7 @@ class TripletMarginLoss(_Loss):
     Shape:
         - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-                  input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math`(N, D)`; a scalar otherwise.
 
     Examples::
 

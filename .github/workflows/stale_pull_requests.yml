@@ -10,20 +10,23 @@ jobs:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
-      - uses: actions/stale@v3
+      - uses: actions/stale@v4.1.0
         with:
           stale-pr-message: >
             Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
             Feel free to remove the `Stale` label if you feel this was a mistake. <br>
             `Stale` pull requests will automatically be closed 30 days after being marked `Stale` <br>
           exempt-pr-labels: "no-stale,open source,high priority"
-          days-before-stale: 60
-          days-before-close: 90
+          days-before-pr-stale: 60
+          days-before-pr-close: 90
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          ascending: true
   stale-open-source:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
-      - uses: actions/stale@v3
+      - uses: actions/stale@v4.1.0
         with:
           stale-pr-message: >
             Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
@@ -32,5 +35,8 @@ jobs:
             `Stale` pull requests will automatically be closed 30 days after being marked `Stale` <br>
           exempt-pr-labels: "no-stale,high priority"
           only-labels: "open source"
-          days-before-stale: 150
-          days-before-close: 180
+          days-before-pr-stale: 60
+          days-before-pr-close: 90
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          ascending: true

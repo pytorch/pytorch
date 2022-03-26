@@ -20,20 +20,6 @@ std::ostream& operator<<(std::ostream& out, const Shape& shape) {
   return out << shape.to_string();
 }
 
-std::vector<Shape> convertShapes(
-    const std::vector<at::ScalarType>& dtypes,
-    const std::vector<std::vector<int64_t>>& shapes) {
-  TORCH_INTERNAL_ASSERT(dtypes.size() == shapes.size());
-
-  std::vector<Shape> shape;
-  shape.reserve(dtypes.size());
-  for (const auto i : c10::irange(dtypes.size())) {
-    shape.emplace_back(dtypes[i], shapes[i]);
-  }
-
-  return shape;
-}
-
 size_t Shape::numel() const {
   size_t elts = 1;
   for (auto size : sizes_) {
@@ -42,8 +28,12 @@ size_t Shape::numel() const {
   return elts;
 }
 
-hash_t Shape::hash() const {
-  return HashCombine(Hash(scalar_type_), DataHash(sizes_.data(), sizes_.size() * sizeof(int64_t)));
+hash_t Shape::hash(bool bakeInSizes) const {
+  if (bakeInSizes) {
+    return HashCombine(Hash(scalar_type_), DataHash(sizes_.data(), sizes_.size() * sizeof(int64_t)));
+  } else {
+    return HashCombine(Hash(scalar_type_), Hash(sizes_.size()));
+  }
 }
 
 }  // namespace lazy

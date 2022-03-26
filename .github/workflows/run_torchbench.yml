@@ -30,17 +30,19 @@ jobs:
           git remote prune origin
           git fetch
           popd
-      - name: Create conda environment
+      - name: Create conda environment and install deps
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           # install magma
           conda install -y -c pytorch "${MAGMA_VERSION}"
-          conda install -y pytorch torchvision torchtext cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
+          # install ffmpeg-4.4.1
+          # torchvision doesn't compile on ffmpeg-5: https://github.com/pytorch/vision/issues/5616
+          conda install -y ffmpeg=4.4.1
       - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
@@ -54,15 +56,8 @@ jobs:
         with:
           repository: pytorch/benchmark
           path: benchmark
-          lfs: true
+          lfs: false
           ref: ${{ env.TORCHBENCH_BRANCH }}
-      - name: Install TorchBench dependencies
-        run: |
-          # shellcheck disable=SC1091
-          . "${HOME}"/anaconda3/etc/profile.d/conda.sh
-          conda activate pr-ci
-          pushd "${PWD}"/benchmark
-          python install.py
       - name: Run TorchBench
         run: |
           pushd "${HOME}"/pytorch
@@ -92,5 +87,5 @@ jobs:
           path: ~/.torchbench/bisection/pr${{ github.event.number }}
 
 concurrency:
-  group: run-torchbench-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
