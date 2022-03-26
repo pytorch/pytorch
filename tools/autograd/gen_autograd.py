@@ -5,6 +5,7 @@ repository, run:
 python -m tools.autograd.gen_autograd \
        build/aten/src/ATen/Declarations.yaml \
        aten/src/ATen/native/native_functions.yaml \
+       aten/src/ATen/native/tags.yaml \
        $OUTPUT_DIR \
        tools/autograd
 
@@ -41,6 +42,7 @@ from .load_derivatives import load_derivatives
 
 def gen_autograd(
     native_functions_path: str,
+    tags_path: str,
     out: str,
     autograd_dir: str,
     operator_selector: SelectiveBuilder,
@@ -48,11 +50,12 @@ def gen_autograd(
 ) -> None:
     # Parse and load derivatives.yaml
     differentiability_infos = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
+        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path,
+        tags_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
-    native_funcs = parse_native_yaml(native_functions_path).native_functions
+    native_funcs = parse_native_yaml(native_functions_path, tags_path).native_functions
     fns = list(sorted(filter(
         operator_selector.is_native_function_selected_for_training,
         native_funcs), key=lambda f: cpp.name(f.func)))
@@ -60,9 +63,9 @@ def gen_autograd(
 
     # Generate VariableType.h/cpp
     if not disable_autograd:
-        gen_variable_type(out, native_functions_path, fns_with_diff_infos, template_path)
+        gen_variable_type(out, native_functions_path, tags_path, fns_with_diff_infos, template_path)
 
-        gen_inplace_or_view_type(out, native_functions_path, fns_with_diff_infos, template_path)
+        gen_inplace_or_view_type(out, native_functions_path, tags_path, fns_with_diff_infos, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
         gen_trace_type(out, native_funcs, template_path)
@@ -71,16 +74,18 @@ def gen_autograd(
         out, differentiability_infos, template_path)
 
     # Generate variable_factories.h
-    gen_variable_factories(out, native_functions_path, template_path)
+    gen_variable_factories(out, native_functions_path, tags_path, template_path)
 
 
 def gen_autograd_python(
     native_functions_path: str,
+    tags_path: str,
     out: str,
     autograd_dir: str,
 ) -> None:
     differentiability_infos = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
+        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path,
+        tags_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
@@ -91,7 +96,7 @@ def gen_autograd_python(
     # Generate Python bindings
     deprecated_path = os.path.join(autograd_dir, 'deprecated.yaml')
     gen_python_functions.gen(
-        out, native_functions_path, deprecated_path, template_path)
+        out, native_functions_path, tags_path, deprecated_path, template_path)
 
 
 def main() -> None:
@@ -99,12 +104,14 @@ def main() -> None:
         description='Generate autograd C++ files script')
     parser.add_argument('native_functions', metavar='NATIVE',
                         help='path to native_functions.yaml')
+    parser.add_argument('tags', metavar='TAGS',
+                        help='path to tags.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
     parser.add_argument('autograd', metavar='AUTOGRAD',
                         help='path to autograd directory')
     args = parser.parse_args()
-    gen_autograd(args.native_functions,
+    gen_autograd(args.native_functions, args.tags,
                  args.out, args.autograd,
                  SelectiveBuilder.get_nop_selector())
 
