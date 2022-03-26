@@ -1377,6 +1377,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       });
     }
 
+    const auto dim_indices = indices[dim].contiguous();
+
     const auto get_selected_indices_small_nnz_large_size = [&]() -> std::tuple<Tensor, Tensor> {
       // Much faster than at::unique_dim
       const auto unique_with_counts = [](
@@ -1602,10 +1604,30 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       };
 
-      auto dim_indices_counts = at::zeros({size}, index.options());
-      get_counts(dim_indices_counts, indices[dim], /*bins=*/size,
+      const auto nnz_grain_size = at::internal::GRAIN_SIZE;
+      // 1 <= n_threads_nnz <= min(nnz / grain, max_threads)
+      const auto n_threads_nnz = std::max<int64_t>(
+          1, std::min<int64_t>(nnz / nnz_grain_size, at::get_num_threads())
+      );
+
+      auto dim_indices_counts_per_threads = at::zeros({n_threads_nnz, size}, index.options());
+      at::parallel_for(0, nnz, nnz_grain_size, [&](int64_t start, int64_t end) {
+          const auto tid = at::get_thread_num();
+          const auto tid_dim_indices = dim_indices.slice(0, start, end);
+          auto tid_dim_indices_counts = dim_indices_counts_per_threads.select(0, tid);
           // When self is coalesced and dim == 0, indices[dim] is sorted.
-          /*is_sorted=*/self.is_coalesced() && dim == 0);
+          get_counts(tid_dim_indices_counts, tid_dim_indices, /*bins=*/size,
+              // Mark sorted for better cache alighment, but do not run in parallel
+              // as we are in parallel loop already.
+              /*is_sorted=*/self.is_coalesced() && dim == 0,
+              /*run_in_parallel=*/false);
+      });
+      const auto dim_indices_counts = dim_indices_counts_per_threads.sum(/*dim=*/0);
+
+      //auto dim_indices_counts = at::zeros({size}, index.options());
+      //get_counts(dim_indices_counts, dim_indices, /*bins=*/size,
+      //    // When self is coalesced and dim == 0, indices[dim] is sorted.
+      //    /*is_sorted=*/self.is_coalesced() && dim == 0);
 
       auto index_counts = at::zeros({size}, index.options());
       const auto index_sorted = [&get_counts, &index_counts](
@@ -1649,7 +1671,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto* ptr_intersection_cumsum = intersection_cumsum.data_ptr<int64_t>();
         auto* ptr_idx_curr_offset = idx_curr_offset.data_ptr<int64_t>();
         const auto* ptr_index_counts = index_counts.data_ptr<int64_t>();
-        const auto* ptr_dim_indices = indices[dim].data_ptr<int64_t>();
+        const auto* ptr_dim_indices = dim_indices.data_ptr<int64_t>();
 
         for (const auto i : c10::irange(nnz)) {
           const auto idx = *ptr_dim_indices++;
