@@ -3,6 +3,7 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
+import platform
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -189,7 +190,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        zip_file_reader_type: Type[PackageZipFileWriter] = TorchScriptPackageZipFileWriter
+        zip_file_writer_type: Type[PackageZipFileWriter] = TorchScriptPackageZipFileWriter
     ):
         """
         Create an exporter.
@@ -199,17 +200,10 @@ class PackageExporter:
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
+            zip_file_writer_type: A subclass of PackageZipFileWriter which would be used to instantiate the zip file writer
         """
-        if isinstance(f, (Path, str)):
-            f = str(f)
-            self.buffer: Optional[BinaryIO] = None
-        else:  # is a byte buffer
-            self.buffer = f
 
-        self.zip_file = zip_file_reader_type(f)
-        assert isinstance(self.zip_file, TorchScriptPackageZipFileWriter)
-        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file.zip_file_writer)
-        self.storage_context = self.script_module_serializer.storage_context()
+        self.zip_file = zip_file_writer_type(f)
 
         self._written_files: Set[str] = set()
 
@@ -897,8 +891,8 @@ class PackageExporter:
             location = location_tag(storage)
 
             # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(storage)
-            storage_id = self.storage_context.get_or_add_storage(storage)
+            storage_present = self.zip_file.storage_context.has_storage(storage)
+            storage_id = self.zip_file.storage_context.get_or_add_storage(storage)
             if not storage_present:
                 if storage.device.type != "cpu":
                     storage = storage.cpu()
@@ -1033,6 +1027,10 @@ class PackageExporter:
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
 
+    def _write_python_version(self):
+        """Writes the python version that the package was created with to .data/python_version"""
+        self._write(".data/python_version", platform.python_version())
+
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
         It is preferable to use resource guard syntax instead::
@@ -1041,15 +1039,13 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
-        self.script_module_serializer.write_files()
+        self._write_python_version()
         self._finalize_zip()
 
     def _finalize_zip(self):
         """Called at the very end of packaging to leave the zipfile in a closed but valid state."""
         self.zip_file.close()
         del self.zip_file
-        if self.buffer:
-            self.buffer.flush()
 
     def _filename(self, package, resource):
         package_path = package.replace(".", "/")
