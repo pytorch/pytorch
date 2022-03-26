@@ -1,35 +1,23 @@
 import torch
 from ._directory_reader_torchscript import TorchScriptDirectoryReader
 from ._zip_file_torchscript import TorchScriptPackageZipFileReader
+from ._zip_file import PackageZipFileReader
 from torch.serialization import _get_restore_location
 from .package_importer_no_torch import _maybe_decode_ascii
 from .package_importer_no_torch import PackageImporter as DefaultPackageImporter
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Union, BinaryIO, Callable
 from pathlib import Path
-import os.path
 import io
 
 class PackageImporter(DefaultPackageImporter):
 
-    def get_zip_reader(self, file_or_buffer):
-        zip_reader: Any
-        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
-            filename = "<pytorch_file_reader>"
-            zip_reader = TorchScriptPackageZipFileReader(file_or_buffer)
-        elif isinstance(file_or_buffer, TorchScriptPackageZipFileReader):
-            filename = "<pytorch_file_reader>"
-            zip_reader = file_or_buffer
-        elif isinstance(file_or_buffer, (Path, str)):
-            filename = str(file_or_buffer)
-            if not os.path.isdir(filename):
-                zip_reader = TorchScriptPackageZipFileReader(filename)
-            else:
-                zip_reader = TorchScriptDirectoryReader(filename)
-        else:
-            filename = "<binary>"
-            zip_reader = TorchScriptPackageZipFileReader(file_or_buffer)
-        return filename, zip_reader
+    def __init__(
+        self,
+        file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
+        module_allowed: Callable[[str], bool] = lambda module_name: True
+    ):
+        super(PackageImporter, self).__init__(file_or_buffer, module_allowed, zip_file_reader_type=TorchScriptPackageZipFileReader)
 
     def persistent_load(self, typename, data):
         assert isinstance(self.zip_reader, (TorchScriptDirectoryReader, TorchScriptPackageZipFileReader))
@@ -40,7 +28,7 @@ class PackageImporter(DefaultPackageImporter):
             if self.storage_context.has_storage(name):
                 storage = self.storage_context.get_storage(name, dtype).storage()
             else:
-                tensor = self.zip_reader.zip_file_reader.get_storage_from_record(
+                tensor = self.zip_reader.zip_reader.get_storage_from_record(
                     ".data/" + name, size, dtype
                 )
                 if isinstance(self.zip_reader, torch._C.PyTorchFileReader):

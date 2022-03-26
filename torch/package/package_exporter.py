@@ -23,22 +23,8 @@ class PackageExporter(DefaultPackageExporter):
         importer: Union[Importer, Sequence[Importer]] = sys_importer
     ):
 
-        super(PackageExporter, self).__init__(f, importer)
-        self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file.zip_file_writer)
-        self.storage_context = self.script_module_serializer.storage_context()
+        super(PackageExporter, self).__init__(f, importer, zip_file_writer_type=TorchScriptPackageZipFileWriter)
 
-    def setup_zipfile(self, f):
-        # uses zipfile which is designed for torch models
-        if isinstance(f, (Path, str)):
-            f = str(f)
-            self.buffer: Optional[BinaryIO] = None
-        else:  # is a byte buffer
-            self.buffer = f
-        self.zip_file = TorchScriptPackageZipFileWriter(f)
-
-    def closing_function(self):
-        # write torchscript files when close is called
-        self.script_module_serializer.write_files()
 
     def persistent_id(self, obj):
         # needed for 'storage' typename which is a way in which torch models are saved
@@ -62,8 +48,8 @@ class PackageExporter(DefaultPackageExporter):
             location = location_tag(storage)
 
             # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(storage)
-            storage_id = self.storage_context.get_or_add_storage(storage)
+            storage_present = self.zip_file.storage_context.has_storage(storage)
+            storage_id = self.zip_file.storage_context.get_or_add_storage(storage)
             if not storage_present:
                 if storage.device.type != "cpu":
                     storage = storage.cpu()
