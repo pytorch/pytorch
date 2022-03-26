@@ -84,4 +84,73 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, const Scalar& value)
     return output;
 }
 
+Tensor _pad_circular(const Tensor &self, IntArrayRef padding) {
+  const auto in_shape = self.sizes();
+  const auto ndim = static_cast<int64_t>(in_shape.size()) - 2;
+  TORCH_CHECK(padding.size() + 4 == in_shape.size() * 2,
+              "Invalid padding size, expected ", ndim * 2, " but got ", padding.size());
+
+  DimVector out_shape(in_shape.size());
+  out_shape[0] = in_shape[0];
+  out_shape[1] = in_shape[1];
+
+  // Get shape of padded tensor
+  for (const auto i : c10::irange(ndim)) {
+    const auto pad_l = padding[2 * (ndim - i - 1) + 0];
+    const auto pad_r = padding[2 * (ndim - i - 1) + 1];
+    const auto size = in_shape[2 + i];
+    out_shape[2 + i] = size + pad_l + pad_r;
+
+    TORCH_CHECK(
+        pad_l <= size && pad_r <= size,
+        "Padding value causes wrapping around more than once.");
+    TORCH_CHECK(
+        out_shape[2 + i] >= 0,
+        "Negative padding value is resulting in an empty dimension");
+  }
+
+  auto out = self.new_empty(out_shape, self.options());
+
+  // Put original array into the padded array
+  Tensor out_slice = out;
+  Tensor in_slice = self;
+  constexpr int64_t zero = 0;
+  for (const auto i : c10::irange(ndim)) {
+    const auto dim = ndim - i + 1;
+    const auto pad_l = padding[2*i + 0];
+    const auto pad_r = padding[2*i + 1];
+    out_slice = out_slice.slice(dim, std::max(pad_l, zero), out_shape[dim] - std::max(pad_r, zero));
+    in_slice = in_slice.slice(dim, std::max(-pad_l, zero), in_shape[dim] - std::max(-pad_r, zero));
+  }
+  out_slice.copy_(in_slice);
+
+  // The following steps first pad the beginning of the tensor (left side),
+  // and then pad the end of the tensor (right side).
+  // Note: Corners will be written more than once when ndim > 1.
+  //
+  // Only in cases where padding values are > 0 are when additional copying
+  // is required.
+  for (const auto i : c10::irange(ndim)) {
+    const auto dim = ndim - i + 1;
+    const auto pad_l = padding[2*i + 0];
+    const auto pad_r = padding[2*i + 1];
+
+    if (pad_l > 0) {
+      out_slice = out.slice(dim, 0, pad_l);
+      in_slice = out.slice(dim,
+                           out_shape[dim] - pad_l - std::max(pad_r, zero),
+                           out_shape[dim] - std::max(pad_r, zero));
+      out_slice.copy_(in_slice);
+    }
+
+    if (pad_r > 0) {
+      out_slice = out.slice(dim, out_shape[dim] - pad_r, out_shape[dim]);
+      in_slice = out.slice(dim, std::max(pad_l, zero), std::max(pad_l, zero) + pad_r);
+      out_slice.copy_(in_slice);
+    }
+  }
+
+  return out;
+}
+
 }}  // namespace at::native
