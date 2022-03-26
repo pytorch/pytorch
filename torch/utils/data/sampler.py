@@ -83,7 +83,7 @@ class RandomSampler(Sampler[int]):
     replacement: bool
 
     def __init__(self, data_source: Sized, replacement: bool = False,
-                 num_samples: Optional[int] = None, generator=None) -> None:
+                 num_samples: int = None, generator=None) -> None:
         self.data_source = data_source
         self.replacement = replacement
         self._num_samples = num_samples
