@@ -229,12 +229,24 @@ void ndtri_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
+const char erf_name[] = "erf_kernel";
 void erf_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "erf_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::erf(a);
+  #if AT_USE_JITERATOR()
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+	iter.common_dtype(), "erf_cuda", [&]() {
+          jitted_gpu_kernel</*name=*/erf_name,
+                            /*return_dtype=*/ scalar_t,
+			    /*common_dtype=*/ scalar_t,
+			    /*arity=*/ 1>(iter, erf_string);
+        }); // erf_string
+  #else
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
+	iter.common_dtype(), "erf_cuda", [&]() {
+	  gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+            return ::erf(a);
+          });
     });
-  });
+  #endif
 }
 
 const char erfc_name[] = "erfc_kernel";

@@ -522,6 +522,13 @@ const auto exp2_string = jiterator_stringify(
   }
 ); // exp2_string
 
+const auto erf_string = jiterator_stringify(
+  template <typename T>
+  T erf_kernel(T a) {
+    return erf(a);
+  }
+); // erf_string
+
 const auto erfc_string = jiterator_stringify(
   template <typename T>
   T erfc_kernel(T a) {
