@@ -641,6 +641,7 @@ struct ReduceJitOp {
 };
 
 extern "C"
+__launch_bounds__(${max_threads_lb}, 4)
 __global__ void reduction_${name}_kernel(ReduceJitOp r){
   r.run();
 }

@@ -899,9 +899,10 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
 }
 
 template<char const *name, typename scalar_t, typename out_scalar_t,
-int vt0, int max_threads, typename R>
+int vt0, typename R>
 static void launch_jitted_reduce_kernel(DeviceIndex idx, const ReduceConfig& config,
 R& reduction, const std::string& func) {
+  constexpr int max_threads = mnt_wrapper<scalar_t>::MAX_NUM_THREADS;
   dim3 block = config.block();
   dim3 grid = config.grid();
 
@@ -916,19 +917,17 @@ R& reduction, const std::string& func) {
   case 2:
     fn_ptr = &fns[idx][1];
     break;
-//    reduce_kernel<max_threads / 2, 2, R><<<grid, block, shared_memory, stream>>>(reduction);
   default:
     fn_ptr = &fns[idx][2];
-//    reduce_kernel<max_threads / 1, 1, R><<<grid, block, shared_memory, stream>>>(reduction);
   }
   if (!fn_ptr->function) {
     std::string f_inputs_type_str = at::cuda::jit::typeName<scalar_t>();
     std::string accum_type_str = at::cuda::jit::typeName<at::opmath_type<scalar_t>>();
     std::string result_type_str = at::cuda::jit::typeName<out_scalar_t>();
-
+    int max_threads_codegen = max_threads/config.output_vec_size;
     auto code = at::cuda::jit::generate_reduction_code(1, func, name, vt0,
                                                f_inputs_type_str, accum_type_str, result_type_str,
-                                               true, false, config.output_vec_size);
+                                               true, false, config.output_vec_size, max_threads_codegen);
 
     *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_"+std::string(name));
 
@@ -1315,7 +1314,7 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   reduce.final_output = iter.is_final_output();
 
   launch_jitted_reduce_kernel<name, scalar_t,
-  out_scalar_t, vt0, mnt_wrapper<scalar_t>::MAX_NUM_THREADS>(iter.device().index(),
+  out_scalar_t, vt0>(iter.device().index(),
   config, reduce, func);
 }
 

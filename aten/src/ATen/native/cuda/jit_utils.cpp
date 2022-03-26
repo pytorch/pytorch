@@ -895,7 +895,8 @@ std::string generate_reduction_code(
     const std::string& result_type,
     bool contiguous,
     bool vectorized,
-    int vec_size) {
+    int vec_size,
+    int max_threads_codegen) {
       at::jit::TemplateEnv env;
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
@@ -903,7 +904,7 @@ std::string generate_reduction_code(
       env.s("reduction_accum_type", reduction_accum_type);
       env.s("vt0", std::to_string(vt0));
       env.s("name", name);
-      env.s("traits_string", "");
+      env.s("max_threads_lb", std::to_string(max_threads_codegen));
       // reductions don't support dynamic casting, so the only way to get nonstandard types
       // is through input
       if (f_inputs_type == "at::Half") {

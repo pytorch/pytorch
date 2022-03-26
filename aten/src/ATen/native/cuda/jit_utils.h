@@ -42,7 +42,8 @@ std::string generate_reduction_code(
     const std::string& result_type,
     bool contiguous,
     bool vectorized,
-    int vec_size=0);
+    int vec_size,
+    int max_threads_codegen);
 
 NvrtcFunction jit_pwise_function(
     const std::string& code,
