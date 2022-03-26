@@ -42,11 +42,10 @@ class Bias(torch.nn.Module):
         return x + self.bias
 
 
-class AffineA(torch.nn.Module):
+class BlockA(torch.nn.Module):
     """
-    This module applies an affine transformation (like ``nn.Linear``). It is
-    used to define interesting nested structure for FSDP wrapping.
-    AffineA
+    Used to define interesting nested structure for FSDP wrapping.
+    BlockA
         Bias0
             bias
         weight
@@ -60,56 +59,59 @@ class AffineA(torch.nn.Module):
         self.bias_module0 = Bias(out_dim)
         self.weight = torch.nn.Parameter(torch.randn((in_dim, out_dim)))
         self.bias_module1 = Bias(out_dim)
+        self.relu = torch.nn.ReLU()
 
     def forward(self, x):
         x = x @ self.weight
         x = self.bias_module0(x)
+        x = self.relu(x)  # ensure biases have different gradients
         x = self.bias_module1(x)
         return x
 
-
-class AffineB(torch.nn.Module):
+class BlockB(torch.nn.Module):
     """
-    This module applies an affine transformation (like ``nn.Linear``). It is
-    used to define interesting nested structure for FSDP wrapping.
-    AffineB
+    Used to define interesting nested structure for FSDP wrapping.
+    BlockB
         weight
         Bias
             bias
-        bias
+        Bias
+            bias
     """
     def __init__(self, in_dim: int, out_dim: int) -> None:
         super().__init__()
         assert all(v > 0 for v in (in_dim, out_dim))
         torch.manual_seed(0)
         self.weight = torch.nn.Parameter(torch.randn((in_dim, out_dim)))
-        self.bias_module = Bias(out_dim)
-        self.bias = torch.nn.Parameter(torch.randn((out_dim,)))
+        self.bias_module0 = Bias(out_dim)
+        self.bias_module1 = Bias(out_dim)
+        self.relu = torch.nn.ReLU()
 
     def forward(self, x):
         x = x @ self.weight
-        x = self.bias_module(x)
-        x = x + self.bias
+        x = self.bias_module0(x)
+        x = self.relu(x)  # ensure biases have different gradients
+        x = self.bias_module1(x)
         return x
 
 
-class AffineModel(torch.nn.Module):
+class NestedModel(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.affine0 = AffineA(5, 7)
-        self.affine1 = AffineB(7, 7)
+        self.block0 = BlockB(5, 7)
+        self.block1 = BlockB(7, 7)
         self.bias = torch.nn.Parameter(torch.randn((5,)))
-        self.affine2 = torch.nn.Sequential(
-            AffineB(7, 9),
-            AffineA(9, 9),
-            AffineB(9, 5),
+        self.block2 = torch.nn.Sequential(
+            BlockA(7, 9),
+            BlockA(9, 9),
+            BlockB(9, 5),
         )
         self.relu = torch.nn.ReLU()
 
     def forward(self, x) -> torch.Tensor:
-        x = self.relu(self.affine0(x))
-        x = self.relu(self.affine1(x))
-        x = self.relu(self.affine2(x))
+        x = self.relu(self.block0(x))
+        x = self.relu(self.block1(x))
+        x = self.relu(self.block2(x))
         x = x + self.bias
         return x
 
@@ -124,49 +126,58 @@ class AffineModel(torch.nn.Module):
         loss.backward()
 
     @staticmethod
-    def wrap(model, group=None) -> None:
-        # Flatten Bias; then flatten weight and bias together into `affine1`
-        model.affine1.bias_module = FSDP(
-            model.affine1.bias_module, process_group=group,
+    def wrap(model, group=None) -> torch.nn.Module:
+        # Flatten Bias0; then flatten weight and Bias1 together into `block1`
+        model.block1.bias_module0 = FSDP(
+            model.block1.bias_module0, process_group=group,
         )
-        model.affine1 = FSDP(model.affine1, process_group=group)
-        # Flatten Bias0; flatten Bias1; then flatten weight into `affine2[1]`
-        model.affine2[1].bias_module0 = FSDP(
-            model.affine2[1].bias_module0, process_group=group,
+        model.block1 = FSDP(model.block1, process_group=group)
+        # Flatten Bias0; flatten Bias1; then flatten weight into `block2[1]`
+        model.block2[1].bias_module0 = FSDP(
+            model.block2[1].bias_module0, process_group=group,
         )
-        model.affine2[1].bias_module1 = FSDP(
-            model.affine2[1].bias_module1, process_group=group,
+        model.block2[1].bias_module1 = FSDP(
+            model.block2[1].bias_module1, process_group=group,
         )
-        model.affine2[1] = FSDP(model.affine2[1], process_group=group)
-        # Flatten weight, Bias, bias into `affine2[2]`
-        model.affine2[2] = FSDP(model.affine2[2], process_group=group)
+        model.block2[1] = FSDP(model.block2[1], process_group=group)
+        # Flatten weight, Bias, bias into `block2[2]`
+        model.block2[2] = FSDP(model.block2[2], process_group=group)
+        return model
+
+    @staticmethod
+    def wrap_alt(model, group=None) -> torch.nn.Module:
+        model.block0.bias_module0 = FSDP(
+            model.block0.bias_module0, process_group=group,
+        )
+        model.block0 = FSDP(model.block0, process_group=group)
+        return model
 
     def param_group0(self) -> List[torch.nn.Parameter]:
-        # Use `affine1`'s parameters for the first parameter group to deviate
+        # Use `block1`'s parameters for the first parameter group to deviate
         # from the `model.parameters()` order
-        return list(self.affine1.parameters())
+        return list(self.block1.parameters())
 
     def param_group1(self) -> List[torch.nn.Parameter]:
         # Deviate from the `model.parameters()` order further by rearranging
-        # `affine2`'s parameters to be before `affine0`'s parameters
-        return list(self.affine2.parameters()) + \
-            list(self.affine0.parameters())
+        # `block2`'s parameters to be before `block0`'s parameters
+        return list(self.block2.parameters()) + \
+            list(self.block0.parameters())
 
 
 class TestFSDPOptimState(FSDPTest):
-    def _init_affine_model(
+    def _init_nested_model(
         self,
         wrap: bool,
+        wrap_alt: bool = False,  # ignored if `wrap=False`
         device: torch.device = torch.device("cuda"),
         group=None,
         optim_class: Type[torch.optim.Optimizer] = torch.optim.Adam,
         use_multiple_param_groups: bool = False,
-        **optim_kwargs,
     ):
-        model = AffineModel().to(device)
+        model = NestedModel().to(device)
         if wrap:
-            AffineModel.wrap(model, group)
-        lr = optim_kwargs.pop("lr", 0.01)
+            model = NestedModel.wrap_alt(model, group) if wrap_alt \
+                else NestedModel.wrap(model, group)
         if not use_multiple_param_groups:
             optim_input = list(model.parameters())
         else:
@@ -174,7 +185,7 @@ class TestFSDPOptimState(FSDPTest):
                 {"params": model.param_group0()},
                 {"params": model.param_group1(), "weight_decay": 0.9}
             ]
-        optim = optim_class(optim_input, lr=lr, **optim_kwargs)
+        optim = optim_class(optim_input, lr=0.01)
         return model, optim, optim_input
 
     def _init_transformer_model(
@@ -184,7 +195,6 @@ class TestFSDPOptimState(FSDPTest):
         group=None,
         optim_class: Type[torch.optim.Optimizer] = torch.optim.Adam,
         use_multiple_param_groups: bool = False,
-        **optim_kwargs,
     ):
         assert not use_multiple_param_groups, \
             "Multiple parameter groups for the transformer is not implemented"
@@ -193,8 +203,7 @@ class TestFSDPOptimState(FSDPTest):
         model = self._get_wrapped_model(group=group).to(device) if wrap \
             else self._get_nonwrapped_model(group=group).to(device)
         model.eval()  # disable dropout for determinism
-        lr = optim_kwargs.pop("lr", 0.01)
-        optim = optim_class(model.parameters(), lr=lr, **optim_kwargs)
+        optim = optim_class(model.parameters(), lr=0.01)
         return model, optim, None
 
     def _step_model(
@@ -305,7 +314,7 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
-    def test_full_optim_state_dict_affine(
+    def test_full_optim_state_dict_nested(
         self,
         use_multiple_param_groups: bool,
     ) -> None:
@@ -318,7 +327,7 @@ class TestFSDPOptimState(FSDPTest):
         in the "state" part) may be rearranged.
         """
         NUM_ITERS = 3
-        model1, optim1, optim_input = self._init_affine_model(
+        model1, optim1, optim_input = self._init_nested_model(
             wrap=True, use_multiple_param_groups=use_multiple_param_groups,
         )
         losses1 = self._step_model(model1, optim1, num_iters=NUM_ITERS)
@@ -326,7 +335,7 @@ class TestFSDPOptimState(FSDPTest):
         if self.rank != OPTIM_TARGET_RANK:
             return
 
-        model2, optim2, _ = self._init_affine_model(
+        model2, optim2, _ = self._init_nested_model(
             wrap=False, use_multiple_param_groups=use_multiple_param_groups,
         )
         losses2 = self._step_model(model2, optim2, num_iters=NUM_ITERS)
@@ -340,15 +349,16 @@ class TestFSDPOptimState(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
-    def test_shard_full_optim_state_dict_affine(
+    def test_shard_full_optim_state_dict_nested(
         self,
         use_multiple_param_groups: bool,
     ) -> None:
         """Tests :meth:`shard_full_optim_state_dict` for a non-FSDP-root model
         with nested FSDP instances."""
         self._test_shard_full_optim_state(
-            model_class="affine",
+            model_class="nested",
             use_multiple_param_groups=use_multiple_param_groups,
+            halve_world_size=True,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -357,12 +367,39 @@ class TestFSDPOptimState(FSDPTest):
         transformer model with shared parameters."""
         self._test_shard_full_optim_state(
             model_class="transformer", use_multiple_param_groups=False,
+            halve_world_size=True,
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_shard_full_optim_state_dict_diff_wrap(self):
+        """Check that :meth:`shard_full_optim_state_dict` raises a
+        ``ValueError`` if the FSDP wrapping scheme changes."""
+        error_context = self.assertRaisesRegex(
+            ValueError,
+            "The passed-in full optimizer state dict was from a model with "
+            "a different FSDP wrapping scheme as the passed-in model"
+        )
+        with error_context:
+            self._test_shard_full_optim_state(
+                model_class="nested",
+                use_multiple_param_groups=False,
+                halve_world_size=False,
+                wrap_alt=True,
+            )
+        with error_context:
+            self._test_shard_full_optim_state(
+                model_class="nested",
+                use_multiple_param_groups=True,
+                halve_world_size=False,
+                wrap_alt=True,
+            )
 
     def _test_shard_full_optim_state(
         self,
         model_class: str,
         use_multiple_param_groups: bool,
+        halve_world_size: bool,
+        **new_model_kwargs,
     ):
         """
         (1) Runs a model with full world size for K iterations to generate a
@@ -377,7 +414,7 @@ class TestFSDPOptimState(FSDPTest):
         former could have equivalently been loaded into the local optimizer.
         """
         NUM_ITERS = 3
-        initializer = self._init_affine_model if model_class == "affine" \
+        initializer = self._init_nested_model if model_class == "nested" \
             else self._init_transformer_model if model_class == "transformer" \
             else None
         assert initializer is not None, f"Unsupported model: {model_class}"
@@ -390,15 +427,19 @@ class TestFSDPOptimState(FSDPTest):
         # Broadcast instead of `torch.save()`/`torch.load()` so that all ranks
         # have the full state dict
         full_osd1 = self._broadcast_full_osd(full_osd1)
-        # Create a new process group with halved world size
-        new_group_ranks = [r for r in range(self.world_size) if r % 2 == 0]
-        new_group = dist.new_group(ranks=new_group_ranks)
-        if self.rank not in new_group_ranks:
-            return
+        if halve_world_size:
+            # Create a new process group with halved world size
+            new_group_ranks = [r for r in range(self.world_size) if r % 2 == 0]
+            new_group = dist.new_group(ranks=new_group_ranks)
+            if self.rank not in new_group_ranks:
+                return
+        else:
+            new_group = dist.distributed_c10d._get_default_group()
         # Run a wrapped model with halved world size (from scratch)
         model2, optim2, optim_input2 = initializer(
             wrap=True, group=new_group,
             use_multiple_param_groups=use_multiple_param_groups,
+            **new_model_kwargs,
         )
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
         full_osd2 = FSDP.full_optim_state_dict(model2, optim2, optim_input2)

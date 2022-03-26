@@ -49,6 +49,8 @@ from .optim_utils import (
     OPTIM_TARGET_RANK,
     _flatten_optim_state,
     _get_flat_param_id_to_param,
+    _get_unflat_to_flat_param_ids,
+    _is_same_fsdp_wrapping,
     _unflatten_optim_state,
 )
 from .utils import _apply_to_tensors, _replace_by_prefix
@@ -2021,25 +2023,38 @@ class FullyShardedDataParallel(nn.Module):
         ]] = None,
     ) -> Dict[str, Any]:
         """
-        Consolidates the full optimizer state on the target rank and returns it
-        as a :class:`dict` following the convention of normal
-        :class:`torch.optim.Optimizer` s. This involves remapping from
-        flattened to unflattened parameters for any FSDP modules contained in
-        ``model`` so that the state is agnostic to the current world size and
-        resulting sharding scheme.
-
-        The returned :class:`dict` is identical to the result of
-        ``torch.optim.Optimizer.state_dict()`` for an optimizer constructed
-        using the parameters of a purely non-wrapped version of the model (i.e.
-        without any ``FullyShardedDataParallel`` modules).
+        Consolidates the full optimizer state on rank 0 and returns it
+        as a :class:`dict` following the convention of
+        :meth:`torch.optim.Optimizer.state_dict`, i.e. with keys ``"state"``
+        and ``"param_groups"``. The flattened parameters in ``FSDP`` modules
+        contained in ``model`` are mapped back to their unflattened parameters.
 
         .. warning:: This needs to be called on all ranks since synchronization
             primitives are used.
 
-        .. note:: Tensors contained in the optimizer state dict are not
-        cloned, so there may be aliasing surprises. For best practices, save
-        the optimizer state dict to disk immediately (e.g. using
-        ``torch.save()``).
+        .. warning:: The parameter IDs used in the state dict depend on the
+        ``FSDP`` wrapping scheme used in the passed-in ``model``. This means
+        that they may not match those of a purely non-wrapped version of the
+        model and that the returned state dict cannot necessarily be loaded
+        for a version of the model with a different ``FSDP`` wrapping scheme.
+        However, this does support changing the world size between save and
+        load time.
+
+        .. warning:: If you do not pass ``model.parameters()`` as the first
+        argument to the optimizer, then you should pass that same value to
+        this method as ``optim_input``.
+
+        .. note:: To check that the ``FSDP`` wrapping scheme did not change
+        between save and load time, the returned state dict includes an
+        additional key ``"unflat_to_flat_param_ids"`` to validate passed-in
+        state dicts in :meth:`shard_full_optim_state_dict`. Hence, the dict
+        has three keys in total: ``"state"``, ``"param_groups"``, and
+        ``"unflat_to_flat_param_ids"``.
+
+        .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
+        contained in the optimizer state dict are not cloned, so there may be
+        aliasing surprises. For best practices, consider saving the returned
+        optimizer state dict immediately, e.g. using ``torch.save()``.
 
         Args:
             model (torch.nn.Module): Root module (which may or may not be a
@@ -2057,8 +2072,8 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
                 state for ``model`` 's original unflattened parameters and
-                having keys "state" and "param_groups" following the convention
-                of normal :class:`torch.optim.Optimizer` s.
+                including keys "state" and "param_groups" following the
+                convention of :meth:`torch.optim.Optimizer.state_dict`.
         """
         osd = optim.state_dict()
         osd_state, osd_param_groups = osd["state"], osd["param_groups"]  # alias
@@ -2097,6 +2112,7 @@ class FullyShardedDataParallel(nn.Module):
                 for _ in range(num_unflat_params):
                     unflat_param_ids.append(unflat_param_id)
                     unflat_param_id += 1
+            # For FSDP parameters, we need to unflatten
             elif isinstance(param, FlatParameter):
                 assert param in flat_param_to_fsdp_module, \
                     "Check the `flat_param_to_fsdp_module` mapping " \
@@ -2111,7 +2127,7 @@ class FullyShardedDataParallel(nn.Module):
                         full_osd_state[unflat_param_id] = unflat_param_state
                         unflat_param_ids.append(unflat_param_id)
                         unflat_param_id += 1
-            # For parameters from non-FSDP modules, do not need to unflatten
+            # For parameters from non-FSDP modules, we do not need to unflatten
             elif to_save:
                 # Do not `deepcopy()` to avoid unnecessarily duplicating
                 # tensor storage
@@ -2145,6 +2161,11 @@ class FullyShardedDataParallel(nn.Module):
                 for unflat_param_id in unflat_param_ids
             ]  # flatten the list of lists
             full_osd_param_groups.append(unflat_param_group)
+        # Include the parameter ID mapping for checking if the optimizer state
+        # dict passed into `shard_full_optim_state_dict()` comes from a model
+        # with the same FSDP wrapping scheme
+        full_osd["unflat_to_flat_param_ids"] = \
+            _get_unflat_to_flat_param_ids(flat_to_unflat_param_ids)
         return full_osd
 
 
@@ -2157,15 +2178,35 @@ class FullyShardedDataParallel(nn.Module):
         ]] = None,
     ) -> Dict[str, Any]:
         """
-        Shards the full optimizer state dict ``full_optim_state_dict``,
+        Shards the full optimizer state dict ``full_optim_state_dict`` by
         remapping the state to flattened parameters instead of unflattened
-        parameters and restricting the positive-dimension tensor optimizer
-        state to only this rank's shard.
+        parameters and restricting to only this rank's part of the optimizer
+        state. The first argument should be the return value of
+        :meth:``full_optim_state_dict`.
+
+        Example::
+
+            >>> from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+            >>> model, optim = ...
+            >>> full_osd = FSDP.full_optim_state_dict(model, optim)
+            >>> torch.save(full_osd, PATH)
+            >>> # Define new model with possibly different world size
+            >>> new_model, new_optim = ...
+            >>> full_osd = torch.load(PATH)
+            >>> sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, new_model)
+            >>> new_optim.load_state_dict(sharded_osd)
+
+        .. warning:: If you do not pass ``model.parameters()`` as the first
+        argument to the optimizer, then you should pass that same value to
+        this method as ``optim_input``.
+
+        .. note:: This does not support changing the ``FSDP`` wrapping scheme
+        between save and load time and will error in that case.
 
         Args:
             full_optim_state_dict (Dict[str, Any]): Optimizer state dict
                 corresponding to the unflattened parameters and holding the
-                full non-sharded tensor optimizer state.
+                full non-sharded optimizer state.
             model (torch.nn.Module): Root module (which may or may not be a
                 :class:`FullyShardedDataParallel` instance) whose parameters
                 correspond to the optimizer state in ``full_optim_state_dict``.
@@ -2179,13 +2220,19 @@ class FullyShardedDataParallel(nn.Module):
             sharded_optim_state_dict (Dict[str, Any]): The full optimizer
                 state dict remapped to flattened parameters instead of
                 unflattened parameters and restricted to only include this
-                rank's shard of the tensor optimizer state.
+                rank's part of the optimizer state.
         """
         full_osd = full_optim_state_dict  # alias
         if "state" not in full_osd or "param_groups" not in full_osd:
             raise ValueError(
                 "`full_optim_state_dict` must have the keys \"state\" and "
                 "\"param_groups\" to be a valid optimizer state dict"
+            )
+        if "unflat_to_flat_param_ids" not in full_osd:
+            raise ValueError(
+                "`full_optim_state_dict` should have the key "
+                "\"unflat_to_flat_param_ids\" if saved from the method "
+                "`full_optim_state_dict()`"
             )
 
         flat_param_to_fsdp_module = {}
@@ -2195,16 +2242,26 @@ class FullyShardedDataParallel(nn.Module):
                 for param in module.params:  # may have none
                     flat_param_to_fsdp_module[param] = module
 
+        # Check that the FSDP wrapping scheme is the same for `model` here and
+        # the model for which the optimizer state dict was saved
+        flat_param_id_to_param = _get_flat_param_id_to_param(model, optim_input)
+        if not _is_same_fsdp_wrapping(
+            flat_param_id_to_param, full_osd["unflat_to_flat_param_ids"],
+        ):
+            raise ValueError(
+                "The passed-in full optimizer state dict was from a model with "
+                "a different FSDP wrapping scheme as the passed-in model"
+            )
+
         # Save a mapping from unflattened to flattened parameter IDs to remap
         # the IDs in the "param_groups" part
         unflat_to_flat_param_ids: List[int] = []  # `unflat_param_id` is the index
-
         # Handle the "state" part of the optimizer state dict
         sharded_osd_state: Dict[int, Any] = {}
         full_osd_state = full_osd["state"]
-        flat_param_id_to_param = _get_flat_param_id_to_param(model, optim_input)
         for flat_param_id, param in enumerate(flat_param_id_to_param):  # type: ignore[assignment]
             unflat_param_id = len(unflat_to_flat_param_ids)
+            # For FSDP parameters, we need to flatten
             if isinstance(param, FlatParameter):
                 assert param in flat_param_to_fsdp_module, \
                     "Check the `flat_param_to_fsdp_module` mapping " \
@@ -2214,24 +2271,24 @@ class FullyShardedDataParallel(nn.Module):
                     unflat_param_id,
                     unflat_param_id + num_unflat_params,
                 ))  # corresponding to the flattened parameter `param`
-                unflat_param_shapes = param._param_shapes
                 fsdp_module = flat_param_to_fsdp_module[param]
                 flat_state = _flatten_optim_state(
-                    full_osd_state,
-                    unflat_param_ids,
-                    unflat_param_shapes,
-                    fsdp_module,
-                    param,
+                    full_osd_state, unflat_param_ids, fsdp_module, param,
                 )
                 sharded_osd_state[flat_param_id] = flat_state
                 for _ in range(num_unflat_params):
                     unflat_to_flat_param_ids.append(flat_param_id)
-            else:  # do not need to flatten
+            # For parameters from non-FSDP modules, we do not need to flatten
+            else:
                 # Remap from unflattened to flattened parameter ID -- do not
                 # deepcopy to avoid unnecessarily duplicating tensor storage
                 sharded_osd_state[flat_param_id] = \
                     copy.copy(full_osd_state[unflat_param_id])
                 unflat_to_flat_param_ids.append(flat_param_id)
+        assert unflat_to_flat_param_ids == \
+            full_osd["unflat_to_flat_param_ids"], \
+            "`_is_same_fsdp_wrapping()` should have verified that these two " \
+            "would be equal "
 
         # Handle the "param_groups" part of the optimizer state dict
         sharded_osd_param_groups: List[Dict[str, Any]] = []

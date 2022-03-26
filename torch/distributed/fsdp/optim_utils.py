@@ -196,7 +196,6 @@ def _unflatten_communicated_optim_state(
 def _flatten_optim_state(
     unflat_osd_state: Dict[int, Dict[str, Any]],
     unflat_param_ids: List[int],
-    unflat_param_shapes: List[torch.Size],
     fsdp_module,
     flat_param: FlatParameter,
 ) -> Dict[str, Any]:
@@ -213,8 +212,6 @@ def _flatten_optim_state(
             IDs used in ``full_optim_state_dict`` corresponding to a single
             flattened parameter; the :class:`list` should consist of
             consecutive increasing non-negative integers.
-        unflat_param_shapes (List[torch.Size]): Unflattened parameter
-            shapes corresponding to the single flattened parameter.
         fsdp_module (FullyShardedDataParallel): FSDP module owning the
             flattened parameter.
         flat_param (FlatParameter): The flattened parameter.
@@ -228,6 +225,7 @@ def _flatten_optim_state(
     assert len(unflat_param_ids) > 0, \
         "Expects at least one unflattened parameter ID corresponding to " \
         "the flattened parameter"
+    unflat_param_shapes = flat_param._param_shapes
     assert len(unflat_param_ids) == len(unflat_param_shapes), \
         f"`unflat_param_ids`: {len(unflat_param_ids)} " \
         f"`unflat_param_shapes`: {len(unflat_param_shapes)}"
@@ -561,6 +559,88 @@ def _get_flat_param_id_to_param(
             # `param`
             flat_param_id_to_param.append(param)
     return flat_param_id_to_param  # type: ignore[return-value]
+
+
+def _get_unflat_to_flat_param_ids(
+    flat_to_unflat_param_ids: Dict[int, List[int]],
+) -> List[int]:
+    """
+    Inverts the mapping ``flat_to_unflat_param_ids`` to be from unflattened
+    parameter ID to flattened parameter ID, where the unflattened parameter ID
+    is the index in the returned :class:`list`. There may be multiple
+    unflattened parameter IDs mapping to the same flattened parameter ID.
+
+    Args:
+        flat_to_unflat_param_ids (Dict[int, List[int]]): A mapping from
+            flattened parameter ID to a :class:`list` of corresponding
+            unflattened parameter IDs.
+
+    Returns:
+        unflat_to_flat_param_ids (List[int]): A mapping from unflattened
+            parameter ID to flattened parameter ID, where the unflattened
+            parameter ID is the index in the :class:`list`.
+    """
+    # Construct as a dict and then convert to list
+    unflat_to_flat_param_ids = {}
+    for flat_param_id, unflat_param_ids in flat_to_unflat_param_ids.items():
+        for unflat_param_id in unflat_param_ids:
+            assert unflat_param_id not in unflat_to_flat_param_ids, \
+                "`flat_to_unflat_param_ids` has the unflattened parameter " \
+                f"ID {unflat_param_id} mapped to multiple flattened " \
+                "parameter IDs"
+            unflat_to_flat_param_ids[unflat_param_id] = flat_param_id
+    num_unflat_param_ids = len(unflat_to_flat_param_ids)
+    unflat_param_ids_set = set(unflat_to_flat_param_ids.keys())
+    assert unflat_param_ids_set == set(range(num_unflat_param_ids)), \
+        "The set of unflattened parameter IDs should be {0, ..., " + \
+        str(num_unflat_param_ids - 1) + "} but got " + \
+        f"{unflat_param_ids_set}"
+    return [
+        unflat_to_flat_param_ids[unflat_param_id]
+        for unflat_param_id in range(num_unflat_param_ids)
+    ]
+
+
+def _is_same_fsdp_wrapping(
+    flat_param_id_to_param: List[torch.nn.Parameter],
+    unflat_to_flat_param_ids: List[int],
+) -> bool:
+    """
+    Checks if a model's ``FSDP`` wrapping scheme is compatible with the
+    parameter ID mapping given by ``unflat_to_flat_param_ids``.
+
+    Args:
+        flat_param_id_to_param (List[torch.nn.Parameter]): A mapping from
+            flattened parameter ID to the parameter itself.
+        unflat_to_flat_param_ids (List[int]): A mapping from unflattened
+            parameter ID to flattened parameter ID, where the unflattened
+            parameter ID is the index in the :class:`list`.
+
+    Returns:
+        is_same_fsdp_wrapping (bool): ``True`` if the wrapping scheme
+            corresponding to ``unflat_to_flat_param_ids`` (from the saved state
+            dict) matches that corresponding to ``flat_param_id_to_param`` (for
+            the candidate model for loading).
+    """
+    curr_unflat_param_id = 0
+    new_unflat_to_flat_param_ids = {}
+    for flat_param_id, param in enumerate(flat_param_id_to_param):
+        if isinstance(param, FlatParameter):  # FSDP parameter
+            # Unflattened parameter IDs for a flattened parameter are saved to
+            # be consecutive
+            unflat_param_ids = list(range(
+                curr_unflat_param_id,
+                curr_unflat_param_id + param._num_unflattened_params,
+            ))  # corresponding to the flattened parameter `param`
+        else:  # non-FSDP parameter
+            unflat_param_ids = [curr_unflat_param_id]
+        for unflat_param_id in unflat_param_ids:
+            new_unflat_to_flat_param_ids[unflat_param_id] = flat_param_id
+            if unflat_param_id >= len(unflat_to_flat_param_ids) or \
+                    unflat_to_flat_param_ids[unflat_param_id] != flat_param_id:
+                return False
+        curr_unflat_param_id += len(unflat_param_ids)
+    return True
 
 
 def _is_zero_dim_tensor(x: Any) -> bool:
