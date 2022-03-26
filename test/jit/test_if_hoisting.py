@@ -148,13 +148,13 @@ class TestIfHoisting(JitTestCase):
         self.run_pass("dce", op_graph)
 
         FileCheck().check_count("prim::If", 1, exactly=True).run(op_graph)
-        FileCheck().check_count("aten::add", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::add(", 2, exactly=True).run(op_graph)
         FileCheck().check_count("aten::add_", 1, exactly=True).run(op_graph)
 
         t1 = torch.Tensor([1])
         t2 = torch.Tensor([5, 6])
-        self.assertEqual(fn(True, t1), fn_script(True, t1))
-        self.assertEqual(fn(False, t2), fn_script(False, t2))
+        self.assertEqual(fn(True, t1.clone()), fn_script(True, t1.clone()))
+        self.assertEqual(fn(False, t2.clone()), fn_script(False, t2.clone()))
 
     def test_mutate_after(self):
         """
@@ -179,7 +179,6 @@ class TestIfHoisting(JitTestCase):
 
         FileCheck().check_count("prim::If", 1, exactly=True).run(op_graph)
         FileCheck().check_count("aten::add", 2, exactly=True).run(op_graph)
-
         t1 = torch.Tensor([1])
         t2 = torch.Tensor([5, 6])
         self.assertEqual(fn(True, t1.clone()), fn_script(True, t1.clone()))
@@ -211,3 +210,24 @@ class TestIfHoisting(JitTestCase):
         t2 = torch.Tensor([5, 6])
         self.assertEqual(fn(True, t1), fn_script(True, t1))
         self.assertEqual(fn(False, t2), fn_script(False, t2))
+
+    def test_hoist_with_side_effects(self):
+        def fn(cond: bool, x, y):
+            if cond:
+                x.sqrt_()
+                x = x + y
+                x.relu_()
+            else:
+                x.relu_()
+                x = x + y
+                x.sqrt_()
+            z = x * 2
+            return z
+
+        fn_s = torch.jit.script(fn)
+        op_graph = fn_s.graph
+        self.run_pass("common_expression_hoisting", op_graph)
+        self.run_pass("dce", op_graph)
+        FileCheck().check_count("aten::relu_", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::sqrt_", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::add", 2, exactly=True).run(op_graph)

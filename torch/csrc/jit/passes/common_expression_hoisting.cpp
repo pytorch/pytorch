@@ -45,9 +45,9 @@ struct CommonExpressionHoister {
       // If both of the moves are valid, then we know we can move the item out
       // of the if blocks entirely.
       AliasDb& aliasDb = getOrCreateAliasDb();
-      bool true_moveable = aliasDb.couldMoveAfterTopologically(
+      bool true_moveable = aliasDb.couldMoveBeforeTopologically(
           true_b_node, true_block->nodes().front());
-      bool false_moveable = aliasDb.couldMoveAfterTopologically(
+      bool false_moveable = aliasDb.couldMoveBeforeTopologically(
           false_b_node, false_block->nodes().front());
 
       if (!true_moveable || !false_moveable) {
