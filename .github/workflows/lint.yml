@@ -493,7 +493,7 @@ jobs:
           set -eux
           time python3 -mtools.generate_torch_version --is_debug=false
           time python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
-          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
+          time python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --tags-path aten/src/ATen/native/tags.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
       - name: Run mypy
         env:
           MYPY_FORCE_COLOR: 1
