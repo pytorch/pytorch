@@ -566,7 +566,6 @@ Keyword args:
 Example::
     >>> torch.special.log_ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
     tensor([-6.6077 -3.7832 -1.841  -0.6931 -0.1728 -0.023  -0.0014])
-    TODO(bahuang) double check torch's result
 """.format(**common_args))
 
 log1p = _add_docstr(_special.special_log1p,

@@ -1269,7 +1269,7 @@
   result: auto_element_wise
 
 - name: special_log_ndtr(Tensor self) -> Tensor
-  self: grad   # TODO(bahuang)
+  self: grad / std::sqrt(2 * M_PI) * (result + self.pow(2) / 2).neg().exp()
   result: auto_element_wise
 
 # [Note: Sometimes view derivatives]

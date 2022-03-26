@@ -1653,12 +1653,6 @@ static inline C10_HOST_DEVICE T calc_ndtri(T y0) {
   return x;
 }
 
-// TODO: add header here
-template <typename T>
-static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
-  
-}
-
 /* The next function is taken from http://ab-initio.mit.edu/Faddeev */
 
 /* Copyright (c) 2012 Massachusetts Institute of Technology
@@ -2163,6 +2157,17 @@ calc_erfcx(T x)
     else {
       return 2*exp(x*x) - erfcx_y100(400/(4-x));
     }
+  }
+}
+
+// TODO: add header here
+template <typename T>
+static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
+  T t = x * M_SQRT1_2;
+  if (x < T{-1.0}) {
+    return std::log(calc_erfcx(-t) / 2) - t * t;
+  } else {
+    return std::log1p(-std::erfc(t) / 2);
   }
 }
 
