@@ -152,9 +152,13 @@ size_t assignOffsetsOptimized(
           continue;
         }
 
+        auto new_offset = x_offset + x_size;
         if (x_offset < prev_offset) {
-          prev_offset = std::max(prev_offset, x_offset + x_size);
-          continue;
+          prev_offset = std::max(prev_offset, new_offset);
+          // prev_offset can't get any bigger since the tensors are sorted by
+          // size, so there's no need to consider the rest of the tensors for
+          // this offset value
+          break;
         }
 
         const auto gap = x_offset - prev_offset;
@@ -162,7 +166,11 @@ size_t assignOffsetsOptimized(
           smallest_gap = gap;
           best_offset = prev_offset;
         }
-        prev_offset = std::max(prev_offset, x_offset + x_size);
+        prev_offset = new_offset;
+        // Again, prev_offset can't get any bigger since the tensors are sorted
+        // by size, so we're free to skip over the rest of the tensors with this
+        // offset value.
+        break;
       }
     }
 
