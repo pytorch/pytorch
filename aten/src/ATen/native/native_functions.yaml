@@ -5343,7 +5343,8 @@
 - func: _sparse_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA, SparseCsrCPU, SparseCsrCUDA: sparse_to_dense
+    SparseCPU, SparseCUDA: sparse_to_dense
+    SparseCsrCPU, SparseCsrCUDA: sparse_csr_to_dense
 
 # Special case of to_dense with custom derivative
 - func: _mkldnn_to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
