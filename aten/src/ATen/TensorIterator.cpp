@@ -947,6 +947,7 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
       .promote_inputs_to_common_dtype(true)
+      .enforce_safe_casting_to_output(true)
       .add_owned_output(out)
       .add_owned_input(a)
       .add_owned_input(b)
