@@ -237,7 +237,7 @@ if(USE_ROCM)
   set(ATen_HIP_SRCS ${ATen_HIP_SRCS} ${hip_hip} ${native_hip_hip} ${native_sparse_hip_hip} ${native_quantized_hip_hip})
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   set(all_hip_cpp ${native_sparse_hip_cpp} ${native_quantized_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${native_hip_linalg_cpp} ${cuda_generated_sources} ${ATen_HIP_SRCS})
-  set(all_hip_cpp ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
+  set(all_hip_cpp ${native_grid_sampler_utils_cpp} ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
