@@ -248,7 +248,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
 
   // Create the transform plan (either from cache or locally)
-  const auto value_type = c10::toValueType(input.scalar_type());
+  const auto value_type = c10::toRealValueType(input.scalar_type());
   auto fft_type = GetCuFFTTransformType(input.is_complex(), out.is_complex());
   CuFFTParams Params(input.strides(), out.strides(), signal_size, fft_type, value_type);
   CuFFTParamsLRUCache& plan_cache = cufft_get_plan_cache(input.device().index());
@@ -445,7 +445,7 @@ Tensor _fft_c2r_cufft(const Tensor& self, IntArrayRef dim, int64_t normalization
   DimVector out_sizes(in_sizes.begin(), in_sizes.end());
   out_sizes[dim.back()] = lastdim;
 
-  auto output = at::empty(out_sizes, self.options().dtype(c10::toValueType(self.scalar_type())));
+  auto output = at::empty(out_sizes, self.options().dtype(c10::toRealValueType(self.scalar_type())));
 
   if (use_optimized_cufft_path(dim)) {
     Tensor temp;

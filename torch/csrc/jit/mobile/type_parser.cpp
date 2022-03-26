@@ -1,28 +1,21 @@
 #include <torch/csrc/jit/mobile/type_parser.h>
 
-#include <ATen/core/jit_type.h>
-#include <c10/util/string_view.h>
-#include <torch/csrc/jit/frontend/parser_constants.h>
-#include <torch/csrc/jit/mobile/runtime_compatibility.h>
-#include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/custom_class.h>
 #include <queue>
 
-namespace torch {
-namespace jit {
-const std::unordered_map<std::string, c10::TypePtr>& string_to_type_lut();
-}
-} // namespace torch
+#include <ATen/core/jit_type.h>
+#include <ATen/core/type_factory.h>
+#include <c10/util/string_view.h>
+#include <torch/csrc/jit/frontend/parser_constants.h>
+#include <torch/custom_class.h>
 
-using torch::jit::string_to_type_lut;
 using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
 
 namespace {
 
-// Torchbind custom class always starts with the follow prefix, so use it as an
-// identifier for torchbind custom class type
+// Torchbind custom class always starts with the follow prefix, so use it as
+// an identifier for torchbind custom class type
 static constexpr const char* kTypeTorchbindCustomClass =
     "__torch__.torch.classes";
 static constexpr const char* kTypeNamedTuple = "NamedTuple";
@@ -80,7 +73,7 @@ std::vector<TypePtr> TypeParser::parseList() {
 // The list of non-simple types supported by current parser.
 const std::unordered_set<std::string>& TypeParser::getNonSimpleType() {
   static std::unordered_set<std::string> nonSimpleTypes{
-      "List", "Optional", "Future", "Dict", "Tuple"};
+      "List", "Optional", "Dict", "Tuple"};
   return nonSimpleTypes;
 }
 
@@ -99,20 +92,26 @@ std::unordered_set<std::string> TypeParser::getContainedTypes() {
   return contained_types_;
 }
 
+template <typename T>
+TypePtr TypeParser::parseSingleElementType() {
+  expectChar('[');
+  auto result = DynamicTypeFactory::create<T>(parse());
+  expectChar(']');
+  return result;
+}
+
 TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
-    return CreateSingleElementType<ListType>();
+    return parseSingleElementType<ListType>();
   } else if (token == "Optional") {
-    return parseSingleElementType(DynamicType::Tag::Optional);
-  } else if (token == "Future") {
-    return CreateSingleElementType<FutureType>();
+    return parseSingleElementType<OptionalType>();
   } else if (token == "Dict") {
     expectChar('[');
     auto key = parse();
     expectChar(',');
     auto val = parse();
     expectChar(']');
-    return DictType::create(std::move(key), std::move(val));
+    return DynamicTypeFactory::create<DictType>(std::move(key), std::move(val));
   } else if (token == "Tuple") {
     std::vector<TypePtr> types;
     expectChar('[');
@@ -123,15 +122,16 @@ TypePtr TypeParser::parseNonSimple(const std::string& token) {
       }
     }
     expect("]");
-    return TupleType::create(types);
+    return DynamicTypeFactory::create<TupleType>(std::move(types));
   }
   return nullptr;
 }
 
 TypePtr TypeParser::parse() {
   std::string token = next();
-  auto simpleTypeIt = string_to_type_lut().find(token);
-  if (simpleTypeIt != string_to_type_lut().end()) {
+  const auto& baseTypes = DynamicTypeFactory::basePythonTypes();
+  auto simpleTypeIt = baseTypes.find(token);
+  if (simpleTypeIt != baseTypes.end()) {
     if (cur() != "]" && cur() != "," && cur() != "") {
       TORCH_CHECK(
           false, "Simple type ", token, " is followed by ", "invalid chars.");
@@ -150,6 +150,12 @@ TypePtr TypeParser::parse() {
       // other class starts with __torch__ following by custom names
       return parseCustomType();
     }
+  } else if (token == "Union") {
+    // TODO Union types are not supported on embedded runtime, and we need to
+    // generate compiler errors for users scripting UnionTypes. Right now
+    // for preserving backward compatibility we have to return a nullptr since
+    // it does not get involved in type reflection.
+    return nullptr;
   } else {
     TORCH_CHECK(
         false,
@@ -178,14 +184,14 @@ TypePtr TypeParser::parse() {
 //         ]
 //     ]"
 TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
-  std::vector<std::string> field_names;
+  std::vector<c10::string_view> field_names;
   std::vector<TypePtr> field_types;
   std::string ns;
   expect(",");
   expect("[");
   while (cur() != "]") {
     expect("[");
-    std::string field_name = next();
+    auto field_name = nextView();
     expect(",");
     TypePtr field_type = parse();
     field_names.emplace_back(field_name);
@@ -195,7 +201,8 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
       next();
     }
   }
-  return TupleType::createNamed(qualified_name, field_names, field_types);
+  return DynamicTypeFactory::createNamedTuple(
+      qualified_name, field_names, field_types);
 }
 
 // Custom type will be following structure:
@@ -293,22 +300,6 @@ void TypeParser::expectChar(char c) {
   advance();
 }
 
-template <class T>
-TypePtr TypeParser::CreateSingleElementType() {
-  expectChar('[');
-  auto result = T::create(parse());
-  expectChar(']');
-  return result;
-}
-
-TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
-  expectChar('[');
-  auto result =
-      std::make_shared<DynamicType>(tag, DynamicType::Arguments(parse()));
-  expectChar(']');
-  return result;
-}
-
 void TypeParser::lex() {
   // skip white spaces
   while (start_ < pythonStr_.size() && pythonStr_[start_] == ' ')
@@ -328,15 +319,19 @@ void TypeParser::lex() {
   }
 }
 
-std::string TypeParser::next() {
+c10::string_view TypeParser::nextView() {
   TORCH_CHECK(
       !next_token_.empty(),
       "Empty token queue in mobile type parser.",
       "Check the format of the type string and make sure it's correct.");
   c10::string_view token = cur();
-  std::string ret(token.begin(), token.end());
   advance();
-  return ret;
+  return token;
+}
+
+std::string TypeParser::next() {
+  auto token = nextView();
+  return std::string(token.begin(), token.end());
 }
 
 void TypeParser::advance() {
@@ -358,4 +353,5 @@ TORCH_API std::vector<at::TypePtr> parseType(
   at::TypeParser parser(pythonStrs);
   return parser.parseList();
 }
+
 } // namespace c10

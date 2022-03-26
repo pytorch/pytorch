@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 #include <Python.h>
@@ -35,11 +36,18 @@
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/autograd/python_return_types.h"
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/FuncTorchTLS.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
 #include <stdexcept>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+$ops_headers
+#endif
 
 using at::DeviceGuard;
 using at::device_of;
@@ -256,11 +264,12 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
     // manually.
     if (jit::tracer::isTracing()) {
       auto tracer_state = jit::tracer::getTracingState();
-      auto node = tracer_state->graph->create(jit::aten::contiguous, /*num_outputs=*/0);
+      auto op_name = c10::Symbol::fromQualString("aten::contiguous");
+      auto node = tracer_state->createNode(op_name, /*num_outputs=*/0);
       jit::tracer::recordSourceLocation(node);
       jit::tracer::addInputs(node, "self", self_);
       jit::tracer::addInputs(node, "memory_format", memory_format);
-      tracer_state->graph->insertNode(node);
+      tracer_state->insertNode(node);
       jit::tracer::addOutput(node, self_);
     }
     Py_INCREF(self);
@@ -782,6 +791,12 @@ static PyObject * THPVariable_requires_grad_(PyObject* self, PyObject* args, PyO
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
 
+  // temporary hack to improve functorch UX.
+  const auto& functorch_tls = at::functorch::functorchTLSAccessor();
+  if (functorch_tls) {
+    functorch_tls->checkSupportsInplaceRequiresGrad();
+  }
+
   auto requires_grad = r.toBool(0);
   // should we throw if requires_grad is true?  var.requires_grad = True throws here
   // but it's nice to let this be a no-op.
@@ -921,7 +936,7 @@ static PyObject * THPVariable_storage(PyObject* self, PyObject* arg)
     return handle_torch_function(self, "storage");
   }
   auto& self_ = THPVariable_Unpack(self);
-  return createPyObject(self_.storage(), self_.dtype());
+  return createPyObject(self_.storage());
   END_HANDLE_TH_ERRORS
 }
 
@@ -1099,7 +1114,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -1115,7 +1130,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an UntypedStorage, but got type ", storage_scalar_type,
+        " or an _UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,

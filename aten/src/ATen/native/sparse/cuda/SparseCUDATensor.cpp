@@ -1,9 +1,19 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at { namespace native {
 

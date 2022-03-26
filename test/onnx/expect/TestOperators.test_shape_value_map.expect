@@ -4,12 +4,12 @@ producer_version: "CURRENT_VERSION"
 graph {
   node {
     input: "x"
-    output: "1"
+    output: "onnx::Gather_1"
     name: "Shape_0"
     op_type: "Shape"
   }
   node {
-    output: "2"
+    output: "onnx::Gather_2"
     name: "Constant_1"
     op_type: "Constant"
     attribute {
@@ -22,9 +22,9 @@ graph {
     }
   }
   node {
-    input: "1"
-    input: "2"
-    output: "3"
+    input: "onnx::Gather_1"
+    input: "onnx::Gather_2"
+    output: "onnx::Unsqueeze_3"
     name: "Gather_2"
     op_type: "Gather"
     attribute {
@@ -34,8 +34,8 @@ graph {
     }
   }
   node {
-    input: "3"
-    output: "7"
+    input: "onnx::Unsqueeze_3"
+    output: "onnx::Concat_7"
     name: "Unsqueeze_3"
     op_type: "Unsqueeze"
     attribute {
@@ -45,11 +45,11 @@ graph {
     }
   }
   node {
-    input: "7"
-    input: "21"
-    input: "22"
-    input: "23"
-    output: "11"
+    input: "onnx::Concat_7"
+    input: "onnx::Concat_21"
+    input: "onnx::Concat_22"
+    input: "onnx::Concat_23"
+    output: "onnx::Reshape_11"
     name: "Concat_4"
     op_type: "Concat"
     attribute {
@@ -60,14 +60,14 @@ graph {
   }
   node {
     input: "x"
-    input: "11"
-    output: "12"
+    input: "onnx::Reshape_11"
+    output: "onnx::Transpose_12"
     name: "Reshape_5"
     op_type: "Reshape"
   }
   node {
-    input: "12"
-    output: "13"
+    input: "onnx::Transpose_12"
+    output: "onnx::Softmax_13"
     name: "Transpose_6"
     op_type: "Transpose"
     attribute {
@@ -80,8 +80,8 @@ graph {
     }
   }
   node {
-    input: "13"
-    output: "14"
+    input: "onnx::Softmax_13"
+    output: "onnx::Transpose_14"
     name: "Softmax_7"
     op_type: "Softmax"
     attribute {
@@ -91,8 +91,8 @@ graph {
     }
   }
   node {
-    input: "14"
-    output: "15"
+    input: "onnx::Transpose_14"
+    output: "onnx::Reshape_15"
     name: "Transpose_8"
     op_type: "Transpose"
     attribute {
@@ -105,8 +105,8 @@ graph {
     }
   }
   node {
-    input: "3"
-    output: "17"
+    input: "onnx::Unsqueeze_3"
+    output: "onnx::Concat_17"
     name: "Unsqueeze_9"
     op_type: "Unsqueeze"
     attribute {
@@ -116,9 +116,9 @@ graph {
     }
   }
   node {
-    input: "17"
-    input: "24"
-    output: "19"
+    input: "onnx::Concat_17"
+    input: "onnx::Concat_24"
+    output: "onnx::Reshape_19"
     name: "Concat_10"
     op_type: "Concat"
     attribute {
@@ -128,35 +128,35 @@ graph {
     }
   }
   node {
-    input: "15"
-    input: "19"
+    input: "onnx::Reshape_15"
+    input: "onnx::Reshape_19"
     output: "20"
     name: "Reshape_11"
     op_type: "Reshape"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   initializer {
     dims: 1
     data_type: 7
-    name: "21"
+    name: "onnx::Concat_21"
     raw_data: "\001\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 1
     data_type: 7
-    name: "22"
+    name: "onnx::Concat_22"
     raw_data: "\002\000\000\000\000\000\000\000"
   }
   initializer {
     dims: 1
     data_type: 7
-    name: "23"
+    name: "onnx::Concat_23"
     raw_data: "\377\377\377\377\377\377\377\377"
   }
   initializer {
     dims: 1
     data_type: 7
-    name: "24"
+    name: "onnx::Concat_24"
     raw_data: "\377\377\377\377\377\377\377\377"
   }
   input {

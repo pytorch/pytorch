@@ -1,3 +1,4 @@
+# Owner(s): ["oncall: jit"]
 
 import torch
 from torch.testing import FileCheck
@@ -211,7 +212,7 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(True, t1), fn_script(True, t1))
         self.assertEqual(fn(False, t2), fn_script(False, t2))
 
-    def test_hoist_with_side_effects(self):
+    def test_hoist_mutation_2(self):
         def fn(cond: bool, x, y):
             if cond:
                 x.sqrt_()

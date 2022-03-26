@@ -26,8 +26,15 @@ class TestUpgraders(JitTestCase):
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
         zipped_model = zipfile.ZipFile(buffer)
-        version = int(zipped_model.read('archive/version').decode("utf-8"))
-        return version
+        # there was a change in how we store version number
+        # in a package between version 3 and 7.
+        # So we have to check for both.
+        try:
+            version = int(zipped_model.read('archive/version').decode("utf-8"))
+            return version
+        except KeyError:
+            version = int(zipped_model.read('archive/.data/version').decode("utf-8"))
+            return version
 
     # TODO (tugsuu) We should ideally be generating this test cases.
     def test_populated_upgrader_graph(self):
@@ -115,6 +122,85 @@ class TestUpgraders(JitTestCase):
         # we check by its code because graph variable names
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_div_other_variants(self):
+        def test_func():
+            a = torch.ones((4, 5, 6), dtype=torch.int64)
+            b = 4
+            return a // b
+
+        traced_func = torch.jit.trace(test_func, ())
+        buffer = io.BytesIO()
+        torch.jit.save(traced_func, buffer)
+        buffer.seek(0)
+        loaded_func = torch.jit.load(buffer)
+        version = self._load_model_version(loaded_func)
+        self.assertTrue(version == 4)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_linspace(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_linspace_v7.ptl"
+        loaded_model = torch.jit.load(model_path)
+        sample_inputs = ((3, 10), (-10, 10), (4.0, 6.0), (3 + 4j, 4 + 5j))
+        for (a, b) in sample_inputs:
+            output_with_step, output_without_step = loaded_model(a, b)
+            # when no step is given, should have used 100
+            self.assertTrue(output_without_step.size(dim=0) == 100)
+            self.assertTrue(output_with_step.size(dim=0) == 5)
+
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 8)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_linspace_out(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_linspace_out_v7.ptl"
+        loaded_model = torch.jit.load(model_path)
+        sample_inputs = (
+            (3, 10, torch.empty((100,), dtype=torch.int64)),
+            (-10, 10, torch.empty((100,), dtype=torch.int64)),
+            (4.0, 6.0, torch.empty((100,), dtype=torch.float64)),
+            (3 + 4j, 4 + 5j, torch.empty((100,), dtype=torch.complex64)),
+        )
+        for (a, b, c) in sample_inputs:
+            output = loaded_model(a, b, c)
+            # when no step is given, should have used 100
+            self.assertTrue(output.size(dim=0) == 100)
+
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 8)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_logspace(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_v8.ptl"
+        loaded_model = torch.jit.load(model_path)
+        sample_inputs = ((3, 10), (-10, 10), (4.0, 6.0), (3 + 4j, 4 + 5j))
+        for (a, b) in sample_inputs:
+            output_with_step, output_without_step = loaded_model(a, b)
+            # when no step is given, should have used 100
+            self.assertTrue(output_without_step.size(dim=0) == 100)
+            self.assertTrue(output_with_step.size(dim=0) == 5)
+
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 9)
+
+    @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
+    def test_aten_logspace_out(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_logspace_out_v8.ptl"
+        loaded_model = torch.jit.load(model_path)
+        sample_inputs = (
+            (3, 10, torch.empty((100,), dtype=torch.int64)),
+            (-10, 10, torch.empty((100,), dtype=torch.int64)),
+            (4.0, 6.0, torch.empty((100,), dtype=torch.float64)),
+            (3 + 4j, 4 + 5j, torch.empty((100,), dtype=torch.complex64)),
+        )
+        for (a, b, c) in sample_inputs:
+            output = loaded_model(a, b, c)
+            # when no step is given, should have used 100
+            self.assertTrue(output.size(dim=0) == 100)
+
+        version = self._load_model_version(loaded_model)
+        self.assertTrue(version == 9)
 
     @unittest.skipIf(not _is_upgraders_enabled(), "Skipping because upgraders are not enabled")
     def test_aten_test_serialization(self):

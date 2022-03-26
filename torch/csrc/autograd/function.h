@@ -23,6 +23,11 @@
 #include <utility>
 #include <vector>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 namespace torch { namespace autograd {
 
 struct Edge;
@@ -618,3 +623,5 @@ edge_list collect_next_edges(Variables&&... variables) {
   return std::move(make.next_edges);
 }
 }} // namespace torch::autograd
+
+C10_CLANG_DIAGNOSTIC_POP()

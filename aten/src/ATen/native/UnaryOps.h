@@ -6,7 +6,7 @@
 
 namespace at {
 class Tensor;
-struct TensorIterator;
+class TensorBase;
 struct TensorIteratorBase;
 }
 
@@ -73,14 +73,14 @@ DECLARE_DISPATCH(unary_fn, trunc_stub);
 DECLARE_DISPATCH(unary_fn, lgamma_stub);
 
 // NB: these are actually defined in Distribution
-DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, c10::optional<Generator>), bernoulli_tensor_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, c10::optional<Generator>), bernoulli_scalar_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const TensorBase&, c10::optional<Generator>), bernoulli_tensor_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const double, c10::optional<Generator>), bernoulli_scalar_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), cauchy_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), exponential_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), geometric_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), log_normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), uniform_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const double, const double, c10::optional<Generator>), normal_stub);
+DECLARE_DISPATCH(void(*)(const TensorBase&, const double, const double, c10::optional<Generator>), normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const uint64_t, const int64_t, c10::optional<Generator>), random_from_to_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, c10::optional<Generator>), random_full_64_bits_range_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, c10::optional<Generator>), random_stub);
@@ -98,6 +98,7 @@ DECLARE_DISPATCH(
         c10::optional<double>,
         c10::optional<double>),
     nan_to_num_stub);
+DECLARE_DISPATCH(void (*)(TensorIteratorBase&, int64_t), round_decimals_stub);
 
 // Missing unary functions
 // digamma

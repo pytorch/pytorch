@@ -40,178 +40,12 @@ class TestTesting(TestCase):
             (0, S),
             (S, 0)]
         for test_size in test_sizes:
-            a = make_tensor(test_size, device, dtype, low=-5, high=5)
+            a = make_tensor(test_size, dtype=dtype, device=device, low=-5, high=5)
             a_n = a.cpu().numpy()
             msg = f'size: {test_size}'
             self.assertEqual(a_n, a, rtol=0, atol=0, msg=msg)
             self.assertEqual(a, a_n, rtol=0, atol=0, msg=msg)
             self.assertEqual(a_n, a_n, rtol=0, atol=0, msg=msg)
-
-    # Tests that when rtol or atol (including self.precision) is set, then
-    # the other is zeroed.
-    # TODO: this is legacy behavior and should be updated after test
-    # precisions are reviewed to be consistent with torch.isclose.
-    @onlyNativeDeviceTypes
-    def test__comparetensors_legacy(self, device):
-        a = torch.tensor((10000000.,))
-        b = torch.tensor((10000002.,))
-
-        x = torch.tensor((1.,))
-        y = torch.tensor((1. + 1e-5,))
-
-        # Helper for reusing the tensor values as scalars
-        def _scalar_helper(a, b, rtol=None, atol=None):
-            return self._compareScalars(a.item(), b.item(), rtol=rtol, atol=atol)
-
-        for op in (self._compareTensors, _scalar_helper):
-            # Tests default
-            result, debug_msg = op(a, b)
-            self.assertTrue(result)
-
-            # Tests setting atol
-            result, debug_msg = op(a, b, atol=2, rtol=0)
-            self.assertTrue(result)
-
-            # Tests setting atol too small
-            result, debug_msg = op(a, b, atol=1, rtol=0)
-            self.assertFalse(result)
-
-            # Tests setting rtol too small
-            result, debug_msg = op(x, y, atol=0, rtol=1.05e-5)
-            self.assertTrue(result)
-
-            # Tests setting rtol too small
-            result, debug_msg = op(x, y, atol=0, rtol=1e-5)
-            self.assertFalse(result)
-
-    @onlyNativeDeviceTypes
-    def test__comparescalars_debug_msg(self, device):
-        # float x float
-        result, debug_msg = self._compareScalars(4., 7.)
-        expected_msg = ("Comparing 4.0 and 7.0 gives a difference of 3.0, "
-                        "but the allowed difference with rtol=1.3e-06 and "
-                        "atol=1e-05 is only 1.9100000000000003e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # complex x complex
-        result, debug_msg = self._compareScalars(complex(1, 3), complex(3, 1))
-        expected_msg = ("Comparing (1+3j) and (3+1j) gives a difference "
-                        "of 2.8284271247461903, but the allowed difference "
-                        "with rtol=1.3e-06 and atol=1e-05 is only "
-                        "1.4110960958218895e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # complex x int
-        result, debug_msg = self._compareScalars(complex(1, -2), 1)
-        expected_msg = ("Comparing (1-2j) and 1 gives a difference of 2.0, "
-                        "but the allowed difference with rtol=1.3e-06 and "
-                        "atol=1e-05 is only 1.13e-05!")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # NaN x NaN, equal_nan=False
-        result, debug_msg = self._compareScalars(float('nan'), float('nan'), equal_nan=False)
-        expected_msg = ("Found nan and nan while comparing and either one is "
-                        "nan and the other isn't, or both are nan and equal_nan "
-                        "is False")
-        self.assertEqual(debug_msg, expected_msg)
-
-    # Checks that compareTensors provides the correct debug info
-    @onlyNativeDeviceTypes
-    def test__comparetensors_debug_msg(self, device):
-        # Acquires atol that will be used
-        atol = max(1e-05, self.precision)
-
-        # Checks float tensor comparisons (2D tensor)
-        a = torch.tensor(((0, 6), (7, 9)), device=device, dtype=torch.float32)
-        b = torch.tensor(((0, 7), (7, 22)), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 4) "
-                        "whose difference(s) exceeded the margin of error (including 0 nan comparisons). "
-                        "The greatest difference was 13.0 (9.0 vs. 22.0), "
-                        "which occurred at index (1, 1).").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks float tensor comparisons (with extremal values)
-        a = torch.tensor((float('inf'), 5, float('inf')), device=device, dtype=torch.float32)
-        b = torch.tensor((float('inf'), float('nan'), float('-inf')), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 3) "
-                        "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
-                        "The greatest difference was nan (5.0 vs. nan), "
-                        "which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks float tensor comparisons (with finite vs nan differences)
-        a = torch.tensor((20, -6), device=device, dtype=torch.float32)
-        b = torch.tensor((-1, float('nan')), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("With rtol=1.3e-06 and atol={0}, found 2 element(s) (out of 2) "
-                        "whose difference(s) exceeded the margin of error (including 1 nan comparisons). "
-                        "The greatest difference was nan (-6.0 vs. nan), "
-                        "which occurred at index 1.").format(atol)
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks int tensor comparisons (1D tensor)
-        a = torch.tensor((1, 2, 3, 4), device=device)
-        b = torch.tensor((2, 5, 3, 4), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Found 2 different element(s) (out of 4), "
-                        "with the greatest difference of 3 (2 vs. 5) "
-                        "occuring at index 1.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks bool tensor comparisons (0D tensor)
-        a = torch.tensor((True), device=device)
-        b = torch.tensor((False), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Found 1 different element(s) (out of 1), "
-                        "with the greatest difference of 1 (1 vs. 0) "
-                        "occuring at index 0.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks size mismatch
-        a = torch.tensor((1, 2), device=device)
-        b = torch.tensor((3), device=device)
-        result, debug_msg = self._compareTensors(a, b)
-        expected_msg = ("Attempted to compare equality of tensors "
-                        "with different sizes. Got sizes torch.Size([2]) and torch.Size([]).")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks dtype mismatch
-        a = torch.tensor((1, 2), device=device, dtype=torch.long)
-        b = torch.tensor((1, 2), device=device, dtype=torch.float32)
-        result, debug_msg = self._compareTensors(a, b, exact_dtype=True)
-        expected_msg = ("Attempted to compare equality of tensors "
-                        "with different dtypes. Got dtypes torch.int64 and torch.float32.")
-        self.assertEqual(debug_msg, expected_msg)
-
-        # Checks device mismatch
-        if self.device_type == 'cuda':
-            a = torch.tensor((5), device='cpu')
-            b = torch.tensor((5), device=device)
-            result, debug_msg = self._compareTensors(a, b, exact_device=True)
-            expected_msg = ("Attempted to compare equality of tensors "
-                            "on different devices! Got devices cpu and cuda:0.")
-            self.assertEqual(debug_msg, expected_msg)
-
-    # Helper for testing _compareTensors and _compareScalars
-    # Works on single element tensors
-    def _comparetensors_helper(self, tests, device, dtype, equal_nan, exact_dtype=True, atol=1e-08, rtol=1e-05):
-        for test in tests:
-            a = torch.tensor((test[0],), device=device, dtype=dtype)
-            b = torch.tensor((test[1],), device=device, dtype=dtype)
-
-            # Tensor x Tensor comparison
-            compare_result, debug_msg = self._compareTensors(a, b, rtol=rtol, atol=atol,
-                                                             equal_nan=equal_nan,
-                                                             exact_dtype=exact_dtype)
-            self.assertEqual(compare_result, test[2])
-
-            # Scalar x Scalar comparison
-            compare_result, debug_msg = self._compareScalars(a.item(), b.item(),
-                                                             rtol=rtol, atol=atol,
-                                                             equal_nan=equal_nan)
-            self.assertEqual(compare_result, test[2])
 
     def _isclose_helper(self, tests, device, dtype, equal_nan, atol=1e-08, rtol=1e-05):
         for test in tests:
@@ -222,7 +56,7 @@ class TestTesting(TestCase):
             expected = test[2]
             self.assertEqual(actual.item(), expected)
 
-    def test_isclose_comparetensors_bool(self, device):
+    def test_isclose_bool(self, device):
         tests = (
             (True, True, True),
             (False, False, True),
@@ -231,11 +65,10 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, torch.bool, False)
-        self._comparetensors_helper(tests, device, torch.bool, False)
 
     @dtypes(torch.uint8,
             torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_isclose_comparetensors_integer(self, device, dtype):
+    def test_isclose_integer(self, device, dtype):
         tests = (
             (0, 0, True),
             (0, 1, False),
@@ -252,7 +85,6 @@ class TestTesting(TestCase):
         ]
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         if dtype is torch.uint8:
             tests = [
@@ -266,11 +98,10 @@ class TestTesting(TestCase):
             ]
 
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.float32, torch.float64)
-    def test_isclose_comparetensors_float(self, device, dtype):
+    def test_isclose_float(self, device, dtype):
         tests = (
             (0, 0, True),
             (0, -1, False),
@@ -283,7 +114,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
-        self._comparetensors_helper(tests, device, dtype, False)
 
         # atol and rtol tests
         eps = 1e-2 if dtype is torch.half else 1e-6
@@ -300,7 +130,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # equal_nan = True tests
         tests = (
@@ -311,12 +140,9 @@ class TestTesting(TestCase):
 
         self._isclose_helper(tests, device, dtype, True)
 
-        self._comparetensors_helper(tests, device, dtype, True)
-
-    # Note: compareTensor will compare the real and imaginary parts of a
-    # complex tensors separately, unlike isclose.
+    @unittest.skipIf(IS_SANDCASTLE, "Skipping because doesn't work on sandcastle")
     @dtypes(torch.complex64, torch.complex128)
-    def test_isclose_comparetensors_complex(self, device, dtype):
+    def test_isclose_complex(self, device, dtype):
         tests = (
             (complex(1, 1), complex(1, 1 + 1e-8), True),
             (complex(0, 1), complex(1, 1), False),
@@ -332,7 +158,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False)
-        self._comparetensors_helper(tests, device, dtype, False)
 
         # atol and rtol tests
 
@@ -362,7 +187,6 @@ class TestTesting(TestCase):
         )
 
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # atol and rtol tests for isclose
         tests = (
@@ -377,17 +201,7 @@ class TestTesting(TestCase):
             (complex(2, 4), complex(1., 8.8523607 + eps), False),
             (complex(1, 99), complex(4, 100), True),
         )
-
         self._isclose_helper(tests, device, dtype, False, atol=.5, rtol=.5)
-
-        # atol and rtol tests for compareTensors
-        tests = (
-            (complex(1, -1), complex(-1, 1), False),
-            (complex(1, -1), complex(2, -2), True),
-            (complex(1, 99), complex(4, 100), True),
-        )
-
-        self._comparetensors_helper(tests, device, dtype, False, atol=.5, rtol=.5)
 
         # equal_nan = True tests
         tests = (
@@ -398,7 +212,6 @@ class TestTesting(TestCase):
             (complex(float('nan'), float('nan')), complex(float('nan'), float('nan')), True),
         )
         self._isclose_helper(tests, device, dtype, True)
-        self._comparetensors_helper(tests, device, dtype, True)
 
     # Tests that isclose with rtol or atol values less than zero throws a
     #   RuntimeError
@@ -442,7 +255,7 @@ class TestTesting(TestCase):
         def check(size, low, high, requires_grad, noncontiguous):
             if dtype not in [torch.float, torch.cfloat]:
                 requires_grad = False
-            t = make_tensor(size, device, dtype, low=low, high=high,
+            t = make_tensor(size, dtype=dtype, device=device, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
             self.assertEqual(t.shape, size)
@@ -465,12 +278,6 @@ class TestTesting(TestCase):
         for size in (tuple(), (0,), (1,), (1, 1), (2,), (2, 3), (8, 16, 32)):
             check(size, None, None, False, False)
             check(size, 2, 4, True, True)
-
-    def test_assert_messages(self, device):
-        self.assertIsNone(self._get_assert_msg(msg=None))
-        self.assertEqual("\nno_debug_msg", self._get_assert_msg("no_debug_msg"))
-        self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
-        self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
     # The following tests (test_cuda_assert_*) are added to ensure test suite terminates early
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
@@ -596,7 +403,7 @@ if __name__ == '__main__':
         ops_to_test = list(filter(lambda op: op.name in ['atan2', 'topk', 'xlogy'], op_db))
 
         for op in ops_to_test:
-            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op.op, op.sample_inputs_func, self.device_type)
+            dynamic_dtypes = opinfo_helper.get_supported_dtypes(op, op.sample_inputs_func, self.device_type)
             dynamic_dispatch = opinfo_helper.dtypes_dispatch_hint(dynamic_dtypes)
             if self.device_type == 'cpu':
                 dtypes = op.dtypesIfCPU
@@ -745,7 +552,7 @@ class TestAssertClose(TestCase):
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(ValueError, str(type(actual))):
+            with self.assertRaisesRegex(TypeError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
@@ -762,8 +569,15 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "layout"):
                 fn()
+
+    def test_meta(self):
+        actual = torch.empty((2, 2), device="meta")
+        expected = torch.empty((2, 2), device="meta")
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
 
     def test_mismatching_layout(self):
         strided = torch.empty((2, 2))
@@ -973,6 +787,10 @@ class TestAssertClose(TestCase):
             fn(check_dtype=False)
 
     class UnexpectedException(Exception):
+        """The only purpose of this exception is to test ``assert_close``'s handling of unexpected exceptions. Thus,
+        the test should mock a component to raise this instead of the regular behavior. We avoid using a builtin
+        exception here to avoid triggering possible handling of them.
+        """
         pass
 
     @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
@@ -1192,36 +1010,14 @@ class TestAssertCloseSparseCOO(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
-    def test_mismatching_is_coalesced(self):
-        indices = (
-            (0, 1),
-            (1, 0),
-        )
-        values = (1, 2)
-        actual = torch.sparse_coo_tensor(indices, values, size=(2, 2))
-        expected = actual.clone().coalesce()
+    def test_mismatching_sparse_dims(self):
+        t = torch.randn(2, 3, 4)
+        actual = t.to_sparse()
+        expected = t.to_sparse(2)
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, "is_coalesced"):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of sparse dimensions in sparse COO tensors")):
                 fn()
-
-    def test_mismatching_is_coalesced_no_check(self):
-        actual_indices = (
-            (0, 1),
-            (1, 0),
-        )
-        actual_values = (1, 2)
-        actual = torch.sparse_coo_tensor(actual_indices, actual_values, size=(2, 2)).coalesce()
-
-        expected_indices = (
-            (0, 1, 1,),
-            (1, 0, 0,),
-        )
-        expected_values = (1, 1, 1)
-        expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
-
-        for fn in assert_close_with_inputs(actual, expected):
-            fn(check_is_coalesced=False)
 
     def test_mismatching_nnz(self):
         actual_indices = (

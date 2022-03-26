@@ -17,7 +17,7 @@ bool use_channel_shuffle(
   //   and all dimensions must be positive.
   // * The number of groups must be larger than 1 and
   //   the number of channels must be divisible by the number of groups.
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
       // Input
       (4 == input.dim()) &&
       (input.device().is_cpu()) &&

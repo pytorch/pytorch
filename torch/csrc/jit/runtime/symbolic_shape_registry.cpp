@@ -105,8 +105,10 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "expand"},
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "expand_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
+      {"aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", "max_dim"},
       {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
+      {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", "zero_dim_tensor"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
       {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)", "upsample_nearest2d"},
       {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> Tensor", "unary"},
@@ -288,6 +290,16 @@ c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
   GRAPH_DEBUG("Could not find schema: ", schema);
 
   return c10::nullopt;
+}
+
+void RegisterShapeComputeGraphForSchema(
+    const FunctionSchema& schema,
+    std::shared_ptr<Graph> g) {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+  cached_schema_to_graph[&schema] = g;
 }
 
 } // namespace jit

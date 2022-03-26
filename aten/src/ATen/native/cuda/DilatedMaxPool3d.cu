@@ -1,5 +1,8 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
@@ -11,6 +14,15 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <c10/macros/Macros.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/max_pool3d_with_indices_backward_native.h>
+#include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at {
 namespace native {
@@ -131,7 +143,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int itime, int iheight, int iwidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW,
+  int dilationT, int dilationH,
   int offsetZ)
 {
   int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
@@ -159,7 +171,7 @@ void max_pool3d_with_indices_backward_out_frame(
   int oheight, int owidth,
   int dT, int dH, int dW,
   int pT, int pH, int pW,
-  int dilationT, int dilationH, int dilationW)
+  int dilationT, int dilationH)
 {
   int offsetZ = 0;
   dim3 block(32, 8);
@@ -177,7 +189,7 @@ void max_pool3d_with_indices_backward_out_frame(
         itime, iheight, iwidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW,
+        dilationT, dilationH,
         offsetZ);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -404,7 +416,7 @@ void max_pool3d_with_indices_backward_out_cuda_template(
         oheight, owidth,
         dT, dH, dW,
         pT, pH, pW,
-        dilationT, dilationH, dilationW);
+        dilationT, dilationH);
     }
   );
 }

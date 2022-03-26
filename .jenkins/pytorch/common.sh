@@ -95,11 +95,13 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Report sccache stats for easier debugging
     sccache --zero-stats
     function sccache_epilogue() {
+      echo "::group::Sccache Compilation Log"
       echo '=================== sccache compilation log ==================='
       python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
       echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
       sccache --show-stats
       sccache --stop-server || true
+      echo "::endgroup::"
     }
 
     if [[ "${JOB_BASE_NAME}" == *-build ]]; then

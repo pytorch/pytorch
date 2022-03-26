@@ -52,9 +52,7 @@ at::DeprecatedTypeProperties* get_type(at::Backend backend, at::ScalarType scala
   return &at::getDeprecatedTypeProperties(backend, scalarType);
 }
 
-PyTypeObject* getPyTypeObject(
-    const at::Storage& storage,
-    const caffe2::TypeMeta dtype) {
+PyTypeObject* getPyTypeObject(const at::Storage& storage) {
   // TODO: https://github.com/pytorch/pytorch/issues/47442
   if (storage.device_type() == at::DeviceType::Meta) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings for meta storage objects not supported");
@@ -67,10 +65,9 @@ PyTypeObject* getPyTypeObject(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
       scalarType);
   auto it = attype_to_py_storage_type.find(attype);
-  if (it != attype_to_py_storage_type.end()) {
-    return it->second;
-  }
-  throw std::invalid_argument("unsupported Storage type");
+  TORCH_INTERNAL_ASSERT(it != attype_to_py_storage_type.end(),
+        "Failed to get the Python type of `_UntypedStorage`.");
+  return it->second;
 }
 } // namespace
 
@@ -106,10 +103,8 @@ THPLayout* getTHPLayout(at::Layout layout) {
   return thp_layout;
 }
 
-PyObject* createPyObject(
-    const at::Storage& storage,
-    const caffe2::TypeMeta data_type) {
-  auto type = getPyTypeObject(storage, data_type);
+PyObject* createPyObject(const at::Storage& storage) {
+  auto type = getPyTypeObject(storage);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
   ((THPVoidStorage*)obj.get())->cdata = at::Storage(/* copy */ storage).unsafeReleaseStorageImpl();
@@ -120,10 +115,10 @@ PyTypeObject* loadTypedStorageTypeObject() {
   PyObject* storage_module = PyImport_ImportModule("torch.storage");
   TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
-  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "TypedStorage");
+  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "_TypedStorage");
   TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
   return reinterpret_cast<PyTypeObject*>(
-      PyObject_GetAttrString(storage_module, "TypedStorage"));
+      PyObject_GetAttrString(storage_module, "_TypedStorage"));
 }
 
 PyTypeObject* getTypedStorageTypeObject() {
@@ -174,7 +169,7 @@ at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, boo
     }
     if (obj_type == storage_type) {
       auto& type = *item.second;
-      // UntypedStorage should always be interpreted with byte dtype
+      // _UntypedStorage should always be interpreted with byte dtype
       scalar_type = at::kByte;
       return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
     }

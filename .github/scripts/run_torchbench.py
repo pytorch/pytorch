@@ -53,6 +53,7 @@ def find_current_branch(repo_path: str) -> str:
     repo = git.Repo(repo_path)
     name: str = repo.active_branch.name
     return name
+
 def deploy_torchbench_config(output_dir: str, config: str) -> None:
     # Create test dir if needed
     pathlib.Path(output_dir).mkdir(exist_ok=True)

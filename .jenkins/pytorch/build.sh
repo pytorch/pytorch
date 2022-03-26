@@ -148,23 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
+  # hipify sources
   python tools/amd_build/build_amd.py
-  python setup.py install
-
-  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-  sudo rm -f /opt/cache/bin/cc
-  sudo rm -f /opt/cache/bin/c++
-  sudo rm -f /opt/cache/bin/gcc
-  sudo rm -f /opt/cache/bin/g++
-  pushd /opt/rocm/llvm/bin
-  if [[ -d original ]]; then
-    sudo mv original/clang .
-    sudo mv original/clang++ .
-  fi
-  sudo rm -rf original
-  popd
-
-  exit 0
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -224,10 +209,13 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
-    # ppc64le build fails when WERROR=1
+    # ppc64le, rocm builds fail when WERROR=1
+    # XLA test build fails when WERROR=1
     # set only when building other architectures
-    # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+    # or building non-XLA tests.
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* &&
+          "$BUILD_ENVIRONMENT" != *rocm*  &&
+          "$BUILD_ENVIRONMENT" != *xla* ]]; then
       WERROR=1 python setup.py bdist_wheel
     else
       python setup.py bdist_wheel
@@ -249,6 +237,25 @@ else
     mkdir -p dist
     if [ -f build/.ninja_log ]; then
       cp build/.ninja_log dist
+    fi
+
+    if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+      # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+      sudo rm -f /opt/cache/bin/cc
+      sudo rm -f /opt/cache/bin/c++
+      sudo rm -f /opt/cache/bin/gcc
+      sudo rm -f /opt/cache/bin/g++
+      pushd /opt/rocm/llvm/bin
+      if [[ -d original ]]; then
+        sudo mv original/clang .
+        sudo mv original/clang++ .
+      fi
+      sudo rm -rf original
+      popd
+
+      # exit before building custom test artifacts until we resolve cmake error:
+      # static library kineto_LIBRARY-NOTFOUND not found.
+      exit 0
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}

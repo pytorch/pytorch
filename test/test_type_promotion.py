@@ -9,7 +9,7 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
-                                                        dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta)
+                                                        dtypes, dtypesIfCUDA, onlyCPU, expectedFailureMeta, skipMeta)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_fp_dtypes
 )
@@ -330,8 +330,12 @@ class TestTypePromotion(TestCase):
         expected = torch.ones(0, dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, False, device=device), expected)
 
-        self.assertEqual(torch.linspace(False, True, device=device), torch.linspace(0, 1, device=device))
-        self.assertEqual(torch.logspace(False, True, device=device), torch.logspace(0, 1, device=device))
+        bool_tensor_lin = torch.linspace(False, True, steps=100, device=device)
+        int_tensor_lin = torch.linspace(0, 1, steps=100, device=device)
+        self.assertEqual(bool_tensor_lin, int_tensor_lin)
+        bool_tensor_log = torch.linspace(False, True, steps=100, device=device)
+        int_tensor_log = torch.linspace(0, 1, steps=100, device=device)
+        self.assertEqual(bool_tensor_log, int_tensor_log)
 
         # this seems like odd behavior but ints also create float tensors, numpy doesn't have this function.
         self.assertEqual(torch.scalar_tensor(False, device=device), torch.tensor(0., device=device))
@@ -933,7 +937,11 @@ class TestTypePromotion(TestCase):
             elif op in real_only_ops and dtypes[0].is_complex:
                 with self.assertRaises(RuntimeError):
                     op(t, out=out)
-            elif op in float_only_ops and (not dtypes[0].is_floating_point and not dtypes[0].is_complex):
+            elif (
+                    op in float_only_ops
+                    and (not dtypes[0].is_floating_point and not dtypes[0].is_complex)
+                    and device != "meta"
+            ):
                 with self.assertRaises(RuntimeError):
                     op(t, out=out)
             else:
@@ -943,6 +951,7 @@ class TestTypePromotion(TestCase):
     # Verifies that the out= argument doesn't affect the computation, that
     # is, out = op(...) and op(..., out=out) produce the same result.
     @onlyNativeDeviceTypes
+    @skipMeta
     def test_computation_ignores_out(self, device):
         t = torch.tensor(33000, dtype=torch.float16, device=device)
         out = torch.empty(0, dtype=torch.float64, device=device)

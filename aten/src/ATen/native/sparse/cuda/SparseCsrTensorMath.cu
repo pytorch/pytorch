@@ -1,7 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
@@ -9,6 +10,15 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <algorithm>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#endif
 
 #include <cuda_runtime.h>
 #include <type_traits>

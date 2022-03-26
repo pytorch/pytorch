@@ -140,7 +140,7 @@ struct TORCH_API Type {
   protected:
   Type(TypeKind kind) : kind_(kind) {}
 
-  virtual std::string annotation_str_impl(TypePrinter printer) const {
+  virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
     return str();
   }
   // a == b
@@ -374,6 +374,7 @@ struct TORCH_API Type {
 
   using TypePtr = SingletonOrSharedTypePtr<Type>;
   using Ptr = TypePtr;
+  using ElementType = Type;
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal or if this <: T where rhs = Optional[T]
@@ -462,7 +463,7 @@ struct TORCH_API Type {
     return kind_;
   }
 
-  bool isUnionType() const {
+  virtual bool isUnionType() const {
     return false;
   }
 
@@ -554,13 +555,19 @@ struct TORCH_API Type {
   virtual at::ArrayRef<TypePtr> containedTypes() const {
     return {};
   }
+  virtual TypePtr containedType(size_t i) const {
+    return containedTypes().at(i);
+  }
+  virtual size_t containedTypeSize() const {
+    return containedTypes().size();
+  }
   // create a new version of this type, replacing its contained types with
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types);
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
-      std::vector<TypePtr> contained_types) const {
+      std::vector<TypePtr> /*contained_types*/) const {
     AT_ERROR(
         "type with contained types did not overload createWithContained: ",
         str());

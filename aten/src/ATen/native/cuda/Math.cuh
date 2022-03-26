@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/AccumulateType.h>
+#include <ATen/jit_macros.h>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/jit_utils.h>
 
@@ -110,9 +111,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 
 // See note [Jiterator]
 // TODO: elaborate in this comment on the structure of math.cuh
-// The jiterator is not currently supported on ROCm
-// TODO: update this to USE_JITERATOR in the future (requires refactoring the macro)
-#ifndef USE_ROCM
+#if AT_USE_JITERATOR()
 
 const auto ndtri_string = jiterator_stringify(
   /*
@@ -130,14 +129,17 @@ const auto ndtri_string = jiterator_stringify(
   * coef[0] = C  , ..., coef[N] = C  .
   *            N                   0
   */
-template <typename T>
-T polevl(const T x, const T A[], const int len) {
-  T result = 0;
-  for (int i = 0; i < len; ++i) {
-    result = result * x + A[i];
+  template <typename T>
+  T polevl(const T x, const T A[], const int len) {
+    // NOTE: This `polevl` is different from other `polevl`
+    // implementation (in PyTorch) which expect the `len` to be
+    // `len(A) - 1` instead of `len(A)`.
+    T result = 0;
+    for (int i = 0; i < len; ++i) {
+      result = result * x + A[i];
+    }
+    return result;
   }
-  return result;
-}
 
   /*
   * This function is derived from the implementation of the i1e function in the Cephes Math Library.
@@ -503,6 +505,56 @@ const auto lgamma_string = jiterator_stringify(
   }
 ); // lgamma_string
 
+const auto polygamma_string = zeta_string + jiterator_stringify(
+  template <typename T>
+  T polygamma(T x, int n) {
+    // already blocked if n <= 1
+    const auto one = T{1};
+    return ((n % 2) ? one : -one) * exp(lgamma(static_cast<T>(n) + one)) *
+        zeta<T>(static_cast<T>(n + 1), x);
+  }
+); // polygamma_string
+
+const auto exp2_string = jiterator_stringify(
+  template <typename T>
+  T exp2_kernel(T a) {
+    return exp2(a);
+  }
+); // exp2_string
+
+const auto erfc_string = jiterator_stringify(
+  template <typename T>
+  T erfc_kernel(T a) {
+    return erfc(a);
+  }
+); // erfc_string
+
+const auto erfinv_string = jiterator_stringify(
+  template <typename T>
+  T erfinv_kernel(T a) {
+    return erfinv(a);
+  }
+); // erfinv_string
+
+const auto entr_string = jiterator_stringify(
+  template <typename T>
+  T entr(T a) {
+    if (a != a) {
+      return a;
+    }
+
+    if (a > 0) {
+      return -a * log(a);
+    }
+
+    if (a == 0) {
+      return 0;
+    }
+
+    return NEG_INFINITY;
+  }
+); // entr_string
+
 const auto i0_string = jiterator_stringify(
   template<typename T>
   T chbevl(T x, const T array[], const int len) {
@@ -828,6 +880,19 @@ const auto i1e_string = jiterator_stringify(
     return (_x < float{0.}) ? -out : out;
   }
 ); // i1e_string
+
+const auto sinc_string = jiterator_stringify(
+  template <typename T>
+  T sinc(T a) {
+    if (a == T(0)) {
+      return T(1);
+    } else {
+      constexpr T pi = T(3.14159265358979323846L);
+      T product = pi * a;
+      return std::sin(product) / product;
+    }
+  }
+); // sinc_string
 
 const auto erfcx_string = jiterator_stringify(
   /* The next function is taken from http://ab-initio.mit.edu/Faddeev */
@@ -1341,7 +1406,7 @@ const auto erfcx_string = jiterator_stringify(
   }
 ); // erfcx_string
 
-#else // USE_ROCM
+#else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
@@ -1607,7 +1672,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
   return (_x < scalar_t{0.0}) ? -out : out;
 }
 
-#endif // USE_ROCM (false/true)
+#endif // AT_USE_JITERATOR() (this closes the "else" branch of a if/else preprocessor directive)
 
 } // namespace native
 } // namespace at

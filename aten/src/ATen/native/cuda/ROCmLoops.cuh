@@ -39,12 +39,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 
-// Marks a lambda as executable on both the host and device. The __host__
-// attribute is important so that we can access static type information from
-// the host, even if the function is typically only executed on the device.
-#ifndef GPU_LAMBDA
-#define GPU_LAMBDA __host__ __device__
-#endif
 
 #ifdef __NVCC__
 #define ASSERT_HOST_DEVICE_LAMBDA(type) \

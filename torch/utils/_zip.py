@@ -1,6 +1,8 @@
 import argparse
+import glob
+import os
 from pathlib import Path
-from zipfile import PyZipFile
+from zipfile import ZipFile
 
 # Exclude some standard library modules to:
 # 1. Slim down the final zipped file size
@@ -23,18 +25,35 @@ DENY_LIST = [
     "_bootstrap_external.py",
 ]
 
+def remove_prefix(text, prefix):
+    if text.startswith(prefix):
+        return text[len(prefix):]
+    return text
+
+def write_to_zip(file_path, strip_file_path, zf):
+    stripped_file_path = remove_prefix(file_path, strip_file_dir + "/")
+    path = Path(stripped_file_path)
+    if path.name in DENY_LIST:
+        return
+    zf.write(file_path, stripped_file_path)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Zip py source")
     parser.add_argument("paths", nargs="*", help="Paths to zip.")
     parser.add_argument("--install_dir", help="Root directory for all output files")
+    parser.add_argument("--strip_dir", help="The absolute directory we want to remove from zip")
     parser.add_argument("--zip_name", help="Output zip name")
     args = parser.parse_args()
 
     zip_file_name = args.install_dir + '/' + args.zip_name
-    zf = PyZipFile(zip_file_name, mode='w')
+    strip_file_dir = args.strip_dir
+    zf = ZipFile(zip_file_name, mode='w')
 
     for p in args.paths:
-        path = Path(p)
-        if path.name in DENY_LIST:
-            continue
-        zf.write(p)
+        if os.path.isdir(p):
+            files = glob.glob(p + "/**/*.py", recursive=True)
+            for file_path in files:
+                # strip the absolute path
+                write_to_zip(file_path, strip_file_dir + "/", zf)
+        else:
+            write_to_zip(p, strip_file_dir + "/", zf)

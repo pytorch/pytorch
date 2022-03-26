@@ -7,7 +7,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <c10/macros/Macros.h>
 #include <c10/cuda/CUDACachingAllocator.h>
