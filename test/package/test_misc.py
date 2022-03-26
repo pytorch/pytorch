@@ -2,11 +2,14 @@
 # Owner(s): ["oncall: package/deploy"]
 
 import inspect
+import platform
 from io import BytesIO
+from pathlib import Path
 from textwrap import dedent
+from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter, is_from_package, PackagingError
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, IS_FBCODE, IS_SANDCASTLE
 from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
 from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
@@ -37,6 +40,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── python_version
                 │   └── version
                 ├── main
                 │   └── main
@@ -60,6 +64,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── python_version
                 │   └── version
                 ├── main
                 │   └── main
@@ -104,6 +109,36 @@ class TestMisc(PackageTestCase):
             dedent("\n".join(str(file_structure).split("\n")[1:])),
             import_exclude,
         )
+
+    def test_python_version(self):
+        """
+        Tests that the current python version is stored in the package and is available
+        via PackageImporter's python_version() method.
+        """
+        buffer = BytesIO()
+
+        with PackageExporter(buffer) as he:
+            from package_a.test_module import SimpleTest
+
+            he.intern("**")
+            obj = SimpleTest()
+            he.save_pickle("obj", "obj.pkl", obj)
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+
+        self.assertEqual(hi.python_version(), platform.python_version())
+
+    @skipIf(
+        IS_FBCODE or IS_SANDCASTLE,
+        "Tests that use temporary files are disabled in fbcode",
+    )
+    def test_load_python_version_from_package(self):
+        """Tests loading a package with a python version embdded"""
+        importer1 = PackageImporter(
+            f"{Path(__file__).parent}/package_e/test_nn_module.pt"
+        )
+        self.assertEqual(importer1.python_version(), "3.9.7")
 
     def test_file_structure_has_file(self):
         """

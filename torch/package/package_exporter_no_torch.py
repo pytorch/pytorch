@@ -19,7 +19,9 @@ from typing import (
     Set,
     Union,
     DefaultDict,
+    Type,
 )
+import platform
 
 from ._digraph import DiGraph
 from ._hooks import RemovableHandle
@@ -27,7 +29,7 @@ from ._importlib import _normalize_path
 from ._mangling import demangle, is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
-from ._zip_file import DefaultPackageZipFileWriter
+from ._zip_file import PackageZipFileWriter, DefaultPackageZipFileWriter
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
@@ -177,7 +179,8 @@ class PackageExporter:
     def __init__(
         self,
         f: Union[str, Path, BinaryIO],
-        importer: Union[Importer, Sequence[Importer]] = sys_importer
+        importer: Union[Importer, Sequence[Importer]] = sys_importer,
+        zip_file_writer_type: Type[PackageZipFileWriter] = DefaultPackageZipFileWriter
     ):
         """
         Create an exporter.
@@ -187,9 +190,10 @@ class PackageExporter:
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
+            zip_file_writer_type: A subclass of PackageZipFileWriter which would be used to instantiate the zip file
         """
 
-        self.setup_zipfile(f)
+        self.zip_file = zip_file_writer_type(f)
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
@@ -219,15 +223,6 @@ class PackageExporter:
 
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
-
-    def setup_zipfile(self, f):
-        if isinstance(f, (Path, str)):
-            f = str(f)
-            self.buffer: Optional[BinaryIO] = None
-        else:  # is a byte buffer
-            self.buffer = f
-        self.zip_file = DefaultPackageZipFileWriter(f)
-
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -990,12 +985,9 @@ class PackageExporter:
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
 
-    def closing_function(self):
-        """ function is meant to be overwritten to allow for plug in functionality to
-        the close function of package exporter. It is called between resolving the dependency graph
-        and finalizing the zip file.
-        """
-        pass
+    def _write_python_version(self):
+        """Writes the python version that the package was created with to .data/python_version"""
+        self._write(".data/python_version", platform.python_version())
 
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
@@ -1005,15 +997,13 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
-        self.closing_function()
+        self._write_python_version()
         self._finalize_zip()
 
     def _finalize_zip(self):
         """Called at the very end of packaging to leave the zipfile in a closed but valid state."""
         self.zip_file.close()
         del self.zip_file
-        if self.buffer:
-            self.buffer.flush()
 
     def _filename(self, package, resource):
         package_path = package.replace(".", "/")

@@ -116,7 +116,7 @@ class TestDiGraph(PackageTestCase):
 
         result = g.all_paths("1", "3")
         # to get rid of indeterminism
-        actual = set([i.strip("\n") for i in result.split(";")[2:-1]])
+        actual = {i.strip("\n") for i in result.split(";")[2:-1]}
         expected = {
             '"2" -> "3"',
             '"1" -> "7"',

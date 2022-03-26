@@ -6,7 +6,7 @@ import linecache
 import os.path
 import types
 from pathlib import Path
-from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union, Type
 from weakref import WeakValueDictionary
 
 from ._directory_reader import DirectoryReader
@@ -83,6 +83,7 @@ class PackageImporter(Importer):
         self,
         file_or_buffer: Union[str, PackageZipFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
+        zip_file_reader_type: Type[PackageZipFileReader] = DefaultPackageZipFileReader
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
         allowed by ``module_allowed``
@@ -92,14 +93,12 @@ class PackageImporter(Importer):
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
+            zip_file_writer_type: A subclass of PackageZipFileReader which would be used to instantiate the zip file reader
         Raises:
             ImportError: If the package will use a disallowed module.
         """
 
-        self.filename, self.zip_reader = self.get_zip_reader(file_or_buffer)
-
-        assert self.filename is not None
-        assert self.zip_reader is not None
+        self.zip_reader = zip_file_reader_type(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -262,7 +261,23 @@ class PackageImporter(Importer):
             :class:`Directory`
         """
         return _create_directory_from_file_list(
-            self.filename, self.zip_reader.get_all_records(), include, exclude
+            self.zip_reader.get_filename(), self.zip_reader.get_all_records(), include, exclude
+        )
+
+    def python_version(self):
+        """Returns the version of python that was used to create this package.
+
+        Note: this function is experimental and not Forward Compatible. The plan is to move this into a lock
+        file later on.
+
+        Returns:
+            :class:`Optional[str]` a python version e.g. 3.8.9 or None if no version was stored with this package
+        """
+        python_version_path = ".data/python_version"
+        return (
+            self.zip_reader.get_record(python_version_path).decode("utf-8").strip()
+            if self.zip_reader.has_record(python_version_path)
+            else None
         )
 
     def _read_extern(self):
@@ -318,7 +333,7 @@ class PackageImporter(Importer):
         for atom in name.split("."):
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
                 raise ModuleNotFoundError(
-                    f'No module named "{name}" in self-contained archive "{self.filename}"'
+                    f'No module named "{name}" in self-contained archive "{self.zip_reader.get_filename()}"'
                     f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
                     name=name,
                 )
@@ -623,13 +638,11 @@ class _PackageResourceReader:
     def resource_path(self, resource):
         # The contract for resource_path is that it either returns a concrete
         # file system path or raises FileNotFoundError.
-        if isinstance(
-            self.importer.zip_reader, DirectoryReader
-        ) and self.importer.zip_reader.has_record(
+        if self.importer.zip_reader.is_directory() and self.importer.zip_reader.has_record(
             os.path.join(self.fullname, resource)
         ):
             return os.path.join(
-                self.importer.zip_reader.directory, self.fullname, resource
+                self.importer.zip_reader.get_filename(), self.fullname, resource
             )
         raise FileNotFoundError
 

@@ -1,9 +1,8 @@
 import os.path
 from glob import glob
-from ._zip_file import PackageZipFileReader
 
 
-class DirectoryReader(PackageZipFileReader):
+class DirectoryReader(object):
     """
     Class to allow PackageImporter to operate on unzipped packages. Methods
     copy the behavior of the internal PyTorchFileReader class (which is used for
