@@ -21,7 +21,7 @@ from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
-def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
+def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str, tags_yaml_path: str) -> Sequence[DifferentiabilityInfo]:
     # Do some caching as this is a deterministic function
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
@@ -30,7 +30,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
         with open(derivatives_yaml_path, 'r') as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
-        functions = parse_native_yaml(native_yaml_path).native_functions
+        functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
 
         # What's the difference between function schema v.s. signature?
         # function schema is the complete declaration including mutability annotation / default value and etc.
