@@ -2,11 +2,6 @@ name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
-inputs:
-  github-secret:
-    description: GitHub token
-    required: true
-
 runs:
   using: composite
   steps:
@@ -45,11 +40,6 @@ runs:
         retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
         retry aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
             --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-
-    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-      uses: seemethere/add-github-ssh-key@v1
-      with:
-        GITHUB_TOKEN: ${{ inputs.github-secret }}
 
     - name: Preserve github env variables for use in docker
       shell: bash
