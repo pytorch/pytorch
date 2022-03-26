@@ -5,7 +5,6 @@ from torch.overrides import get_default_nowrap_functions
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed import distributed_c10d
 
-
 class ReplicatedTensor(torch.Tensor):
     """
     ReplicatedTensor represents a tensor which is replicated across the `world_size` and
@@ -39,6 +38,7 @@ class ReplicatedTensor(torch.Tensor):
             if process_group is not None
             else distributed_c10d._get_default_group()
         )
+        r.requires_grad = data.requires_grad
         return r
 
     def __repr__(self):
@@ -90,7 +90,7 @@ class ReplicatedTensor(torch.Tensor):
                 # if all operands are ReplicatedTensors and does not get dispatched to ShardedTensor
                 # __torch_function__, result is a torch.Tensor, then we convert and return a
                 # ReplicatedTensor according to our inter-op rule
-                rs = rs.as_subclass(cls)        # type: ignore[arg-type]
+                rs = rs.as_subclass(ReplicatedTensor)        # type: ignore[arg-type]
                 # propagate the process_group field to result
                 rs.process_group = replicated_pg        # type: ignore[attr-defined]
 
@@ -123,3 +123,27 @@ class ReplicatedTensor(torch.Tensor):
                     f"ReplicatedTensor have different values on rank {current_rank} and {rank}")
 
         return True
+
+class ReplicatedParameter(ReplicatedTensor, torch.nn.Parameter):
+    """
+    ReplicatedParameter is essentially a wrapper around ReplicatedTensor and
+    torch.nn.Parameter. There are two goals here:
+
+    1.  ReplicatedParameter is an instance of ReplicatedTensor to ensure
+        ReplicatedTensor operator dispatch works accordingly.
+    2.  ReplicatedParamerer is an instance of torch.nn.Parameter so that it
+        behaves as a regular torch.nn.Parameter when used within an nn.Module.
+    """
+
+    def __new__(cls, tensor: torch.Tensor, process_group=None):
+        process_group = (     # type: ignore[attr-defined]
+            process_group
+            if process_group is not None
+            else distributed_c10d._get_default_group()
+        )
+
+        replicated_tensor = ReplicatedTensor(tensor, process_group)
+        r = torch.Tensor._make_subclass(cls, replicated_tensor)      # type: ignore[arg-type]
+        r.process_group = process_group
+        r.requires_grad = tensor.requires_grad
+        return r

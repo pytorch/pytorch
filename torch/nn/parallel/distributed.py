@@ -601,8 +601,8 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
-        if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
-            self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
+        if hasattr(self.module, "_ddp_params_and_buffers_to_ignore"):
+            self.parameters_to_ignore = self.module._ddp_params_and_buffers_to_ignore
         else:
             self.parameters_to_ignore = []
 
@@ -616,7 +616,7 @@ class DistributedDataParallel(Module, Joinable):
             )
 
         # Check that a module does not have Uninitialized parameters
-        for param in module.parameters():
+        for param in self.module.parameters():
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 self._log_and_throw(
                     RuntimeError,
@@ -664,6 +664,16 @@ class DistributedDataParallel(Module, Joinable):
             self._distributed_broadcast_coalesced(
                 module_states, self.broadcast_bucket_size, authoritative_rank
             )
+
+        # After syncing, tag them as replicated.
+        from torch.distributed._shard.replicated_tensor import ReplicatedTensor, ReplicatedParameter
+        for name, param in self.module.named_parameters():
+            if name not in self.parameters_to_ignore:
+                setattr(self.module, name, ReplicatedParameter(param))
+
+        for name, buffer in self.module.named_buffers():
+            if name not in self.parameters_to_ignore:
+                setattr(self.module, name, ReplicatedTensor(buffer))
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -987,6 +997,14 @@ class DistributedDataParallel(Module, Joinable):
                 output = self.module(*inputs[0], **kwargs[0])
             else:
                 output = self.module(*inputs, **kwargs)
+
+            # Convert back to regular tensor since we can't guarantee
+            # buffers are replicated anymore.
+            from torch.distributed._shard.replicated_tensor import ReplicatedTensor
+            for name, buffer in self.module.named_buffers():
+                if name not in self.parameters_to_ignore:
+                    if isinstance(buffer, ReplicatedTensor):
+                        setattr(self.module, name, torch.Tensor(buffer))
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
@@ -1616,6 +1634,12 @@ class DistributedDataParallel(Module, Joinable):
             # reassigned.
             self._assign_modules_buffers()
             self._sync_module_buffers(authoritative_rank)
+
+            # Tag buffers as replicated.
+            from torch.distributed._shard.replicated_tensor import ReplicatedTensor
+            for name, buffer in self.named_module_buffers.items():
+                if not isinstance(buffer, ReplicatedTensor):
+                    setattr(self.module, name, ReplicatedTensor(buffer))
 
     def _sync_module_buffers(self, authoritative_rank):
         if not hasattr(self, 'buffer_hook'):

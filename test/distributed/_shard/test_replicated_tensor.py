@@ -4,8 +4,9 @@ import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 
 import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
-from torch.distributed._shard.replicated_tensor import ReplicatedTensor
+from torch.distributed._shard.replicated_tensor import ReplicatedTensor, ReplicatedParameter
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -182,3 +183,53 @@ class TestReplicatedTensor(ShardedTensorTestBase):
 
         with self.assertRaisesRegex(RuntimeError, 'not supported for ShardedTensor'):
             st % replica_tensor
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_with_ddp(self):
+        # Test Replicated params for DDP
+        replica_tensor = ReplicatedTensor(torch.rand(4, 8, device=self.rank))
+        module = torch.nn.Linear(8, 2).cuda(self.rank)
+        ddp = DDP(module)
+        self.assertIsInstance(ddp.module.weight, ReplicatedParameter)
+        self.assertIsInstance(ddp.module.bias, ReplicatedParameter)
+        self.assertIsInstance(module.weight, ReplicatedParameter)
+        self.assertIsInstance(module.bias, ReplicatedParameter)
+
+        # Test module.parameters.
+        params = list(ddp.parameters())
+        self.assertEqual(2, len(params))
+        self.assertEqual(ddp.module.weight, params[0])
+        self.assertEqual(ddp.module.bias, params[1])
+
+        params = list(module.parameters())
+        self.assertEqual(2, len(params))
+        self.assertEqual(module.weight, params[0])
+        self.assertEqual(module.bias, params[1])
+
+        # Validate output
+        out = ddp(replica_tensor)
+        self.assertIsInstance(out, ReplicatedTensor)
+
+        # Validate after forward pass
+        self.assertIsInstance(ddp.module.weight, ReplicatedParameter)
+        self.assertIsInstance(ddp.module.bias, ReplicatedParameter)
+        self.assertIsInstance(module.weight, ReplicatedParameter)
+        self.assertIsInstance(module.bias, ReplicatedParameter)
+
+        # Test buffers.
+        module.register_buffer('foo', torch.rand(10).cuda(self.rank))
+        ddp = DDP(module)
+        self.assertIsInstance(ddp.module.foo, ReplicatedTensor)
+        self.assertIsInstance(module.foo, ReplicatedTensor)
+
+        # Validate during forward pass
+        def hook(module, input):
+            self.assertIsInstance(ddp.module.foo, ReplicatedTensor)
+            self.assertIsInstance(module.foo, ReplicatedTensor)
+
+        module.register_forward_pre_hook(hook)
+        for _ in range(2):
+            out = ddp(replica_tensor)
+            self.assertIsInstance(out, ReplicatedTensor)
