@@ -50,7 +50,7 @@ from .optim_utils import (
     _flatten_optim_state,
     _get_flat_param_id_to_param,
     _get_unflat_to_flat_param_ids,
-    _is_same_fsdp_wrapping,
+    _is_compatible_fsdp_wrapping,
     _unflatten_optim_state,
 )
 from .utils import _apply_to_tensors, _replace_by_prefix
@@ -2044,11 +2044,11 @@ class FullyShardedDataParallel(nn.Module):
         argument to the optimizer, then you should pass that same value to
         this method as ``optim_input``.
 
-        .. note:: To check that the ``FSDP`` wrapping scheme did not change
-        between save and load time, the returned state dict includes an
-        additional key ``"unflat_to_flat_param_ids"`` to validate passed-in
-        state dicts in :meth:`shard_full_optim_state_dict`. Hence, the dict
-        has three keys in total: ``"state"``, ``"param_groups"``, and
+        .. note:: To check that the ``FSDP`` wrapping scheme is compatible, the
+        returned state dict includes an additional key
+        ``"unflat_to_flat_param_ids"`` to validate passed-in state dicts in
+        :meth:`shard_full_optim_state_dict`. Hence, the dict has three keys in
+        total: ``"state"``, ``"param_groups"``, and
         ``"unflat_to_flat_param_ids"``.
 
         .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
@@ -2163,7 +2163,7 @@ class FullyShardedDataParallel(nn.Module):
             full_osd_param_groups.append(unflat_param_group)
         # Include the parameter ID mapping for checking if the optimizer state
         # dict passed into `shard_full_optim_state_dict()` comes from a model
-        # with the same FSDP wrapping scheme
+        # with a compatible FSDP wrapping scheme
         full_osd["unflat_to_flat_param_ids"] = \
             _get_unflat_to_flat_param_ids(flat_to_unflat_param_ids)
         return full_osd
@@ -2200,8 +2200,8 @@ class FullyShardedDataParallel(nn.Module):
         argument to the optimizer, then you should pass that same value to
         this method as ``optim_input``.
 
-        .. note:: This does not support changing the ``FSDP`` wrapping scheme
-        between save and load time and will error in that case.
+        .. note:: In general, this does not support changing the ``FSDP``
+        wrapping scheme between save and load time and may error in that case.
 
         Args:
             full_optim_state_dict (Dict[str, Any]): Optimizer state dict
@@ -2242,15 +2242,15 @@ class FullyShardedDataParallel(nn.Module):
                 for param in module.params:  # may have none
                     flat_param_to_fsdp_module[param] = module
 
-        # Check that the FSDP wrapping scheme is the same for `model` here and
-        # the model for which the optimizer state dict was saved
+        # Check that the FSDP wrapping scheme is compatible for `model` here
+        # and the model for which the optimizer state dict was saved
         flat_param_id_to_param = _get_flat_param_id_to_param(model, optim_input)
-        if not _is_same_fsdp_wrapping(
+        if not _is_compatible_fsdp_wrapping(
             flat_param_id_to_param, full_osd["unflat_to_flat_param_ids"],
         ):
             raise ValueError(
                 "The passed-in full optimizer state dict was from a model with "
-                "a different FSDP wrapping scheme as the passed-in model"
+                "an incompatible FSDP wrapping scheme as the passed-in model"
             )
 
         # Save a mapping from unflattened to flattened parameter IDs to remap
@@ -2287,7 +2287,7 @@ class FullyShardedDataParallel(nn.Module):
                 unflat_to_flat_param_ids.append(flat_param_id)
         assert unflat_to_flat_param_ids == \
             full_osd["unflat_to_flat_param_ids"], \
-            "`_is_same_fsdp_wrapping()` should have verified that these two " \
+            "`_is_compatible_fsdp_wrapping()` should have verified that these two " \
             "would be equal "
 
         # Handle the "param_groups" part of the optimizer state dict

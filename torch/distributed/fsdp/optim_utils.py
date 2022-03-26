@@ -601,13 +601,18 @@ def _get_unflat_to_flat_param_ids(
     ]
 
 
-def _is_same_fsdp_wrapping(
+def _is_compatible_fsdp_wrapping(
     flat_param_id_to_param: List[torch.nn.Parameter],
     unflat_to_flat_param_ids: List[int],
 ) -> bool:
     """
     Checks if a model's ``FSDP`` wrapping scheme is compatible with the
-    parameter ID mapping given by ``unflat_to_flat_param_ids``.
+    parameter ID mapping given by ``unflat_to_flat_param_ids``. Note that in
+    some edge cases, two wrapping schemes may be different but still
+    compatible since compatibility only requires that unflattened parameter IDs
+    map to the same flattened parameter IDs. However, in general, the optimizer
+    state checkpointing should only be used when the wrapping scheme does not
+    change.
 
     Args:
         flat_param_id_to_param (List[torch.nn.Parameter]): A mapping from
@@ -617,10 +622,10 @@ def _is_same_fsdp_wrapping(
             parameter ID is the index in the :class:`list`.
 
     Returns:
-        is_same_fsdp_wrapping (bool): ``True`` if the wrapping scheme
+        is_compatible_fsdp_wrapping (bool): ``True`` if the wrapping scheme
             corresponding to ``unflat_to_flat_param_ids`` (from the saved state
-            dict) matches that corresponding to ``flat_param_id_to_param`` (for
-            the candidate model for loading).
+            dict) is compatible with that corresponding to
+            ``flat_param_id_to_param`` (for the candidate model for loading).
     """
     curr_unflat_param_id = 0
     new_unflat_to_flat_param_ids = {}

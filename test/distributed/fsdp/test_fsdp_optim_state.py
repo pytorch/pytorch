@@ -377,7 +377,7 @@ class TestFSDPOptimState(FSDPTest):
         error_context = self.assertRaisesRegex(
             ValueError,
             "The passed-in full optimizer state dict was from a model with "
-            "a different FSDP wrapping scheme as the passed-in model"
+            "an incompatible FSDP wrapping scheme as the passed-in model"
         )
         with error_context:
             self._test_shard_full_optim_state(

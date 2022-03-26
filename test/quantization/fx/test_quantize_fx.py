@@ -4073,10 +4073,13 @@ class TestQuantizeFx(QuantizationTestCase):
                                                   default_affine_fixed_qparams_fake_quant)
         self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"],
                                                   default_symmetric_fixed_qparams_fake_quant)
-        self.assertTrue(get_default_output_activation_post_process_map(is_training=True) is
-                        DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP)
-        self.assertTrue(get_default_output_activation_post_process_map(is_training=False) is
-                        DEFAULT_OUTPUT_OBSERVER_MAP)
+        output_fake_quantize_map = get_default_output_activation_post_process_map(is_training=True)
+        output_observer_map = get_default_output_activation_post_process_map(is_training=False)
+        self.assertEqual(output_observer_map.get("dummy_quant3"), default_symmetric_fixed_qparams_observer)
+        self._assertFixedQParamsFakeQuantizeEqual(output_fake_quantize_map.get("dummy_quant3"),
+                                                  default_symmetric_fixed_qparams_fake_quant)
+
+
 
     def test_reuse_input_qconfig(self):
         class M1(torch.nn.Module):
@@ -5412,6 +5415,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_function(torch.quantize_per_tensor),
             ns.call_method('dequantize')
         ]
+        # TODO: change these to use backend_config_dict
         additional_patterns = {torch.nn.GELU: DefaultNodeQuantizeHandler,
                                torch.nn.functional.gelu: DefaultNodeQuantizeHandler}
         self._test_default_node_quant_handler_ops(
