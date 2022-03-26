@@ -28,13 +28,14 @@ def no_dispatch():
 
 
 @contextmanager
-def pythonkey_decompose(decomposition_table):
+def decompose(decomposition_table):
     global CURRENT_DECOMPOSITION_TABLE
+    old_decomposition_table = CURRENT_DECOMPOSITION_TABLE
     CURRENT_DECOMPOSITION_TABLE = decomposition_table
     try:
         yield CURRENT_DECOMPOSITION_TABLE
     finally:
-        CURRENT_DECOMPOSITION_TABLE = {}
+        CURRENT_DECOMPOSITION_TABLE = old_decomposition_table
 
 
 class ProxyTensor(torch.Tensor):
@@ -73,9 +74,9 @@ class ProxyTensor(torch.Tensor):
         if func_overload in CURRENT_DECOMPOSITION_TABLE:
             return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
         # Commenting this out for now since it causes some spurious failures (such as error checking)
-        # if func == aten._local_scalar_dense:
-        #     raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
-        #                        "It's likely that this is caused by data-dependent control flow or similar.")
+        if func == aten._local_scalar_dense:
+            raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
+                               "It's likely that this is caused by data-dependent control flow or similar.")
 
         def unwrap_proxy(e):
             return e.proxy if isinstance(e, ProxyTensor) else e
@@ -105,7 +106,7 @@ class ProxyTensor(torch.Tensor):
             else:
                 return e
         if isinstance(real_out, tuple):
-            return tuple([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
+            return tuple(wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out))
         elif isinstance(real_out, list):
             return list([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
         elif isinstance(real_out, torch.Tensor):
@@ -157,7 +158,7 @@ class PythonKeyTracer(Tracer):
         return super().create_arg(a)
 
 
-def pythonkey_trace(
+def dispatch_trace(
     root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None
 ) -> GraphModule:
     tracer = PythonKeyTracer()
@@ -194,8 +195,8 @@ def make_fx(f, decomposition_table={}):
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda x: fx.PH, args)
-        with pythonkey_decompose(decomposition_table):
-            t = pythonkey_trace(wrap_key(f, args), concrete_args=tuple(phs))
+        with decompose(decomposition_table):
+            t = dispatch_trace(wrap_key(f, args), concrete_args=tuple(phs))
         return t
 
     return wrapped
