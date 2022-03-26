@@ -1089,7 +1089,6 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
                     inputs.append(SampleInput(t.detach().requires_grad_(requires_grad),
                                               args=sample_input_args,
                                               kwargs=sample_input_kwargs))
-
     return inputs
 
 
@@ -1165,9 +1164,12 @@ def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
                 sample_input_args = sample_input.args
                 sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
             if requires_grad:
-                inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
-                orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
-                                               dim, keepdim=True, mask=inmask)
+                if sample_input_kwargs.get('mask') is None:
+                    orig_count = torch._masked.sum(torch.ones(sample_input.input.shape, dtype=torch.int64), dim, keepdim=True)
+                else:
+                    inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
+                    orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
+                                                   dim, keepdim=True, mask=inmask)
                 if orig_count.min() <= int(unbiased):
                     # Skip samples that lead to singularities in var
                     # computation resulting nan values both in var and
@@ -8396,6 +8398,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if 'mask' in keys:
             mask = kwargs.pop('mask')
             if mask is not None:
+                assert mask.layout == torch.strided
                 kwargs['where'] = mask.cpu().numpy()
 
         if 'identity' in keys:
@@ -15322,6 +15325,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        supports_sparse=True,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -15788,10 +15792,12 @@ binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
+sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('_masked.')]
+sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('_masked.')]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

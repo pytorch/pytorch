@@ -40,8 +40,12 @@ jobs:
       - name: Setup Windows
         uses: pytorch/pytorch/.github/actions/setup-win@master
         with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
           cuda-version: ${{ inputs.cuda-version }}
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/pytorch/.github/actions/setup-ssh@master
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download PyTorch Build Artifacts
         uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
