@@ -1,6 +1,8 @@
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
+import typing
+from .._jit_internal import boolean_dispatch
 
 __all__ = [
     'bessel_j0',
@@ -302,52 +304,6 @@ Example::
     >>> torch.special.logit(a, eps=1e-6)
     tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
-
-
-def logsumexp(input, dim, keepdim=False, b=None, return_sign=False, *, out=None):
-    r"""
-    Returns the log of summed exponentials of each row of the :attr:`input`
-    tensor (optionally scaled by :attr:`b`) in the given dimension :attr:`dim`.
-    The computation is numerically stabilized.
-
-    For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
-
-        .. math::
-            \text{logsumexp}(x)_{i} = \log \sum_j b_{ij} \exp(x_{ij})
-
-
-    If :attr:`keepdim` is ``True``, the output tensor is of the same size
-    as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
-    Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
-    output tensor having 1 (or ``len(dim)``) fewer dimension(s).
-
-
-    Args:
-        input (Tensor): the input tensor.
-        dim (int or tuple of ints): the dimension or dimensions to reduce.
-        keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
-        b (Tensor): Scaling factors for exponentiated :attr:`input` (may be negative).
-        return_sign (bool): whether to return sign information (negative results will
-            return NaN if :attr:`return_sign` is false).
-
-    Keyword args:
-        out (tuple of Tensors, optional): output tensor for the result and sign information. The
-            second element of the tuple will remain unchanged if :attr:`return_sign` is false.
-
-    Example::
-
-        >>> a = torch.randn(3, 3)
-        >>> torch.logsumexp(a, 1)
-        tensor([1.4907, 1.0593, 1.5696])
-        >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
-        tensor(1.6859e-07)
-    """
-    if not return_sign:
-        return _special.special_logsumexp(input, dim, keepdim, b, out=out)
-    if isinstance(out, torch.Tensor):
-        raise ValueError('`out` must be a tuple of tensors when `return_sign` is true')
-    return _special._special_logsumexp_with_sign(input, dim, keepdim, b, return_sign, out=out)
-
 
 expit = _add_docstr(_special.special_expit,
                     r"""
@@ -1260,3 +1216,64 @@ Args:
 Keyword args:
     {out}
 """.format(**common_args))
+
+def _logsumexp_return_sign_false(
+        input: Tensor, dim: typing.List[int], keepdim: bool = False,
+        b: typing.Optional[Tensor] = None, return_sign: bool = False, out: Tensor = None) -> Tensor:
+    return _special.special_logsumexp(input, dim, keepdim, b, out=out)
+
+
+def _logsumexp_return_sign_true(
+        input: Tensor, dim: typing.List[int], keepdim: bool = False,
+        b: typing.Optional[Tensor] = None, return_sign: bool = False,
+        out: typing.Tuple[Tensor, Tensor] = None) -> typing.Tuple[Tensor, Tensor]:
+    r"""
+    Returns the log of summed exponentials of each row of the :attr:`input`
+    tensor (optionally scaled by :attr:`b`) in the given dimension :attr:`dim`.
+    The computation is numerically stabilized.
+
+    For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+        .. math::
+            \text{logsumexp}(x)_{i} = \log \sum_j b_{ij} \exp(x_{ij})
+
+
+    If :attr:`keepdim` is ``True``, the output tensor is of the same size
+    as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+    Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+    output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+
+
+    Args:
+        input (Tensor): the input tensor.
+        dim (int or tuple of ints): the dimension or dimensions to reduce.
+        keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
+        b (Tensor): Scaling factors for exponentiated :attr:`input` (may be negative).
+        return_sign (bool): whether to return sign information (negative results will
+            return NaN if :attr:`return_sign` is false).
+
+    Keyword args:
+        out (tuple of Tensors, optional): output tensor for the result and sign information. The
+            second element of the tuple will remain unchanged if :attr:`return_sign` is false.
+
+    Example::
+
+        >>> a = torch.randn(3, 3)
+        >>> torch.logsumexp(a, 1)
+        tensor([1.4907, 1.0593, 1.5696])
+        >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
+        tensor(1.6859e-07)
+    """
+    return _special._special_logsumexp_with_sign(input, dim, keepdim, b, return_sign, out=out)
+
+
+logsumexp = boolean_dispatch(
+    arg_name='return_sign',
+    arg_index=4,
+    default=False,
+    if_false=_logsumexp_return_sign_false,
+    if_true=_logsumexp_return_sign_true,
+    module_name=__name__,
+    func_name='logsumexp',
+)
+logsumexp.__doc__ = _logsumexp_return_sign_true.__doc__

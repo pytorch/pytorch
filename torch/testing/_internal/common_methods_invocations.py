@@ -3352,7 +3352,11 @@ def sample_inputs_special_logsumexp(self, device, dtype, requires_grad, **kwargs
             t = make_tensor(shape, dtype=dtype, device=device, low=low, high=high,
                             requires_grad=requires_grad)
             if scale_shape:
-                b = make_tensor(scale_shape, dtype=dtype, device=device, low=low,
+                # Make sure that we have positive scale factors for gradient checking if (a) we
+                # don't return the sign or (b) we have integral dtypes to avoid zero scale factors
+                # by chance (numerical gradients cannot be evaluated at zero).
+                scale_low = low if return_sign and dtype is not None else 1
+                b = make_tensor(scale_shape, dtype=dtype, device=device, low=scale_low,
                                 high=high, requires_grad=requires_grad)
             else:
                 b = None
@@ -17325,13 +17329,13 @@ op_db: List[OpInfo] = [
     #                     DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
     #                 )),
     OpInfo('logsumexp',
-           aliases=('special.logsumexp',),
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_logsumexp),
+           sample_inputs_func=sample_inputs_logsumexp,
+           gradcheck_fast_mode=False),
     OpInfo('special.logsumexp',
            dtypes=all_types_and(torch.bool, torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),

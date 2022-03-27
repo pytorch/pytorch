@@ -1288,7 +1288,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   return result;
 }
 
-static std::tuple<Tensor&, Tensor&> logsumexp_out_impl(Tensor& result, Tensor& sign_result,
+static std::tuple<Tensor&, Tensor&> logsumexp_out_impl(Tensor& value_result, Tensor& sign_result,
     const Tensor& self, IntArrayRef dims, bool keepdim, const optional<Tensor>& b, bool return_sign) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
@@ -1300,17 +1300,17 @@ static std::tuple<Tensor&, Tensor&> logsumexp_out_impl(Tensor& result, Tensor& s
     if (b) {
       temp.mul_((*b).sign());
     }
-    at::sum_out(result, temp, dims, keepdim);
+    at::sum_out(value_result, temp, dims, keepdim);
     if (return_sign) {
-      at::sign_out(sign_result, result);
-      result.abs_();
+      at::sign_out(sign_result, value_result);
+      value_result.abs_();
     }
-    result.log_().add_(maxes_squeezed);
+    value_result.log_().add_(maxes_squeezed);
   } else {
-    at::sum_out(result, at::exp(self), dims, keepdim);
-    result.log_();
+    at::sum_out(value_result, at::exp(self), dims, keepdim);
+    value_result.log_();
   }
-  return std::forward_as_tuple(result, sign_result);
+  return std::forward_as_tuple(value_result, sign_result);
 }
 
 Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
@@ -1373,20 +1373,21 @@ ScalarType ensureFloatingType(const ScalarType& dtype) {
 std::tuple<Tensor, Tensor> _special_logsumexp_with_sign(const Tensor& self, IntArrayRef dims,
     bool keepdim, const optional<Tensor>& b, bool return_sign) {
   // Allocate memory for the result tensors with the correct dtype.
-  Tensor result, sign_result;
+  Tensor value_result, sign_result;
   auto dtype = ensureFloatingType(self.scalar_type());
   TensorOptions options = self.options().dtype(dtype);
-  result = at::empty({0}, options);
+  value_result = at::empty({0}, options);
   // We reuse the `result` tensor if signs aren't being returned to limit memory allocation.
-  sign_result = return_sign ? at::empty({0}, options) : result;
+  sign_result = return_sign ? at::empty({0}, options) : value_result;
   return at::native::_special_logsumexp_with_sign_out(self, dims, keepdim, b, return_sign,
-                                                      result, sign_result);
+                                                      value_result, sign_result);
 }
 
 std::tuple<Tensor&, Tensor&> _special_logsumexp_with_sign_out(const Tensor& self, IntArrayRef dims,
-    bool keepdim, const optional<Tensor>& b, bool return_sign, Tensor& result, Tensor& sign_result) {
+    bool keepdim, const optional<Tensor>& b, bool return_sign, Tensor& value_result, Tensor& sign_result) {
   auto dtype = ensureFloatingType(self.scalar_type());
-  return logsumexp_out_impl(result, sign_result, self.to(dtype), dims, keepdim, b, return_sign);
+  return logsumexp_out_impl(
+    value_result, sign_result, self.to(dtype), dims, keepdim, b ? (*b).to(dtype) : b, return_sign);
 }
 
 void impl_func_norm(
