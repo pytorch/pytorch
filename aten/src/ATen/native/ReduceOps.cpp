@@ -1331,16 +1331,18 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
   return result;
 }
 
-Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  TensorOptions result_options;
-  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-    // even for integral inputs, result is floating dtype
-    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-    result_options = self.options().dtype(default_dtype);
-  } else {
-    result_options = self.options();
+ScalarType ensureFloatingType(const ScalarType& dtype) {
+  if (at::isIntegralType(dtype, /*includeBool=*/true)) {
+    return at::typeMetaToScalarType(c10::get_default_dtype());
   }
-  auto result = at::empty({0}, result_options);
+  return dtype;
+}
+
+Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  // Allocate memory for the result tensors with the correct dtype.
+  auto dtype = ensureFloatingType(self.scalar_type());
+  auto options = self.options().dtype(dtype);
+  auto value_result = at::empty({0}, options);
   // Need to check compliance with https://github.com/pytorch/pytorch/pull/77130.
   return std::get<0>(at::native::_special_logsumexp_with_sign(self, dims, keepdim, {}, false));
 }
@@ -1363,22 +1365,14 @@ Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim
   return std::get<0>(at::_special_logsumexp_with_sign_out(result, result, self, dims, keepdim, b, false));
 }
 
-ScalarType ensureFloatingType(const ScalarType& dtype) {
-  if (at::isIntegralType(dtype, /*includeBool=*/true)) {
-    return at::typeMetaToScalarType(c10::get_default_dtype());
-  }
-  return dtype;
-}
-
 std::tuple<Tensor, Tensor> _special_logsumexp_with_sign(const Tensor& self, IntArrayRef dims,
     bool keepdim, const optional<Tensor>& b, bool return_sign) {
   // Allocate memory for the result tensors with the correct dtype.
-  Tensor value_result, sign_result;
   auto dtype = ensureFloatingType(self.scalar_type());
-  TensorOptions options = self.options().dtype(dtype);
-  value_result = at::empty({0}, options);
+  auto options = self.options().dtype(dtype);
+  auto value_result = at::empty({0}, options);
   // We reuse the `result` tensor if signs aren't being returned to limit memory allocation.
-  sign_result = return_sign ? at::empty({0}, options) : value_result;
+  auto sign_result = return_sign ? at::empty({0}, options) : value_result;
   return at::native::_special_logsumexp_with_sign_out(self, dims, keepdim, b, return_sign,
                                                       value_result, sign_result);
 }
