@@ -47,6 +47,13 @@ jobs:
       - name: Checkout PyTorch
         uses: ./.github/actions/checkout-pytorch
 
+      - name: Check for new workflows
+        run: |
+          if [ ! -f "./.github/actions/setup-linux/action.yml" ]; then
+            echo "::error::Your PR is based on a version of master that is too old for our CI to work. Please rebase your PR on latest master and resubmit."
+            exit 1
+          fi
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
