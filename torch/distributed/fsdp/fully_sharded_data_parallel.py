@@ -1617,13 +1617,13 @@ class FullyShardedDataParallel(nn.Module):
                 # backward pass in preparation for the optimizer step.
                 accumulate_grad = hasattr(param, "_saved_grad_shard")
                 if accumulate_grad:
-                    _p_assert(
+                    p_assert(
                         param._saved_grad_shard.shape == output.shape,  # type: ignore[attr-defined]
                         "Shape mismatch when accumulating gradients: "  # type: ignore[attr-defined]
                         f"existing grad shape={param._saved_grad_shard.shape} "
                         f"new grad shape={output.shape}"  # type: ignore[attr-defined]
                     )
-                    _p_assert(
+                    p_assert(
                         param._saved_grad_shard.device == output.device,  # type: ignore[attr-defined]
                         "Device mismatch when accumulating gradients: "  # type: ignore[attr-defined]
                         f"existing grad device={param._saved_grad_shard.device} "
@@ -1723,21 +1723,21 @@ class FullyShardedDataParallel(nn.Module):
                     # Set `p.grad` as needed to ensure optimizer correctness
                     # since optimizers operate on the `grad` attribute
                     if hasattr(p, "_cpu_grad"):
-                        _p_assert(
+                        p_assert(
                             p.device == torch.device("cpu"),
                             f"Device mismatch: p={p.device} "  # type: ignore[attr-defined]
                             f"p._cpu_grad={p._cpu_grad}"
                         )
                         p.grad = p._cpu_grad  # type: ignore[attr-defined]
                     elif hasattr(p, "_saved_grad_shard"):
-                        _p_assert(
+                        p_assert(
                             p.device == p._saved_grad_shard.device,  # type: ignore[attr-defined]
                             f"Device mismatch: p={p.device} "  # type: ignore[attr-defined]
                             f"p._saved_grad_shard={p._saved_grad_shard.device}"
                         )
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                     else:
-                        _p_assert(
+                        p_assert(
                             not p._is_sharded, "All sharded parameters should "
                             "use `_saved_grad_shard`"
                         )
@@ -2344,7 +2344,7 @@ def _alloc_storage(data: torch.Tensor, size: torch.Size) -> None:
     ), "Then tensor storage should have been resized to be 0."
     data.storage().resize_(size.numel())  # type: ignore[attr-defined]
 
-def _p_assert(cond: Any, s: Any) -> None:
+def p_assert(cond: Any, s: Any) -> None:
     """This is used as an alternate to ``assert`` when in the backward context
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
