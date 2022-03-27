@@ -41,7 +41,7 @@ static void compute_cuda(
     int64_t size,
     int64_t result_size) {
   int64_t block = 512;
-  int64_t warps_per_block = block / C10_WARP_SIZE;
+  int64_t warps_per_block = block / at::cuda::warp_size();
   int64_t grid =
       std::min<int64_t>((size + warps_per_block - 1) / warps_per_block, 2048L);
 
