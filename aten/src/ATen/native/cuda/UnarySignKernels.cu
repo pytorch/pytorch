@@ -81,7 +81,7 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
         /*name=*/ sgn_name,
 	/*return_dtype=*/ scalar_t,
 	/*common_dtype=*/ scalar_t,
-	/*arity=*/ 3>(iter, sgn_string);
+	/*arity=*/ 1>(iter, sgn_string);
       });
   #else
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
