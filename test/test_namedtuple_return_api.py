@@ -22,6 +22,7 @@ all_operators_with_namedtuple_return = {
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
     '_det_lu_based_helper', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor',
+    '_special_logsumexp_with_sign',
 }
 
 
@@ -114,6 +115,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
             op(operators=['_lu_with_info'],
                input=(), names=('LU', 'pivots', 'info'), hasout=False),
+            op(operators=['_special_logsumexp_with_sign'],
+               input=(torch.tensor([3, 4]), 0), names=('value_out', 'sign_out'), hasout=True)
         ]
 
         def get_func(f):
