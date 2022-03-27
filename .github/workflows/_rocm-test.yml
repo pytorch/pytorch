@@ -161,5 +161,3 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/pytorch/.github/actions/teardown-linux@master
         if: always()
-        with:
-          wait-ssh: false
