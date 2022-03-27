@@ -6,7 +6,7 @@ from tools.codegen.api.translate import translate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
     Argument, NativeFunction, SchemaKind, BackendIndex,
-    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy
+    FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
@@ -107,7 +107,7 @@ def emit_view_functionalization_body(
     # view op case
     assert f.is_view_op
 
-    if f.tag is Tag.inplace_view:
+    if 'inplace_view' in f.tags:
         # This op is both an inplace op AND a view op.
         # See Note [Functionalization Pass - Inplace View Ops] for details.
         # I currently have the view meta call into the out-of-place variant of the view, to avoid
@@ -142,7 +142,7 @@ def emit_view_functionalization_body(
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     meta_call_args = [e.expr for e in translate(meta_call_ctx, call_sig.arguments(), method=False)]
 
-    if f.tag is Tag.inplace_view:
+    if 'inplace_view' in f.tags:
         # See Note [Functionalization Pass - Inplace View Ops] for more details
         return f"""
       at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(

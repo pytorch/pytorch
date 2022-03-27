@@ -6,7 +6,7 @@ from torch.autograd.profiler_util import (
 from torch.autograd import (
     DeviceType, ProfilerActivity, ProfilerConfig, ProfilerState,
     kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
-    _prepare_profiler, _supported_activities
+    _prepare_profiler, _supported_activities, _kineto_step,
 )
 import torch
 import torch.cuda
@@ -664,3 +664,10 @@ def parse_nvprof_trace(path):
 
     functions.sort(key=lambda evt: evt.time_range.start)
     return functions
+
+
+def kineto_step():
+    """ Notify kineto so it is aware of iteration boundaries for asynchronous
+        trace requests.
+    """
+    _kineto_step()
