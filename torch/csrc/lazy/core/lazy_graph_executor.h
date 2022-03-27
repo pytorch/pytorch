@@ -1,5 +1,7 @@
 #pragma once
 
+#include <thread>
+
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/cache.h>
@@ -7,6 +9,8 @@
 #include <torch/csrc/lazy/core/multi_wait.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
+
+#include <caffe2/utils/simple_queue.h>
 
 namespace torch {
 namespace lazy {
@@ -22,6 +26,12 @@ class TORCH_API LazyGraphExecutor {
   };
 
   static LazyGraphExecutor* Get();
+
+  LazyGraphExecutor();
+  ~LazyGraphExecutor();
+
+  void InitExecutionThread();
+  void ExitExecutionThread();
 
   void RegisterTensor(std::shared_ptr<LazyTensor::Data> data);
   void UnregisterTensor(LazyTensor::Data* data);
@@ -195,7 +205,7 @@ class TORCH_API LazyGraphExecutor {
   PostOrderData RunPostOrder(
       const std::vector<LazyTensorPtr>& tensors,
       c10::ArrayRef<size_t> indices);
-  std::shared_ptr<Async> TryRunCachedSync(
+  bool TryRunCachedSync(
       std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
       PostOrderData* po_data);
@@ -213,7 +223,7 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<size_t> indices,
       LoweringContext* lowering_ctx);
 
-  std::shared_ptr<Async> SyncTensorsGraphInternal(
+  void SyncTensorsGraphInternal(
       std::vector<LazyTensorPtr>* tensors,
       c10::ArrayRef<std::string> devices,
       const SyncTensorsConfig& config);
@@ -221,13 +231,13 @@ class TORCH_API LazyGraphExecutor {
   // Schedules the execution of a sync tensors operation in background. The
   // asynchronous operation will hold the device locks by capturing the ones
   // present within the coll structure.
-  std::shared_ptr<Async> ScheduleSyncTensorsGraph(
+  void ScheduleSyncTensorsGraph(
       SyncTensorCollection* coll,
       std::vector<BackendDataPtr> parameters_data,
       std::vector<BackendDataPtr> tensors_data,
       ComputationCache::TypePtr cached_computation);
 
-  std::shared_ptr<Async> ScheduleSyncTensorsGraph(
+  void ScheduleSyncTensorsGraph(
       std::vector<LazyTensorPtr>* tensors,
       SyncTensorCollection* coll,
       std::vector<BackendDataPtr> parameters_data,
@@ -248,6 +258,9 @@ class TORCH_API LazyGraphExecutor {
       c10::ArrayRef<BackendDataPtr> tensors_data);
 
   bool noop_execution_mode_ = false;
+
+  std::unique_ptr<std::thread> execution_thread_;
+  std::unique_ptr<caffe2::SimpleQueue<std::function<void()>>> execution_queue_;
 };
 
 } // namespace lazy

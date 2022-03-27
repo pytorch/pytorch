@@ -14,7 +14,7 @@ C10_DEFINE_bool(
 
 C10_DEFINE_bool(
     torch_lazy_use_thread_pool,
-    false,
+    true,
     "Use thread pool to schedule backend execution");
 
 C10_DEFINE_int(
