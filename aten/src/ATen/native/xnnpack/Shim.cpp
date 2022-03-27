@@ -32,7 +32,7 @@ bool available() {
 bool use_convolution2d(
     const Tensor&,
     const Tensor&,
-    const c10::optional<IntArrayRef>,
+    const at::OptionalIntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
     const IntArrayRef,
