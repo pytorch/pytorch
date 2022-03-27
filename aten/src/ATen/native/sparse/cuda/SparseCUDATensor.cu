@@ -142,8 +142,9 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     const int SZ = 4;
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
-    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) C10_WARP_SIZE*SZ));
-    dim3 block(C10_WARP_SIZE, SZ);
+    int warp_size = at::cuda::warp_size();
+    dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
+    dim3 block(warp_size, SZ);
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
