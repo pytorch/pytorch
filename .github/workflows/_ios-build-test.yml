@@ -55,7 +55,7 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        uses: ./.github/actions/checkout-pytorch
 
       - name: Populate CI build options
         run: |
