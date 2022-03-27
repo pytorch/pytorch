@@ -529,7 +529,7 @@ class TestReductions(TestCase):
 
             # Evaluate the outputs and compare.
             actual = torch.special.logsumexp(a, 1, keepdim, b, return_sign)
-            expected = logsumexp(a, 1, b, keepdim, return_sign)
+            expected = logsumexp(a.cpu(), 1, b if b is None else b.cpu(), keepdim, return_sign)
 
             if return_sign:
                 actual, actual_sign = actual
