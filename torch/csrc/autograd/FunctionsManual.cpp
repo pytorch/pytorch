@@ -603,12 +603,24 @@ Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
   return grad.flip(dim).cumsum(dim).flip(dim);
 }
 
-Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
+Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, optional<Tensor> sign_result,
+                          IntArrayRef dim, bool keepdim, const optional<Tensor>& b, bool return_sign,
+                          int grad_index) {
   if (!keepdim && self.dim() != 0) {
     grad = unsqueeze_multiple(grad, dim, self.sizes().size());
     result = unsqueeze_multiple(result, dim, self.sizes().size());
+    if (return_sign) {
+      sign_result = unsqueeze_multiple(*sign_result, dim, self.sizes().size());
+    }
   }
-  return grad * (self - result).exp();
+  if (grad_index == 0 && b && (*b).defined()) {
+    grad = grad * (*b);
+  }
+  if (return_sign) {
+    grad = grad * (*sign_result);
+  }
+  grad = grad * (self - result).exp();
+  return grad;
 }
 
 Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim) {

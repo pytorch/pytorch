@@ -303,12 +303,51 @@ Example::
     tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
 
-logsumexp = _add_docstr(_special.special_logsumexp,
-                        r"""
-logsumexp(input, dim, keepdim=False, *, out=None)
 
-Alias for :func:`torch.logsumexp`.
-""".format(**multi_dim_common))
+def logsumexp(input, dim, keepdim=False, b=None, return_sign=False, *, out=None):
+    r"""
+    Returns the log of summed exponentials of each row of the :attr:`input`
+    tensor (optionally scaled by :attr:`b`) in the given dimension :attr:`dim`.
+    The computation is numerically stabilized.
+
+    For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
+
+        .. math::
+            \text{logsumexp}(x)_{i} = \log \sum_j b_{ij} \exp(x_{ij})
+
+
+    If :attr:`keepdim` is ``True``, the output tensor is of the same size
+    as :attr:`input` except in the dimension(s) :attr:`dim` where it is of size 1.
+    Otherwise, :attr:`dim` is squeezed (see :func:`torch.squeeze`), resulting in the
+    output tensor having 1 (or ``len(dim)``) fewer dimension(s).
+
+
+    Args:
+        input (Tensor): the input tensor.
+        dim (int or tuple of ints): the dimension or dimensions to reduce.
+        keepdim (bool): whether the output tensor has :attr:`dim` retained or not.
+        b (Tensor): Scaling factors for exponentiated :attr:`input` (may be negative).
+        return_sign (bool): whether to return sign information (negative results will
+            return NaN if :attr:`return_sign` is false).
+
+    Keyword args:
+        out (tuple of Tensors, optional): output tensor for the result and sign information. The
+            second element of the tuple will remain unchanged if :attr:`return_sign` is false.
+
+    Example::
+
+        >>> a = torch.randn(3, 3)
+        >>> torch.logsumexp(a, 1)
+        tensor([1.4907, 1.0593, 1.5696])
+        >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
+        tensor(1.6859e-07)
+    """
+    if not return_sign:
+        return _special.special_logsumexp(input, dim, keepdim, b, out=out)
+    if isinstance(out, torch.Tensor):
+        raise ValueError('`out` must be a tuple of tensors when `return_sign` is true')
+    return _special._special_logsumexp_with_sign(input, dim, keepdim, b, return_sign, out=out)
+
 
 expit = _add_docstr(_special.special_expit,
                     r"""

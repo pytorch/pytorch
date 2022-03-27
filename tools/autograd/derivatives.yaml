@@ -942,8 +942,13 @@
   result: self_t.zero_()
 
 - name: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  self: logsumexp_backward(grad, self, result, dim, keepdim)
+  self: logsumexp_backward(grad, self, result, {}, dim, keepdim, {}, false, 0)
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
+
+- name: _special_logsumexp_with_sign(Tensor self, int[1] dim, bool keepdim=False, Tensor? b=None, bool return_sign=False) -> (Tensor out, Tensor sign_out)
+  self: logsumexp_backward(grad, self, out, sign_out, dim, keepdim, b, return_sign, 0)
+  b: logsumexp_backward(grad, self, out, sign_out, dim, keepdim, b, return_sign, 1)
+  output_differentiability: [True, False]
 
 - name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
   self: not_implemented("lstsq")

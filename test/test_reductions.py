@@ -503,6 +503,53 @@ class TestReductions(TestCase):
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected, actual)
 
+    @skipIfNoSciPy
+    def test_logsumexp_with_sign(self, device):
+        from scipy.special import logsumexp
+
+        ft = [False, True]
+        for integral, keepdim, scale, return_sign in product(ft, ft, ft, ft):
+            if integral:
+                a = torch.randint(-100, 100, [5, 4], device=device)
+                if scale:
+                    b = torch.randint(-100, 100, [5, 4], device=device)
+                    b[2, :] = b[3, 0] = 0
+                else:
+                    b = None
+            else:
+                # Generate input tensors.
+                a = torch.randn(5, 4, device=device)
+                a[0, 0] = inf
+                a[1, :] = -inf
+                if scale:
+                    b = torch.randn(5, 4, device=device)
+                    b[2, :] = b[3, 0] = 0
+                else:
+                    b = None
+
+            # Evaluate the outputs and compare.
+            actual = torch.special.logsumexp(a, 1, keepdim, b, return_sign)
+            expected = logsumexp(a, 1, b, keepdim, return_sign)
+
+            if return_sign:
+                actual, actual_sign = actual
+                expected, expected_sign = expected
+                self.assertEqual(expected_sign, actual_sign, exact_dtype=False)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertEqual(expected, actual, exact_dtype=False)
+
+            # Verify that out works as expected.
+            out = torch.randn(5)
+            if return_sign:
+                out = (out, torch.randn(5))
+
+            torch.special.logsumexp(a, 1, keepdim, b, return_sign, out=out)
+
+            if return_sign:
+                out, out_sign = out
+                self.assertEqual(expected_sign, out_sign, exact_dtype=False)
+            self.assertEqual(expected, out, exact_dtype=False)
+
     @onlyCPU
     def test_sum_parallel(self, device):
         # To use parallel branches we'll need to compare on tensors

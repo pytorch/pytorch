@@ -3330,6 +3330,37 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
 
     return tuple(samples)
 
+
+def sample_inputs_special_logsumexp(self, device, dtype, requires_grad, **kwargs):
+    inputs = [
+        # Inputs also used for the standard logsumexp without scale factors or signs.
+        ((), (0,), True, None, False),
+        ((S, S), (1,), True, None, False),
+        ((S, S), (1,), False, None, False),
+        # Test broadcasting of the scale factors.
+        ((S, S), (1,), False, (S, S), False),
+        ((S, S + 1), (1,), False, (S + 1,), False),
+        # Test returning the signs.
+        ((S, S), (1,), False, (S, S), True),
+    ]
+    samples = []
+    # Test large inputs to check numerical stability
+    lows = (None, 1e3, 1e6) if dtype in (torch.float32, torch.float64) else (None,)
+    for low in lows:
+        high = low * 2 if low is not None else None
+        for shape, dim, keepdim, scale_shape, return_sign in inputs:
+            t = make_tensor(shape, dtype=dtype, device=device, low=low, high=high,
+                            requires_grad=requires_grad)
+            if scale_shape:
+                b = make_tensor(scale_shape, dtype=dtype, device=device, low=low,
+                                high=high, requires_grad=requires_grad)
+            else:
+                b = None
+            samples.append(SampleInput(t, args=(dim, keepdim, b, return_sign)))
+
+    return tuple(samples)
+
+
 def sample_inputs_like_fns(self, device, dtype, requires_grad, **kwargs):
     inputs = [
         ((), {}),
@@ -17301,6 +17332,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_logsumexp),
+    OpInfo('special.logsumexp',
+           dtypes=all_types_and(torch.bool, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.half),
+           assert_autodiffed=True,
+           sample_inputs_func=sample_inputs_special_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
