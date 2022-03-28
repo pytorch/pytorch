@@ -48,58 +48,66 @@ class DispatchKey(Enum):
     Undefined = 0
     CatchAll = Undefined
 
-    CPU = auto()
-    CUDA = auto()
-    HIP = auto()
+    Dense = auto()
     FPGA = auto()
     ORT = auto()
-    XLA = auto()
-    Lazy = auto()
     Vulkan = auto()
     Metal = auto()
-    XPU = auto()
     MKLDNN = auto()
     OpenGL = auto()
     OpenCL = auto()
     IDEEP = auto()
-    QuantizedCPU = auto()
-    QuantizedCUDA = auto()
-    QuantizedXPU = auto()
+    Quantized = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
-    SparseCPU = auto()
-    SparseCUDA = auto()
+    Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
-    SparseHIP = auto()
-    SparseXPU = auto()
-    NestedTensor = auto()
-    PrivateUse1 = auto()
-    PrivateUse2 = auto()
-    PrivateUse3 = auto()
-    EndOfBackendKeys = PrivateUse3
 
     ZeroTensor = auto()
     Meta = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()
-    AutogradCPU = auto()
-    AutogradCUDA = auto()
-    AutogradXLA = auto()
-    AutogradLazy = auto()
+    AutogradFunctionality = auto()
     AutogradNestedTensor = auto()
-    AutogradXPU = auto()
-    AutogradPrivateUse1 = auto()
-    AutogradPrivateUse2 = auto()
-    AutogradPrivateUse3 = auto()
     Tracer = auto()
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
-    NumDispatchKeys = auto()
+    EndOfFunctionalityKeys = TESTING_ONLY_GenericMode
+
+    CPU = auto()
+    CUDA = auto()
+    HIP = auto()
+    XLA = auto()
+    Lazy = auto()
+    XPU = auto()
+    NestedTensor = auto()
+    PrivateUse1 = auto()
+    PrivateUse2 = auto()
+    PrivateUse3 = auto()
+
+    QuantizedCPU = auto()
+    QuantizedCUDA = auto()
+    QuantizedXPU = auto()
+
+    SparseCPU = auto()
+    SparseCUDA = auto()
+    SparseHIP = auto()
+    SparseXPU = auto()
+
+    AutogradCPU = auto()
+    AutogradCUDA = auto()
+    AutogradXLA = auto()
+    AutogradLazy = auto()
+    AutogradXPU = auto()
+    AutogradPrivateUse1 = auto()
+    AutogradPrivateUse2 = auto()
+    AutogradPrivateUse3 = auto()
+
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeExplicitAutograd = auto()
@@ -262,22 +270,6 @@ class DeviceCheckType(Enum):
     NoCheck = 0
     ExactSame = 1
 
-class Tag(Enum):
-    inplace_view = 0
-    # Note [view_copy NativeFunctions]
-    #
-    view_copy = 1
-
-    def __str__(self) -> str:
-        return self.name
-
-    @staticmethod
-    def parse(value: str) -> 'Tag':
-        for k, v in Tag.__members__.items():
-            if k == value:
-                return v
-        raise AssertionError(f'unknown tag {value}')
-
 ViewSchemaKind = Enum('ViewSchemaKind', ('aliasing', 'inplace', 'out', 'non_aliasing'))
 
 # The basic input to the code generation is native_functions.yaml.
@@ -387,8 +379,7 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    # For now operators have at most one tag.
-    tag: Optional['Tag']
+    tags: Set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -398,7 +389,8 @@ class NativeFunction:
     @staticmethod
     def from_yaml(
             ei: Dict[str, object],
-            loc: 'Location'
+            loc: 'Location',
+            valid_tags: Set[str]
     ) -> Tuple['NativeFunction', Dict[DispatchKey, Dict['OperatorName', 'BackendMetadata']]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
@@ -467,9 +459,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tag_str = e.pop('tags', None)
-        assert tag_str is None or isinstance(tag_str, str), f'not a str: {tag_str}'
-        tag = Tag.parse(tag_str) if tag_str else None
+        tags_s = e.pop('tags', '')
+        assert isinstance(tags_s, str)
+        tags: Set[str] = set()
+        if len(tags_s) > 0:
+            assert len(valid_tags) > 0
+            for t in tags_s.split(', '):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f'illegal tag {t}')
+        assert isinstance(tags, set)
 
         from tools.codegen.api import cpp
 
@@ -586,7 +587,7 @@ class NativeFunction:
             is_abstract=is_abstract,
             has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
             has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-            tag=tag,
+            tags=tags,
         ), backend_metadata
 
 
@@ -642,7 +643,7 @@ class NativeFunction:
     def is_view_op(self) -> bool:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
-        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        is_inplace_view = 'inplace_view' in self.tags
         is_wildcard_view = any(inp.annotation is not None and
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -1096,22 +1097,6 @@ class FunctionSchema:
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
 
-    def remove_aliases(self) -> 'FunctionSchema':
-        return FunctionSchema(
-            name=self.name,
-            # remove all alias annotations from arguments and returns
-            # (signature() does this)
-            arguments=self.arguments.signature(),
-            returns=tuple(r.remove_alias() for r in self.returns)
-        )
-
-    def with_name(self, name: 'OperatorName') -> 'FunctionSchema':
-        return FunctionSchema(
-            name=name,
-            arguments=self.arguments,
-            returns=self.returns
-        )
-
     @property
     def modifies_arguments(self) -> bool:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out]
@@ -1413,13 +1398,6 @@ class Return:
             return type
         else:
             return f"{type} {self.name}"
-
-    def remove_alias(self) -> 'Return':
-        return Return(
-            name=self.name,
-            type=self.type,
-            annotation=None
-        )
 
 
 # Represents the self argument for functions that may be methods
@@ -1763,16 +1741,6 @@ class OperatorName:
         assert str(r) == op_name, f'{str(r)} != {op_name}'
         return r
 
-    def with_base_name(self, base: str) -> 'OperatorName':
-        return OperatorName(
-            name=BaseOperatorName(
-                base=base,
-                inplace=self.name.inplace,
-                dunder_method=self.name.dunder_method,
-            ),
-            overload_name=self.overload_name
-        )
-
     def __str__(self) -> str:
         if self.overload_name:
             return f"{self.name}.{self.overload_name}"
@@ -1834,7 +1802,7 @@ class NativeFunctionsViewGroup:
         else:
             assert self.view_copy.func.name.name.base.endswith('_copy')
             assert self.view.func.signature() == self.view_copy.func.signature(strip_view_copy_name=True)
-            assert self.view_copy.tag is Tag.view_copy, \
+            assert 'view_copy' in self.view_copy.tags, \
                 f"{str(self.view_copy.func.name)} appears to be a view_copy operator. The codegen expects" \
                 " view_copy operators to be annotated with the 'view_copy' tag in native_functions.yaml." \
                 " See Note [view_copy NativeFunction] for details."
@@ -1861,7 +1829,7 @@ def gets_generated_view_copy(f: NativeFunction) -> bool:
     if f.has_composite_implicit_autograd_kernel:
         return False
     # We also don't need to generate copy variants for inplace views.
-    if f.tag is Tag.inplace_view:
+    if 'inplace_view' in f.tags:
         return False
     return True
 
