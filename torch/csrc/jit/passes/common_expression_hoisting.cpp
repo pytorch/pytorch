@@ -54,6 +54,20 @@ struct CommonExpressionHoister {
         continue;
       }
 
+      bool did_move_true = aliasDb.moveBeforeTopologicallyValid(
+          true_b_node, true_block->nodes().front());
+      bool did_move_false = aliasDb.moveBeforeTopologicallyValid(
+          false_b_node, false_block->nodes().front());
+
+      TORCH_INTERNAL_ASSERT(
+          did_move_true && did_move_false,
+          "Wasn't able to move nodes to the beginning of the if blocks");
+
+      if (true_b_node != true_block->nodes().front() ||
+          false_b_node != false_block->nodes().front()) {
+        continue;
+      }
+
       // Get all the uses of the output to delete and reinsert them
       // as the input would change, the HashNode value would also change.
       std::unordered_set<Node*> true_b_uses;
