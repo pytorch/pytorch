@@ -824,7 +824,16 @@ def configure_extension_build():
                   include_dirs=[],
                   library_dirs=library_dirs,
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
+    C_flatbuffer = Extension("torch._C_flatbuffer",
+                             libraries=main_libraries,
+                             sources=["torch/csrc/stub_with_flatbuffer.c"],
+                             language='c',
+                             extra_compile_args=main_compile_args + extra_compile_args,
+                             include_dirs=[],
+                             library_dirs=library_dirs,
+                             extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
+    extensions.append(C_flatbuffer)
 
     if not IS_WINDOWS:
         DL = Extension("torch._dl",
@@ -933,6 +942,7 @@ if __name__ == '__main__':
                 'bin/*',
                 'test/*',
                 '_C/*.pyi',
+                '_C_flatbuffer/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
