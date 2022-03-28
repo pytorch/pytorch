@@ -278,7 +278,8 @@ class FlattenParamsWrapper(nn.Module):
         # Register hook to be called after state_dict() to remove the
         # "_fpw_module." prefix and before load_state_dict() to add it back.
         # The hooks must be registered even if the target param_list is empty as
-        # self._fpw_module may contains FSDP wrapped modules.
+        # all submodules in FlattenParamsWrapper should be pre/post processed by
+        # the hooks.
         self._register_state_dict_hook(_post_state_dict_hook)
         self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
 
