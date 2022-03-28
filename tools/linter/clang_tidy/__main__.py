@@ -93,8 +93,6 @@ DEFAULTS = {
         "-torch/csrc/deploy/interpreter/interpreter_impl.h",
         "-torch/csrc/deploy/interpreter/test_main.cpp",
         "-torch/csrc/deploy/test_deploy_python_ext.cpp",
-        # TODO
-        "-torch/csrc/python_headers.h",
     ],
     "paths": ["torch/csrc/"],
     "include-dir": [
