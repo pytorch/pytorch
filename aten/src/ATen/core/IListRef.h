@@ -192,10 +192,8 @@ using IListRefConstRef = typename ivalue_to_const_ref_overload_return<T>::type;
  *    used in the definition of `IListRef<T>`. In general, we should do
  *    so by inheriting from `IListRefTagImplBase<TAG, T, ListElemT>`.
  *
- * Existing Specializations
- * ========================
  * [Note: IListRefTagImpl Specialization]
- *
+ * ======================================
  * For `IListRef(Iterator)<at::Tensor>`:
  * - <IListRefTag::Unboxed, at::Tensor>
  * - <IListRefTag::Boxed, at::Tensor>
@@ -288,6 +286,26 @@ using MaterializedIListRef = std::vector<_MaterializedIListRefElem<IListRefConst
  * wraps each container's `const_iterator` type alias. So, for example,
  * given that the container for `IListRefTag::Boxed` is `c10::List`, this
  * iterator will wrap a `c10::List::const_iterator`.
+ *
+ * [Note: MSVC Iterator Debug]
+ * ===========================
+ * MSVC `vector<T>::iterator` implementation (used in the boxed variant)
+ * makes it so this union's destructor, copy-constructor (assignment), and
+ * move-constructor (assignment) are implcitly deleted.
+ *
+ * Therefore, we need to explicitly define them as needed. Follows a list
+ * of places where these are needed and their reason:
+ *
+ *   - `Payload` destructor:
+ *     it is deleted only if the macro `_ITERATOR_DEBUG_LEVEL` is set to 2.
+ *
+ *   - `IListRefIterator` destructor:
+ *     same as above. However, we need to explicitly call the variant
+ *     destructor explicitly.
+ *
+ *   - `IListRefIterator` copy-constructor:
+ *     it is deleted only if the macro `_ITERATOR_DEBUG_LEVEL` is different
+ *     than 0.
  */
 template <typename T>
 class IListRefIterator : public std::iterator<
@@ -316,8 +334,34 @@ class IListRefIterator : public std::iterator<
 
   IListRefIterator() : tag_(IListRefTag::None) {}
 
-  IListRefIterator(const IListRefIterator<T>& iterator)
-      : payload_(iterator.payload_), tag_(iterator.tag_) {}
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
+  // See [Note: MSVC Iterator Debug]
+  ITensorListRefIterator(const ITensorListRefIterator& iterator)
+      : tag_(iterator.tag_) {
+    switch (tag_) {
+      case ITensorListRefTag::Boxed:
+        payload_.boxed_iterator = iterator.payload_.boxed_iterator;
+      case ITensorListRefTag::Unboxed:
+        payload_.unboxed_iterator = iterator.payload_.unboxed_iterator;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");
+    }
+  }
+#endif
+
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
+  // See [Note: MSVC Iterator Debug]
+  ~ITensorListRefIterator() {
+    switch (tag_) {
+      case ITensorListRefTag::Boxed:
+        payload_.boxed_iterator.~boxed_iterator_type();
+      case ITensorListRefTag::Unboxed:
+        payload_.unboxed_iterator.~unboxed_iterator_type();
+      default:
+        TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");
+    }
+  }
+#endif
 
   IListRefIterator(boxed_iterator_type boxed) : tag_(IListRefTag::Boxed) {
     payload_.boxed_iterator = boxed;
@@ -378,7 +422,10 @@ class IListRefIterator : public std::iterator<
     materialized_iterator_type materialized_iterator;
     void* _init_ptr;
     Payload() : _init_ptr(nullptr) {}
+#if defined(_MSC_VER)
+    // See [Note: MSVC Iterator Debug]
     ~Payload() {}
+#endif
   };
 
   Payload payload_;
