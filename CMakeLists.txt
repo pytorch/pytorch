@@ -320,6 +320,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
 cmake_dependent_option(
+    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
+    "USE_C10D_NCCL" OFF)
+cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
