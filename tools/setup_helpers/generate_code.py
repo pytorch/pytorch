@@ -13,6 +13,7 @@ except ImportError:
 source_files = {'.py', '.cpp', '.h'}
 
 NATIVE_FUNCTIONS_PATH = 'aten/src/ATen/native/native_functions.yaml'
+TAGS_PATH = 'aten/src/ATen/native/tags.yaml'
 
 # TODO: This is a little inaccurate, because it will also pick
 # up setup_helper scripts which don't affect code generation
@@ -29,6 +30,7 @@ def all_generator_source() -> List[str]:
 def generate_code(ninja_global: Optional[str] = None,
                   nn_path: Optional[str] = None,
                   native_functions_path: Optional[str] = None,
+                  tags_path: Optional[str] = None,
                   install_dir: Optional[str] = None,
                   subset: Optional[str] = None,
                   disable_autograd: bool = False,
@@ -58,6 +60,7 @@ def generate_code(ninja_global: Optional[str] = None,
     if subset == "pybindings" or not subset:
         gen_autograd_python(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir)
 
@@ -68,6 +71,7 @@ def generate_code(ninja_global: Optional[str] = None,
 
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
@@ -77,6 +81,7 @@ def generate_code(ninja_global: Optional[str] = None,
     if subset == "python" or not subset:
         gen_annotated(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
+            tags_path or TAGS_PATH,
             python_install_dir,
             autograd_dir)
 
@@ -135,6 +140,7 @@ def get_selector(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Autogenerate code')
     parser.add_argument('--native-functions-path')
+    parser.add_argument('--tags-path')
     parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
     parser.add_argument('--install_dir')
@@ -162,12 +168,23 @@ def main() -> None:
         help='force it to generate schema-only registrations for ops that are not'
         'listed on --selected-op-list'
     )
+    parser.add_argument(
+        '--gen_lazy_ts_backend',
+        action='store_true',
+        help='Enable generation of the torch::lazy TorchScript backend'
+    )
+    parser.add_argument(
+        '--per_operator_headers',
+        action='store_true',
+        help='Build lazy tensor ts backend with per-operator ATen headers, must match how ATen was built'
+    )
     options = parser.parse_args()
 
     generate_code(
         options.ninja_global,
         options.nn_path,
         options.native_functions_path,
+        options.tags_path,
         options.install_dir,
         options.subset,
         options.disable_autograd,
@@ -175,6 +192,31 @@ def main() -> None:
         # options.selected_op_list
         operator_selector=get_selector(options.selected_op_list_path, options.operators_yaml_path),
     )
+
+    if options.gen_lazy_ts_backend:
+        aten_path = os.path.dirname(os.path.dirname(options.native_functions_path))
+        ts_backend_yaml = os.path.join(aten_path, 'native/ts_native_functions.yaml')
+        ts_native_functions = "torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+        ts_node_base = "torch/csrc/lazy/ts_backend/ts_node.h"
+        if options.install_dir is None:
+            options.install_dir = "torch/csrc"
+        lazy_install_dir = os.path.join(options.install_dir, "lazy/generated")
+        if not os.path.exists(lazy_install_dir):
+            os.makedirs(lazy_install_dir)
+
+        assert os.path.isfile(ts_backend_yaml), f"Unable to access ts_backend_yaml: {ts_backend_yaml}"
+        assert os.path.isfile(ts_native_functions), f"Unable to access {ts_native_functions}"
+        from tools.codegen.gen_lazy_tensor import run_gen_lazy_tensor
+        run_gen_lazy_tensor(aten_path=aten_path,
+                            source_yaml=ts_backend_yaml,
+                            output_dir=lazy_install_dir,
+                            dry_run=False,
+                            impl_path=ts_native_functions,
+                            gen_ts_lowerings=True,
+                            node_base="TsNode",
+                            node_base_hdr=ts_node_base,
+                            build_in_tree=True,
+                            per_operator_headers=options.per_operator_headers)
 
 
 if __name__ == "__main__":

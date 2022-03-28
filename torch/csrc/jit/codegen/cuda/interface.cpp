@@ -90,6 +90,11 @@ bool profileNode(const Node* node) {
       getFuserInterface()->fn_profile_n(node);
 }
 
+bool skipNode(const std::string& symbol_str, bool flip) {
+  return getFuserInterface()->fn_skip_n != nullptr &&
+      getFuserInterface()->fn_skip_n(symbol_str, flip);
+}
+
 //! [ Note -- type guard logic in CudaFusionGuard ]
 //!
 //! CudaFusionGuard is used to Guard input tensor to `CudaFusionGroup` so that

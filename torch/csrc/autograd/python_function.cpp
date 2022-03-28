@@ -167,10 +167,16 @@ auto PyNode::is_traceable() -> bool {
 }
 
 auto PyNode::release_variables() -> void {
-  pybind11::gil_scoped_acquire gil;
-  auto f = (THPFunction*) obj;
-  f->saved_variables.clear();
-  f->has_freed_buffers = 1;
+  // This function is called as part of the Node destructor!
+  // Since this object might be kept alive by C++, it is possible
+  // that the python interpreter is already dead here. In that case
+  // we just leak the saved objects.
+  if (Py_IsInitialized()) {
+    pybind11::gil_scoped_acquire gil;
+    auto f = (THPFunction*) obj;
+    f->saved_variables.clear();
+    f->has_freed_buffers = 1;
+  }
 }
 
 auto PyNode::name() const -> std::string {
