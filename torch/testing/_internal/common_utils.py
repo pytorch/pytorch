@@ -3119,20 +3119,17 @@ def sandcastle_skip_if(condition, reason):
     skipping continuously.
     """
     def decorator(func):
-
-        if not IS_SANDCASTLE and condition:
-            func.__unittest_skip__ = True
-            func.__unittest_skip_why__ = reason
-            return func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if condition and IS_SANDCASTLE:
-                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
-                return
+        if condition:
+            if IS_SANDCASTLE:
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return wrapper
             else:
-                return func(*args, **kwargs)
-        return wrapper
+                func.__unittest_skip__ = True
+                func.__unittest_skip_why__ = reason
+
+        return func
 
     return decorator
 
