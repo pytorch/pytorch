@@ -57,9 +57,9 @@ def _pre_load_state_dict_hook(
     *args: Any,
 ) -> None:
     """
-    _post_state_dict_hook() is called before the _load_from_state_dict() is
-    This API pre-processes the keys of the state_dict to add the
-    FlattenParamsWrapper internal prefix
+    _pre_load_state_dict_hook() is called before the _load_from_state_dict() is
+    executed. This API pre-processes the keys of the state_dict to add the
+    FlattenParamsWrapper internal prefix.
     """
     # Push everything down to FPW_MODULE level.
     _replace_by_prefix(state_dict, prefix, prefix + f"{FPW_MODULE}.")
@@ -275,6 +275,13 @@ class FlattenParamsWrapper(nn.Module):
         self._fpw_module = module
         self.flat_param = None
 
+        # Register hook to be called after state_dict() to remove the
+        # "_fpw_module." prefix and before load_state_dict() to add it back.
+        # The hooks must be registered even if the target param_list is empty as
+        # self._fpw_module may contains FSDP wrapped modules.
+        self._register_state_dict_hook(_post_state_dict_hook)
+        self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
+
         if len(param_list) == 0:
             return
 
@@ -304,11 +311,6 @@ class FlattenParamsWrapper(nn.Module):
         # Sanity check for the string constants.
         assert getattr(self, FPW_MODULE) is self._fpw_module
         assert getattr(self, FLAT_PARAM) is self.flat_param
-
-        # Register hook to be called after state_dict() to remove the
-        # "_fpw_module." prefix and before load_state_dict() to add it back.
-        self._register_state_dict_hook(_post_state_dict_hook)
-        self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
 
     @property
     def module(self) -> Any:
