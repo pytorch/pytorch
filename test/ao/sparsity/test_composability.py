@@ -24,7 +24,7 @@ sparse_defaults = {
 }
 
 class TestComposability(TestCase):
-    def _get_model_and_sparsifier_and_sparse_config(self):
+    def _get_model_and_sparsifier_and_sparse_config(self, qconfig=None):
         model = nn.Sequential(
             nn.Linear(4, 4), # 0
             nn.ReLU(),
@@ -35,8 +35,12 @@ class TestComposability(TestCase):
             nn.ReLU(),
             tq.DeQuantStub(),
         )
-        model[4].qconfig = tq.get_default_qconfig("fbgemm")
-        model[5].qconfig = tq.get_default_qconfig("fbgemm")
+        if qconfig==None:
+            model[4].qconfig = tq.get_default_qconfig("fbgemm")
+            model[5].qconfig = tq.get_default_qconfig("fbgemm")
+        else:
+            model[4].qconfig = qconfig
+            model[5].qconfig = qconfig
 
         sparsifier = sparsity.WeightNormSparsifier(**sparse_defaults)
 
@@ -136,4 +140,43 @@ class TestComposability(TestCase):
         cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparsity_level)
         self.assertGreaterAlmostEqual(sparsity_level, sparse_config[0]["sparsity_level"])
+        self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
+
+    def test_s_prep_before_qat_prep(self):
+        mod, sparsifier, sparse_config = self._get_model_and_sparsifier_and_sparse_config(tq.get_default_qat_qconfig('fbgemm'))
+        sparsifier.prepare(mod, config=sparse_config)
+        tq.prepare_qat(mod, inplace=True)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
+        self.assertTrue(isinstance(mod[5], torch.nn.qat.Linear))
+        self._squash_mask_calibrate_and_convert(mod, sparsifier, torch.randn(1,4,4,4))
+        self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
+        self.assertEqual(mod(torch.randn(1,4,4,4)).shape, torch.Size([1,4,4,4]))
+        cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
+        self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
+
+    def test_qat_prep_before_s_prep(self):
+        mod, sparsifier, _ = self._get_model_and_sparsifier_and_sparse_config(tq.get_default_qat_qconfig('fbgemm'))
+        tq.prepare_qat(mod, inplace=True)
+
+        #need to setup sparse_config on new modules
+        sparse_config = [
+            {
+                "module": mod[5],
+                "sparsity_level": 0.7,
+                "sparse_block_shape": (1, 4),
+                "zeros_per_block": 4,
+            },
+            mod[0],
+        ]
+        sparsifier.prepare(mod, config=sparse_config)
+        self.assertTrue(hasattr(mod[0], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "parametrizations"))
+        self.assertTrue(hasattr(mod[5], "activation_post_process"))
+        self.assertTrue(isinstance(mod[5], torch.nn.qat.Linear))
+        self._squash_mask_calibrate_and_convert(mod, sparsifier, torch.randn(1,4,4,4))
+        self.assertTrue(isinstance(mod[5], torch.nn.quantized.Linear))
+        self.assertEqual(mod(torch.randn(1,4,4,4)).shape, torch.Size([1,4,4,4]))
+        cur_sparsity = self._calculate_sparsity(mod[5]._weight_bias()[0])
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
