@@ -50,8 +50,6 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::cout << "Loaded context." << std::endl;
-
   std::cout << "Starting benchmark." << std::endl;
   CAFFE_ENFORCE(
       FLAGS_iter >= 0,
