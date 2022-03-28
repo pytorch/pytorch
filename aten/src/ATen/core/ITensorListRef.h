@@ -120,11 +120,31 @@ using MaterializedITensorListRef =
 /*
  * Wrapper around both boxed and unboxed iterators.
  *
- * Currently, a `std::bidirectional_iterator` that wraps those
- * defined for each of the `ITensorListRefTag`.
+ * Currently, a `std::bidirectional_iterator` that wraps those defined for
+ * each of the `ITensorListRefTag`.
  *
- * One should be able to use it, as if it were the unwrapped
- * iterators themselves.
+ * One should be able to use it, as if it were the unwrapped iterators
+ * themselves.
+ *
+ * [Note: MSVC Iterator Debug]
+ * ===========================
+ * MSVC `vector<T>::iterator` implementation (used in the boxed variant)
+ * makes it so this union's destructor, copy-constructor (assignment), and
+ * move-constructor (assignment) are implcitly deleted.
+ *
+ * Therefore, we need to explicitly define them as needed. Follows a list
+ * of places where these are needed and their reason:
+ *
+ *   - `Payload` destructor:
+ *     it is deleted only if the macro `_ITERATOR_DEBUG_LEVEL` is set to 2.
+ *
+ *   - `ITensorListRefIterator` destructor:
+ *     same as above. However, we need to explicitly call the variant
+ *     destructor explicitly.
+ *
+ *   - `ITensorListRefIterator` copy-constructor:
+ *     it is deleted only if the macro `_ITERATOR_DEBUG_LEVEL` is different
+ *     than 0.
  */
 class ITensorListRefIterator
     : public std::iterator<
@@ -148,14 +168,43 @@ class ITensorListRefIterator
     unboxed_iterator_type unboxed_iterator;
     void* _init_ptr;
     Payload() : _init_ptr(nullptr) {}
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
+    // See [Note: MSVC Iterator Debug]
     ~Payload() {}
+#endif
   };
 
  public:
   ITensorListRefIterator() : tag_(ITensorListRefTag::None) {}
 
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
+  // See [Note: MSVC Iterator Debug]
   ITensorListRefIterator(const ITensorListRefIterator& iterator)
-      : payload_(iterator.payload_), tag_(iterator.tag_) {}
+      : tag_(iterator.tag_) {
+    switch (tag_) {
+      case ITensorListRefTag::Boxed:
+        payload_.boxed_iterator = iterator.payload_.boxed_iterator;
+      case ITensorListRefTag::Unboxed:
+        payload_.unboxed_iterator = iterator.payload_.unboxed_iterator;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");
+    }
+  }
+#endif
+
+#if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
+  // See [Note: MSVC Iterator Debug]
+  ~ITensorListRefIterator() {
+    switch (tag_) {
+      case ITensorListRefTag::Boxed:
+        payload_.boxed_iterator.~boxed_iterator_type();
+      case ITensorListRefTag::Unboxed:
+        payload_.unboxed_iterator.~unboxed_iterator_type();
+      default:
+        TORCH_INTERNAL_ASSERT(false, "invalid ITensorListRef tag.");
+    }
+  }
+#endif
 
   ITensorListRefIterator(boxed_iterator_type boxed) : tag_(ITensorListRefTag::Boxed) {
     payload_.boxed_iterator = boxed;
