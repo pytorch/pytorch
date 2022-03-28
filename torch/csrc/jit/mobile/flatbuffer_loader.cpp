@@ -6,6 +6,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/impl/alloc_cpu.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/ScopeExit.h>
@@ -168,7 +169,7 @@ void parseExtraFiles(
     mobile::serialization::Module* module,
     ExtraFilesMap& extra_files) {
   auto extra_files_offsets = module->extra_files();
-  parseExtraFilesFromVector(module->extra_files(), &extra_files);
+  parseExtraFilesFromVector(extra_files_offsets, &extra_files);
 }
 
 mobile::Module FlatbufferLoader::parseModule(
@@ -253,29 +254,32 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
 
   function->set_register_size(method->register_size());
   if (method->schema()) {
-    auto parseArgList = [this](const auto* args_fb) {
-      std::vector<c10::Argument> args;
-      for (const auto* arg_tb : *args_fb) {
-        IValue default_value = getIValue(arg_tb->default_value());
-        TypePtr type_ptr = getOrCreateTypeAnnotations(arg_tb->type());
-        auto arg = c10::Argument(
-            arg_tb->name()->str(),
-            std::move(type_ptr),
-            c10::nullopt /*N*/,
-            std::move(default_value));
-        args.emplace_back(std::move(arg));
-      }
-      return args;
-    };
-    c10::FunctionSchema schema(
-        method->qn()->str(),
-        "" /*overload_name*/,
-        parseArgList(method->schema()->arguments()),
-        parseArgList(method->schema()->returns()),
-        false /*is_varargs*/,
-        false /*is_varret*/);
+    try {
+      auto parseArgList = [this](const auto* args_fb) {
+        std::vector<c10::Argument> args;
+        for (const auto* arg_tb : *args_fb) {
+          IValue default_value = getIValue(arg_tb->default_value());
+          TypePtr type_ptr = getOrCreateTypeAnnotations(arg_tb->type());
+          auto arg = c10::Argument(
+              arg_tb->name()->str(),
+              std::move(type_ptr),
+              c10::nullopt /*N*/,
+              std::move(default_value));
+          args.emplace_back(std::move(arg));
+        }
+        return args;
+      };
+      c10::FunctionSchema schema(
+          method->qn()->str(),
+          "" /*overload_name*/,
+          parseArgList(method->schema()->arguments()),
+          parseArgList(method->schema()->returns()),
+          false /*is_varargs*/,
+          false /*is_varret*/);
 
-    function->setSchema(std::move(schema));
+      function->setSchema(std::move(schema));
+    } catch (const c10::Error& e) {
+    }
   }
   return function;
 }
@@ -589,16 +593,8 @@ std::tuple<std::shared_ptr<char>, size_t> get_file_content(
   // make sure buffer size is multiple of alignment
   size_t buffer_size =
       (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
-#ifdef _WIN32
   std::shared_ptr<char> data(
-      static_cast<char*>(
-          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
-      _aligned_free); // NOLINT
-#else
-  std::shared_ptr<char> data(
-      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
-      free); // NOLINT
-#endif
+      static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);
   fread(data.get(), size, 1, f);
   fclose(f);
 #endif
@@ -616,16 +612,8 @@ std::tuple<std::shared_ptr<char>, size_t> get_stream_content(std::istream& in) {
   // NOLINT make sure buffer size is multiple of alignment
   size_t buffer_size =
       (size / FLATBUFFERS_MAX_ALIGNMENT + 1) * FLATBUFFERS_MAX_ALIGNMENT;
-#ifdef _WIN32
   std::shared_ptr<char> data(
-      static_cast<char*>(
-          _aligned_malloc(buffer_size, FLATBUFFERS_MAX_ALIGNMENT)),
-      _aligned_free); // NOLINT
-#else
-  std::shared_ptr<char> data(
-      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, buffer_size)),
-      free); // NOLINT
-#endif
+      static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);
   in.read(data.get(), size);
 
   // reset stream to original position
