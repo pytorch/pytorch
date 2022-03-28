@@ -53,5 +53,11 @@ TORCH_API void RegisterShapeComputeGraphForSchema(
 TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema);
 
+TORCH_API std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas();
+
+TORCH_API void LintShapeComputeGraph(
+    const FunctionSchema* schema,
+    const std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch

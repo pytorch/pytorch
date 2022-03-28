@@ -275,15 +275,6 @@ void checkInputAndOutputTypes(
   }
 }
 
-void checkShapeFunction(
-    const FunctionSchema* schema,
-    const std::shared_ptr<Graph>& graph) {
-  checkInputAndOutputTypes(schema, graph);
-  checkForWhileLoop(schema, graph);
-  checkInputReturnedAsOutput(schema, graph);
-  // TODO: other checks ? list ops which we don't symbolically optimize, etc ?
-}
-
 void transformShapeFunction(
     const FunctionSchema* schema_string,
     std::shared_ptr<Graph> graph) {
@@ -328,7 +319,9 @@ void registerSchema(
       toGraphFunction(shape_compute_function).graph();
 
   transformShapeFunction(schema_string, graph);
-  checkShapeFunction(schema_string, graph);
+  // NB: we lint the shape functions registered in source
+  // in a test file
+  // LintShapeComputeGraph(schema_string, graph);
 
   cached_schema_to_graph[schema_string] = graph;
   reused_functions[shape_compute_function_name] = graph;
@@ -429,9 +422,32 @@ void RegisterShapeComputeGraphForSchema(
     loadFunctions();
   }
   transformShapeFunction(&schema, g);
-  checkShapeFunction(&schema, g);
+  LintShapeComputeGraph(&schema, g);
 
   cached_schema_to_graph[&schema] = g;
+}
+
+std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas() {
+  std::lock_guard<std::mutex> guard(lock);
+  if (cached_schema_to_graph.size() == 0) {
+    loadFunctions();
+  }
+
+  std::vector<const FunctionSchema*> schemas;
+  schemas.reserve(cached_schema_to_graph.size());
+  for (const auto& pair : cached_schema_to_graph) {
+    schemas.push_back(pair.first);
+  }
+  return schemas;
+}
+
+void LintShapeComputeGraph(
+    const FunctionSchema* schema,
+    const std::shared_ptr<Graph>& graph) {
+  checkInputAndOutputTypes(schema, graph);
+  checkForWhileLoop(schema, graph);
+  checkInputReturnedAsOutput(schema, graph);
+  // TODO: other checks ? list ops which we don't symbolically optimize, etc ?
 }
 
 } // namespace jit
