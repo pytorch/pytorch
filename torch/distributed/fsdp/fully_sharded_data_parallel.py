@@ -184,7 +184,7 @@ class FullyShardedDataParallel(nn.Module):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
-    FullyShardedDataParallel is commonly shorten to FSDP.
+    FullyShardedDataParallel is commonly shortened to FSDP.
 
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
@@ -208,7 +208,7 @@ class FullyShardedDataParallel(nn.Module):
 
     .. warning::
         Module should be already placed on the destination device or
-        device is set properly using torch.cuda.set_device(device_id).
+        device is set properly using ``torch.cuda.set_device(device_id)``.
         FSDP will get compute device from module first, if module device
         is CPU, FSDP will then get compute device from current device.
 
@@ -227,7 +227,7 @@ class FullyShardedDataParallel(nn.Module):
             Config sharding algorithm, different sharding algorithm has trade off
             between memory saving and communication overhead. 'FULL_SHARD' will
             be chose if sharding_strategy is not specified.
-        cpu_offload (Optional [CPUOffload]):
+        cpu_offload (Optional[CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
             ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
@@ -235,7 +235,7 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        auto_wrap_policy: (Optional [callable]):
+        auto_wrap_policy (Optional[Callable]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
@@ -259,7 +259,7 @@ class FullyShardedDataParallel(nn.Module):
                 >>> ) -> bool:
                 >>>     return unwrapped_params >= min_num_params
 
-        backward_prefetch: (Optional[BackwardPrefetch]):
+        backward_prefetch (Optional[BackwardPrefetch]):
             This is an experimental feature that is subject to change in the
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
@@ -830,17 +830,22 @@ class FullyShardedDataParallel(nn.Module):
         modules of the target module. The target module does not have to be a FSDP
         module. If the target module is a FSDP module, its state_dict_type will
         also be changed.
+
         .. note:: This API should be called for only the top-level (root) module.
-        .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
+
+        .. note:: The default ``state_dict_type`` is ``StateDictType.FULL_STATE_DICT``.
+
         .. note:: This API enables users to transparently use the conventional
         ``state_dict`` API to take model checkpoints in cases where the root
         FSDP module is wrapped by another ``nn.Module``. For example, the
-        following will ensure `state_dict`  is called on all non-FSDP instances,
-        while dispatching into `local_state_dict` implementation for FSDP:
+        following will ensure ``state_dict``  is called on all non-FSDP instances,
+        while dispatching into ``local_state_dict`` implementation for FSDP:
+
         >>> model = DDP(FSDP(...))
-        >> fsdp_root = model.module
+        >>> fsdp_root = model.module
         >>> with fsdp_root.state_dict_type(StateDictType.LOCAL_STATE_DICT):
         >>>     checkpoint = model.state_dict()
+
         Args:
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
@@ -949,7 +954,7 @@ class FullyShardedDataParallel(nn.Module):
         ``state_dict`` on every rank, which could result in OOM if the model
         cannot fit on a single GPU. As a result, :func:`state_dict_type` API is
         available to configure between `state_dict` implementations. User can
-        thus use `with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)`
+        thus use ``with self.state_dict_type(self, StateDictType.LOCAL_STATE_DICT)``
         context manager to perform a local checkpoint that will store only local
         shards of the module. Currently, the only supported implementations are
         ``StateDictType.LOCAL_STATE_DICT`` and ``StateDictType.FULL_STATE_DICT``
@@ -1221,7 +1226,7 @@ class FullyShardedDataParallel(nn.Module):
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
             changes will be discarded). In the case where FSDP does not shard
-            the parameters, currently only when world_size == 1, the
+            the parameters, currently only when ``world_size == 1``, the
             modification is persisted regardless of ``writeback``.
 
         .. warning:: Note that ``rank0_only=True`` in conjunction with
@@ -1359,6 +1364,25 @@ class FullyShardedDataParallel(nn.Module):
                         stack.close()
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
+
+    def named_buffers(
+        self,
+        *args,
+        **kwargs,
+    ) -> Iterator[Tuple[str, torch.Tensor]]:
+        """
+        Overrides :meth:`named_buffers()` to intercept buffer names and
+        remove all occurrences of the FSDP-specific flattened buffer prefix
+        when inside the :meth:`summon_full_params` context manager.
+        """
+        in_summon_full_params = getattr(self, "training_state", None) == \
+            TrainingState_.SUMMON_FULL_PARAMS
+        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
+            if in_summon_full_params:
+                # Remove any instances of the FSDP-specific prefix; there can
+                # be multiple in the case of nested FSDP modules
+                buffer_name = buffer_name.replace(FSDP_PREFIX, "")
+            yield (buffer_name, buffer)
 
     def named_parameters(
         self,
