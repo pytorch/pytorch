@@ -95,17 +95,10 @@ generate_aten(
     generator = "//tools/codegen:gen",
 )
 
-py_library(
-    name = "tools_jit",
-    srcs = glob(["tools/jit/*.py"]),
-    data = glob(["tools/jit/templates/*"]),
-)
-
 py_binary(
     name = "generate_code",
     srcs = ["tools/setup_helpers/generate_code.py"],
     deps = [
-        ":tools_jit",
         "//tools/autograd",
     ],
 )
