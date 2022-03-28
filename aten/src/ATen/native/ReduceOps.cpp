@@ -858,7 +858,7 @@ Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional
   }
 }
 
-void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, c10::optional<IntArrayRef> dim,  int64_t edge_order) {
+void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size, at::OptionalIntArrayRef dim,  int64_t edge_order) {
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
@@ -960,7 +960,7 @@ std::vector<int64_t> gradient_dim_preprocess(const Tensor& self, c10::optional<i
 std::vector<Tensor> gradient(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
     pre_check_gradient(self,
                        c10::optional<int64_t>(coordinates.size()),
-                       c10::optional<IntArrayRef>(dim),
+                       at::OptionalIntArrayRef(dim),
                        edge_order);
     return gradient_helper(self, coordinates, dim, edge_order);
 }
@@ -969,7 +969,7 @@ std::vector<Tensor> gradient(const Tensor& self, TensorList coordinates, c10::op
   const auto processed_dim = gradient_dim_preprocess(self, dim);
   pre_check_gradient(self,
                      c10::optional<int64_t>(coordinates.size()),
-                     dim.has_value() ? c10::optional<IntArrayRef>(processed_dim) : c10::nullopt,
+                     dim.has_value() ? at::OptionalIntArrayRef(processed_dim) : c10::nullopt,
                      edge_order);
   return gradient_helper(self, coordinates, processed_dim, edge_order);
 }
@@ -977,7 +977,7 @@ std::vector<Tensor> gradient(const Tensor& self, TensorList coordinates, c10::op
 std::vector<Tensor> gradient(const Tensor& self, c10::ArrayRef<Scalar> spacing, IntArrayRef dim, int64_t edge_order) {
   pre_check_gradient(self,
                      c10::optional<int64_t>(spacing.size()),
-                     c10::optional<IntArrayRef>(dim),
+                     at::OptionalIntArrayRef(dim),
                      edge_order);
   return gradient_helper_float(self, spacing, dim, edge_order);
 }
@@ -986,7 +986,7 @@ std::vector<Tensor> gradient(const Tensor& self, ArrayRef<Scalar> spacing, c10::
   const auto processed_dim = gradient_dim_preprocess(self, dim);
   pre_check_gradient(self,
                      c10::optional<int64_t>(spacing.size()),
-                     dim.has_value() ? c10::optional<IntArrayRef>(processed_dim) : c10::nullopt,
+                     dim.has_value() ? at::OptionalIntArrayRef(processed_dim) : c10::nullopt,
                      edge_order);
   return gradient_helper_float(self, spacing, processed_dim, edge_order);
 }
@@ -997,7 +997,7 @@ std::vector<Tensor> gradient(const Tensor& self, const Scalar& unit_size, IntArr
   std::vector<Scalar> spacing(dim.size(), unit_size);
   pre_check_gradient(self,
                      c10::optional<int64_t>(spacing.size()),
-                     c10::optional<IntArrayRef>(dim),
+                     at::OptionalIntArrayRef(dim),
                      edge_order);
   return gradient_helper_float(self, spacing, dim, edge_order);
 }
@@ -1011,7 +1011,7 @@ std::vector<Tensor> gradient(const Tensor& self, const c10::optional<Scalar>& un
                               unit_size.has_value() ? unit_size.value() : 1.0) ;
   pre_check_gradient(self,
                      unit_size.has_value() ?  c10::optional<int64_t>(spacing.size()) : c10::nullopt,
-                     dim.has_value() ? c10::optional<IntArrayRef>(processed_dim) : c10::nullopt,
+                     dim.has_value() ? at::OptionalIntArrayRef(processed_dim) : c10::nullopt,
                      edge_order);
   return gradient_helper_float(self, spacing, processed_dim, edge_order);
 }
@@ -1020,7 +1020,7 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
   std::vector<Scalar> spacing(dim.size(), 1.0) ;
   pre_check_gradient(self,
                      c10::optional<int64_t>(spacing.size()),
-                     c10::optional<IntArrayRef>(dim),
+                     at::OptionalIntArrayRef(dim),
                      edge_order);
   return gradient_helper_float(self, spacing, dim, edge_order);
 }
@@ -1573,7 +1573,7 @@ static double std_var_all_cpu(const Tensor& self, int64_t correction, bool take_
 
 static Tensor& std_var_out(
     const char* fname, Tensor& result, const Tensor& self,
-    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
+    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction_opt,
     bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().is_cpu() || self.device().is_cuda(),
               "std and var only supports tensors on a CPU or CUDA device, but got: ",
@@ -1641,7 +1641,7 @@ static Tensor& std_var_out(
 
 static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     const char* fname, Tensor& result1, Tensor& result2, const Tensor& self,
-    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
+    at::OptionalIntArrayRef dim, c10::optional<int64_t> correction_opt,
     bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.device().is_cpu() || self.is_cuda(),
@@ -1712,13 +1712,13 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
 
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::var_mean(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+  return at::var_mean(self, /*dim=*/at::OptionalIntArrayRef(dim),
                       /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::std_mean(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+  return at::std_mean(self, /*dim=*/at::OptionalIntArrayRef(dim),
                       /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
@@ -1745,7 +1745,7 @@ static TensorOptions options_to_value_type(TensorOptions opts) {
 }
 
 std::tuple<Tensor, Tensor> var_mean(
-    const Tensor& self, c10::optional<IntArrayRef> dim,
+    const Tensor& self, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim) {
   Tensor result1 = at::empty({0}, options_to_value_type(self.options()));
   Tensor result2 = at::empty({0}, self.options());
@@ -1754,7 +1754,7 @@ std::tuple<Tensor, Tensor> var_mean(
 }
 
 std::tuple<Tensor, Tensor> std_mean(
-    const Tensor& self, c10::optional<IntArrayRef> dim,
+    const Tensor& self, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim) {
   Tensor result1 = at::empty({0}, options_to_value_type(self.options()));
   Tensor result2 = at::empty({0}, self.options());
@@ -1768,12 +1768,12 @@ Tensor var(const Tensor& self, bool unbiased) {
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::var(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+  return at::var(self, /*dim=*/at::OptionalIntArrayRef(dim),
                  /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor& var_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::var_out(result, self, /*dim=*/c10::optional<IntArrayRef>(dim),
+  return at::var_out(result, self, /*dim=*/at::OptionalIntArrayRef(dim),
                      /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
@@ -1783,35 +1783,35 @@ Tensor std(const Tensor& self, bool unbiased) {
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return at::std(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+  return at::std(self, /*dim=*/at::OptionalIntArrayRef(dim),
                  /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor& std_out(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, Tensor& result) {
-  return at::std_out(result, self, /*dim=*/c10::optional<IntArrayRef>(dim),
+  return at::std_out(result, self, /*dim=*/at::OptionalIntArrayRef(dim),
                      /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
-Tensor std(const Tensor& self, c10::optional<IntArrayRef> dim,
+Tensor std(const Tensor& self, at::OptionalIntArrayRef dim,
            c10::optional<int64_t> correction, bool keepdim) {
   Tensor result = at::empty({0}, options_to_value_type(self.options()));
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
 
 Tensor& std_out(
-    const Tensor& self, c10::optional<IntArrayRef> dim,
+    const Tensor& self, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim, Tensor& result) {
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
 
 Tensor& var_out(
-    const Tensor& self, c10::optional<IntArrayRef> dim,
+    const Tensor& self, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim, Tensor& result) {
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
 
 Tensor var(
-    const Tensor& self, c10::optional<IntArrayRef> dim,
+    const Tensor& self, at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction, bool keepdim) {
   Tensor result = at::empty({0}, options_to_value_type(self.options()));
   return std_var_out("var", result, self, dim, correction, keepdim, false);
