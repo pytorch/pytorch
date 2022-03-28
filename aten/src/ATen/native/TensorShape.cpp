@@ -1605,15 +1605,15 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       };
 
       const auto nnz_grain_size = at::internal::GRAIN_SIZE;
-      // 1 <= n_threads_nnz <= min(nnz / nnz_grain, max_threads)
+      // 1 <= n_threads_nnz <= min(ceil(nnz / nnz_grain), max_threads)
       const auto n_threads_nnz = std::max<int64_t>(
-          1, std::min<int64_t>(nnz / nnz_grain_size, at::get_num_threads())
+          1, std::min<int64_t>((nnz + nnz_grain_size - 1) / nnz_grain_size, at::get_num_threads())
       );
 
       const auto size_grain_size = at::internal::GRAIN_SIZE;
-      // 1 <= n_threads_size <= min(size / size_grain, max_threads)
+      // 1 <= n_threads_size <= min(ceil(size / size_grain), max_threads)
       const auto n_threads_size = std::max<int64_t>(
-          1, std::min<int64_t>(size / size_grain_size, at::get_num_threads())
+          1, std::min<int64_t>((size + size_grain_size - 1) / size_grain_size, at::get_num_threads())
       );
 
       auto dim_indices_offset_counts_per_thread = [&](void) -> Tensor {
