@@ -8,7 +8,6 @@ from ..observer import (
 )
 
 from ..utils import (
-    get_qconfig_dtypes,
     activation_dtype,
 )
 
@@ -23,7 +22,7 @@ from .utils import (
 
 from abc import ABC
 import operator
-from typing import Any, Callable, Dict, Union, Optional, Tuple, List
+from typing import Any, Callable, Dict, Optional
 
 # -------------------------
 # Pattern Registrations
