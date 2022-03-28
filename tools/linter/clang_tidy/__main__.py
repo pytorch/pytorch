@@ -6,6 +6,7 @@ import subprocess
 import re
 import sys
 from typing import List
+from sysconfig import get_paths
 
 
 from tools.linter.clang_tidy.run import run
@@ -96,7 +97,13 @@ DEFAULTS = {
         "-torch/csrc/python_headers.h",
     ],
     "paths": ["torch/csrc/"],
-    "include-dir": ["/usr/lib/llvm-11/include/openmp", "/usr/include/python3.8", "/__w/pytorch/pytorch/third_party/pybind11/include"] + clang_search_dirs(),
+    "include-dir": [
+        "/usr/lib/llvm-11/include/openmp",
+        # We want the string '/usr/local/include/python<version number>'
+        # https://stackoverflow.com/a/35071359
+        get_paths()['include'],
+        "/__w/pytorch/pytorch/third_party/pybind11/include"
+    ] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",
