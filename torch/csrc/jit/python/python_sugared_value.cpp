@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/python/python_sugared_value.h>
 
+#include <ATen/core/interned_strings.h>
+#include <c10/core/ScalarType.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -12,8 +14,6 @@
 #include <string>
 #include <tuple>
 #include <vector>
-#include "ATen/core/interned_strings.h"
-#include "c10/core/ScalarType.h"
 
 #include <Python.h>
 
