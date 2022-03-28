@@ -161,3 +161,5 @@ jobs:
       - name: Teardown Linux
         uses: ./.github/actions/teardown-linux
         if: always()
+        with:
+          skip-wait-ssh: false
