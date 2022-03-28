@@ -10,6 +10,20 @@ import torch.nn.quantized._reference as nnqr
 
 from ...fuser_method_mappings import reverse_sequential_wrapper2
 
+_ConvMetadata = namedtuple("_ConvMetadata", ["root", "reference", "qat", "relu", "relu_qat", "bn_qat", "bn_relu_qat", "func"])
+_Conv1dMetadata = _ConvMetadata(torch.nn.Conv1d, nnqr.Conv1d, nnqat.Conv1d, nni.ConvReLU1d,
+                                nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d, F.conv1d)
+_Conv2dMetadata = _ConvMetadata(torch.nn.Conv2d, nnqr.Conv2d, nnqat.Conv2d, nni.ConvReLU2d,
+                                nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d, F.conv2d)
+_Conv3dMetadata = _ConvMetadata(torch.nn.Conv3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
+                                nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
+
+# ==================
+# |  DTYPE CONFIGS |
+# ==================
+
+# weighted op int8 dtype config
+# this is config for ops that has quantized weights, like linear, conv
 weighted_op_int8_dtype_config = {
     # optional, input activation dtype
     "input_dtype": torch.quint8,
@@ -21,13 +35,66 @@ weighted_op_int8_dtype_config = {
     "output_dtype": torch.quint8
 }
 
-_ConvMetadata = namedtuple("_ConvMetadata", ["root", "reference", "qat", "relu", "relu_qat", "bn_qat", "bn_relu_qat", "func"])
-_Conv1dMetadata = _ConvMetadata(torch.nn.Conv1d, nnqr.Conv1d, nnqat.Conv1d, nni.ConvReLU1d,
-                                nniqat.ConvReLU1d, nniqat.ConvBn1d, nniqat.ConvBnReLU1d, F.conv1d)
-_Conv2dMetadata = _ConvMetadata(torch.nn.Conv2d, nnqr.Conv2d, nnqat.Conv2d, nni.ConvReLU2d,
-                                nniqat.ConvReLU2d, nniqat.ConvBn2d, nniqat.ConvBnReLU2d, F.conv2d)
-_Conv3dMetadata = _ConvMetadata(torch.nn.Conv3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
-                                nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
+default_op_quint8_dtype_config = {
+    # optional, input activation dtype
+    "input_dtype": torch.quint8,
+    # optional, output activation dtype
+    "output_dtype": torch.quint8,
+}
+
+default_op_fp16_dtype_config = {
+    # optional, input activation dtype
+    "input_dtype": torch.float16,
+    # optional, weight dtype
+    "weight_dtype": torch.float16,
+    # optional, output activation dtype
+    "output_dtype": torch.float16,
+}
+
+# =====================
+# |  OPERATOR CONFIGS |
+# =====================
+
+def _get_default_op_backend_config(op, dtype_configs):
+    return {
+        "pattern": op,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": dtype_configs,
+    }
+
+_DEFAULT_OP_INT8_CONFIGS = [
+    _get_default_op_backend_config(op, [default_op_quint8_dtype_config]) for op in [
+        torch.nn.ConvTranspose1d,
+        torch.nn.ConvTranspose2d,
+        torch.nn.ELU,
+        torch.nn.LeakyReLU,
+        torch.nn.Hardswish,
+        torch.nn.InstanceNorm1d,
+        torch.nn.InstanceNorm2d,
+        torch.nn.InstanceNorm3d,
+        torch.nn.LayerNorm,
+        torch.nn.Dropout,
+        torch.nn.functional.elu,
+        torch.nn.functional.hardswish,
+        torch.nn.functional.instance_norm,
+        torch.nn.functional.leaky_relu,
+        torch.nn.functional.dropout,
+    ]]
+
+_DEFAULT_OP_FP16_CONFIGS = [
+    _get_default_op_backend_config(op, [default_op_fp16_dtype_config]) for op in [
+        torch.nn.SiLU,
+        torch.nn.Mish,
+        torch.nn.functional.silu,
+        torch.nn.functional.mish,
+        torch.sum,
+    ]]
+
+_DEFAULT_OP_INT8_OR_FP16_CONFIGS = [
+    _get_default_op_backend_config(op, [default_op_quint8_dtype_config, default_op_fp16_dtype_config]) for op in [
+        torch.nn.LayerNorm,
+        torch.nn.functional.layer_norm,
+    ]]
 
 def _get_linear_configs():
     """
@@ -205,11 +272,14 @@ def _get_conv_configs():
     return conv_configs
 
 def get_native_backend_config_dict():
-    """ Get backend for PyTorch Native backend_config_dict (fbgemm/qnnpack). """
+    """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
     return {
         # optional
         "name": "native",
         "configs": [
+            *_DEFAULT_OP_INT8_CONFIGS,
+            *_DEFAULT_OP_FP16_CONFIGS,
+            *_DEFAULT_OP_INT8_OR_FP16_CONFIGS,
             *_get_linear_configs(),
             *_get_conv_configs(),
         ],
