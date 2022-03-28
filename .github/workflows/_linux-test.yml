@@ -67,6 +67,13 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: printt testing thing
+        run: |
+          echo ${{ github.event.pull_request.body }}
+          echo ${{ github.event }}
+          echo ${{ github.event.head_commit.message }}
+          git log --oneline
+
       - name: Test
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
