@@ -15,42 +15,85 @@
          "torch/onnx/**"
       ],
       "approved_by": ["BowenBao", "garymm"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "NVFuser",
       "patterns": ["torch/csrc/jit/codegen/fuser/cuda/**", "torch/csrc/jit/codegen/cuda/**", "benchmarks/cpp/nvfuser/**"],
       "approved_by": ["csarofeen", "ngimel"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "OSS CI",
       "patterns": [".github/**", ".circleci/**", ".jenkins/**", "scripts/**", "tools/**"],
-      "approved_by": ["janeyx99", "ezyang"],
-      "mandatory_app_id": 12274
+      "approved_by": ["janeyx99", "ezyang", "atalman"],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "Documentation",
       "patterns": ["docs/**", "torch/*docs.py"],
       "approved_by": ["mruberry", "ngimel", "janeyx99"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "Android",
       "patterns": ["android/**", "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "IvanKobzarev"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "iOS",
       "patterns": ["ios/**", "test/mobile/**"],
       "approved_by": ["linbinyu", "kit1980", "xta0", "hanton"],
-      "mandatory_app_id": 12274
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    },
    {
       "name": "superuser",
       "patterns": ["*"],
-      "approved_by": ["albanD", "jbschlosser", "suo", "osalpekar", "malfet", "seemethere", "ezyang"],
-      "mandatory_app_id": 12274
+      "approved_by": [
+        "albanD",
+        "anjali411",
+        "awgu",
+        "bdhirsh",
+        "cbalioglu",
+        "cpuhrsch",
+        "dagitses",
+        "ejguan",
+        "ezyang",
+        "fduwjj",
+        "gchanan",
+        "george-qi",
+        "H-Huang",
+        "jaceyca",
+        "jamesr66a",
+        "jbschlosser",
+        "jiayisuse",
+        "kumpera",
+        "kwen2501",
+        "malfet",
+        "mikaylagawarecki",
+        "mingzhe09088",
+        "mrshenli",
+        "mruberry",
+        "ngimel",
+        "NivekT",
+        "osalpekar",
+        "pbelevich",
+        "pritamdamania87",
+        "rohan-varma",
+        "saketh-are",
+        "samdow",
+        "seemethere",
+        "SherlockNoMad",
+        "soulitzer",
+        "suo",
+        "VitalyFedyunin",
+        "wanchaol",
+        "wenleix",
+        "yaroslavvb",
+        "zhaojuanmao",
+        "zou3519"
+      ],
+      "mandatory_checks_name": ["Facebook CLA Check", "Lint"]
    }
 ]
