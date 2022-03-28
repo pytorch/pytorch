@@ -70,6 +70,7 @@ DEFAULTS = {
         # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
         # deploy/interpreter files are excluded due to using macros and other techniquies
         # that are not easily converted to accepted c++
+        # torch/csrc/python_headers.h gets included
         "-torch/csrc/jit/passes/onnx/helper.cpp",
         "-torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
         "-torch/csrc/jit/serialization/onnx.cpp",
@@ -95,7 +96,7 @@ DEFAULTS = {
         "-torch/csrc/python_headers.h",
     ],
     "paths": ["torch/csrc/"],
-    "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
+    "include-dir": ["/usr/lib/llvm-11/include/openmp", "/usr/include/python3.8", "/__w/pytorch/pytorch/third_party/pybind11/include/pybind11"] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",
