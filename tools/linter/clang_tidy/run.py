@@ -483,15 +483,10 @@ async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
 
-    print("<<<>>> fileslist")
-    print(files)
     # clang-tidy errors when it does not get input files.
     if not files:
         log("No files detected")
         return CommandResult(0, "", ""), []
-
-    print("<<<>>> linefilterslist")
-    print(line_filters)
 
     result = await _run_clang_tidy(options, line_filters, files)
     fixes, warnings = extract_warnings(
