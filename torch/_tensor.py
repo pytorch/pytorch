@@ -13,7 +13,7 @@ from torch._namedtensor_internals import (
     update_names, check_serializing_named_tensor, resolve_ellipsis,
     unzip_namedshape, single_ellipsis_index, is_ellipsis)
 from torch.overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+    has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function, get_default_nowrap_functions)
 import torch.utils.hooks as hooks
 
