@@ -1,11 +1,12 @@
 # Owner(s): ["module: type promotion"]
 
-from functools import wraps
+from functools import (partial, wraps)
 import itertools
 import unittest
 
 import torch
 
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (TestCase, run_tests, load_tests,
                                                   TEST_NUMPY, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
@@ -808,47 +809,36 @@ class TestTypePromotion(TestCase):
         with self.assertRaisesRegex(RuntimeError, '^Integer division.+is no longer supported+'):
             t.addcdiv_(t, t)
 
-    def test_addcdiv_promotion(self, device):
+    def _ternary_promotion_common(self, device, op1, op2):
+        make_arg = partial(make_tensor, device=device)
+
         types = (
             (torch.float64, torch.float64, torch.complex128),
             (torch.long, torch.bfloat16, torch.float32),
         )
 
         for type1, type2, type3 in types:
-            # Cannot use rand with long.
-            if type1 == torch.long:
-                arg1 = torch.randint(7, [5, 5], device=device, dtype=type1)
-            else:
-                arg1 = torch.rand([5, 5], device=device, dtype=type1)
-            arg2 = torch.rand([5, 5], device=device, dtype=type2)
-            arg3 = torch.rand([1, 5], device=device, dtype=type3)
+            arg1 = make_arg([5, 5], dtype=type1)
+            arg2 = make_arg([5, 5], dtype=type2)
+            arg3 = make_arg([1, 5], dtype=type3)
 
-            res1 = torch.addcdiv(arg1, arg2, arg3)
-            res2 = arg1 + arg2 / arg3
+            res1 = op1(arg1, arg2, arg3)
+            res2 = op2(arg1, arg2, arg3)
 
-            self.assertEqual(res1.dtype, res2.dtype)
+            # res1 and res2 are not guaranteed to be the same.  They are the
+            # same when all the inputs are tensors with one or more dimensions.
             self.assertEqual(res1, res2)
+            self.assertEqual(res1.dtype, res2.dtype)
+
+    def test_addcdiv_promotion(self, device):
+        op1 = lambda arg1, arg2, arg3: torch.addcdiv(arg1, arg2, arg3)
+        op2 = lambda arg1, arg2, arg3: arg1 + arg2 / arg3
+        self._ternary_promotion_common(device, op1, op2)
 
     def test_addcmul_promotion(self, device):
-        types = (
-            (torch.float64, torch.float64, torch.complex128),
-            (torch.long, torch.bfloat16, torch.float32),
-        )
-
-        for type1, type2, type3 in types:
-            # Cannot use rand with long.
-            if type1 == torch.long:
-                arg1 = torch.randint(7, [5, 5], device=device, dtype=type1)
-            else:
-                arg1 = torch.rand([5, 5], device=device, dtype=type1)
-            arg2 = torch.rand([5, 5], device=device, dtype=type2)
-            arg3 = torch.rand([1, 5], device=device, dtype=type3)
-
-            res1 = torch.addcmul(arg1, arg2, arg3)
-            res2 = arg1 + arg2 * arg3
-
-            self.assertEqual(res1.dtype, res2.dtype)
-            self.assertEqual(res1, res2)
+        op1 = lambda arg1, arg2, arg3: torch.addcmul(arg1, arg2, arg3)
+        op2 = lambda arg1, arg2, arg3: arg1 + arg2 * arg3
+        self._ternary_promotion_common(device, op1, op2)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @float_double_default_dtype

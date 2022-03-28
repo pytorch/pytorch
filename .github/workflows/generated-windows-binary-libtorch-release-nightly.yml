@@ -37,6 +37,7 @@ concurrency:
 
 jobs:
   libtorch-cpu-shared-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -367,6 +368,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-shared-without-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -697,6 +699,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-static-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1027,6 +1030,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cpu-static-without-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1357,6 +1361,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-shared-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -1690,6 +1695,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-shared-without-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2023,6 +2029,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-static-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2356,6 +2363,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_3-static-without-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -2689,6 +2697,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-shared-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3022,6 +3031,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-shared-without-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3355,6 +3365,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-static-with-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
@@ -3688,6 +3699,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
   libtorch-cuda11_5-static-without-deps-release-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: 240
     env:
