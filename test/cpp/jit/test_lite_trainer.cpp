@@ -248,7 +248,9 @@ TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
 TEST(MobileTest, LoadParametersFailsWithoutFlatbufferSupport) {
   // Create some data that looks like a flatbuffer header.
   std::stringstream data;
-  data.write("\0\0\0\0PTMF\0\0\0\0", 12);
+  data << "abcd"
+       << "PTMF" // Flatbuffer magic
+       << "ijkl";
 
   // Loading the "flatbuffer" data should fail. Make sure we see the expected
   // exception, not just any exception; since this isn't properly-formed

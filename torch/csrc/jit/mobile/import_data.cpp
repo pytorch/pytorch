@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 
+#include <ATen/Functions.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/file_adapter.h>
@@ -214,16 +215,14 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
           // Name and type are good; copy the contents to the output map.
           std::map<std::string, at::Tensor> params;
           for (const auto& e : data_dict) {
-            // If we just say "copy = e.value().toTensor()", we get a shallow
-            // copy. The Tensor contents will point into the flatbuffer data
-            // associated with the Module.
-            at::Tensor copy = e.value().toTensor();
-            // But, this Tensor needs to outlive the Module, since the caller of
-            // _load_parameters() won't have a pointer to the Module. So, do a
-            // deep copy. But, we needed to initialize `copy` as a shallow copy
-            // first to ensure that it has the same size and type as the Tensor
-            // being copied into it.
-            copy.copy_(e.value().toTensor());
+            // The source Tensor points into the flatbuffer data associated with
+            // the Module. But, this Tensor needs to outlive the Module, since
+            // the caller of _load_parameters() won't have a pointer to the
+            // Module. So, return a deep copy.
+            const auto& source = e.value().toTensor();
+            at::Tensor copy = at::empty_like(source); // Must be the same shape.
+            copy.copy_(source);
+
             params[e.key().toStringRef()] = copy;
           }
           return params;
