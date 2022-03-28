@@ -1,9 +1,9 @@
 #pragma once
+#include <c10/util/Optional.h>
 #include <functional>
 #include <memory>
 #include <string>
 #include <utility>
-#include "c10/util/Optional.h"
 
 #include <ATen/core/symbol.h>
 #include <caffe2/serialize/versions.h>

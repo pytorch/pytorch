@@ -4284,6 +4284,7 @@ struct to_ir {
     //    a.append("hi")
     // This is also the same behavior that C++ allows with {}
     // (cannot assign to a variable typed as auto)
+    // These nodes will be removed in a later pass after initial compilation
     if (values.size() == 0 && type_hint == nullptr) {
       auto node = graph->insertNode(graph->create(prim::EmptyListLiteral));
       node->output()->setType(ListType::ofTensors());
