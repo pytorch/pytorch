@@ -41,7 +41,7 @@ class Linear(nn.Linear):
             or directly from user
         """
         # if this import occurs above, it will error
-        from torch.ao.quantization.utils import nonparam_type
+        from torch.ao.quantization.utils import nonparam_type  # import error if this is moved to the top
         assert nonparam_type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
