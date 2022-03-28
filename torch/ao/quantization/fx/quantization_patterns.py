@@ -76,20 +76,6 @@ class QuantizeHandler(ABC):
         """
         return False
 
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        """
-        Returns true if an observer should be inserted for the output of
-        the pattern matched to this QuantizeHandler instance during the
-        prepare step.
-        """
-        # TODO(future PR): potentially clean up and deduplicate these
-        # mappings.
-        return self.all_node_args_are_tensors and self.input_output_observed()
-
     def get_activation_ctr(
         self,
         qconfig: Any,
@@ -209,26 +195,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 self.num_tensor_args += 1
         self.all_node_args_are_tensors = \
             (self.num_tensor_args == len(self.binary_op_node.args))
-
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        """
-        Returns true if an observer should be inserted for the output of
-        the pattern matched to this QuantizeHandler instance during the
-        prepare step.
-        """
-        dtypes = get_qconfig_dtypes(qconfig)
-        if not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
-            return False
-        if self.num_tensor_args == 1:
-            return True
-        elif self.all_node_args_are_tensors and self.input_output_observed():
-            return True
-        else:
-            return False
 
     def is_general_tensor_value_op(self) -> bool:
         return self.num_tensor_args == 1
