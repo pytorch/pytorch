@@ -40,7 +40,6 @@ class Linear(nn.Linear):
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
-        # if this import occurs above, it will error
         from torch.ao.quantization.utils import nonparam_type  # import error if this is moved to the top
         assert nonparam_type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
