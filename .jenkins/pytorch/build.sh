@@ -129,6 +129,9 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
+  # Preloading context results in VK_ERROR_INCOMPATIBLE_DRIVER when creating the VkInstance.
+  # Perhaps it is caused by SwiftShader, will need to investigate further.
+  export USE_VULKAN_NO_PRELOAD_CONTEXT=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh
 fi

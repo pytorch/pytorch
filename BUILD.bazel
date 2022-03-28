@@ -35,7 +35,7 @@ py_binary(
     ],
 )
 
-aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + ["aten/src/ATen/native/tags.yaml"] + glob(["aten/src/ATen/templates/**"])
+aten_generation_srcs = ["aten/src/ATen/native/native_functions.yaml"] + glob(["aten/src/ATen/templates/**"])
 
 generated_cpu_cpp = [
     "aten/src/ATen/RegisterBackendSelect.cpp",
@@ -185,7 +185,6 @@ genrule(
     name = "all_generated_code",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/tags.yaml",
         "aten/src/ATen/native/ts_native_functions.yaml",
         "torch/csrc/lazy/core/shape_inference.h",
         "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
@@ -195,7 +194,7 @@ genrule(
         "aten/src/ATen/templates/LazyIr.h",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --tags-path $(location aten/src/ATen/native/tags.yaml) --nn-path aten/src --gen_lazy_ts_backend",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src --gen_lazy_ts_backend",
     tools = [":generate_code"],
 )
 
