@@ -3,26 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.intrinsic import LinearReLU
 from torch.nn.parameter import Parameter
-import torch.nn.utils.parametrize as parametrize
-# from torch.ao.quantization.utils import nonparam_type
 from torch.nn.utils.parametrize import is_parametrized
-def nonparam_type(module):
-    """
-    Returns type(module) or the original
-    type if module is currently parametrized
-    """
-    if is_parametrized(module):
-        return module.__class__.__bases__[0]
-    else:
-        return type(module)
-
-def transfer_parametrizations_and_params(from_mod, to_mod):
-    if is_parametrized(from_mod):
-        for parameter_name in from_mod.parametrizations:
-            for param_func in from_mod.parametrizations[parameter_name]:
-                setattr(to_mod, parameter_name, from_mod.parametrizations[parameter_name].original)
-                parametrize.register_parametrization(to_mod, parameter_name, param_func)
-    return to_mod
 
 class Linear(nn.Linear):
     r"""
@@ -59,6 +40,8 @@ class Linear(nn.Linear):
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
             or directly from user
         """
+        # if this import occurs above, it will error
+        from torch.ao.quantization.utils import nonparam_type
         assert nonparam_type(mod) == cls._FLOAT_MODULE, ' qat.' + cls.__name__ + '.from_float only works for ' + \
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
@@ -70,7 +53,7 @@ class Linear(nn.Linear):
         qat_linear = cls(mod.in_features, mod.out_features, bias=mod.bias is not None, qconfig=qconfig)
 
         if is_parametrized(mod):
-            transfer_parametrizations_and_params(mod, qat_linear)
+            torch.ao.quantization.utils.transfer_parametrizations_and_params(mod, qat_linear)
 
         if not hasattr(qat_linear, "weight"):
             qat_linear.weight = mod.weight

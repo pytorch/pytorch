@@ -7,6 +7,7 @@ import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable
 from torch.nn.utils.parametrize import is_parametrized
+import torch.nn.utils.parametrize as parametrize
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
@@ -300,6 +301,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
+    # TODO(jerryzh): Figure out why custom quant_min/quant_max are still adjusted.
     if has_customized_qrange:
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.
@@ -380,6 +382,14 @@ def is_leaf(module):
     if len(module._modules) == 0:
         return True
     elif is_parametrized(module):
-        return len(module._modules)==1 and 'parametrizations' in module._modules
+        return len(module._modules) == 1 and 'parametrizations' in module._modules
     else:
         return False
+
+def transfer_parametrizations_and_params(from_mod, to_mod):
+    if is_parametrized(from_mod):
+        for parameter_name in from_mod.parametrizations:
+            for param_func in from_mod.parametrizations[parameter_name]:
+                setattr(to_mod, parameter_name, from_mod.parametrizations[parameter_name].original)
+                parametrize.register_parametrization(to_mod, parameter_name, param_func)
+    return to_mod
