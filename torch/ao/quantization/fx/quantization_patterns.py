@@ -47,8 +47,6 @@ class QuantizeHandler(ABC):
         else:
             self.num_tensor_args = 0
         self.all_node_args_are_tensors = True
-        # the last node of the matched pattern
-        self.last_node = node
 
     # TODO: can remove after the is_dynamic flag is defined, so that we can
     # move embedding op to backend_config_dict
@@ -88,63 +86,6 @@ class QuantizeHandler(ABC):
         this to a different value than what is specified in the qconfig.
         """
         return qconfig.activation
-
-    # This can be removed after we move all the ops using flag to backend_config_dict
-    # since now we are doing this check in the prepare
-    def is_output_quantized(self, qconfig):
-        """ Returns true if the output node of convert is quantized
-        when is_reference is False, we would return float node when a certain dtype
-        combination is not supported (since fbgemm/qnnpack only support certain dtype
-        combinations), so the output may be float, but when is_reference is True,
-        we support all dtype combinations so the output will always be quantized.
-
-        TODO: This is fragile, whether output is quantized should not depend on `is_reference` since
-        we want to make sure whether a Tensor is quantized
-        should be the same in prepare and convert and is_reference
-        is only available in convert currently
-
-        """
-        return True
-
-# Binary op configs
-
-# Supported combinations are:
-# quant_type | activation (compute_type) | weight
-#  static       quint8                      qint8
-
-# tuple (activation_dtype, weight_dtype, compute_dtype)
-# these are supported types for common binary ops like add/mul etc.
-all_dtypes = [
-    (torch.qint8, torch.qint8, None),
-    (torch.quint8, torch.qint8, None),
-    (torch.float16, torch.float16, None),
-]
-fp16_dtypes = [
-    (torch.float16, torch.float16, None)
-]
-int8_dtypes = [
-    (torch.qint8, torch.qint8, None),
-    (torch.quint8, torch.qint8, None),
-]
-binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
-    operator.add: all_dtypes,
-    torch.add: all_dtypes,
-    operator.mul: all_dtypes,
-    torch.mul: all_dtypes,
-    torch.bmm: fp16_dtypes,
-    torch.sub: fp16_dtypes,
-    operator.sub: fp16_dtypes,
-    torch.div: fp16_dtypes,
-    operator.truediv: fp16_dtypes,
-    torch.matmul: int8_dtypes,
-}
-
-default_op_supported_dtypes = {
-    torch.nn.GELU: int8_dtypes,
-    torch.nn.Softmax: int8_dtypes,
-    torch.nn.functional.gelu: int8_dtypes,
-    torch.nn.functional.softmax: int8_dtypes,
-}
 
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
@@ -198,11 +139,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
     def is_general_tensor_value_op(self) -> bool:
         return self.num_tensor_args == 1
-
-    def is_output_quantized(self, qconfig):
-        dtypes = get_qconfig_dtypes(qconfig)
-        return self.binary_op in binary_op_supported_dtypes and \
-            dtypes in binary_op_supported_dtypes[self.binary_op]
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
@@ -295,20 +231,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 class DefaultNodeQuantizeHandler(QuantizeHandler):
     """ Common quantized op, first input and first output will be quantized
     """
-    def __init__(
-            self,
-            node: Node,
-            modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-        if node.op == "call_function" or node.op == "call_method":
-            self.op = node.target
-        elif node.op == "call_module":
-            self.op = type(modules[str(node.target)])
-
-    def is_output_quantized(self, qconfig):
-        dtypes = get_qconfig_dtypes(qconfig)
-        return self.op in default_op_supported_dtypes and \
-            dtypes in default_op_supported_dtypes[self.op]
+    pass
 
 @register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer)
 @register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
