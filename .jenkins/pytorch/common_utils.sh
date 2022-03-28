@@ -60,14 +60,6 @@ function get_pr_change_files() {
   set -e
 }
 
-function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
-  set +e
-  git fetch origin master --quiet
-  set -e
-  git diff --name-only "$(git merge-base origin/master HEAD)" > "$1"
-}
-
 function get_bazel() {
   # download bazel version
   wget https://ossci-linux.s3.amazonaws.com/bazel-4.2.1-linux-x86_64 -O tools/bazel
