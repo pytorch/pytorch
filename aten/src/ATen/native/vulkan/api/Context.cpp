@@ -10,13 +10,15 @@ namespace vulkan {
 namespace api {
 namespace {
 
-#ifdef USE_VULKAN_PRELOAD_CONTEXT
 
 // This variable only exists to trigger Context initialization upon application
 // loading. It should not be used directly.
-static Context* context_init = context();
-
-#endif /* USE_VULKAN_PRELOAD_CONTEXT */
+static Context* context_init =
+#ifdef USE_VULKAN_NO_PRELOAD_CONTEXT
+  nullptr;
+#else
+  context();
+#endif /* USE_VULKAN_NO_PRELOAD_CONTEXT */
 
 VkDevice create_device(
     const VkPhysicalDevice physical_device,
