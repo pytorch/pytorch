@@ -3039,3 +3039,14 @@ TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
   EXPECT_THROW(
       smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
 }
+
+TEST(StaticRuntime, Select) {
+  const auto src = R"IR(
+    graph(%a: Tensor, %dim: int, %index: int):
+        %none: NoneType = prim::Constant()
+        %b: Tensor = aten::select(%a, %dim, %index)
+        %c: Tensor = aten::clone(%b, %none)
+        return (%c)
+  )IR";
+  testStaticRuntime(src, {at::randn({2, 2}), 0, 1});
+}
