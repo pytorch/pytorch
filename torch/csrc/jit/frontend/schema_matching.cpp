@@ -160,11 +160,6 @@ static Value* tryMatchArgument(
     TypeEnv& type_env) {
   Value* value = named_value.value(graph);
 
-  if (arg.type()->kind() == TypeKind::SymIntType &&
-      value->type()->kind() == TypeKind::IntType) {
-    return value;
-  }
-
   // Some functions that take lists of integers or floats for fixed size arrays
   // also allow single ints/floats to be passed in their place. The single
   // int/float is then repeated to the length of the list
