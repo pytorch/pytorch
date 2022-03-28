@@ -264,16 +264,12 @@ async def _run_clang_tidy(
     # Apply per-file options
     commands = []
     for f in files:
-        print(">>><<< processing file :")
-        print(f)
         command = list(base) + [map_filename(options.compile_commands_dir, f)]
         commands.append((command, f))
 
     if options.dry_run:
         return CommandResult(0, str([c for c, _ in commands]), "")
 
-    print(">>>all commands being execed : ")
-    print(commands)
     return await _run_clang_tidy_in_parallel(commands, options.disable_progress_bar)
 
 

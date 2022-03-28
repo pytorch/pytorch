@@ -8,6 +8,7 @@ import sys
 from sysconfig import get_paths as gp
 from typing import List
 
+
 from tools.linter.clang_tidy.run import run
 from tools.linter.clang_tidy.generate_build_files import generate_build_files
 from tools.linter.install.clang_tidy import INSTALLATION_PATH
@@ -70,7 +71,6 @@ DEFAULTS = {
         # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
         # deploy/interpreter files are excluded due to using macros and other techniquies
         # that are not easily converted to accepted c++
-        # torch/csrc/python_headers.h gets included
         "-torch/csrc/jit/passes/onnx/helper.cpp",
         "-torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
         "-torch/csrc/jit/serialization/onnx.cpp",
