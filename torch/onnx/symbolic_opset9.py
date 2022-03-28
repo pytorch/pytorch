@@ -1529,6 +1529,24 @@ def index_copy(g, self, dim, index, source):
     return scatter(g, self, dim, expanded_index, source)
 
 
+@parse_args("v", "v", "b", "b")
+def bucketize(g, self, boundaries, out_int32=False, right=False):
+    out_type = torch.onnx.TensorProtoDataType.INT64
+    if out_int32:
+        out_type = torch.onnx.TensorProtoDataType.INT32
+    new_shape = g.op("Concat",
+                     g.op("Shape", boundaries), g.op("Shape", self),
+                     axis_i=0)
+    unsqueeze_axes = [dim for dim in range(1, sym_help._get_tensor_rank(self) + 1)]
+    boundary_mask = expand(g, sym_help._unsqueeze_helper(g, boundaries, unsqueeze_axes), new_shape, None)
+    if right:
+        cond = ge(g, self, boundary_mask)
+    else:
+        cond = gt(g, self, boundary_mask)
+    cond_out = g.op("Cast", cond, to_i=out_type)
+    return sym_help._reducesum_helper(g, cond_out, axes_i=[0], keepdims_i=0)
+
+
 def type_as(g, self, other):
     self_dtype = sym_help._try_get_scalar_type(self)
     other_dtype = sym_help._try_get_scalar_type(other)
