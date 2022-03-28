@@ -69,19 +69,19 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
         template <typename T>
         T sgn_kernel(T a) {
           const T z = T(0);
-	  if (a == z) {
-	    return z;
-	  } else {
-	    return z / std::abs(a);
-	  }
-	}
+          if (a == z) {
+            return z;
+          } else {
+            return a / std::abs(a);
+          }
+        }
       ); // sgn_string
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
       jitted_gpu_kernel<
         /*name=*/ sgn_name,
-	/*return_dtype=*/ scalar_t,
-	/*common_dtype=*/ scalar_t,
-	/*arity=*/ 1>(iter, sgn_string);
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, sgn_string);
       });
   #else
     AT_DISPATCH_COMPLEX_TYPES(dtype, "sgn_cuda", [&]() {
