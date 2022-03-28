@@ -7,6 +7,7 @@ import argparse
 import pathlib
 import json
 from dataclasses import dataclass
+import functools
 
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  Location, NativeFunction,
@@ -17,7 +18,7 @@ from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
                                  is_cuda_dispatch_key,
                                  is_generic_dispatch_key,
                                  is_ufunc_dispatch_key,
-                                 Tag, BaseOperatorName)
+                                 BaseOperatorName)
 from tools.codegen.api.types import (Binding, CppSignature, CppSignatureGroup,
                                      DispatcherSignature, NativeSignature)
 from tools.codegen.api import cpp
@@ -113,7 +114,7 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple('ParsedYaml', ['native_functions', 'backend_indices'])
 
-def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
+def parse_native_yaml_struct(es: object, valid_tags: Set[str], path: str = "<stdin>") -> ParsedYaml:
     assert isinstance(es, list)
     rs: List[NativeFunction] = []
     bs: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = defaultdict(dict)
@@ -122,7 +123,7 @@ def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
         loc = Location(path, e['__line__'])
         funcs = e.get('func')
         with context(lambda: f'in {loc}:\n  {funcs}'):
-            func, m = NativeFunction.from_yaml(e, loc)
+            func, m = NativeFunction.from_yaml(e, loc, valid_tags)
             rs.append(func)
             BackendIndex.grow_index(bs, m)
     error_check_native_functions(rs)
@@ -144,12 +145,38 @@ def parse_native_yaml_struct(es: object, path: str = "<stdin>") -> ParsedYaml:
             index=v)
     return ParsedYaml(rs, indices)
 
-def parse_native_yaml(path: str) -> ParsedYaml:
+def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
+    assert isinstance(es, list)
+    rs: Set[str] = set()
+    for e in es:
+        assert isinstance(e.get('__line__'), int), e
+        loc = Location(path, e['__line__'])
+        tags = e.get('tag')
+        with context(lambda: f'in {loc}:\n  {tags}'):
+            e_i = e.copy()
+            name = e_i.pop('tag')
+            desc = e_i.pop('desc', '')
+            # ensure that each tag has a non-empty description
+            assert desc != ''
+            rs.add(name)
+    return rs
+
+@functools.lru_cache(maxsize=None)
+def parse_tags_yaml(path: str) -> Set[str]:
+    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
+    with open(path, 'r') as f:
+        es = yaml.load(f, Loader=LineLoader)
+        valid_tags = parse_tags_yaml_struct(es, path=path)
+    return valid_tags
+
+def parse_native_yaml(path: str, tags_yaml_path: str) -> ParsedYaml:
+    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
+        valid_tags = parse_tags_yaml(tags_yaml_path)
         with open(path, 'r') as f:
             es = yaml.load(f, Loader=LineLoader)
-        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(es, path=path)
+        _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = parse_native_yaml_struct(es, valid_tags, path=path)
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
 
@@ -168,7 +195,7 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
                 f"{f.func.name} is marked as a structured_delegate pointing to " \
                 f"{f.structured_delegate}, but {f.structured_delegate} is not marked as structured. " \
                 f"Consider adding 'structured=True' to the delegated operator"
-        if f.tag is not None and f.tag is Tag.inplace_view:
+        if 'inplace_view' in f.tags:
             base_name = f.func.name.name
             overload_name = f.func.name.overload_name
             assert base_name.inplace, \
@@ -1661,7 +1688,8 @@ def main() -> None:
     )
 
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(options.source_path, 'native/tags.yaml')
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
     structured_native_functions = [g for g in grouped_native_functions
