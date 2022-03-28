@@ -68,10 +68,14 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: printt testing thing
+        env:
+          AAAAA: ${{ github.event }}
+          BBBBB: ${{ github.event.pull_request.body }}
+          CCCCC: ${{ github.event.head_commit.message }}
         run: |
-          echo "${{ github.event.pull_request.body }}"
-          echo "${{ github.event }}"
-          echo "${{ github.event.head_commit.message }}"
+          echo $AAAAA
+          echo $BBBBB
+          echo $CCCCC
           git log --oneline
 
       - name: Test
