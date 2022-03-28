@@ -1605,24 +1605,69 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       };
 
       const auto nnz_grain_size = at::internal::GRAIN_SIZE;
-      // 1 <= n_threads_nnz <= min(nnz / grain, max_threads)
+      // 1 <= n_threads_nnz <= min(nnz / nnz_grain, max_threads)
       const auto n_threads_nnz = std::max<int64_t>(
           1, std::min<int64_t>(nnz / nnz_grain_size, at::get_num_threads())
       );
 
-      auto dim_indices_counts_per_threads = at::zeros({n_threads_nnz, size}, index.options());
-      at::parallel_for(0, nnz, nnz_grain_size, [&](int64_t start, int64_t end) {
-          const auto tid = at::get_thread_num();
-          const auto tid_dim_indices = dim_indices.slice(0, start, end);
-          auto tid_dim_indices_counts = dim_indices_counts_per_threads.select(0, tid);
-          // When self is coalesced and dim == 0, indices[dim] is sorted.
-          get_counts(tid_dim_indices_counts, tid_dim_indices, /*bins=*/size,
-              // Mark sorted for better cache alighment, but do not run in parallel
-              // as we are in parallel loop already.
-              /*is_sorted=*/self.is_coalesced() && dim == 0,
-              /*run_in_parallel=*/false);
-      });
-      const auto dim_indices_counts = dim_indices_counts_per_threads.sum(/*dim=*/0);
+      const auto size_grain_size = at::internal::GRAIN_SIZE;
+      // 1 <= n_threads_size <= min(size / size_grain, max_threads)
+      const auto n_threads_size = std::max<int64_t>(
+          1, std::min<int64_t>(size / size_grain_size, at::get_num_threads())
+      );
+
+      auto dim_indices_offset_counts_per_thread = [&](void) -> Tensor {
+        // We avoid allocating more elements than this value,
+        // and we definitely do now want to allocate more than nnz.
+        const int64_t MEMORY_ALLOC_THRESHOLD = std::min<int64_t>(1e+7, nnz);
+
+        // No matter what the value of MEMORY_ALLOC_THRESHOLD is,
+        // we cannot avoid this step of allocating
+        // n_threads_nnz * size * sizeof(int64_t) bytes of memory
+        // for a no-sync count table computation.
+        auto dim_indices_counts_per_threads = at::zeros({n_threads_nnz, size}, index.options());
+        at::parallel_for(0, nnz, nnz_grain_size, [&](int64_t start, int64_t end) {
+            const auto tid = at::get_thread_num();
+            const auto tid_dim_indices = dim_indices.slice(0, start, end);
+            auto tid_dim_indices_counts = dim_indices_counts_per_threads.select(0, tid);
+            // When self is coalesced and dim == 0, indices[dim] is sorted.
+            get_counts(tid_dim_indices_counts, tid_dim_indices, /*bins=*/size,
+                // Mark sorted for better cache alighment, but do not run in parallel
+                // as we are in the parallel loop already.
+                /*is_sorted=*/self.is_coalesced() && dim == 0,
+                /*run_in_parallel=*/false);
+        });
+
+        // We want to compute a cumulative count table across per-thread count tables.
+        // At this step we can benefit from MEMORY_ALLOC_THRESHOLD and compute the
+        // cumulative table in-place while reusing the memory of dim_indices_counts_per_threads.
+
+        // Faster, but new memory is allocated
+        if (dim_indices_counts_per_threads.numel() < MEMORY_ALLOC_THRESHOLD) {
+          return dim_indices_counts_per_threads.cumsum(/*dim=*/0);
+        }
+        // Slower, but potentially no huge memory allocations
+        // depending on how size_grain_size is defined.
+        // NOTE: it could be that size <= n_threads_size * size_grain_size,
+        // so it makes sense to benchmark for optimal size_grain_size.
+        else {
+          auto counts_buffer = at::empty({n_threads_size, size_grain_size, n_threads_nnz}, index.options());
+          auto cumsum_buffer = at::empty_like(counts_buffer);
+          at::parallel_for(0, size, size_grain_size, [&](int64_t start, int64_t end) {
+              const auto tid = at::get_thread_num();
+              auto tid_counts_buffer = counts_buffer.select(0, tid).slice(0, 0, end - start);
+              auto tid_cumsum_buffer = cumsum_buffer.select(0, tid).slice(0, 0, end - start);
+              auto tid_counts = dim_indices_counts_per_threads.slice(1, start, end);
+              tid_counts_buffer.copy_(tid_counts.transpose(-1, -2));
+              at::cumsum_out(tid_cumsum_buffer, tid_counts_buffer, /*dim=*/-1);
+              tid_counts.copy_(tid_cumsum_buffer.transpose(-1, -2));
+          });
+          return dim_indices_counts_per_threads;
+        }
+      }();
+
+      //const auto dim_indices_counts = dim_indices_counts_per_threads.sum(/*dim=*/0);
+      const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
 
       //auto dim_indices_counts = at::zeros({size}, index.options());
       //get_counts(dim_indices_counts, dim_indices, /*bins=*/size,
