@@ -3,6 +3,7 @@
 import sys
 import contextlib
 from functools import partial
+from itertools import product
 
 import torch
 import torch.nn as nn
@@ -17,7 +18,7 @@ from torch.distributed.fsdp import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
-    TransformerWithSharedParams,
+    subtest_name,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -47,6 +48,39 @@ mp_diff_buffer_and_reduce = MixedPrecision(
 )
 # Buffer original dtype, which can differ from model params.
 buffer_orig_dtype = torch.float64
+
+mp_configs = [
+    default_mp, mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce
+]
+params = "mp_config,cpu_offload,backward_prefetch,full_precision_param_dtype"
+cpu_offload_config = [
+    CPUOffload(offload_params=True), CPUOffload(offload_params=False)
+]
+backward_prefetch_config = [
+    BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST
+]
+full_precision_param_dtype_config = [torch.float32, torch.float64]
+configs = list(product(
+    mp_configs,
+    cpu_offload_config,
+    backward_prefetch_config,
+    full_precision_param_dtype_config,
+))
+
+test_name_mapping = {
+    str(CPUOffload(offload_params=True)): "offload_true",
+    str(CPUOffload(offload_params=False)): "offload_false",
+    str(BackwardPrefetch.BACKWARD_PRE): "prefetch_pre",
+    str(BackwardPrefetch.BACKWARD_POST): "prefetch_post",
+    str(default_mp): "mp_fp16",
+    str(mp_diff_reduce): "mp_diff_reduce",
+    str(mp_diff_buffer): "mp_diff_buffer",
+    str(mp_diff_buffer_and_reduce): "mp_diff_buffer_reduce",
+    str(torch.float32): "fp32",
+    str(torch.float64): "fp64",
+}
+
+subtest_name = partial(subtest_name, test_name_mapping)
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter):
@@ -301,21 +335,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "mp_config",
-        [default_mp, mp_diff_reduce, mp_diff_buffer, mp_diff_buffer_and_reduce]
-    )
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE]
-    )
-    @parametrize(
-        "full_precision_param_dtype", [torch.float32, torch.float64]
-    )
+    @parametrize(params, configs, subtest_name)
     def test_mixed_precision_e2e_full_shard(
         self,
         mp_config,
@@ -331,6 +351,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             ShardingStrategy.FULL_SHARD,
         )
 
+    @skip_if_lt_x_gpu(2)
     def test_mixed_precision_embedding_table(self):
         # Basic test to ensure int inputs are not casted which would break
         # modules such as embedding tables.

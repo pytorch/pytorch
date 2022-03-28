@@ -646,12 +646,14 @@ class FullyShardedDataParallel(nn.Module):
                     # state_dict() calls.
                     # Note that non-floating point buffers are not casted.
                     if torch.is_floating_point(buf):
+                        # We are restoring the original buffer type in
+                        # preparation for checkpoint.
                         if dtype:
                             buf = buf.to(dtype=dtype[name])
                         # Note that we don't pass in self.mixed_precision.buffer_dtype
                         # recursively into _cast_buffers, as we want to respect
                         # mp config for child FSDP instances.
-                        elif self.mixed_precision:
+                        elif self.mixed_precision is not None:
                             buf = buf.to(self.mixed_precision.buffer_dtype)
 
                     setattr(module, name, buf)
@@ -785,8 +787,7 @@ class FullyShardedDataParallel(nn.Module):
         if self._is_root:
             # Buffers stay on GPU, and don't get sharded. Since _cast_buffers
             # applies recursively, we only call this from the root instance.
-            if self.mixed_precision:
-                self._cast_buffers(recurse=True)
+            self._cast_buffers(recurse=True)
 
             # Don't free the full params for the outer-most (root) instance,
             # In most cases, root instance contains params in the last layers
@@ -1116,7 +1117,7 @@ class FullyShardedDataParallel(nn.Module):
         # back to their mixed precision type. This is because buffers are cast
         # during lazy_init() and stay at their mixed precision type before/after
         # forward/backward. As a result state_dict() should maintain this.
-        if self._is_root and self.mixed_precision:
+        if self._is_root and self.mixed_precision is not None:
             self._cast_buffers(recurse=True)
         return processed_state_dict
 
@@ -1169,7 +1170,9 @@ class FullyShardedDataParallel(nn.Module):
                     # call here instead of above because summon_full_params itself
                     # calls _lazy_init() which would cast the buffers.
                     if self.mixed_precision is not None and self._is_root:
-                        self._cast_buffers(dtype=self._orig_buffer_dtypes, recurse=False)
+                        self._cast_buffers(
+                            dtype=self._orig_buffer_dtypes, recurse=False
+                        )
                     state_dict = super().state_dict(*args, **kwargs)
             else:
                 # Since buffers are not sharded and stay casted, restore them to their
@@ -1179,7 +1182,9 @@ class FullyShardedDataParallel(nn.Module):
                 # call here instead of above because summon_full_params itself
                 # calls _lazy_init() which would cast the buffers.
                 if self.mixed_precision is not None and self._is_root:
-                    self._cast_buffers(dtype=self._orig_buffer_dtypes, recurse=False)
+                    self._cast_buffers(
+                        dtype=self._orig_buffer_dtypes, recurse=False
+                    )
                 state_dict = super().state_dict(*args, **kwargs)
 
             # TODO: support offload to CPU in post state dict hook.
@@ -1577,25 +1582,6 @@ class FullyShardedDataParallel(nn.Module):
                         stack.close()
                         _free_full_params_and_use_local_shard(currently_local_params)
                         self.training_state = TrainingState_.IDLE
-
-    def named_buffers(
-        self,
-        *args,
-        **kwargs,
-    ) -> Iterator[Tuple[str, torch.Tensor]]:
-        """
-        Overrides :meth:`named_buffers()` to intercept buffer names and
-        remove all occurrences of the FSDP-specific flattened buffer prefix
-        when inside the :meth:`summon_full_params` context manager.
-        """
-        in_summon_full_params = getattr(self, "training_state", None) == \
-            TrainingState_.SUMMON_FULL_PARAMS
-        for buffer_name, buffer in super().named_buffers(*args, **kwargs):
-            if in_summon_full_params:
-                # Remove any instances of the FSDP-specific prefix; there can
-                # be multiple in the case of nested FSDP modules
-                buffer_name = buffer_name.replace(FSDP_PREFIX, "")
-            yield (buffer_name, buffer)
 
     def named_parameters(
         self,

@@ -19,6 +19,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     NestedWrappedModuleWithDelay,
     TransformerWithSharedParams,
+    subtest_name
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -57,8 +58,8 @@ test_name_mapping = {
     str(ShardingStrategy.SHARD_GRAD_OP): "shard_grad_op",
 }
 
-def subtest_name(*args):
-    return '_'.join([test_name_mapping[str(s)] if s is not None else "none" for s in args])
+subtest_name = functools.partial(subtest_name, test_name_mapping)
+
 
 class TestParityWithDDP(FSDPTest):
     """

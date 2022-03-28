@@ -49,6 +49,11 @@ def _get_state_dict(model, cpu_offload=False, half=False):
 
     return model.state_dict()
 
+def subtest_name(test_name_mapping, *args):
+    return '_'.join(
+        [test_name_mapping[str(s)] if s is not None else "none" for s in args]
+    )
+
 # get full params of a model recursively. Note that if CPU offloading, it will
 # also automatically move the parameters to GPU, due to _rebuild_full_params
 # call.
@@ -446,10 +451,11 @@ class FSDPTest(MultiProcessTestCase):
                 ), "loss data type should be float32, as the original \
                     parameter data type is float32."
             else:
-                assert (
-                    loss.dtype == mixed_precision.param_dtype
-                ), f"Expected loss dtype {mixed_precision.param_dtype} but got \
-                    type {loss.dtype}"
+                # FSDP loss is fp16, DDP AMP loss is fp32
+                if isinstance(model, FullyShardedDataParallel):
+                    self.assertEqual(loss.dtype, mixed_precision.param_dtype)
+                else:
+                    self.assertEqual(loss.dtype, torch.float32)
             model.module.run_backward(loss)
             if norm_type is not None:
                 if isinstance(model, FullyShardedDataParallel):
@@ -511,12 +517,11 @@ class FSDPTest(MultiProcessTestCase):
             )
         else:
             model = ref_ddp_fn(model)
-        if mixed_precision:
-            model = model.half()
 
         # DDP training
         ref_loss = self._train_for_several_steps(
-            model, num_steps, autocast=False, lr=lr, fsdp_cpu_offload=cpu_offload, mixed_precision=mixed_precision,
+            model, num_steps, autocast=mixed_precision is not None, lr=lr,
+            fsdp_cpu_offload=cpu_offload, mixed_precision=mixed_precision,
         )
         ref_full_params = list(model.parameters())
 
