@@ -242,7 +242,7 @@ class Linear(WeightedQuantizedModule):
             mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
-        from torch.ao.quantization.utils import nonparam_type
+        from torch.ao.quantization.utils import nonparam_type  # moving this to the top causes an import error
         if hasattr(mod, 'weight_fake_quant'):
             if nonparam_type(mod) == nniqat.LinearBn1d:
                 mod.weight, mod.bias = fuse_linear_bn_weights(
