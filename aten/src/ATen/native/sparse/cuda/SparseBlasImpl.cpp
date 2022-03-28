@@ -1025,6 +1025,12 @@ void add_out_sparse_csr(
             &nnzC,
             work_data.get());
 
+        // For some reason POINTER_MODE_HOST is not working here
+        // Let's extract manually the nnz from the C_crow_indices
+        #if AT_ROCM_ENABLED()
+        nnzC = std::max({nnzC, C_crow_indices.narrow(-1, m, 1).item<int>()});
+        #endif
+
         // Resize result using nnz information from cusparse
         col_indices_and_values_resize_(C, nnzC);
         C_col_indices = C.col_indices();
