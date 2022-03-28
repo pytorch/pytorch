@@ -1050,17 +1050,6 @@ TORCH_IMPL_FUNC(sum_out)
   }
 }
 
-Tensor& sum_csr_out(const Tensor& self,
- IntArrayRef dim,
- bool keepdim,
- optional<ScalarType> opt_dtype,
- Tensor& result) {
-  TORCH_CHECK(dim.size() == 0, "sum_csr_out currently only supports full reductions. Got dim ", dim, " instead.");
-  TORCH_INTERNAL_ASSERT(result.layout() == c10::kStrided, "Expected result to have strided layout.");
-  result.copy_(self.values().sum());
-  return result;
-}
-
 Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
   return at::sum(self, IntArrayRef{}, false, dtype);
 }
