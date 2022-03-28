@@ -11,7 +11,8 @@ def define_targets(rules):
 
     rules.py_binary(
         name = "gen",
-        srcs = [":codegen"],
+        srcs = [],
+        deps = [":codegen"],
         main = "gen.py",
         visibility = ["//visibility:public"],
     )
