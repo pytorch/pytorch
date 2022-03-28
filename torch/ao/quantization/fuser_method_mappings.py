@@ -5,7 +5,8 @@ from typing import Union, Callable, Tuple, Dict, Optional, Type
 from torch.ao.quantization.utils import Pattern
 
 from torch.ao.quantization.utils import get_combined_dict
-
+from torch.ao.quantization.utils import MatchAllNode
+import itertools
 
 def fuse_conv_bn(is_qat, conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -226,6 +227,37 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.BatchNorm3d, nn.ConvTranspose3d): reverse2(fuse_convtranspose_bn),
 }
 
+def get_valid_patterns(op_pattern):
+    """
+    Returns a list of valid patterns generated from the op_pattern,
+    since MatchAllNode can match all types of nodes,
+    e.g. pattern (torch.nn.Conv2d, torch.add) should also be able to match keys like
+    (MatchAllNode, torch.add) and (torch.nn.Conv2d, MatchAllNode)
+
+    Example Input:
+    (torch.add, (torch.nn.ReLU, torch.nn.Conv2d))
+
+    Example Output:
+    [(torch.add, (torch.nn.ReLU, torch.nn.Conv2d)),
+     (torch.add, (torch.nn.ReLU, MatchAllNode)),
+     (torch.add, (MatchAllNode, torch.nn.Conv2d)),
+     (torch.add, (MatchAllNode, MatchAllNode)),
+     (MatchAllNode, (torch.nn.ReLU, torch.nn.Conv2d)),
+     (MatchAllNode, (torch.nn.ReLU, MatchAllNode)),
+     (MatchAllNode, (MatchAllNode, torch.nn.Conv2d)),
+     (MatchAllNode, (MatchAllNode, MatchAllNode)),
+    ]
+    """
+    result = []
+    if isinstance(op_pattern, (tuple, list)):
+        sub_combs = []
+        for sub_pattern in op_pattern:
+            sub_combs.append(get_valid_patterns(sub_pattern))
+        result = list(itertools.product(*sub_combs))
+    else:
+        result = [op_pattern, MatchAllNode]
+    return result
+
 def get_fuser_method_new(
         op_pattern: Pattern,
         fuser_method_mapping: Optional[Dict[Pattern, Union[nn.Sequential, Callable]]] = None):
@@ -235,6 +267,11 @@ def get_fuser_method_new(
     if fuser_method_mapping is None:
         fuser_method_mapping = DEFAULT_PATTERN_TO_FUSER_METHOD
 
-    fuser_method = fuser_method_mapping.get(op_pattern, None)
+    op_patterns = get_valid_patterns(op_pattern)
+    fuser_method = None
+    for op_pattern in op_patterns:
+        fuser_method = fuser_method_mapping.get(op_pattern, None)
+        if fuser_method is not None:
+            break
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_pattern)
     return fuser_method

@@ -1,8 +1,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 
 namespace torch {
 namespace jit {

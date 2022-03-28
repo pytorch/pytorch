@@ -1,6 +1,8 @@
-# Owner(s): ["high priority"]
+# Owner(s): ["module: __torch_dispatch__"]
 
+import tempfile
 import torch
+from copy import deepcopy
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
@@ -29,11 +31,11 @@ class TestPythonDispatch(TestCase):
             # self.assertEqual(saved_x._version, x._version)
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten.mul($0, $0)
+$1 = torch._ops.aten.mul.Tensor($0, $0)
 $2 = input('grad_y')
-$3 = torch._ops.aten.mul($2, $0)
-$4 = torch._ops.aten.mul($2, $0)
-$5 = torch._ops.aten.add($4, $3)''')
+$3 = torch._ops.aten.mul.Tensor($2, $0)
+$4 = torch._ops.aten.mul.Tensor($2, $0)
+$5 = torch._ops.aten.add.Tensor($4, $3)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -49,7 +51,7 @@ $5 = torch._ops.aten.add($4, $3)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.abs($0, out=$1)''')
+$2 = torch._ops.aten.abs.out($0, out=$1)''')
 
 
     def test_kwarg_only(self) -> None:
@@ -72,11 +74,11 @@ $2 = torch._ops.aten.abs($0, out=$1)''')
 $0 = input('x')
 $1 = input('y')
 $2 = input('z')
-$3 = torch._ops.aten.addmv($0, $1, $2)
-$4 = torch._ops.aten.addmv($0, $1, $2)
-$5 = torch._ops.aten.addmv($0, $1, $2, beta=2)
-$6 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
-$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+$3 = torch._ops.aten.addmv.default($0, $1, $2)
+$4 = torch._ops.aten.addmv.default($0, $1, $2)
+$5 = torch._ops.aten.addmv.default($0, $1, $2, beta=2)
+$6 = torch._ops.aten.addmv.default($0, $1, $2, alpha=2)
+$7 = torch._ops.aten.addmv.default($0, $1, $2, beta=2, alpha=2)''')
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
@@ -94,10 +96,10 @@ $7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.kl_div($0, $1)
-$3 = torch._ops.aten.kl_div($0, $1, 2)
-$4 = torch._ops.aten.kl_div($0, $1, log_target=True)
-$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
+$2 = torch._ops.aten.kl_div.default($0, $1)
+$3 = torch._ops.aten.kl_div.default($0, $1, 2)
+$4 = torch._ops.aten.kl_div.default($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div.default($0, $1, 2, log_target=True)''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
@@ -109,7 +111,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                    if func == torch.ops.aten.split:
+                    if func.overloadpacket == torch.ops.aten.split:
                         with no_dispatch():
                             return list_type(torch.split(*args))
                     else:
@@ -132,7 +134,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
                 return "arf"
 
         # Wobbles depending on NDEBUG mode of pybind11
-        self.assertRaisesRegexp(
+        self.assertRaisesRegex(
             RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
         self.assertRaisesRegexp(
@@ -150,8 +152,8 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
         # would be bad if calling .detach() once emits 3+ detaches).
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
-$1 = torch._ops.aten.detach($0)
-$2 = torch._ops.aten.detach($1)''')
+$1 = torch._ops.aten.detach.default($0)
+$2 = torch._ops.aten.detach.default($1)''')
 
     def test_metadata_change_not_allowed(self) -> None:
         x = LoggingTensor(torch.ones(1))
@@ -262,11 +264,11 @@ $2 = torch._ops.aten.detach($1)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('x.grad')
-$2 = torch._ops.aten.pow($0, 2)
+$2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
-$4 = torch._ops.aten.mul($3, tensor(2))
-$5 = torch._ops.aten.mul($4, $0)
-$6 = torch._ops.aten.add_($1, $5)''')
+$4 = torch._ops.aten.mul.Tensor($3, tensor(2))
+$5 = torch._ops.aten.mul.Tensor($4, $0)
+$6 = torch._ops.aten.add_.Tensor($1, $5)''')
 
     def test_subclass_creation(self):
         # Make sure these statements runs without error
@@ -338,6 +340,83 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertEqual(y.stride(), x.stride())
         self.assertEqual(y.storage_offset(), x.storage_offset())
 
+    def test_wrapper_subclass_serializes(self) -> None:
+        with tempfile.TemporaryFile() as f:
+            x = LoggingTensor(torch.randn(3))
+            torch.save(x, f)
+            f.seek(0)
+            x_loaded = torch.load(f)
+            self.assertTrue(type(x_loaded) is type(x))
+            self.assertEqual(x.elem, x_loaded.elem)
+            self.assertFalse(x is x_loaded)
+
+    def test_deepcopy_wrapper_subclass(self) -> None:
+        x = LoggingTensor(torch.randn(3))
+        x_copy = deepcopy(x)
+        self.assertTrue(type(x_copy) is type(x))
+        self.assertEqual(x.elem, x_copy.elem)
+        self.assertFalse(x is x_copy)
+
+    def test_deepcopy_wrapper_subclass_with_clone_returning_different_type(self) -> None:
+
+        class MyWrapperTensor(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad,
+                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func.overloadpacket.__name__ == "clone":
+                    # Return a plain tensor from clone().
+                    return args[0].elem.clone()
+                raise RuntimeError("NYI")
+
+            # NB: The default Tensor.__torch_function__ implementation called for deepcopy
+            # disables __torch_function__ by the time we get to clone(), so there is no need to
+            # explicitly disable __torch_function__ for this subclass.
+
+        x = MyWrapperTensor(torch.randn(3))
+        with self.assertRaisesRegex(RuntimeError,
+                                    "for which cloning returns another instance of the same subclass"):
+            x_copy = deepcopy(x)
+
+    def test_deepcopy_non_wrapper_subclass(self) -> None:
+
+        # Ensure correct error is thrown for common error cases.
+        class SubTensorError1(torch.Tensor):
+            # Default implementation of new_empty() returns a plain tensor.
+            pass
+
+        class SubTensorError2(torch.Tensor):
+            # new_empty() incorrectly returns a different type (i.e. a plain tensor).
+            def new_empty(self, shape):
+                return torch.Tensor(shape)
+
+        for error_cls in [SubTensorError1, SubTensorError2]:
+            x = error_cls(3)
+            with self.assertRaisesRegex(RuntimeError,
+                                        "for which that function returns another instance of the same subclass"):
+                x_copy = deepcopy(x)
+
+        # Ensure a correctly implemented new_empty() causes deepcopy() to work.
+        class SubTensorSuccess(torch.Tensor):
+            def new_empty(self, shape):
+                return type(self)(shape)
+
+        x = SubTensorSuccess(3)
+        x_copy = deepcopy(x)
+        self.assertIs(type(x_copy), type(x))
+
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []
 
@@ -365,7 +444,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
         idxs = (MyTensor(torch.tensor(0)),)
         v = torch.randn(1)
         res = x.index_put_(idxs, v)
-        self.assertEqual(called_funcs, [torch.ops.aten.index_put_])
+        self.assertEqual(called_funcs, [torch.ops.aten.index_put_.default])
 
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
@@ -515,7 +594,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 # It prevents infinite recursion.
                 with no_dispatch():
                     rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-                if func.__name__ == "add":
+                if func.overloadpacket.__name__ == "add":
                     return None
                 else:
                     return rs
@@ -561,6 +640,117 @@ $6 = torch._ops.aten.add_($1, $5)''')
 
         self.assertIsNone(t.grad)
         self.assertIsNotNone(t.elem.grad)
+
+    def test_dispatch_super_call(self):
+        called = []
+
+        class SubTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem)
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        x = torch.randn(2)
+        y = torch.randn(2)
+        self.assertEqual(SubTensor(x) + SubTensor(y), x + y)
+        self.assertEqual(called, [torch.ops.aten.add.Tensor])
+
+    def test_dispatch_super_call_list_arg(self):
+        called = []
+
+        class SubTensorWithListArg(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem)
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                return super().__torch_dispatch__(func, types, list(args), kwargs)
+
+        x = torch.randn(2)
+        self.assertEqual(SubTensorWithListArg(x).neg(), x.neg())
+        self.assertEqual(called, [torch.ops.aten.neg.default])
+
+    def test_dispatch_super_dont_autograd(self):
+        called = []
+
+        class SubTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called.append(func)
+                # This argument still requires grad because it was passed
+                # through directly...
+                self.assertTrue(args[0].requires_grad)
+                r = super().__torch_dispatch__(func, types, args, kwargs)
+                # But the output better not require grad, because that means
+                # you did autograd again in torch dispatch (oops)
+                self.assertFalse(r.requires_grad)
+                return r
+
+        x = SubTensor(torch.randn(2, requires_grad=True))
+        x.neg()
+        self.assertEqual(called, [torch.ops.aten.neg.default])
+
+    def test_construct_int_tensor(self):
+        class SubTensor(torch.Tensor):
+            pass
+        # should not fail
+        SubTensor(torch.zeros(2, dtype=torch.int))
+
+    def test_multiple_ops_subclass(self):
+        # This is a Direct Subclass, don't do that!
+        class MySubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                r = torch.Tensor._make_subclass(cls, elem)
+                return r
+
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        x = MySubclass(torch.rand(2, 2, dtype=torch.complex64))
+        y = x.conj()
+        # Details of the bug that this tests for:
+        # Here, y dispatch keys are: {PythonTLSSnapshot, AutogradCPU, Conjugate, Python, CPU}
+        # There are a few calls to the dispatcher that are going to happen here:
+        #  - call_exp: User calling exp on y
+        #    - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #    - AutogradCPU: no input requires grad, so does nothing and redispatch
+        #    - Conjugate: no special implementation for exp: use the fallback that
+        #                 first clone the Tensor (to materialize the conj) then redispatch
+        #      - call_clone: conjugate fallback calling clone on y
+        #        - PythonTLSSnapshot: records the TLS on entry and redispatch
+        #        - (AutogradCPU: skipped as autograd added itself to the exclude set above)
+        #        - Conjugate: special implementation for clone: just skip this key
+        #        - Python: Reset the TLS based on the snapshot above and call the user implementation (this
+        #                  actually calls into the dispatcher again but since we disable both our keys
+        #                  before, not detailed here)
+        #        - exit Python: restore the TLS and exit
+        #        - exit Conjugate: nothing was inplace so just exit
+        #        - exit PythonTLSSnapshot: done with this call, reset the saved TLS to empty
+        #    - Python: Reset the TLS again based on the snapshot. <- this used to fail
+        #    - More steps....
+        y.exp()
+
 
 
 if __name__ == '__main__':

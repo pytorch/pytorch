@@ -129,22 +129,27 @@ void PyTorchStreamReader::init() {
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
   version_ = caffe2::stoull(version);
-  AT_ASSERTM(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      version_ >= kMinSupportedFileFormatVersion,
-      "Attempted to read a PyTorch file with version ",
-      c10::to_string(version_),
-      ", but the minimum supported version for reading is ",
-      c10::to_string(kMinSupportedFileFormatVersion),
-      ". Your PyTorch script module file is too old. Please re-export it again.");
-  AT_ASSERTM(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      version_ <= kMaxSupportedFileFormatVersion,
-      "Attempted to read a PyTorch file with version ",
-      version_,
-      ", but the maximum supported version for reading is ",
-      kMaxSupportedFileFormatVersion,
-      ". Your PyTorch installation may be too old.");
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  if (version_ < kMinSupportedFileFormatVersion) {
+    CAFFE_THROW(
+        "Attempted to read a PyTorch file with version ",
+        c10::to_string(version_),
+        ", but the minimum supported version for reading is ",
+        c10::to_string(kMinSupportedFileFormatVersion),
+        ". Your PyTorch script module file is too old. Please regenerate it",
+        " with latest version of PyTorch to mitigate this issue.");
+  }
+
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  if (version_ > kMaxSupportedFileFormatVersion) {
+    CAFFE_THROW(
+        "Attempted to read a PyTorch file with version ",
+        version_,
+        ", but the maximum supported version for reading is ",
+        kMaxSupportedFileFormatVersion,
+        ". The version of your PyTorch installation may be too old, ",
+        "please upgrade PyTorch to latest version to mitigate this issue.");
+  }
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {

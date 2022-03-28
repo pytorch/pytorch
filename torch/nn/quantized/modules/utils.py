@@ -4,7 +4,7 @@ from itertools import repeat
 import collections
 from torch.nn.modules.module import _addindent
 
-class ReferenceableQuantizedModule(torch.nn.Module, metaclass=abc.ABCMeta):
+class WeightedQuantizedModule(torch.nn.Module, metaclass=abc.ABCMeta):
     """Wrapper for quantized modules than can be lowered from reference modules."""
     @classmethod
     @abc.abstractmethod

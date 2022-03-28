@@ -137,6 +137,51 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
+TEST(FlatbufferTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  extra_files["mobile_info.json"] = "{\"key\": 23}";
+
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+#if defined ENABLE_FLATBUFFER
+  std::stringstream ss;
+  module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
+
+  loaded_extra_files["metadata.json"] = "";
+  auto mobile_module = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  // load it twice using the same stream
+  auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+#else
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(*module, options);
+  auto buff = save_mobile_module_to_bytes(bc, extra_files);
+
+  loaded_extra_files["metadata.json"] = "";
+  auto* flatbuffer_module =
+      mobile::serialization::GetMutableModule(buff.data());
+
+  parseExtraFiles(flatbuffer_module, loaded_extra_files);
+#endif
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+}
+
 TEST(FlatbufferTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
@@ -1101,6 +1146,109 @@ TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
     ASSERT_EQ(
         func2.get_code().operator_input_sizes_.size(),
         func2.get_code().operators_.size());
+  }
+}
+
+Module jitModuleFromBuffer(void* data) {
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
+  FlatbufferLoader loader;
+  mobile::Module mobilem = loader.parseModule(flatbuffer_module);
+  ExtraFilesMap files;
+  std::vector<IValue> constants;
+  loader.extractJitSourceAndConstants(&files, &constants);
+  return jitModuleFromSourceAndConstants(
+      mobilem._ivalue(), files, constants, 8);
+}
+
+TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  auto data = save_jit_module_to_bytes(m);
+  Module m2 = jitModuleFromBuffer(data.data());
+  auto res = m2.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+
+  mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+  res = m3.forward(inputs);
+  resd = res.toTensor();
+  refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+}
+
+TEST(TestSourceFlatbuffer, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+  auto data = save_jit_module_to_bytes(m);
+  Module m2 = jitModuleFromBuffer(data.data());
+  bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
+  AT_ASSERT(mobile_optimized);
+  mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+  mobile_optimized = m3.attr("mobile_optimized", false).toBool();
+  AT_ASSERT(mobile_optimized);
+}
+
+TEST(TestSourceFlatbuffer,
+     MethodInvocation) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
+
+    const int fortyTwo = 42; // (keep linter happy)
+    auto minput = fortyTwo * torch::ones({});
+    auto ref = m.run_method("test_func", minput);
+
+    auto data = save_jit_module_to_bytes(m);
+    Module m2 = jitModuleFromBuffer(data.data());
+    const auto& test_func = m2.get_method("test_func");
+    IValue res;
+    for (int i = 0; i < 3; ++i) {
+      res = test_func({minput});
+    }
+    auto resd = res.toTensor().item<float>();
+    auto refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
+
+    mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+    const auto& test_func3 = m3.get_method("test_func");
+    for (int i = 0; i < 3; ++i) {
+      res = test_func3({minput});
+    }
+    resd = res.toTensor().item<float>();
+    refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
   }
 }
 
