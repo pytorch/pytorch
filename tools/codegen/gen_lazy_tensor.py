@@ -120,7 +120,12 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
                         tensor_class: str = default_args.tensor_class,
                         tensor_class_hdr: str = default_args.tensor_class_hdr,
                         shape_inference_hdr: str = default_args.shape_inference_hdr,
-                        lazy_ir_cls: Type[LazyIR] = default_args.lazy_ir_cls) -> None:
+                        lazy_ir_cls: Type[LazyIR] = default_args.lazy_ir_cls,
+                        # build_in_tree is true for TS backend and affects include paths
+                        build_in_tree: bool = False,
+                        # per_operator_headers changes whether ATen/Functions.h or individual operator headers are used
+                        # it must match how ATen was built
+                        per_operator_headers: bool = False) -> None:
 
     template_dir = os.path.join(aten_path, "templates")
 
@@ -130,7 +135,8 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(aten_path, 'native/native_functions.yaml')
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(aten_path, 'native/tags.yaml')
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
 
@@ -188,7 +194,7 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
 
     if impl_path is not None:
         error_on_missing_kernels(native_functions, backend_indices, backend_key,
-                                 autograd_key, impl_path, full_codegen)
+                                 autograd_key, class_name, impl_path, full_codegen)
 
 
     """ Validate Shape Inference Definitions
@@ -223,8 +229,10 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
 
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
-        gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                     backend_key, dispatch_key, selector)
+        gen_dispatcher_registrations(fm, output_dir, class_name, cpp_namespace, backend_indices, grouped_native_functions,
+                                     backend_key, dispatch_key, selector,
+                                     build_in_tree=build_in_tree,
+                                     per_operator_headers=per_operator_headers)
 
     # Generate native function impls that build IR nodes
     ns_helper = NamespaceHelper(cpp_namespace)
@@ -235,12 +243,13 @@ def run_gen_lazy_tensor(aten_path: str, source_yaml: str, output_dir: str,
             "ATen/Functions.h",
             "ATen/MetaFunctions.h",
             "ATen/Operators.h",
+            "ATen/native/CPUFallback.h",
             "torch/csrc/lazy/core/lazy_graph_executor.h",
             "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
-            "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
-            f"{output_dir}/{backend_key}LazyIr.h",
+            f"{output_dir}/LazyIr.h",
+            "torch/csrc/lazy/ts_backend/ts_eager_fallback.h",
         ]],
         'native_functions_include': '',
         'namespace_prologue': ns_helper.prologue,
