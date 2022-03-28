@@ -735,7 +735,7 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-conda install ccache -f conda-forge
+conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
