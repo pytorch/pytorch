@@ -1031,9 +1031,6 @@ returned tensor will, by default, infer its datatype from the scalar values, be 
 CPU device, and not share its memory.
 
 .. seealso::
-    :func:`torch.as_tensor` creates a tensor that always shares memory if the input is a
-           tensor or a NumPy array, copying otherwise.
-
     :func:`torch.tensor` creates a tensor that always copies the data from the input object.
 
     :func:`torch.from_numpy` creates a tensor that always shares memory from NumPy arrays.
