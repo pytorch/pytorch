@@ -160,9 +160,9 @@ def is_py_special_function(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
+def gen(out: str, native_yaml_path: str, tags_yaml_path: str, deprecated_yaml_path: str, template_path: str) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
     native_functions = list(filter(should_generate_py_binding, native_functions))
 
     methods = load_signatures(native_functions, deprecated_yaml_path, method=True)
