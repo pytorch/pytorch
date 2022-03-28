@@ -130,7 +130,8 @@ class TestGenAutogradFunctions(unittest.TestCase):
 # to edit for use.
 DEFAULT_NATIVE_FUNCTION, _ = tools.codegen.model.NativeFunction.from_yaml(
     {'func': 'func() -> bool'},
-    loc=tools.codegen.model.Location(__file__, 1))
+    tools.codegen.model.Location(__file__, 1),
+    set())
 
 
 if __name__ == '__main__':
