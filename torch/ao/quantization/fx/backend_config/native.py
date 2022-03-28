@@ -18,9 +18,9 @@ _Conv2dMetadata = _ConvMetadata(torch.nn.Conv2d, nnqr.Conv2d, nnqat.Conv2d, nni.
 _Conv3dMetadata = _ConvMetadata(torch.nn.Conv3d, nnqr.Conv3d, nnqat.Conv3d, nni.ConvReLU3d,
                                 nniqat.ConvReLU3d, nniqat.ConvBn3d, nniqat.ConvBnReLU3d, F.conv3d)
 
-# ==================
-# |  DTYPE CONFIGS |
-# ==================
+# ===================
+# |  DTYPE CONFIGS  |
+# ===================
 
 # weighted op int8 dtype config
 # this is config for ops that has quantized weights, like linear, conv
@@ -51,9 +51,9 @@ default_op_fp16_dtype_config = {
     "output_dtype": torch.float16,
 }
 
-# =====================
-# |  OPERATOR CONFIGS |
-# =====================
+# ======================
+# |  OPERATOR CONFIGS  |
+# ======================
 
 def _get_default_op_backend_config(op, dtype_configs):
     return {
