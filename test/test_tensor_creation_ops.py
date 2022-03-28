@@ -4073,6 +4073,8 @@ class TestAsArray(TestCase):
             [0.0, True, False, 42],
             # With Complex
             [0.0, True, False, 42, 5j],
+            # With Range
+            range(5),
         ]
 
         for e in examples:
