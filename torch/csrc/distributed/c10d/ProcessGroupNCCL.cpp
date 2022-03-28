@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/UCCForNCCL.hpp>
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -597,6 +598,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream;
+
+#ifdef USE_NCCL_WITH_UCC
+  static std::once_flag initialize_ucc_lib_flag;
+  std::call_once(initialize_ucc_lib_flag, [&]{
+    uccLib_ = loadTorchUCC();
+    if (uccLib_ != nullptr) {
+      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    }
+  });
+#endif
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -2416,6 +2427,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base");
 }
+
+#ifdef USE_NCCL_WITH_UCC
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
+#endif
 
 } // namespace c10d
 
