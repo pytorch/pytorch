@@ -36,7 +36,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       mergeCommit {
         oid
       }
-      commits(first: 100) {
+      commits_with_authors:commits(first: 100) {
         nodes {
           commit {
             author {
@@ -47,6 +47,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
               name
             }
             oid
+          }
+        }
+        totalCount
+      }
+      commits(last: 1) {
+        nodes {
+          commit {
             checkSuites(first: 50) {
               nodes {
                 app {
@@ -75,9 +82,9 @@ query ($owner: String!, $name: String!, $number: Int!) {
                 hasNextPage
               }
             }
+            oid
           }
         }
-        totalCount
       }
       changedFiles
       files(first: 100) {
@@ -279,6 +286,7 @@ def parse_args() -> Any:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--comment-id", type=int)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -364,20 +372,20 @@ class GitHubPR:
         return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
 
     def get_commit_count(self) -> int:
-        return int(self.info["commits"]["totalCount"])
+        return int(self.info["commits_with_authors"]["totalCount"])
 
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
     def get_committer_login(self, num: int = 0) -> str:
-        user = self.info["commits"]["nodes"][num]["commit"]["author"]["user"]
+        user = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]["user"]
         # If author is not github user, user node will be null
         if user is None:
             return ""
         return cast(str, user["login"])
 
     def get_committer_author(self, num: int = 0) -> str:
-        node = self.info["commits"]["nodes"][num]["commit"]["author"]
+        node = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]
         return f"{node['name']} <{node['email']}>"
 
 
@@ -613,12 +621,12 @@ def find_matching_merge_rule(pr: GitHubPR, repo: GitRepo, force: bool = False) -
     raise RuntimeError(f"PR {pr.pr_num} does not match merge rules")
 
 
-def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False) -> None:
+def try_revert(repo: GitRepo, pr: GitHubPR, *, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
     def post_comment(msg: str) -> None:
         gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
-    comment = pr.get_last_comment()
+    comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
     if not RE_REVERT_CMD.match(comment.body_text):
         raise RuntimeError(f"Comment {comment.body_text} does not seem to be a valid revert command")
     if comment.editor_login is not None:
@@ -665,7 +673,7 @@ def main() -> None:
     pr = GitHubPR(org, project, args.pr_num)
     if args.revert:
         try:
-            try_revert(repo, pr, dry_run=args.dry_run)
+            try_revert(repo, pr, dry_run=args.dry_run, comment_id=args.comment_id)
         except Exception as e:
             msg = f"Reverting PR {args.pr_num} failed due to {e}"
             run_url = os.getenv("GH_RUN_URL")

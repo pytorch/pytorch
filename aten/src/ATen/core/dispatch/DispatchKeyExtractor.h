@@ -156,14 +156,24 @@ public:
       }
     });
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    if (requiresBitsetPerBackend_) {
+      auto backend_idx = ks.getBackendIndex();
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
+    } else {
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    }
   }
 
   template<class... Args>
   DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
-    return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    if (requiresBitsetPerBackend_) {
+      auto backend_idx = ks.getBackendIndex();
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
+    } else {
+      return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
+    }
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
@@ -193,7 +203,12 @@ private:
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
   : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
-  , nonFallthroughKeys_(DispatchKeySet::FULL) {}
+  , nonFallthroughKeys_(DispatchKeySet::FULL)
+  , requiresBitsetPerBackend_(false) {
+    for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
+      nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
+    }
+  }
 
   // this is a bitset that has ones for each argument index which has to be
   // considered for dispatch. This avoids having to iterate over the stack
@@ -205,8 +220,14 @@ private:
   // fallthrough
   c10::utils::bitset dispatch_arg_indices_reverse_;
 
-  // Set of keys for which the operator does NOT have fallthrough kernel.
+  // Set of functionality keys for which the operator does NOT have fallthrough kernel.
   DispatchKeySet nonFallthroughKeys_;
+  // Set of functionality keys for which the operator does NOT have fallthrough kernel, defined PER BACKEND.
+  // This is only needed if we know that the operator has a different set of fallthroughs defined for some backends.
+  std::array<DispatchKeySet, num_backends> nonFallthroughKeysPerBackend_;
+  // Flag to tell us if we can use the single set of nonFallthroughKeys_ (fast path),
+  // or if we need to fall back to the slower path and check nonFallthroughKeysPerBackend_
+  bool requiresBitsetPerBackend_;
 };
 
 }
