@@ -69,7 +69,7 @@ jobs:
 
       - name: printt testing thing
         env:
-          AAAAA: ${{ github.event }}
+          AAAAA: ${{ toJson(github.event) }}
           BBBBB: ${{ github.event.pull_request.body }}
           CCCCC: ${{ github.event.head_commit.message }}
         run: |
