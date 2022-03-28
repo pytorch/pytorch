@@ -3,6 +3,7 @@
 import torch
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
+from typing import Dict
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -213,22 +214,24 @@ class TestIfHoisting(JitTestCase):
         self.assertEqual(fn(False, t2), fn_script(False, t2))
 
     def test_hoist_mutation_2(self):
-        def fn(cond: bool, x, y):
+        def fn(x, y, cond: bool, d: Dict[str, torch.Tensor]):
             if cond:
-                x.sqrt_()
-                x = x + y
-                x.relu_()
+                m = x.relu()
+                f1 = torch.rand((2, 2))
+                d["test"] = f1
+                z = d["test"]
             else:
-                x.relu_()
-                x = x + y
-                x.sqrt_()
-            z = x * 2
-            return z
+                m = y.gelu()
+                f2 = torch.rand((3, 2))
+                d["test"] = f2
+                z = d["test"]
+            return m, z
 
         fn_s = torch.jit.script(fn)
         op_graph = fn_s.graph
         self.run_pass("common_expression_hoisting", op_graph)
         self.run_pass("dce", op_graph)
-        FileCheck().check_count("aten::relu_", 2, exactly=True).run(op_graph)
-        FileCheck().check_count("aten::sqrt_", 2, exactly=True).run(op_graph)
-        FileCheck().check_count("aten::add", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::__getitem__", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::_set_item", 2, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::relu", 1, exactly=True).run(op_graph)
+        FileCheck().check_count("aten::gelu", 1, exactly=True).run(op_graph)
