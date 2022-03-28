@@ -1638,7 +1638,9 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.sum(), a.values().sum())
             if dtype in get_all_fp_dtypes():
                 a.requires_grad_(True)
-                with self.assertRaisesRegex(RuntimeError, "Function SumBackward0 returned an invalid gradient at index 0 - expected layout SparseCsr but got Strided"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            ("Function SumBackward0 returned an invalid gradient at " +
+                                             "index 0 - expected layout SparseCsr but got Strided")):
                     a.sum().backward()
         for shape, index_dtype in itertools.product(
                 [(10, 5), (10, 10)],
