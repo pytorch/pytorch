@@ -2059,16 +2059,17 @@ class FullyShardedDataParallel(nn.Module):
         this method as ``optim_input``.
 
         .. note:: To check that the ``FSDP`` wrapping scheme is compatible, the
-        returned state dict includes an additional key
-        ``"unflat_to_flat_param_ids"`` to validate passed-in state dicts in
-        :meth:`shard_full_optim_state_dict`. Hence, the dict has three keys in
-        total: ``"state"``, ``"param_groups"``, and
-        ``"unflat_to_flat_param_ids"``.
+            returned state dict includes an additional key
+            ``"unflat_to_flat_param_ids"`` to validate passed-in state dicts in
+            :meth:`shard_full_optim_state_dict`. Hence, the dict has three keys
+            in total: ``"state"``, ``"param_groups"``, and
+            ``"unflat_to_flat_param_ids"``.
 
         .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
-        contained in the optimizer state dict are not cloned, so there may be
-        aliasing surprises. For best practices, consider saving the returned
-        optimizer state dict immediately, e.g. using ``torch.save()``.
+            contained in the optimizer state dict are not cloned, so there may
+            be aliasing surprises. For best practices, consider saving the
+            returned optimizer state dict immediately, e.g. using
+            ``torch.save()``.
 
         Args:
             model (torch.nn.Module): Root module (which may or may not be a
@@ -2215,7 +2216,8 @@ class FullyShardedDataParallel(nn.Module):
         this method as ``optim_input``.
 
         .. note:: In general, this does not support changing the ``FSDP``
-        wrapping scheme between save and load time and may error in that case.
+            wrapping scheme between save and load time and may error in that
+            case.
 
         Args:
             full_optim_state_dict (Dict[str, Any]): Optimizer state dict
