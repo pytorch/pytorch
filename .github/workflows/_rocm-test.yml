@@ -162,4 +162,4 @@ jobs:
         uses: ./.github/actions/teardown-linux
         if: always()
         with:
-          skip-wait-ssh: false
+          skip-wait-ssh: true
