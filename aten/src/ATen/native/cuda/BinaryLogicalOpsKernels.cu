@@ -36,8 +36,8 @@ void logical_and_kernel_cuda(TensorIterator& iter) {
     });
 #endif
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, ScalarType::BFloat16,
-                                           iter.common_dtype(), "logical_and_cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, ScalarType::BFloat16,
+                               iter.common_dtype(), "logical_and_cuda", [&]() {
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> bool {
         return a && b;
       });
