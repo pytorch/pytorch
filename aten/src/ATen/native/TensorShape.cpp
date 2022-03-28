@@ -1669,11 +1669,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       //const auto dim_indices_counts = dim_indices_counts_per_threads.sum(/*dim=*/0);
       const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
 
-      //auto dim_indices_counts = at::zeros({size}, index.options());
-      //get_counts(dim_indices_counts, dim_indices, /*bins=*/size,
-      //    // When self is coalesced and dim == 0, indices[dim] is sorted.
-      //    /*is_sorted=*/self.is_coalesced() && dim == 0);
-
       auto index_counts = at::zeros({size}, index.options());
       const auto index_sorted = [&get_counts, &index_counts](
           const Tensor& index, int64_t size) -> Tensor {
