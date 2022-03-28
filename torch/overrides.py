@@ -1072,6 +1072,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.retains_grad.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
         Tensor.is_mlc.__get__: lambda self: -1,
+        Tensor.is_nested.__get__: lambda self: -1,
         Tensor.is_ort.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
         Tensor.is_quantized.__get__: lambda self: -1,
@@ -1172,6 +1173,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.resize: lambda self, *size: -1,
         Tensor.resize_: lambda self, size: -1,
         Tensor.resize_as: lambda self, other: -1,
+        Tensor.resize_as_sparse_: lambda self, other: -1,
         Tensor.retain_grad: lambda self: -1,
         Tensor.set_: lambda self, source=None, storage_offset=0, size=None, stride=None: -1,
         Tensor.select_scatter: lambda self, src, dim, index: -1,
@@ -1370,7 +1372,7 @@ def handle_torch_function(
     Example
     -------
     >>> def func(a):
-    ...     if type(a) is not torch.Tensor:  # This will make func dispatchable by __torch_function__
+    ...     if has_torch_function_unary(a):
     ...         return handle_torch_function(func, (a,), a)
     ...     return a + 0
     """

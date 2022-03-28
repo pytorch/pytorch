@@ -4,6 +4,7 @@
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
@@ -159,9 +160,10 @@ Tensor MakeStridedQTensorCPU(
       allocator->allocate(size_bytes),
       allocator,
       /* resizable = */ true);
+  constexpr auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
   auto tensor = detail::make_tensor<QTensorImpl>(
       storage,
-      at::DispatchKeySet(at::DispatchKey::QuantizedCPU),
+      quantized_cpu_ks,
       dtype,
       quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
@@ -470,6 +472,16 @@ int register_linear_params() {
                       std::move(weight), std::move(bias));
                 }
 #endif // USE_PYTORCH_QNNPACK
+#if AT_MKLDNN_ENABLED()
+                if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
+                  TORCH_CHECK(
+                      weight.scalar_type() == at::kQInt8,
+                      "ONEDNN only supports INT8 bit width currently. Got ",
+                      c10::toString(weight.scalar_type()));
+                  return PackedLinearWeightsOnednn::prepack(
+                      std::move(weight), std::move(bias));
+                }
+#endif // #if AT_MKLDNN_ENABLED()
                 TORCH_CHECK(false, "Unknown qengine");
               })
               .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
