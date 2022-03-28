@@ -1666,9 +1666,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       }();
 
-      //const auto dim_indices_counts = dim_indices_counts_per_threads.sum(/*dim=*/0);
-      const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
-
       auto index_counts = at::zeros({size}, index.options());
       const auto index_sorted = [&get_counts, &index_counts](
           const Tensor& index, int64_t size) -> Tensor {
@@ -1693,7 +1690,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       }(nneg_index, size);
 
       // find res_dim_indices
-      const auto res_dim_indices = [&dim_indices_counts, &index_sorted, index_len](void) -> Tensor {
+      const auto res_dim_indices = [&dim_indices_offset_counts_per_thread,
+            &index_sorted, index_len](void) -> Tensor {
+        const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
         const auto selected_dim_indices_counts = dim_indices_counts.index_select(0, index_sorted);
         const auto perm = at::arange(index_len, index_sorted.options());
         return at::repeat_interleave(perm, selected_dim_indices_counts);
@@ -1702,6 +1701,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       // find selected_dim_indices
       Tensor selected_dim_indices = at::empty_like(res_dim_indices);
       {
+        const auto dim_indices_counts = dim_indices_offset_counts_per_thread.select(0, -1);
         const auto intersection_counts = (dim_indices_counts * index_counts);
         const auto intersection_cumsum = intersection_counts.cumsum(/*dim=*/0);
         auto idx_curr_offset = at::zeros({size}, index_sorted.options());
