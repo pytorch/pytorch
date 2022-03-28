@@ -1,0 +1,5 @@
+# This yaml file contains all the possible tags that can be defined in `tags` in `native_functions.yaml`
+
+- tag: inplace_view
+  desc: |
+          This tag indicates if an operator *only* modifies the tensor metadata
