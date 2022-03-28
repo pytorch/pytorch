@@ -5,6 +5,7 @@
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/onednn_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <ATen/native/quantized/packed_params.h>
 
@@ -119,3 +120,17 @@ template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp
 template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
     3>::unpack();
 #endif // USE_PYTORCH_QNNPACK
+
+#if AT_MKLDNN_ENABLED()
+template <int kSpatialDim>
+std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
+    kSpatialDim>::unpack() {
+  return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+      orig_weight_, orig_bias_);
+}
+
+template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
+    2>::unpack();
+template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
+    3>::unpack();
+#endif // #if AT_MKLDNN_ENABLED()
