@@ -125,10 +125,9 @@ enum struct AllocatorBackend : uint8_t {
 };
 
 C10_CUDA_API AllocatorBackend allocatorBackend();
-C10_CUDA_API size_t maxSplitSize();
 
 // Size pretty-printer
-inline std::string format_size(uint64_t size);
+std::string format_size(uint64_t size);
 
 #define CUDA_ALLOCATOR_BACKEND_INTERFACE \
 C10_CUDA_API void* raw_alloc(size_t nbytes); \

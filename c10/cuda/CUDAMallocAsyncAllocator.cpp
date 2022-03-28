@@ -45,8 +45,21 @@ struct UsageStream {
   }
 };
 
+bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
+  return (lhs.stream == rhs.stream) && (lhs.device == rhs.device);
+}
+
+struct UsageStreamHash {
+  size_t operator()(const UsageStream& us) const noexcept {
+    return std::hash<void*>{}(us.stream) + size_t(us.device);
+  }
+};
+
 struct PtrUsage {
-  std::vector<UsageStream> usage_streams;
+  // recorded_streams holds side usage streams added by record_stream calls.
+  // In other words, it does NOT include the original creation stream.
+  ska::flat_hash_set<UsageStream, UsageStreamHash> recorded_streams;
+  UsageStream creation_stream;
   uint64_t size;
   bool captured;
   PtrUsage(uint64_t s, bool c) : size(s), captured(c) {}
@@ -128,16 +141,6 @@ std::vector<size_t> pytorch_memory_limits;
  * carefully about the CPU overhead of remembering and rejoining
  * all free streams during capture. Maybe it's not a big deal.
  */
-bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
-  return (lhs.stream == rhs.stream) && (lhs.device == rhs.device);
-}
-
-struct UsageStreamHash {
-  size_t operator()(const UsageStream& us) const noexcept {
-    return std::hash<void*>{}(us.stream) + size_t(us.device);
-  }
-};
-
 std::unordered_set<UsageStream, UsageStreamHash> capture_free_streams;
 bool capture_underway = false;
 
@@ -180,26 +183,36 @@ inline void lazy_init_device(int device) {
   }
 }
 
+inline void sync_raw(cudaStream_t dependency, cudaStream_t dependent) {
+  // CUDACachingAllocator.cpp uses raw cuda events, as do we.
+  cudaEvent_t event;
+  C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+  C10_CUDA_CHECK(cudaEventRecord(event, dependency));
+  C10_CUDA_CHECK(cudaStreamWaitEvent(dependent, event));
+  C10_CUDA_CHECK(cudaEventDestroy(event));
+}
+
 // Assumes the caller holds general_mutex
 inline void free_impl(PtrInfo::iterator& it) {
   // Possible micro-optimization: If we did a value-copy here, we could move
   // ptr_info.erase(it) up here and drop the lock immediately.
-  const auto& usage_streams = it->second.usage_streams;
+  const auto& recorded_streams = it->second.recorded_streams;
+  const auto& creation_stream = it->second.creation_stream;
 
   // If the usage stream is a null (default) stream,
   // cudaFreeAsync infers the device from the ambient context,
   // so we need to set the right ambient context.
-  CUDAGuard g(usage_streams[0].device);
+  CUDAGuard g(creation_stream.device);
 
-  if (usage_streams.size() == 1) {
+  if (recorded_streams.size() == 0) {
     // ptr was only used on one stream, which must have been
     // the original allocation stream.
     // Frees ptr in the original allocation stream.
-    C10_CUDA_CHECK(cudaFreeAsync(it->first, usage_streams[0].stream));
+    C10_CUDA_CHECK(cudaFreeAsync(it->first, creation_stream.stream));
 
     if (C10_UNLIKELY(capture_underway)) {
       // See Note [Avoid dangling free streams during CUDA graph capture]
-      capture_free_streams.insert(usage_streams[0]);
+      capture_free_streams.insert(creation_stream);
     }
   } else {
     // ptr was used on many streams. We don't know which was the most recent.
@@ -212,23 +225,21 @@ inline void free_impl(PtrInfo::iterator& it) {
 
     // Retrieves the dummy "unifier" stream from the device
     // on which the pointer was originally allocated.
-    auto dummy_unifying_free_stream = dummy_unifying_free_streams[usage_streams[0].device];
-    TORCH_INTERNAL_ASSERT(dummy_unifying_free_stream.device == usage_streams[0].device);
+    auto dummy_unifying_free_stream = dummy_unifying_free_streams[creation_stream.device];
+    TORCH_INTERNAL_ASSERT(dummy_unifying_free_stream.device == creation_stream.device);
+
+    // we're already on creation_stream.device, no need to re-guard
+    sync_raw(creation_stream.stream, dummy_unifying_free_stream.stream);
 
     // The number of usage streams is typically small (low single digits)
-    for (const auto& usage_stream : usage_streams) {
+    for (const auto& recorded_stream : recorded_streams) {
       // Logic here accommodates the chance some of the usage streams were on other devices,
       // which is possible if some usage kernels accessed the memory via p2p.
 
       // cudaEventRecord requires that the input event and stream are on the same device.
-      CUDAGuard g_usage(usage_stream.device);
+      CUDAGuard g_usage(recorded_stream.device);
 
-      // CUDACachingAllocator.cpp uses raw cuda events, as do we.
-      cudaEvent_t event;
-      C10_CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
-      C10_CUDA_CHECK(cudaEventRecord(event, usage_stream.stream));
-      C10_CUDA_CHECK(cudaStreamWaitEvent(dummy_unifying_free_stream.stream, event));
-      C10_CUDA_CHECK(cudaEventDestroy(event));
+      sync_raw(recorded_stream.stream, dummy_unifying_free_stream.stream);
     }
 
     // Frees ptr in the dummy "unifier" stream.
@@ -240,10 +251,10 @@ inline void free_impl(PtrInfo::iterator& it) {
     // In theory, we could remove the need for the driver to do this tracking by e.g. replacing
     // cudaStreamWaitEvent(dummy_unifying_free_stream.stream, event);
     // with
-    // cudaStreamWaitEvent(usage_streams[0].stream, event);
-    // then cudaFreeAsyncing straight back into usage_streams[0];
-    // but this forces a potentially false dependency of usage_streams[0]
-    // on all the other usage_streams.
+    // cudaStreamWaitEvent(creation_stream.stream, event);
+    // then cudaFreeAsyncing straight back into creation_stream.stream,
+    // but this forces a potentially false dependency of creation_stream.stream
+    // on all the recorded_streams.
 
     if (C10_UNLIKELY(capture_underway)) {
       // See Note [Avoid dangling free streams during CUDA graph capture]
@@ -252,7 +263,7 @@ inline void free_impl(PtrInfo::iterator& it) {
     }
   }
 
-  pytorch_used_bytes[usage_streams[0].device] -= it->second.size;
+  pytorch_used_bytes[creation_stream.device] -= it->second.size;
 
   ptr_info.erase(it);
 }
@@ -263,8 +274,6 @@ void free(void* ptr) {
   auto it = ptr_info.find(ptr);
   TORCH_INTERNAL_ASSERT(it != ptr_info.end(),
                         "ptr not found in ptr_info");
-  TORCH_INTERNAL_ASSERT(it->second.usage_streams.size() != 0,
-                        "ptr's stream uses vector is empty");
 
   if (C10_UNLIKELY(capture_underway)) {
     if (!it->second.captured) {
@@ -354,7 +363,7 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
                         "address returned by cudaMallocAsync already exists "
                         "in ptr_info");
 
-  inserted.first->second.usage_streams.emplace_back(stream, device);
+  inserted.first->second.creation_stream = {stream, device};
 
   pytorch_used_bytes[device] += size;
 }
@@ -394,7 +403,7 @@ Allocator* get(void) {
 // just set up for later calls to init per-device pools based
 // on the current device each later call sees.
 void init(int dev_count) {
-  static bool called = [] {;
+  static bool called = [](int dev_count) {;
     // Are there external guarantees init will be called before
     // any of the allocator's other functions?
     // std::lock_guard<std::mutex> lk(general_mutex);
@@ -404,7 +413,7 @@ void init(int dev_count) {
     pytorch_used_bytes.resize(dev_count);
     pytorch_memory_limits.resize(dev_count);
     return true;
-  }();
+  }(dev_count);
 }
 
 static inline void assertValidDevice(int device) {
@@ -532,11 +541,14 @@ void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) {
   auto it = ptr_info.find(ptr.get());
   TORCH_INTERNAL_ASSERT(it != ptr_info.end(),
                         "ptr not found in ptr_info");
-  TORCH_INTERNAL_ASSERT(it->second.usage_streams.size() != 0,
-                        "ptr's stream uses vector is empty");
 
-  it->second.usage_streams.emplace_back(stream.stream(),
-                                        stream.device_index());
+  UsageStream to_record{stream.stream(), stream.device_index()};
+  if (to_record == it->second.creation_stream) {
+    TORCH_WARN("Called record_stream on tensor whose original creation stream "
+               "matches the recorded stream. This is unnecessary and has no effect.");
+  } else {
+    it->second.recorded_streams.insert(to_record);
+  }
 }
 
 std::mutex* getFreeMutex() {
@@ -700,8 +712,6 @@ void notifyCaptureEnded(int device, CaptureId_t graph_id) {
     auto it = ptr_info.find(ptr);
     TORCH_INTERNAL_ASSERT(it != ptr_info.end(),
                           "ptr not found in ptr_info");
-    TORCH_INTERNAL_ASSERT(it->second.usage_streams.size() != 0,
-                          "ptr's stream uses vector is empty");
     free_impl(it);
   }
 

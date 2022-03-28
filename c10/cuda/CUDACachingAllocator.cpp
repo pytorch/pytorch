@@ -310,11 +310,13 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 #endif
 }
 
-} // namespace
+} // anonymous namespace
+} // namespace Native
 
 // Environment config parser
 // Defined here, rather than its own .cpp file,
 // because parseArgs needs to know kLargeBuffer.
+// Defined outside namespace Native because it's not Native-specific.
 class CachingAllocatorConfig {
  public:
   static AllocatorBackend allocator_backend() {
@@ -379,11 +381,11 @@ class CachingAllocatorConfig {
           if (kv[0].compare("max_split_size_mb") == 0) {
             size_t val2 = stoi(kv[1]);
             TORCH_CHECK(
-                val2 > kLargeBuffer / (1024 * 1024),
+                val2 > Native::kLargeBuffer / (1024 * 1024),
                 "CachingAllocator option max_split_size_mb too small, must be > ",
-                kLargeBuffer / (1024 * 1024),
+                Native::kLargeBuffer / (1024 * 1024),
                 "");
-            val2 = std::max(val2, kLargeBuffer / (1024 * 1024));
+            val2 = std::max(val2, Native::kLargeBuffer / (1024 * 1024));
             val2 = std::min(
                 val2, (std::numeric_limits<size_t>::max() / (1024 * 1024)));
             m_max_split_size = val2 * 1024 * 1024;
@@ -452,6 +454,8 @@ class CachingAllocatorConfig {
   }
 };
 
+namespace Native {
+
 class DeviceCachingAllocator {
  private:
   // lock around all operations
@@ -509,7 +513,7 @@ class DeviceCachingAllocator {
   DeviceCachingAllocator()
       : large_blocks(BlockComparator, /*is_small=*/false),
         small_blocks(BlockComparator, /*is_small=*/true) {
-    stats.max_split_size = CUDACachingAllocator::maxSplitSize();
+    stats.max_split_size = CachingAllocatorConfig::max_split_size();
   }
 
   // All public methods (except the above) acquire the allocator mutex.
@@ -676,7 +680,7 @@ class DeviceCachingAllocator {
       update_stat(stats.active[stat_type], 1);
       update_stat(stats.active_bytes[stat_type], block->size);
     });
-    if (block->size >= stats.max_split_size)
+    if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, 1);
 
     c10::reportMemoryUsageToProfiler(
@@ -707,7 +711,7 @@ class DeviceCachingAllocator {
       update_stat(stats.allocation[stat_type], -1);
       update_stat(stats.allocated_bytes[stat_type], -block->size);
     });
-    if (block->size >= stats.max_split_size)
+    if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
 
     if (!block->stream_uses.empty()) {
@@ -1133,7 +1137,7 @@ class DeviceCachingAllocator {
     if (block->pool->is_small) {
       return remaining >= kMinBlockSize;
     } else {
-      return (size < stats.max_split_size) &&
+      return (size < CachingAllocatorConfig::max_split_size()) &&
           (remaining > kSmallSize);
     }
   }
@@ -1162,11 +1166,11 @@ class DeviceCachingAllocator {
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
       return false;
     // Do not return an oversized block for a large request
-    if ((p.size() < stats.max_split_size) &&
-        ((*it)->size >= stats.max_split_size))
+    if ((p.size() < CachingAllocatorConfig::max_split_size()) &&
+        ((*it)->size >= CachingAllocatorConfig::max_split_size()))
       return false;
     // Allow oversized block size to be rounded up but within a limit
-    if ((p.size() >= stats.max_split_size) &&
+    if ((p.size() >= CachingAllocatorConfig::max_split_size()) &&
         ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
@@ -1288,7 +1292,7 @@ class DeviceCachingAllocator {
       update_stat(stats.segment[stat_type], 1);
       update_stat(stats.reserved_bytes[stat_type], size);
     });
-    if (size >= stats.max_split_size)
+    if (size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, 1);
 
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
@@ -1300,13 +1304,13 @@ class DeviceCachingAllocator {
    * **/
   /** to satisfy the target size **/
   bool release_available_cached_blocks(const AllocParams& p) {
-    if (stats.max_split_size ==
+    if (CachingAllocatorConfig::max_split_size() ==
         std::numeric_limits<size_t>::max())
       return false;
     BlockPool& pool = *p.pool;
     Block key = p.search_key;
-    key.size = (key.size < stats.max_split_size)
-        ? stats.max_split_size
+    key.size = (key.size < CachingAllocatorConfig::max_split_size())
+        ? CachingAllocatorConfig::max_split_size()
         : key.size;
     auto it = pool.blocks.lower_bound(&key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream()) {
@@ -1318,7 +1322,7 @@ class DeviceCachingAllocator {
       --it; // Back up one item.  Now on the largest block for the correct
             // stream
       while ((totalReleased < key.size) &&
-             ((*it)->size >= stats.max_split_size) &&
+             ((*it)->size >= CachingAllocatorConfig::max_split_size()) &&
              ((*it)->stream == p.stream())) {
         auto cur = it;
         totalReleased += (*it)->size;
@@ -1383,7 +1387,7 @@ class DeviceCachingAllocator {
       update_stat(stats.segment[stat_type], -1);
       update_stat(stats.reserved_bytes[stat_type], -block->size);
     });
-    if (block->size >= stats.max_split_size)
+    if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
 
     pool->blocks.erase(block);
@@ -1870,16 +1874,11 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 // General caching allocator utilities
 
 // External config interface (declared in CUDACachingAllocator.h)
-// Should we bother having these two functions?
-// They are basically useless layers of indirection, but a minor
-// code-cleanliness benefit is they alleviate the need to define
+// This is a useless layer of indirection with a minor
+// code-cleanliness benefit: it alleviates the need to define
 // CachingAllocatorConfig itself in CUDACachingAllocator.h.
 AllocatorBackend allocatorBackend() {
   return CachingAllocatorConfig::allocator_backend();
-}
-
-size_t maxSplitSize() {
-  return CachingAllocatorConfig::max_split_size();
 }
 
 // Size pretty-printer
