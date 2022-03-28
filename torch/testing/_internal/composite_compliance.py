@@ -177,7 +177,7 @@ class CompositeCompliantTensor(torch.Tensor):
 # CompositeCompliantTensor wrappers. If an operator that is
 # CompositeImplicitAutograd does any non-compliant behavior,
 # CompositeCompliantTensor will raise an error.
-def _check_composite_compliance(op, args, kwargs):
+def check_with_mode(op, args, kwargs):
     def wrap(e):
         return CompositeCompliantTensor(e) if isinstance(e, torch.Tensor) else e
 
