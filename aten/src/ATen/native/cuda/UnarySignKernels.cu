@@ -67,12 +67,12 @@ void sgn_kernel_cuda(TensorIteratorBase& iter){
   #if AT_USE_JITERATOR()
     static const auto sgn_string = jiterator_stringify(
         template <typename T>
-        T sgn_kernel(T a) {
-          const T z = T(0);
-          if (a == z) {
-            return z;
+        T sgn_kernel(T z) {
+          const T zero = T(0);
+          if (z == zero) {
+            return zero;
           } else {
-            return a / std::abs(a);
+            return z / std::abs(z);
           }
         }
       ); // sgn_string
