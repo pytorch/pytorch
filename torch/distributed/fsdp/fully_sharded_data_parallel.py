@@ -841,7 +841,10 @@ class FullyShardedDataParallel(nn.Module):
         FSDP modules of the target module. The target module does not have to
         be a FSDP module. If the target module is a FSDP module, its
         ``state_dict_type`` will also be changed.
-        .. note:: This API should be called for only the top-level (root) module.
+
+        .. note:: This API should be called for only the top-level (root)
+            module.
+
         .. note:: This API enables users to transparently use the conventional
             ``state_dict`` API to take model checkpoints in cases where the
             root FSDP module is wrapped by another ``nn.Module``. For example,
@@ -2082,12 +2085,11 @@ class FullyShardedDataParallel(nn.Module):
                 were passed into the optimizer ``optim``.
             optim (torch.optim.Optimizer): Optimizer for ``model`` 's
                 parameters.
-            optim_input (Optional[Union[List[Dict[str, Any]],
-            Iterable[torch.nn.Parameter]]]): Input passed into the optimizer
-                ``optim`` representing either a :class:`list` of parameter
-                groups or an iterable of parameters; if ``None``, then this
-                method assumes the input was ``model.parameters()``. (Default:
-                ``None``)
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Input passed into the optimizer ``optim`` representing either a
+                :class:`list` of parameter groups or an iterable of parameters;
+                if ``None``, then this method assumes the input was
+                ``model.parameters()``. (Default: ``None``)
 
         Returns:
             full_osd (Dict[str, Any]): A :class:`dict` containing the optimizer
@@ -2202,7 +2204,7 @@ class FullyShardedDataParallel(nn.Module):
         remapping the state to flattened parameters instead of unflattened
         parameters and restricting to only this rank's part of the optimizer
         state. The first argument should be the return value of
-        :meth:``full_optim_state_dict`.
+        :meth:`full_optim_state_dict`.
 
         Example::
 
@@ -2217,8 +2219,8 @@ class FullyShardedDataParallel(nn.Module):
             >>> new_optim.load_state_dict(sharded_osd)
 
         .. warning:: If you do not pass ``model.parameters()`` as the first
-        argument to the optimizer, then you should pass that same value to
-        this method as ``optim_input``.
+            argument to the optimizer, then you should pass that same value to
+            this method as ``optim_input``.
 
         .. note:: In general, this does not support changing the ``FSDP``
             wrapping scheme between save and load time and may error in that
@@ -2231,11 +2233,11 @@ class FullyShardedDataParallel(nn.Module):
             model (torch.nn.Module): Root module (which may or may not be a
                 :class:`FullyShardedDataParallel` instance) whose parameters
                 correspond to the optimizer state in ``full_optim_state_dict``.
-            optim_input (Optional[Union[List[Dict[str, Any]],
-            Iterable[torch.nn.Parameter]]]): Input passed into the optimizer
-                representing either a :class:`list` of parameter groups or an
-                iterable of parameters; if ``None``, then this method assumes
-                the input was ``model.parameters()``. (Default: ``None``)
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Input passed into the optimizer representing either a
+                :class:`list` of parameter groups or an iterable of parameters;
+                if ``None``, then this method assumes the input was
+                ``model.parameters()``. (Default: ``None``)
 
         Returns:
             sharded_optim_state_dict (Dict[str, Any]): The full optimizer
