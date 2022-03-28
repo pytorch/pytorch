@@ -3,6 +3,7 @@
 #include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/Functions.h>
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
