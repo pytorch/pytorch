@@ -2506,17 +2506,21 @@ inline const torch::jit::mobile::serialization::Module *GetModule(const void *bu
   return flatbuffers::GetRoot<torch::jit::mobile::serialization::Module>(buf);
 }
 
-inline const torch::jit::mobile::serialization::Module *GetSizePrefixedModule(const void *buf) {
-  return flatbuffers::GetSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
-}
-
-inline Module *GetMutableModule(void *buf) {
+inline Module* GetMutableModule(void* buf) {
   return flatbuffers::GetMutableRoot<Module>(buf);
 }
 
-inline torch::jit::mobile::serialization::Module *GetMutableSizePrefixedModule(void *buf) {
-  return flatbuffers::GetMutableSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
-}
+// inline const torch::jit::mobile::serialization::Module
+// *GetSizePrefixedModule(const void *buf) {
+//   return
+//   flatbuffers::GetSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
+// }
+
+// inline torch::jit::mobile::serialization::Module
+// *GetMutableSizePrefixedModule(void *buf) {
+//   return
+//   flatbuffers::GetMutableSizePrefixedRoot<torch::jit::mobile::serialization::Module>(buf);
+// }
 
 inline const char *ModuleIdentifier() {
   return "PTMF";

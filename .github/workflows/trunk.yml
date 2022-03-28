@@ -126,6 +126,25 @@ jobs:
       ANDROID_SIGN_PASS: ${{ secrets.ANDROID_SIGN_PASS }}
       SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
+  linux-bionic-py3_7-clang9-slow-build:
+    name: linux-bionic-py3.7-clang9-slow
+    uses: pytorch/pytorch/.github/workflows/_linux-build.yml@master
+    with:
+      build-environment: linux-bionic-py3.7-clang9-slow
+      docker-image-name: pytorch-linux-bionic-py3.7-clang9
+
+  linux-bionic-py3_7-clang9-slow-test:
+    name: linux-bionic-py3.7-clang9-slow
+    uses: pytorch/pytorch/.github/workflows/_linux-test.yml@master
+    needs: linux-bionic-py3_7-clang9-slow-build
+    with:
+      build-environment: linux-bionic-py3.7-clang9-slow
+      docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
+
   ios-12-5-1-x86-64:
     name: ios-12-5-1-x86-64
     uses: pytorch/pytorch/.github/workflows/_ios-build-test.yml@master
