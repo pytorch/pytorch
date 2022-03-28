@@ -46,6 +46,9 @@ jobs:
 
       - name: Setup Linux
         uses: pytorch/pytorch/.github/actions/setup-linux@master
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/pytorch/.github/actions/setup-ssh@master
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
