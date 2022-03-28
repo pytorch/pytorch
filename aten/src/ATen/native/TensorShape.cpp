@@ -1618,7 +1618,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
       auto dim_indices_offset_counts_per_thread = [&](void) -> Tensor {
         // We avoid allocating more elements than this value,
-        // and we definitely do now want to allocate more than nnz.
+        // and we definitely do not want to allocate more than nnz.
         const int64_t MEMORY_ALLOC_THRESHOLD = std::min<int64_t>(1e+7, nnz);
 
         // No matter what the value of MEMORY_ALLOC_THRESHOLD is,
