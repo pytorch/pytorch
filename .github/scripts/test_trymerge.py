@@ -96,6 +96,16 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 31093)
         self.assertGreater(len(pr.get_comments()), 50)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_gql_complexity(self, mocked_gql: Any) -> None:
+        "Fetch comments and conclusions for PR with 60 commits"
+        # Previous version of GrapQL query used to cause HTTP/502 error
+        # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
+        pr = GitHubPR("pytorch", "pytorch", 68111)
+        self.assertGreater(len(pr.get_comments()), 20)
+        self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
+        self.assertGreater(pr.get_commit_count(), 60)
+
 
 if __name__ == "__main__":
     main()

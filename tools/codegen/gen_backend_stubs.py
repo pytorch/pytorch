@@ -301,7 +301,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     fm = make_file_manager(output_dir)
 
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
-    parsed_yaml = parse_native_yaml(native_yaml_path)
+    tags_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/tags.yaml')
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
     grouped_native_functions = get_grouped_native_functions(native_functions)
     parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)
