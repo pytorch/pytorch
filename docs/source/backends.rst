@@ -3,6 +3,7 @@
 
 torch.backends
 ==============
+.. automodule:: torch.backends
 
 `torch.backends` controls the behavior of various backends that PyTorch supports.
 
@@ -17,6 +18,7 @@ These backends include:
 
 torch.backends.cuda
 ^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cuda
 
 .. autofunction::  torch.backends.cuda.is_built
 
@@ -50,6 +52,7 @@ torch.backends.cuda
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.cudnn
 
 .. autofunction:: torch.backends.cudnn.version
 
@@ -78,17 +81,26 @@ torch.backends.cudnn
 
 torch.backends.mkl
 ^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mkl
 
 .. autofunction::  torch.backends.mkl.is_available
 
 
 torch.backends.mkldnn
 ^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.mkldnn
 
 .. autofunction::  torch.backends.mkldnn.is_available
 
 
 torch.backends.openmp
 ^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.openmp
 
 .. autofunction::  torch.backends.openmp.is_available
+
+.. Docs for other backends need to be added here.
+.. Automodules are just here to ensure checks run but they don't actually
+.. add anything to the rendered page for now.
+.. py:module:: torch.backends.quantized
+.. py:module:: torch.backends.xnnpack

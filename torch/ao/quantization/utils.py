@@ -12,6 +12,13 @@ from typing import Tuple, Any, Union, Callable
 # TODO: not sure if typing supports recursive data types
 Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
 
+# TODO: maybe rename this to MatchInputNode
+class MatchAllNode:
+    """ A node pattern that matches all nodes, used in defining
+    fusion patterns in FX Graph Mode Quantization
+    """
+    pass
+
 module_type_list = {
     torch.nn.ReLU,
     torch.nn.ReLU6,
@@ -33,6 +40,14 @@ func_list = {
     torch.nn.functional.adaptive_avg_pool1d,
     torch.nn.functional.adaptive_avg_pool2d,
     torch.nn.functional.adaptive_avg_pool3d,
+    torch.nn.functional.elu,
+    torch.nn.functional.hardswish,
+    torch.nn.functional.instance_norm,
+    torch.nn.functional.layer_norm,
+    torch.nn.functional.leaky_relu,
+    torch.nn.functional.silu,
+    torch.nn.functional.mish,
+    torch.nn.functional.dropout,
     torch.nn.functional.max_pool1d,
     torch.nn.functional.max_pool2d,
     torch.nn.functional.max_pool3d,
@@ -46,6 +61,7 @@ func_list = {
     torch.sigmoid,
     torch.squeeze,
     torch.stack,
+    torch.sum,
     torch.tanh,
     torch.unsqueeze,
     torch.cat,
@@ -168,17 +184,33 @@ def activation_is_statically_quantized(qconfig):
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
 
+def activation_is_dynamically_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    dynamically quantized or not, this includes dynamically quantizing to
+    quint8, qint8 and float16
+    """
+    activation_dtype, _, activation_compute_dtype = \
+        get_qconfig_dtypes(qconfig)
+    return activation_dtype == torch.float and \
+        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int8 or not, this includes quantizing to quint8, qint8
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
+def activation_is_int32_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    quantized to int32 or not
+    """
+    return activation_dtype(qconfig) == torch.qint32
+
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16, torch.quint4x2]
 
 def weight_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be statically
@@ -213,7 +245,7 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
     if weight.dtype in static_dtypes:
         if activation.dtype in static_dtypes:
             return QuantType.STATIC
@@ -267,6 +299,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
+    # TODO(jerryzh): Figure out why custom quant_min/quant_max are still adjusted.
     if has_customized_qrange:
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.

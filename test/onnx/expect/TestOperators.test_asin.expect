@@ -8,7 +8,7 @@ graph {
     name: "Asin_0"
     op_type: "Asin"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Asin_0"
     type {

@@ -48,58 +48,66 @@ class DispatchKey(Enum):
     Undefined = 0
     CatchAll = Undefined
 
-    CPU = auto()
-    CUDA = auto()
-    HIP = auto()
+    Dense = auto()
     FPGA = auto()
     ORT = auto()
-    XLA = auto()
-    Lazy = auto()
     Vulkan = auto()
     Metal = auto()
-    XPU = auto()
     MKLDNN = auto()
     OpenGL = auto()
     OpenCL = auto()
     IDEEP = auto()
-    QuantizedCPU = auto()
-    QuantizedCUDA = auto()
-    QuantizedXPU = auto()
+    Quantized = auto()
     CustomRNGKeyId = auto()
     MkldnnCPU = auto()
-    SparseCPU = auto()
-    SparseCUDA = auto()
+    Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
-    SparseHIP = auto()
-    SparseXPU = auto()
-    NestedTensor = auto()
-    PrivateUse1 = auto()
-    PrivateUse2 = auto()
-    PrivateUse3 = auto()
-    EndOfBackendKeys = PrivateUse3
 
     ZeroTensor = auto()
     Meta = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()
-    AutogradCPU = auto()
-    AutogradCUDA = auto()
-    AutogradXLA = auto()
-    AutogradLazy = auto()
+    AutogradFunctionality = auto()
     AutogradNestedTensor = auto()
-    AutogradXPU = auto()
-    AutogradPrivateUse1 = auto()
-    AutogradPrivateUse2 = auto()
-    AutogradPrivateUse3 = auto()
     Tracer = auto()
     Autocast = auto()
     Batched = auto()
     VmapMode = auto()
     TESTING_ONLY_GenericWrapper = auto()
     TESTING_ONLY_GenericMode = auto()
-    NumDispatchKeys = auto()
+    EndOfFunctionalityKeys = TESTING_ONLY_GenericMode
+
+    CPU = auto()
+    CUDA = auto()
+    HIP = auto()
+    XLA = auto()
+    Lazy = auto()
+    XPU = auto()
+    NestedTensor = auto()
+    PrivateUse1 = auto()
+    PrivateUse2 = auto()
+    PrivateUse3 = auto()
+
+    QuantizedCPU = auto()
+    QuantizedCUDA = auto()
+    QuantizedXPU = auto()
+
+    SparseCPU = auto()
+    SparseCUDA = auto()
+    SparseHIP = auto()
+    SparseXPU = auto()
+
+    AutogradCPU = auto()
+    AutogradCUDA = auto()
+    AutogradXLA = auto()
+    AutogradLazy = auto()
+    AutogradXPU = auto()
+    AutogradPrivateUse1 = auto()
+    AutogradPrivateUse2 = auto()
+    AutogradPrivateUse3 = auto()
+
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeExplicitAutograd = auto()
@@ -126,6 +134,26 @@ class DispatchKey(Enum):
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
+# Set of supported dispatch keys
+dispatch_keys = [
+    DispatchKey.CPU,
+    DispatchKey.SparseCPU,
+    DispatchKey.SparseCsrCPU,
+    DispatchKey.MkldnnCPU,
+    DispatchKey.CUDA,
+    DispatchKey.SparseCUDA,
+    DispatchKey.SparseCsrCUDA,
+    DispatchKey.QuantizedCPU,
+    DispatchKey.QuantizedCUDA,
+    DispatchKey.CompositeImplicitAutograd,
+    DispatchKey.CompositeExplicitAutograd,
+    DispatchKey.NestedTensor,
+    # Meta is a magic key: it is automatically generated for structured
+    # kernels
+    DispatchKey.Meta,
+    DispatchKey.ZeroTensor,
+]
+
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
@@ -147,22 +175,100 @@ def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
 
-class DeviceCheckType(Enum):
-    NoCheck = 0
-    ExactSame = 1
+def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
+    # For now, ufunc dispatch keys coincide with structured keys
+    return dk in STRUCTURED_DISPATCH_KEYS
 
-class Tag(Enum):
-    inplace_view = 0
+# This is oddly named ScalarType and not DType for symmetry with C++
+class ScalarType(Enum):
+    Byte = auto()
+    Char = auto()
+    Short = auto()
+    Int = auto()
+    Long = auto()
+    Half = auto()
+    Float = auto()
+    Double = auto()
+    ComplexHalf = auto()
+    ComplexFloat = auto()
+    ComplexDouble = auto()
+    Bool = auto()
+    BFloat16 = auto()
 
     def __str__(self) -> str:
         return self.name
 
     @staticmethod
-    def parse(value: str) -> 'Tag':
-        for k, v in Tag.__members__.items():
+    def maybe_parse(value: str) -> Optional['ScalarType']:
+        for k, v in ScalarType.__members__.items():
             if k == value:
                 return v
-        raise AssertionError(f'unknown tag {value}')
+        return None
+
+    @staticmethod
+    def parse(value: str) -> 'ScalarType':
+        mb_r = ScalarType.maybe_parse(value)
+        assert mb_r is not None, f'unknown dtype {value}'
+        return mb_r
+
+    @staticmethod
+    def parse_set(values: str) -> Set['ScalarType']:
+        dtypes: Set[ScalarType] = set()
+        for value in values.split(', '):
+            if value in DTYPE_CLASSES:
+                dtypes.update(DTYPE_CLASSES[value])
+            else:
+                dtypes.add(ScalarType.parse(value))
+        return dtypes
+
+
+DTYPE_CLASSES: Dict[str, Set[ScalarType]] = {}
+# NB: Integral doesn't include boolean
+DTYPE_CLASSES["Integral"] = {
+    ScalarType.Byte, ScalarType.Char, ScalarType.Int, ScalarType.Long,
+    ScalarType.Short
+}
+# NB: Floating doesn't include low precision types
+DTYPE_CLASSES["Floating"] = {ScalarType.Float, ScalarType.Double}
+DTYPE_CLASSES["Complex"] = {ScalarType.ComplexFloat, ScalarType.ComplexDouble}
+DTYPE_CLASSES["All"] = DTYPE_CLASSES["Integral"] | DTYPE_CLASSES["Floating"]
+DTYPE_CLASSES["AllAndComplex"] = DTYPE_CLASSES["All"] | DTYPE_CLASSES["Complex"]
+DTYPE_CLASSES["FloatingAndComplex"] = DTYPE_CLASSES["Floating"] | DTYPE_CLASSES["Complex"]
+
+
+# Represents the valid entries for ufunc_inner_loop in native_functions.yaml.
+# NB: if you add a new UfuncKey, you will teach tools.codegen.dest.ufunc how
+# to process it.  Most logic will ignore keys they don't understand, so your
+# new key will get silently ignored until you hook in logic to deal with it.
+class UfuncKey(Enum):
+    # These are low level keys that represent exactly one particular
+    # instantiation of the kernel produced by codegen
+    CUDAFunctor = auto()
+    CUDAFunctorOnOther = auto()
+    CUDAFunctorOnSelf = auto()
+
+    CPUScalar = auto()
+    CPUVector = auto()
+
+    # These are the ones users will usually specify, and
+    # implicitly "fill in" the low level keys
+    ScalarOnly = auto()  # CUDA*, CPUScalar
+    Generic = auto()  # CUDA*, CPU*
+
+    def __str__(self) -> str:
+        return self.name
+
+    @staticmethod
+    def parse(value: str) -> 'UfuncKey':
+        for k, v in UfuncKey.__members__.items():
+            if k == value:
+                return v
+        raise AssertionError(f'unknown ufunc key {value}')
+
+
+class DeviceCheckType(Enum):
+    NoCheck = 0
+    ExactSame = 1
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -220,6 +326,10 @@ class NativeFunction:
     # defined.  This is for conveniently reporting error messages!
     loc: 'Location'
 
+    # If non-empty, this kernel is subject to ufunc codegen.
+    # Sorted by ufunc_key
+    ufunc_inner_loop: Dict[UfuncKey, 'UfuncInnerLoop']
+
     # Whether or not this out functions is a "structured kernel".  Structured
     # kernels are defined a little differently from normal kernels; in
     # particular, their shape checking logic is defined separately from
@@ -267,8 +377,7 @@ class NativeFunction:
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
-    # For now operators have at most one tag.
-    tag: Optional['Tag']
+    tags: Set[str]
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -278,7 +387,8 @@ class NativeFunction:
     @staticmethod
     def from_yaml(
             ei: Dict[str, object],
-            loc: 'Location'
+            loc: 'Location',
+            valid_tags: Set[str]
     ) -> Tuple['NativeFunction', Dict[DispatchKey, Dict['OperatorName', 'BackendMetadata']]]:
         """
         Parse a NativeFunction from a dictionary as directly parsed
@@ -347,9 +457,18 @@ class NativeFunction:
         assert precomputed_dict is None or structured is True
         precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
 
-        tag_str = e.pop('tags', None)
-        assert tag_str is None or isinstance(tag_str, str), f'not a str: {tag_str}'
-        tag = Tag.parse(tag_str) if tag_str else None
+        tags_s = e.pop('tags', '')
+        assert isinstance(tags_s, str)
+        tags: Set[str] = set()
+        if len(tags_s) > 0:
+            assert len(valid_tags) > 0
+            for t in tags_s.split(', '):
+                # TODO: verify that the tag is valid and has an entry in tags.yaml
+                if t in valid_tags:
+                    tags.add(t)
+                else:
+                    raise AssertionError(f'illegal tag {t}')
+        assert isinstance(tags, set)
 
         from tools.codegen.api import cpp
 
@@ -367,6 +486,8 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    assert dispatch_key in dispatch_keys, f"Dispatch key {dispatch_key} of kernel {v} " \
+                        "is not a supported dispatch key."
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured
@@ -391,6 +512,31 @@ class NativeFunction:
             "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each " \
             "strictly subsumes the other.  If you wanted to provide an explicit autograd " \
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
+
+        raw_ufunc_inner_loop = e.pop('ufunc_inner_loop', {})
+        ufunc_inner_loop = {}
+        if isinstance(raw_ufunc_inner_loop, str):
+            ufunc_inner_loop[UfuncKey.Generic] = UfuncInnerLoop.parse(raw_ufunc_inner_loop, UfuncKey.Generic)
+        elif isinstance(raw_ufunc_inner_loop, dict):
+            for k, vo in raw_ufunc_inner_loop.items():
+                if k == '__line__':
+                    continue
+                assert isinstance(k, str), f'ufunc_inner_loop key is not a str: {k}'
+                assert isinstance(vo, str), f'ufunc_inner_loop value is not a str: {v}'
+                ufunc_key = UfuncKey.parse(k)
+                ufunc_inner_loop[ufunc_key] = UfuncInnerLoop.parse(vo, ufunc_key)
+        else:
+            raise AssertionError(f'ufunc_inner_loop not str or dict: {raw_ufunc_inner_loop}')
+        # Program the BackendIndex for the implicit dispatch entry from ufunc
+        if ufunc_inner_loop:
+            assert structured, "ufunc must be structured"
+            for dispatch_key in STRUCTURED_DISPATCH_KEYS:
+                assert dispatch_key not in dispatch, \
+                    f"ufunc should not have explicit dispatch entry for {dispatch_key}"
+                dispatch[dispatch_key] = BackendMetadata(
+                    kernel=ufunc.schema_kernel_name(func, dispatch_key),
+                    structured=True
+                )
 
         if structured_delegate:
             # Structured functions MUST have a dispatch table
@@ -427,6 +573,7 @@ class NativeFunction:
             structured_delegate=structured_delegate,
             structured_inherits=structured_inherits,
             precomputed=precomputed,
+            ufunc_inner_loop=ufunc_inner_loop,
             manual_kernel_registration=manual_kernel_registration,
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
@@ -438,7 +585,7 @@ class NativeFunction:
             is_abstract=is_abstract,
             has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
             has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
-            tag=tag,
+            tags=tags,
         ), backend_metadata
 
 
@@ -494,7 +641,7 @@ class NativeFunction:
     def is_view_op(self) -> bool:
         rets = self.func.returns
         is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
-        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        is_inplace_view = 'inplace_view' in self.tags
         is_wildcard_view = any(inp.annotation is not None and
                                inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -645,7 +792,24 @@ class BackendMetadata:
     # in native_functions.yaml.
     # However, external backends like XLA can indendently toggle which ops are structured.
     structured: bool
-    #
+
+@dataclass(frozen=True)
+class UfuncInnerLoop:
+    name: str
+    supported_dtypes: Set[ScalarType]
+    # key is stored here because it affects the semantics of name,
+    # so its helpful to have them together for further processing
+    ufunc_key: UfuncKey
+
+    @staticmethod
+    def parse(value: str, ufunc_key: UfuncKey) -> 'UfuncInnerLoop':
+        name, supported_dtypes_str = value.split(' ', 1)
+        assert supported_dtypes_str[0] == '('
+        assert supported_dtypes_str[-1] == ')'
+        supported_dtypes = set()
+        for k in supported_dtypes_str[1:-1].split(', '):
+            supported_dtypes |= ScalarType.parse_set(k)
+        return UfuncInnerLoop(name=name, supported_dtypes=supported_dtypes, ufunc_key=ufunc_key)
 
 
 # BackendIndex represents a backend.
@@ -1643,3 +1807,5 @@ class Precompute:
             replace_list.append(f'{kernel_param} -> {replacements}')
 
         return replace_list
+
+import tools.codegen.api.ufunc as ufunc
