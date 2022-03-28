@@ -222,10 +222,6 @@ void convert_indices_from_csr_to_coo_cpu(
 
 namespace native {
 
-using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO.
-using namespace at::sparse;
-
 namespace {
 
 template <typename F>
@@ -356,6 +352,7 @@ CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
 CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
 
+
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(
     const Tensor& sparse,
@@ -363,6 +360,8 @@ void addmm_out_sparse_csr_native_cpu(
     const Tensor& r,
     Scalar alpha,
     Scalar beta) {
+  using namespace at::sparse_csr;
+  using namespace at::sparse;
   auto dim_i = sparse.size(0);
   auto dim_k = dense.size(1);
 
@@ -418,6 +417,8 @@ Tensor& addmm_out_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
+  using namespace at::sparse_csr;
+  using namespace at::sparse;
   TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
 
   // TODO: remove this, there are no codegenerated checks for devices yet
@@ -534,7 +535,7 @@ Tensor& addmm_out_sparse_csr_cpu(
 
 Tensor addmm_sparse_csr_dense(
     const Tensor& self,
-    const SparseCsrTensor& sparse,
+    const Tensor& sparse,
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
@@ -570,7 +571,7 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
 
 Tensor _sparse_csr_addmm(
     const Tensor& t,
-    const SparseCsrTensor& sparse,
+    const Tensor& sparse,
     const Tensor& dense,
     const Scalar& beta,
     const Scalar& alpha) {
@@ -601,8 +602,10 @@ Tensor& add_sparse_csr_(
 void add_out_dense_sparse_csr_cpu(
     const Tensor& out,
     const Tensor& dense,
-    const SparseCsrTensor& src,
+    const Tensor& src,
     const Scalar& alpha) {
+  using namespace at::sparse_csr;
+  using namespace at::sparse;
   TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
   TORCH_INTERNAL_ASSERT(src.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
@@ -703,9 +706,9 @@ void add_out_dense_sparse_csr_cpu(
 
 Tensor& add_out_sparse_csr_cpu(
     const Tensor& self,
-    const SparseCsrTensor& other,
+    const Tensor& other,
     const Scalar& alpha,
-    SparseCsrTensor& out) {
+    Tensor& out) {
   if (self.layout() == kStrided) {
     add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   } else {
