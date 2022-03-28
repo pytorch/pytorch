@@ -280,8 +280,8 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
   void allocateManagedTensors() override;
   void deallocateManagedTensors() override;
 
-  const ManagedTensorRanges& ranges_;
-  FastMap<at::Tensor*, const Value*> tensor_to_tensor_value_;
+  BlockRunner* block_runner_;
+  const BlockInfo& block_info_;
 
   size_t num_managed_tensors_{0};
   bool optimize_memory_;

@@ -65,12 +65,12 @@ FastMap<const Value*, at::Tensor*> tensorValueToTensor(
   return result;
 }
 
-FastMap<at::Tensor*, const Value*> tensorToTensorValue(
+std::vector<std::pair<at::Tensor*, const Value*>> collectManagedTensors(
     const std::vector<ProcessedNode>& nodes,
     const FastSet<const Value*>& managed_tensor_values) {
-  FastMap<at::Tensor*, const Value*> result;
+  std::vector<std::pair<at::Tensor*, const Value*>> result;
   auto action = [&result](const Value* value, at::Tensor* tensor) mutable {
-    result.emplace(tensor, value);
+    result.emplace_back(tensor, value);
   };
   mapOverManagedTensors(nodes, managed_tensor_values, action);
   return result;
@@ -597,12 +597,9 @@ PrecomputedOffsetsMemoryPlanner::PrecomputedOffsetsMemoryPlanner(
           block_info,
           enable_out_variant,
           manage_output_tensors),
-      ranges_(block_info.managed_tensor_ranges()),
-      optimize_memory_(optimize_memory) {
-  const auto& managed_tensor_values = block_info.managed_tensor_values();
-  tensor_to_tensor_value_ =
-      tensorToTensorValue(block_runner->nodes(), managed_tensor_values);
-}
+      block_runner_(block_runner),
+      block_info_(block_info),
+      optimize_memory_(optimize_memory) {}
 
 void PrecomputedOffsetsMemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
@@ -623,18 +620,16 @@ void PrecomputedOffsetsMemoryPlanner::allocateManagedTensors() {
     storage_impl->set_data_ptr_noswap(
         at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
     storage_impl->set_nbytes(tensor_size);
-    if (storage_impl->nbytes() < managed_tensor.tensor->nbytes()) {
-      LOG(INFO) << storage_impl->nbytes() << " < "
-                << managed_tensor.tensor->nbytes();
-    }
   }
 }
 
 void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
   const bool first_time = managed_tensor_storage_impls_.empty();
   if (C10_UNLIKELY(first_time)) {
-    managed_tensor_storage_impls_.reserve(tensor_to_tensor_value_.size());
-    for (auto& tensor_and_value : tensor_to_tensor_value_) {
+    auto managed_tensors_and_values = collectManagedTensors(
+        block_runner_->nodes(), block_info_.managed_tensor_values());
+    managed_tensor_storage_impls_.reserve(managed_tensors_and_values.size());
+    for (auto& tensor_and_value : managed_tensors_and_values) {
       auto* tensor = tensor_and_value.first;
       auto* value = tensor_and_value.second;
       const auto& storage = tensor->storage();
@@ -656,13 +651,12 @@ void PrecomputedOffsetsMemoryPlanner::deallocateManagedTensors() {
           c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
               new_impl, 1)));
     }
-
     if (optimize_memory_) {
-      managed_bytes_ = assignOffsetsOptimized(managed_tensors_, ranges_);
+      managed_bytes_ = assignOffsetsOptimized(
+          managed_tensors_, block_info_.managed_tensor_ranges());
     } else {
       managed_bytes_ = assignOffsetsNaive(managed_tensors_);
     }
-
     VLOG(1) << "managed_bytes: " << managed_bytes_;
   } else {
     for (auto& managed_tensor : managed_tensors_) {
