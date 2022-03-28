@@ -1089,7 +1089,6 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
                     inputs.append(SampleInput(t.detach().requires_grad_(requires_grad),
                                               args=sample_input_args,
                                               kwargs=sample_input_kwargs))
-
     return inputs
 
 
@@ -1165,9 +1164,12 @@ def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
                 sample_input_args = sample_input.args
                 sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
             if requires_grad:
-                inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
-                orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
-                                               dim, keepdim=True, mask=inmask)
+                if sample_input_kwargs.get('mask') is None:
+                    orig_count = torch._masked.sum(torch.ones(sample_input.input.shape, dtype=torch.int64), dim, keepdim=True)
+                else:
+                    inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
+                    orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
+                                                   dim, keepdim=True, mask=inmask)
                 if orig_count.min() <= int(unbiased):
                     # Skip samples that lead to singularities in var
                     # computation resulting nan values both in var and
@@ -1816,11 +1818,14 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
     for shape in cases:
         for weight in [-1., 0., 0.8, 1.]:
             weight_tensor = torch.tensor(weight, device=device, dtype=dtype, requires_grad=requires_grad)
-            yield SampleInput(make_arg(shape), kwargs=dict(weight=weight_tensor))
+            yield SampleInput(make_arg(shape), args=(weight_tensor,))
 
         if len(shape) >= 2:
             channel_size = shape[1]
-            yield SampleInput(make_arg(shape), kwargs=dict(weight=make_arg((channel_size,))))
+            yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+    weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
+    yield SampleInput(make_arg((S, S)), kwargs=dict(weight=make_arg((S,)),))
 
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -5403,7 +5408,7 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
-def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False):
+def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None):
     if same_size:
         return [make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous) for _ in range(N)]
     else:
@@ -8385,6 +8390,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if 'mask' in keys:
             mask = kwargs.pop('mask')
             if mask is not None:
+                assert mask.layout == torch.strided
                 kwargs['where'] = mask.cpu().numpy()
 
         if 'identity' in keys:
@@ -9080,6 +9086,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            assert_autodiffed=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('clamp',
                    variant_test_name='scalar',
@@ -9165,13 +9173,18 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.half,)),
            )),
     BinaryUfuncInfo('complex',
-                    dtypes=floating_types(),
+                    dtypes=floating_types_and(torch.half),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
                     skips=(
                         # RuntimeError: Expected object of scalar type Float but got scalar type Double for second argument
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # File "test/test_binary_ufuncs.py", line 334, in test_batch_vs_slicing
+                        # actual = torch.stack(actual)
+                        # RuntimeError: "cat_cuda" not implemented for 'ComplexHalf'
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_batch_vs_slicing',
+                                     device_type='cuda', dtypes=(torch.half,)),
                     )),
     BinaryUfuncInfo('copysign',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -13273,6 +13286,7 @@ op_db: List[OpInfo] = [
                    # polygamma functions have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     OpInfo('ravel',
+           ref=np.ravel,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
@@ -15309,6 +15323,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        supports_sparse=True,
         promotes_int_to_int64=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -15775,10 +15790,12 @@ binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
+sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]
 reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('_masked.')]
+sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('_masked.')]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

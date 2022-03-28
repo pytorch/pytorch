@@ -8,18 +8,6 @@ from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_param
 from torch.nn.utils.fusion import fuse_linear_bn_weights
 from typing import Optional
 
-# from torch.ao.quantization.utils import nonparam_type
-from torch.nn.utils.parametrize import is_parametrized
-def nonparam_type(module):
-    """
-    Returns type(module) or the original
-    type if module is currently parametrized
-    """
-    if is_parametrized(module):
-        return module.__class__.__bases__[0]
-    else:
-        return type(module)
-
 class LinearPackedParams(torch.nn.Module):
     _version = 3
 
@@ -252,6 +240,7 @@ class Linear(WeightedQuantizedModule):
             mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
+        from torch.ao.quantization.utils import nonparam_type
         if hasattr(mod, 'weight_fake_quant'):
             if nonparam_type(mod) == nniqat.LinearBn1d:
                 mod.weight, mod.bias = fuse_linear_bn_weights(
