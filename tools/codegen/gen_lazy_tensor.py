@@ -16,6 +16,64 @@ from .gen_backend_stubs import (parse_backend_yaml, error_on_missing_kernels,
                                 gen_dispatchkey_nativefunc_headers,
                                 gen_dispatcher_registrations)
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#
+#                        Lazy Tensor Codegen
+#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# Overview
+# ~~~~~~~~
+#
+# This codegen script builds on existing data models and helpers used
+# by all ATen backends, and adds new functionality specific to lazy
+# tensor backends.
+#
+# Inputs:
+# - <backend>_native_functions.yaml: controls which operators are
+#   supported by the backend.
+#
+# Outputs:
+# (for all backends)
+# <DispatchKey>Ir.h defines Lazy IR classes to be constructed during tracing
+# - opt-in: also generate 'lowering' methods for the TorchScript backend only
+# <DispatchKey>NativeFunctions.cpp defines implementations of native functions which perform lazy tracing
+# - opt-in: 'full_codegen' section of backend yaml; 'supported' section omits these implementations
+# <DispatchKey>NativeFunctions.h declares implementations of native functions for both 'supported' and 'full_codegen'
+# ops
+#
+# Register<DispatchKey>.cpp registers all op implementations with the dispatcher
+# RegisterAutograd<DispatchKey>.cpp registers all autograd implementations with the dispatcher
+#
+# Validation Helpers:
+# - Shape Inference: errs if any ops in backend yaml require shape inference not provided by meta kernels or
+#   implementations in torch/csrc/lazy/core/shape_inference.*
+# - native function impls: errs if any 'supported' ops do not have an implementation defined in the backend
+#   (non-codegen) implementation file
+#
+#
+# About the Data Model
+# ~~~~~~~~~~~~~~~~~~~~
+#
+# Modeled after ATen codegen, the first step is to parse yaml and build a data model for the operators
+# we care about.  In this case, the <backend>_native_functions yaml defines a subset of the core operators
+# (defined in more detail in the main native_functions.yaml), which will be supported by your backend.
+# Backends can list ops in two categories:
+#  - `supported` ops require hand-implementations but still get codegenned declarations and registrations
+#  - `full_codegen` ops get implementations (and IR classes) generated too
+#
+# Each native function is modeled as an object with a schema, and each schema has objects representing their
+# arguments.  Much of the codegen is manipulation of the arguments and their types.  For example, lazy tensor
+# backends need to transform 'at::Tensor' arguments into 'lazy::Value' objects, as well as replacing reference
+# types (stringref) with actual string objects, and this is done by manipulating the data model objects.
+# - see api/lazy.py for the lazy data model
+#
+# Once the data model is set up, the rest of this script processes a number of templates for output CPP file
+# and fills in the template values using helpers in `dest/lazy_ir.py` and `dest/lazy_ts_lowering.py`.  These
+# helpers mostly iterate over functions and their arguments, outputting different c++ snippets.
+#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
 # Returns a Tuple of (backend_key, autograd_key, cpp_namespace, updated BackendIndex mapping, full_codegen)
 ParsedExternalYaml = namedtuple('ParsedExternalYaml', [
