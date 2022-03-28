@@ -51,7 +51,7 @@ jobs:
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
-        uses: ./.github/actions/checkout-pytorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
