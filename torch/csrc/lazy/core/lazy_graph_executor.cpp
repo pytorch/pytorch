@@ -628,13 +628,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   coll.config = config;
   coll.device = *unique_device;
   coll.indices.reserve(tensors.size());
-  VLOG(4) << "Waiting on device barrier for device " << coll.device << " ...";
-  {
-    TORCH_LAZY_TIMED("DeviceLockWait");
-    coll.unlocker =
-        DeviceLockerArena::Get()->LockDevices(unique_device.AsSet());
-  }
-  VLOG(4) << "Waiting on device barrier for device " << coll.device << " done!";
+
   for (const auto i : c10::irange(tensors.size())) {
     if (tensor_ids.insert(tensors[i]->GetUniqueId()).second &&
         tensors[i]->CurrentDataHandle() == nullptr) {
@@ -936,6 +930,16 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         std::vector<BackendDataPtr> parameters_data,
         std::vector<BackendDataPtr> tensors_data,
         ComputationCache::TypePtr cached_computation) {
+  if (coll) {
+    VLOG(4) << "Waiting on device barrier for device " << coll->device << " ...";
+    {
+      TORCH_LAZY_TIMED("DeviceLockWait");
+      coll->unlocker =
+          DeviceLockerArena::Get()->LockDevices({coll->device });
+    }
+    VLOG(4) << "Waiting on device barrier for device " << coll->device << " done!";
+  }
+
   std::shared_ptr<Async> async = std::make_shared<Async>(
       coll,
       std::move(parameters_data),
