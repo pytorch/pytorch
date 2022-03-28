@@ -3742,7 +3742,7 @@ class TestONNXRuntime(unittest.TestCase):
         class BucketModel(torch.nn.Module):
             def forward(self, input, boundaries):
                 return torch.bucketize(input, boundaries), \
-                       torch.bucketize(input, boundaries, right=True)        
+                    torch.bucketize(input, boundaries, right=True)
 
         src = torch.tensor([[2, 5, 10], [6, 8, 3]])
         index = torch.tensor([1, 5, 7, 8, 10])
