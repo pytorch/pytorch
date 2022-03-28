@@ -187,6 +187,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
+        auto_extern_c_extension_modules: bool = False,
     ):
         """
         Create an exporter.
@@ -196,6 +197,8 @@ class PackageExporter:
                 or a binary I/O object.
             importer: If a single Importer is passed, use that to search for modules.
                 If a sequence of importers are passsed, an ``OrderedImporter`` will be constructed out of them.
+            auto_extern_c_extension_modules: Flag whether to enable autoly extern c extension modules (``True``),
+                or disable (``False``).
         """
         if isinstance(f, (Path, str)):
             f = str(f)
@@ -208,6 +211,8 @@ class PackageExporter:
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
+
+        self.auto_extern_c_extension_modules = auto_extern_c_extension_modules
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -528,7 +533,17 @@ class PackageExporter:
             if filename is None:
                 packaging_error = PackagingErrorReason.NO_DUNDER_FILE
             elif filename.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
-                packaging_error = PackagingErrorReason.IS_EXTENSION_MODULE
+                if self.auto_extern_c_extension_modules:
+                    self.extern([module_name])
+                    self.dependency_graph.add_node(
+                        module_name,
+                        action=_ModuleProviderAction.EXTERN,
+                        is_package=is_package,
+                        provided=True,
+                    )
+                    return
+                else:
+                    packaging_error = PackagingErrorReason.IS_EXTENSION_MODULE
             else:
                 packaging_error = PackagingErrorReason.SOURCE_FILE_NOT_FOUND
                 error_context = f"filename: {filename}"
