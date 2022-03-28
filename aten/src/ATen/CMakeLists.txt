@@ -117,7 +117,6 @@ file(GLOB native_cpu_h "native/cpu/*.h")
 
 file(GLOB native_cuda_cu "native/cuda/*.cu")
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
-file(GLOB native_grid_sampler_utils_cpp "native/GridSamplerUtils.cpp")
 file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
@@ -206,7 +205,6 @@ if(USE_CUDA)
   list(APPEND ATen_CUDA_CPP_SRCS
     ${cuda_cpp}
     ${native_cuda_cpp}
-    ${native_grid_sampler_utils_cpp}
     ${native_cudnn_cpp}
     ${native_miopen_cpp}
     ${native_quantized_cuda_cpp}
@@ -237,7 +235,7 @@ if(USE_ROCM)
   set(ATen_HIP_SRCS ${ATen_HIP_SRCS} ${hip_hip} ${native_hip_hip} ${native_sparse_hip_hip} ${native_quantized_hip_hip})
   # TODO: Codegen separate files for HIP and use those (s/cuda_generated_sources/hip_generated_sources)
   set(all_hip_cpp ${native_sparse_hip_cpp} ${native_quantized_hip_cpp} ${hip_cpp} ${native_hip_cpp} ${native_hip_linalg_cpp} ${cuda_generated_sources} ${ATen_HIP_SRCS})
-  set(all_hip_cpp ${native_grid_sampler_utils_cpp} ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
+  set(all_hip_cpp ${native_miopen_cpp} ${native_cudnn_hip_cpp} ${miopen_cpp} ${all_hip_cpp})
 endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)

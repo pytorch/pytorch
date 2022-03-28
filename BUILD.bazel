@@ -297,7 +297,6 @@ filegroup(
             "aten/src/ATen/native/cuda/linalg/*.cpp",
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
-            "aten/src/ATen/native/GridSamplerUtils.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/THC/*.cpp",
         ],
