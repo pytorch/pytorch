@@ -54,8 +54,7 @@ def generate_code(ninja_global: Optional[str] = None,
     else:
         python_install_dir = install_dir
     autograd_gen_dir = os.path.join(install_dir, 'autograd', 'generated')
-    jit_gen_dir = os.path.join(install_dir, 'jit', 'generated')
-    for d in (autograd_gen_dir, jit_gen_dir, python_install_dir):
+    for d in (autograd_gen_dir, python_install_dir):
         if not os.path.exists(d):
             os.makedirs(d)
 
