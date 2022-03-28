@@ -73,9 +73,9 @@ jobs:
           BBBBB: ${{ github.event.pull_request.body }}
           CCCCC: ${{ github.event.head_commit.message }}
         run: |
-          echo $AAAAA
-          echo $BBBBB
-          echo $CCCCC
+          echo "$AAAAA"
+          echo "$BBBBB"
+          echo "$CCCCC"
           git log --oneline
 
       - name: Test
