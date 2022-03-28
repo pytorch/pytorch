@@ -6,6 +6,7 @@ import unittest
 from test_pytorch_onnx_onnxruntime import run_ort, ort_compare_with_pytorch
 from torch._C import parse_ir
 
+
 class _TestJITIRToONNX:
     """Abstract base class for test cases.
 
@@ -20,10 +21,10 @@ class _TestJITIRToONNX:
         graph = parse_ir(graph_ir)
         jit_outs = torch._C._jit_interpret_graph(graph, example_inputs)
 
-        f = io.BytesIO()
-        # TODO: insert export api here to convert JIT IR to ONNX proto
-
-        ort_sess = onnxruntime.InferenceSession(f.getvalue(), providers=self.ort_providers)
+        f = torch.onnx.utils._export_jit_graph_to_onnx_model_proto(
+            graph,
+            torch.onnx.OperatorExportTypes.ONNX)
+        ort_sess = onnxruntime.InferenceSession(f, providers=self.ort_providers)
         ort_outs = run_ort(ort_sess, example_inputs)
 
         ort_compare_with_pytorch(ort_outs, jit_outs, rtol=1e-3, atol=1e-7)
@@ -40,6 +41,7 @@ class _TestJITIRToONNX:
         b = torch.randn(2, 3)
         self.run_test(graph_ir, (a, b))
 
+
 def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(str(name),
@@ -47,5 +49,9 @@ def MakeTestCase(opset_version: int) -> type:
                 dict(_TestJITIRToONNX.__dict__,
                      opset_version=opset_version))
 
+
 # opset 14 tests
 TestJITIRToONNX_opset14 = MakeTestCase(14)
+
+if __name__ == "__main__":
+    unittest.main()
