@@ -5,9 +5,8 @@ import shutil
 import subprocess
 import re
 import sys
+from sysconfig import get_paths as gp
 from typing import List
-from sysconfig import get_paths
-
 
 from tools.linter.clang_tidy.run import run
 from tools.linter.clang_tidy.generate_build_files import generate_build_files
@@ -99,7 +98,7 @@ DEFAULTS = {
         "/usr/lib/llvm-11/include/openmp",
         # We want the string '/usr/local/include/python<version number>'
         # https://stackoverflow.com/a/35071359
-        get_paths()['include'],
+        gp()['include'],
         "/__w/pytorch/pytorch/third_party/pybind11/include"
     ] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
