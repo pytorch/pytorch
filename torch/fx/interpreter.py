@@ -99,6 +99,8 @@ class Interpreter:
                 This is a dict mapping `Node` to any value. This can be used, for example, to
                 pre-populate results for certain `Nodes` so as to do only partial evaluation within
                 the interpreter.
+            enable_io_processing (bool): If true, we process the inputs and outputs with graph's process_inputs and
+                process_outputs function first before using them.
 
         Returns:
             Any: The value returned from executing the Module

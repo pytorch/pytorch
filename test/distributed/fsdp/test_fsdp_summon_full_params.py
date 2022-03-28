@@ -38,9 +38,9 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 def _run_test_summon_full_param_writeback(cls, writeback, cpu_offload, modify_outer):
-    model = FSDP(
-        nn.Sequential(FSDP(nn.Linear(5, 5, bias=False)), nn.Linear(5, 3, bias=False))
-    ).cuda(cls.rank)
+    lin1 = FSDP(nn.Linear(5, 5, bias=False).cuda(cls.rank), cpu_offload=cpu_offload)
+    lin2 = nn.Linear(5, 3, bias=False).cuda(cls.rank)
+    model = FSDP(nn.Sequential(lin1, lin2), cpu_offload=cpu_offload)
 
     # set the value
     outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
@@ -72,17 +72,16 @@ class TestSummonFullParamsNoShard(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("writeback", [True, False])
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
-    )
     @parametrize("modify_outer", [True, False])
-    def test_summon_full_param_writeback(self, writeback, cpu_offload, modify_outer):
+    # TODO: CPUOffload summon + writeback does not
+    # work when param is not sharded
+    # (currently when world_size == 1)
+    def test_summon_full_param_writeback(self, writeback, modify_outer):
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
-            cpu_offload,
-            modify_outer,
+            cpu_offload=CPUOffload(offload_params=False),
+            modify_outer=modify_outer,
         )
 
 
@@ -422,7 +421,7 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("prefix", ["", "test_prefix"])
     @parametrize("recurse", [False, True])
-    def test_named_parameters(self, prefix: str, recurse: bool):
+    def test_named_parameters_buffers(self, prefix: str, recurse: bool):
         fsdp_model = FSDP(
             NestedWrappedModule(
                 group=dist.distributed_c10d._get_default_group(),
@@ -430,18 +429,21 @@ class TestSummonFullParams(FSDPTest):
                 fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
             )
         )
+        fsdp_model.register_buffer("buffer", torch.ones(1))
         model = NestedWrappedModule(
             group=dist.distributed_c10d._get_default_group(),
             wrap_fsdp=False,
             fsdp_init_mode=FSDPInitMode.CUDA_BEFORE,
         )
+        model.register_buffer("buffer", torch.ones(1))
         with fsdp_model.summon_full_params():
-            for (n1, p1), (n2, p2) in itertools.zip_longest(
-                fsdp_model.named_parameters(prefix=prefix, recurse=recurse),
-                model.named_parameters(prefix=prefix, recurse=recurse),
-            ):
-                self.assertEqual(n1, n2)
-                self.assertEqual(p1, p2)
+            for call in ["named_parameters", "named_buffers"]:
+                for (n1, p1), (n2, p2) in itertools.zip_longest(
+                    getattr(fsdp_model, call)(prefix=prefix, recurse=recurse),
+                    getattr(model, call)(prefix=prefix, recurse=recurse),
+                ):
+                    self.assertEqual(n1, n2)
+                    self.assertEqual(p1, p2)
 
 
 instantiate_parametrized_tests(TestSummonFullParams)
