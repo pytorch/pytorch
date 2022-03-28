@@ -1,0 +1,15 @@
+py_binary(
+    name = "generate-code",
+    srcs = ["generate_code.py"],
+    deps = [
+        "//tools/autograd:autograd",
+        "//tools/codegen:codegen",
+    ],
+    visibiity = ["//:__pkg__"],
+)
+
+py_binary(
+    name = "gen_version_header",
+    srcs = ["gen_version_header.py"],
+    visibiity = ["//:__pkg__"],
+)
