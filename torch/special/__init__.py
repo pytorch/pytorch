@@ -548,7 +548,7 @@ Example::
 """.format(**common_args))
 
 log_ndtr = _add_docstr(_special.special_log_ndtr,
-                   r"""
+                       r"""
 log_ndtr(input, *, out=None) -> Tensor
 Computes the log of the area under the standard Gaussian probability density function,
 integrated from minus infinity to :attr:`input`, elementwise.

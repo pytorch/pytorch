@@ -2160,7 +2160,13 @@ calc_erfcx(T x)
   }
 }
 
-// TODO: add header here
+/*
+ * Logarithm of Gaussian cumulative distribution function.
+
+ * This implementation of log_ndtr and its helper functions
+ * follow SciPy's implementation
+ * See NOTICE for the licenses.
+ */
 template <typename T>
 static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
   T t = x * M_SQRT1_2;

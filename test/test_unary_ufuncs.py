@@ -1275,7 +1275,7 @@ class TestUnaryUfuncs(TestCase):
         min, max, eps, tiny = info.min, info.max, info.eps, info.tiny
         t = torch.tensor([min, max, eps, tiny], dtype=dtype, device=device)
         check_equal(t)
-    
+
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_special_log_ndtr_vs_scipy(self, device, dtype):
@@ -1284,11 +1284,6 @@ class TestUnaryUfuncs(TestCase):
             actual = torch.special.log_ndtr(t)
             expected = scipy.special.log_ndtr(t.cpu().numpy())
             self.assertEqual(actual, expected)
-        
-        # covering special implementation cases for values < -20 or > 6
-        range = (-30, 10)  
-        t = torch.linspace(*range, 1, device=device, dtype=dtype)
-        check_equal(t)
 
         # Skip testing NaN, inf, -inf since they are tested in reference_numerics tests.
         info = torch.finfo(dtype)

@@ -2095,7 +2095,8 @@ def generate_elementwise_binary_large_value_tensors(op, *, device, dtype, requir
     yield SampleInput(lhs, args=(rhs,))
 
 def generate_elementwise_binary_extremal_value_tensors(op, *, device, dtype, requires_grad=False):
-    _float_extremals = (float('inf'), float('-inf'), float('nan'))
+    finfo = torch.finfo(dtype)
+    _float_extremals = (float('inf'), float('-inf'), float('nan'), finfo.max, finfo.min, finfo.eps, finfo.tiny)
 
     l_vals = []
     r_vals = []
@@ -14686,13 +14687,8 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     UnaryUfuncInfo('special.log_ndtr',
                    aten_name='special_log_ndtr',
-                   ref=scipy.speical.log_ndtr if TEST_SCIPY else _NOTHING,
-
-                   # TODO(bahaung): check following values
-                   decorators=(precisionOverride({torch.bfloat16: 5e-3,
-                                                  torch.float16: 5e-4}),),
-                   dtypes=all_types_and(torch.bool, torch.bfloat16),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
+                   ref=scipy.special.log_ndtr if TEST_SCIPY else _NOTHING,
+                   dtypes=all_types_and(torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    safe_casts_outputs=True,

@@ -246,7 +246,6 @@ void log_ndtr_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-
 void erf_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "erf_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
