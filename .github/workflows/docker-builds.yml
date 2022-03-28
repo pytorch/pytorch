@@ -57,8 +57,6 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
-        with:
-          github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build docker image
         id: build-docker-image
