@@ -901,7 +901,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_ipu() const {
-    return key_set_.has_backend(BackendComponent::IPUBit);
+    constexpr auto ipu_ks = DispatchKeySet(BackendComponent::IPUBit);
+    return key_set_.has_all(ipu_ks);
   }
 
   bool is_xla() const {
