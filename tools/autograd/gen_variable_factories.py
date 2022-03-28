@@ -33,8 +33,8 @@ def fully_qualified_type(argument_type: str) -> str:
     qualified_type = f'{argument_type[:index]}at::{argument_type[index:]}'
     return maybe_optional_type(qualified_type, is_opt)
 
-def gen_variable_factories(out: str, native_yaml_path: str, template_path: str) -> None:
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
+def gen_variable_factories(out: str, native_yaml_path: str, tags_yaml_path: str, template_path: str) -> None:
+    native_functions = parse_native_yaml(native_yaml_path, tags_yaml_path).native_functions
     factory_functions = [fn for fn in native_functions if is_factory_function(fn)]
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_with_template('variable_factories.h', 'variable_factories.h', lambda: {
