@@ -461,6 +461,19 @@ class TestFX(JitTestCase):
         gm.graph.lint()
         self.assertEqual(gm(3, 4), 14)
 
+    def test_concrete_arg_none_assert(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, val=None):
+                return x if val is None else x + val
+
+        f = Foo()
+        traced = torch.fx.symbolic_trace(f, concrete_args={'val' : None})
+        with self.assertRaisesRegex(AssertionError, 'val has been specialized to have value None'):
+            traced(torch.randn(5), torch.randn(5))
+
+        x = torch.randn(5)
+        torch.testing.assert_close(traced(x), f(x))
+
     def test_graph_unique_names(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
