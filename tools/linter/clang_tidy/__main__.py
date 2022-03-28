@@ -14,6 +14,9 @@ from tools.linter.clang_tidy.generate_build_files import generate_build_files
 from tools.linter.install.clang_tidy import INSTALLATION_PATH
 from tools.linter.install.download_bin import PYTORCH_ROOT
 
+# Returns '/usr/local/include/python<version number>'
+def get_python_include_dir() -> str:
+    return gp()['include']
 
 def clang_search_dirs() -> List[str]:
     # Compilers are ordered based on fallback preference
@@ -96,10 +99,8 @@ DEFAULTS = {
     "paths": ["torch/csrc/"],
     "include-dir": [
         "/usr/lib/llvm-11/include/openmp",
-        # We want the string '/usr/local/include/python<version number>'
-        # https://stackoverflow.com/a/35071359
-        gp()['include'],
-        "/__w/pytorch/pytorch/third_party/pybind11/include"
+        get_python_include_dir(),
+        os.path.join(PYTORCH_ROOT, "third_party/pybind11/include")
     ] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
     "compile-commands-dir": "build",
