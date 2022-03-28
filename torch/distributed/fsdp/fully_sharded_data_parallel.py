@@ -2052,16 +2052,16 @@ class FullyShardedDataParallel(nn.Module):
             primitives are used.
 
         .. warning:: The parameter IDs used in the state dict depend on the
-        ``FSDP`` wrapping scheme used in the passed-in ``model``. This means
-        that they may not match those of a purely non-wrapped version of the
-        model and that the returned state dict cannot necessarily be loaded
-        for a version of the model with a different ``FSDP`` wrapping scheme.
-        However, this does support changing the world size between save and
-        load time.
+            ``FSDP`` wrapping scheme used in the passed-in ``model``. This
+            means that they may not match those of a purely non-wrapped version
+            of the model and that the returned state dict cannot necessarily be
+            loaded for a version of the model with a different ``FSDP``
+            wrapping scheme. However, this does support changing the world size
+            between save and load time.
 
         .. warning:: If you do not pass ``model.parameters()`` as the first
-        argument to the optimizer, then you should pass that same value to
-        this method as ``optim_input``.
+            argument to the optimizer, then you should pass that same value to
+            this method as ``optim_input``.
 
         .. note:: To check that the ``FSDP`` wrapping scheme is compatible, the
             returned state dict includes an additional key
