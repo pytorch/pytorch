@@ -199,10 +199,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
     def is_general_tensor_value_op(self) -> bool:
         return self.num_tensor_args == 1
 
-    def input_output_observed(self):
-        # for x + y where x and y are scalars, we do not observe anything
-        return self.num_tensor_args > 0
-
     def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
         return self.binary_op in binary_op_supported_dtypes and \
