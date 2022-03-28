@@ -94,7 +94,7 @@ DEFAULTS = {
         "-torch/csrc/python_headers.h",
     ],
     "paths": ["torch/csrc/"],
-    "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
+    "include-dir": ["/usr/lib/llvm-11/include/openmp", "/usr/include/python3.8"] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",

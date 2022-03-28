@@ -270,6 +270,8 @@ async def _run_clang_tidy(
     if options.dry_run:
         return CommandResult(0, str([c for c, _ in commands]), "")
 
+    print(">>>all commands being execed : ")
+    print(commands)
     return await _run_clang_tidy_in_parallel(commands, options.disable_progress_bar)
 
 
