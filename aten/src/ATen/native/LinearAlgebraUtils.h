@@ -114,7 +114,7 @@ static inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const T
  *  broadcasted shape.
  */
 static inline Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
-    c10::optional<IntArrayRef> desired_batch_sizes = c10::nullopt) {
+    at::OptionalIntArrayRef desired_batch_sizes = c10::nullopt) {
   nrows = (nrows == -1) ? src.size(-2) : nrows;
   auto copy_sizes = desired_batch_sizes.has_value()
     ? desired_batch_sizes.value().vec()
