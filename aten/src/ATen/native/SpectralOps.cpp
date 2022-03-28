@@ -28,7 +28,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
-  TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+  TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
 
   if (!require_complex) {
     return type;
@@ -36,6 +36,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
 
   // Promote to complex
   switch (type) {
+  case kHalf: return kComplexHalf;
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
   default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
