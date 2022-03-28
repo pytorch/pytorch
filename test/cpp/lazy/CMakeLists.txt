@@ -9,9 +9,14 @@ set(LAZY_TEST_SRCS
   ${LAZY_TEST_ROOT}/test_misc.cpp
   ${LAZY_TEST_ROOT}/test_permutation_util.cpp
   ${LAZY_TEST_ROOT}/test_shape.cpp
-  ${LAZY_TEST_ROOT}/test_tensor_impl.cpp
   ${LAZY_TEST_ROOT}/test_util.cpp
 )
+if(BUILD_LAZY_TS_BACKEND)
+    list(APPEND LAZY_TEST_SRCS
+      ${LAZY_TEST_ROOT}/test_lazy_ops.cpp
+      ${LAZY_TEST_ROOT}/test_lazy_ops_util.cpp
+    )
+endif()
 
 add_executable(test_lazy
   ${TORCH_ROOT}/test/cpp/common/main.cpp
