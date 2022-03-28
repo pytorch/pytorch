@@ -3015,3 +3015,27 @@ TEST(StaticRuntime, ConcatEmpty) {
   torch::jit::StaticModule smod(mod);
   EXPECT_THROW(smod({}), c10::Error);
 }
+
+TEST(StaticRuntime, IntImplicit) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  testStaticRuntime(src, {at::tensor({1}, at::kInt).squeeze()});
+}
+
+TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  torch::jit::StaticModule smod(graph);
+  // Not 0D tensor
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  // Wrong dtype
+  EXPECT_THROW(
+      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+}
