@@ -6,6 +6,7 @@ import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
 from typing import Tuple, Any, Union, Callable
+from torch.nn.utils.parametrize import is_parametrized
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
@@ -359,3 +360,26 @@ def _parent_name(target):
         return '', r[0]
     else:
         return r[0], r[1]
+
+def nonparam_type(module):
+    """
+    Returns type(module) or the original
+    type if module is currently parametrized
+    """
+    if is_parametrized(module):
+        return module.__class__.__bases__[0]
+    else:
+        return type(module)
+
+def is_leaf(module):
+    """
+    Checks if module._modules is empty or
+    if module is a parametrization, checks that module._modules only has
+    the 'parametrizations' module
+    """
+    if len(module._modules) == 0:
+        return True
+    elif is_parametrized(module):
+        return len(module._modules)==1 and 'parametrizations' in module._modules
+    else:
+        return False

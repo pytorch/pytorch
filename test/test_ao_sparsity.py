@@ -20,5 +20,8 @@ from ao.sparsity.test_pruner import TestBasePruner  # noqa: F401
 # Scheduler
 from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
 
+#Composability
+from ao.sparsity.test_composability import TestComposability
+
 if __name__ == '__main__':
     run_tests()
