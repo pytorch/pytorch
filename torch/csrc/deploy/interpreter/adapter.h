@@ -11,11 +11,11 @@ using torch::deploy::Obj;
 namespace torch {
 namespace deploy {
 
-Obj fromIValue(IValue value) override {
+inline torch::deploy::Obj torch::deployApapter::fromIValueAdapter(IValue value) override {
     return torch::jit::toPyObject(value);
 }
 
-IValue toIValue(Obj obj) const override {
+inline at::IValue torch::deployApapter::toIValueAdapter(Obj obj) const override {
     return torch::jit::toTypeInferredIValue(obj);
 }
 
