@@ -28,7 +28,7 @@ class TorchScriptPackageZipFileWriter(PackageZipFileWriter):
     def write_record(self, f: str, str_or_bytes: Union[str, bytes], size: int):
         if isinstance(str_or_bytes, str):
             str_or_bytes = str.encode(f)
-        self.zip_file_writer.write_record(f, str_or_bytes, size)  # type: ignore
+        self.zip_file_writer.write_record(f, str_or_bytes, size)
 
     def close(self):
         self.script_module_serializer.write_files()
@@ -58,6 +58,9 @@ class TorchScriptPackageZipFileReader(PackageZipFileReader):
     def get_record(self, name: str) -> bytes:
         return self.zip_reader.get_record(name)
 
+    # NOTE: for has_record, get_all_records, and get_storage_from_record pybind doesn't reaveal
+    #       the attributes of PyTorchFileReader, so it'll call an error. Strangely, this error
+    #       doesn't have an error code which is why it's ignored
     def has_record(self, path: str) -> bool:
         return self.zip_reader.has_record(path)  # type: ignore
 
