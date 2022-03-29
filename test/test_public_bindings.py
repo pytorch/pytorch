@@ -8,6 +8,7 @@ import sys
 from typing import Callable
 import inspect
 import json
+import os
 
 class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
@@ -289,7 +290,7 @@ class TestPublicBindings(TestCase):
           `__module__` that start with the current submodule.
         '''
         failure_list = []
-        with open('test/allowlist_for_publicAPI.json') as json_file:
+        with open(os.path.join(sys.path[0], 'allowlist_for_publicAPI.json')) as json_file:
             allow_dict = json.load(json_file)
 
         def test_module(modname):
