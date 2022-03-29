@@ -508,12 +508,14 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch_result, scipy_result)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float32, torch.float64)
+    @dtypes(torch.half, torch.float32, torch.float64)
     def test_torch_complex(self, device, dtype):
         real = torch.tensor([1, 2], device=device, dtype=dtype)
         imag = torch.tensor([3, 4], device=device, dtype=dtype)
         z = torch.complex(real, imag)
-        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        float_to_complex_map = {torch.float16: torch.complex32,
+                                torch.float: torch.complex64, torch.double: torch.complex128}
+        complex_dtype = float_to_complex_map[dtype]
         self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
 
     @onlyNativeDeviceTypes
@@ -531,12 +533,12 @@ class TestTensorCreation(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-            torch.float16, torch.complex64, torch.complex128, torch.bool)
+            torch.complex64, torch.complex128, torch.bool)
     def test_torch_complex_floating_dtype_error(self, device, dtype):
         for op in (torch.complex, torch.polar):
             a = torch.tensor([1, 2], device=device, dtype=dtype)
             b = torch.tensor([3, 4], device=device, dtype=dtype)
-            error = r"Expected both inputs to be Float or Double tensors but " \
+            error = r"Expected both inputs to be Half, Float or Double tensors but " \
                     r"got [A-Za-z]+ and [A-Za-z]+"
         with self.assertRaisesRegex(RuntimeError, error):
             op(a, b)
@@ -4073,6 +4075,8 @@ class TestAsArray(TestCase):
             [0.0, True, False, 42],
             # With Complex
             [0.0, True, False, 42, 5j],
+            # With Range
+            range(5),
         ]
 
         for e in examples:

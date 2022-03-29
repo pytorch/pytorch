@@ -114,7 +114,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
-    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    '_to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
     'sparse_mask_helper_cuda', '_sparse_addmm',
 }
 
@@ -371,7 +371,6 @@ for (const auto& _t: ${arg}) {
 def gen_variable_type(
     out: str,
     native_yaml_path: str,
-    tags_yaml_path: str,
     fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
     template_path: str,
 ) -> None:
