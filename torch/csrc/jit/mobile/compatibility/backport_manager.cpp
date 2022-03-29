@@ -27,6 +27,7 @@ constexpr int64_t kBytecodeVersionV4 = 0x4L;
 constexpr int64_t kBytecodeVersionV5 = 0x5L;
 constexpr int64_t kBytecodeVersionV6 = 0x6L;
 constexpr int64_t kBytecodeVersionV7 = 0x7L;
+constexpr int64_t kBytecodeVersionV8 = 0x8L;
 } // namespace
 
 /********************** Utility Functions **********************/
@@ -434,7 +435,8 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   {
     BytecodeEmitModeGuard argNumGuard(
         true /*emit_default_input_instructions*/,
-        false /*enable_defaults_args_with_out_args*/);
+        false /*enable_defaults_args_with_out_args*/,
+        false /*enable_emit_promoted_ops*/);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
@@ -501,7 +503,8 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   {
     BytecodeEmitModeGuard argNumGuard(
         false /*emit_default_input_instructions*/,
-        false /*enable_defaults_args_with_out_args*/);
+        false /*enable_defaults_args_with_out_args*/,
+        false /*enable_emit_promoted_ops*/);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
@@ -509,6 +512,39 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   // Update the bytecode version (from 7 to 6)
   std::stringstream output_model_stream =
       update_bytecode_version(intermediate_model_stream, kBytecodeVersionV6);
+  return output_model_stream;
+}
+
+std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
+  auto reader = std::make_shared<PyTorchStreamReader>(rai);
+  // extra_files are kept
+  auto records = reader->getAllRecords();
+  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+  ExtraFilesMap extra_files;
+  for (const auto& record : records) {
+    std::size_t found = record.find_last_of("/\\");
+    auto path = record.substr(0, found);
+    if ("extra" == path) {
+      extra_files.emplace(record.substr(found + 1), "");
+    }
+  }
+  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  std::stringstream intermediate_model_stream;
+  {
+    BytecodeEmitModeGuard argNumGuard(
+        false /*emit_default_input_instructions*/,
+        true /*enable_defaults_args_with_out_args*/,
+        false /*enable_emit_promoted_ops*/);
+    torch_script._save_for_mobile(
+        intermediate_model_stream, extra_files, hasBytecodeDebug);
+  }
+
+  // Update the bytecode version (from 8 to 7)
+  std::stringstream output_model_stream =
+      update_bytecode_version(intermediate_model_stream, kBytecodeVersionV7);
+
   return output_model_stream;
 }
 
@@ -528,6 +564,7 @@ BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
   registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
   registerBytecodeBackportFunction(kBytecodeVersionV7, backport_v7_to_v6);
+  registerBytecodeBackportFunction(kBytecodeVersionV8, backport_v8_to_v7);
 }
 
 std::unordered_map<

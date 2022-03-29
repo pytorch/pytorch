@@ -1,5 +1,5 @@
 r"""Functional interface"""
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 import math
 import warnings
 
@@ -645,12 +645,6 @@ def max_pool1d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool1d` later
     """
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool1d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d_with_indices,
@@ -676,12 +670,6 @@ def _max_pool1d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool1d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool1d,
@@ -743,12 +731,6 @@ def max_pool2d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool2d` later
     """
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool2d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d_with_indices,
@@ -774,12 +756,6 @@ def _max_pool2d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool2d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool2d,
@@ -841,12 +817,6 @@ def max_pool3d_with_indices(
         return_indices: If ``True``, will return the argmax along with the max values.
                         Useful for :class:`torch.nn.functional.max_unpool3d` later
     """
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool3d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d_with_indices,
@@ -872,12 +842,6 @@ def _max_pool3d(
     ceil_mode: bool = False,
     return_indices: bool = False
 ) -> Tensor:
-    # See: https://github.com/pytorch/pytorch/pull/62544#issuecomment-896195121
-    # and https://github.com/pytorch/pytorch/issues/62545 for context
-    if ceil_mode != return_indices:
-        warnings.warn("Note that order of the arguments: ceil_mode and return_indices will change"
-                      "to match the args list in nn.MaxPool3d in a future release.")
-
     if has_torch_function_unary(input):
         return handle_torch_function(
             max_pool3d,
@@ -1040,8 +1004,8 @@ def max_unpool3d(
 
 
 def lp_pool2d(
-    input: Tensor, norm_type: float,
-    kernel_size: int,
+    input: Tensor, norm_type: Union[int, float],
+    kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False
 ) -> Tensor:
@@ -1065,7 +1029,7 @@ def lp_pool2d(
 
 
 def lp_pool1d(
-    input: Tensor, norm_type: float,
+    input: Tensor, norm_type: Union[int, float],
     kernel_size: int,
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False
@@ -1681,20 +1645,21 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """,
 )
 
-
 gelu = _add_docstr(
     torch._C._nn.gelu,
     r"""
-gelu(input) -> Tensor
+gelu(input, approximate = 'none') -> Tensor
 
-Applies element-wise the function
+When the approximate argument is 'none', it applies element-wise the function
 :math:`\text{GELU}(x) = x * \Phi(x)`
 
 where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
+When the approximate argument is 'tanh', Gelu is estimated with:
+    :math::  \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
 See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
 """)
-
 
 hardshrink = _add_docstr(
     torch.hardshrink,
@@ -1979,7 +1944,7 @@ This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
 Shape:
 
     - Input: :math:`(*, in\_features)` where `*` means any number of
-        additional dimensions, including none
+      additional dimensions, including none
     - Weight: :math:`(out\_features, in\_features)` or :math:`(in\_features)`
     - Bias: :math:`(out\_features)` or :math:`()`
     - Output: :math:`(*, out\_features)` or :math:`(*)`, based on the shape of the weight
@@ -3470,8 +3435,7 @@ def multi_margin_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None,
-                          reduce=None, reduction='mean') -> Tensor
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=None, reduce=None, reduction='mean') -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -3590,6 +3554,50 @@ Examples::
 """,
 )
 
+native_channel_shuffle = _add_docstr(
+    torch.native_channel_shuffle,
+    r"""
+native_channel_shuffle(input, groups) -> Tensor
+
+Native kernel level implementation of the `channel_shuffle`.
+This function might become private in future releases, use with caution.
+
+Divide the channels in a tensor of shape :math:`(*, C , H, W)`
+into g groups and rearrange them as :math:`(*, C \frac g, g, H, W)`,
+while keeping the original tensor shape.
+
+See :class:`~torch.nn.ChannelShuffle` for details.
+
+Args:
+    input (Tensor): the input tensor
+    groups (int): number of groups to divide channels in and rearrange.
+
+Examples::
+
+    >>> input = torch.randn(1, 4, 2, 2)
+    >>> print(input)
+    [[[[1, 2],
+       [3, 4]],
+      [[5, 6],
+       [7, 8]],
+      [[9, 10],
+       [11, 12]],
+      [[13, 14],
+       [15, 16]],
+     ]]
+    >>> output = torch.nn.functional.native_channel_shuffle(input, 2)
+    >>> print(output)
+    [[[[1, 2],
+       [3, 4]],
+      [[9, 10],
+       [11, 12]],
+      [[5, 6],
+       [7, 8]],
+      [[13, 14],
+       [15, 16]],
+     ]]
+""",
+)
 
 @_overload  # noqa: F811
 def upsample(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = "nearest", align_corners: Optional[bool] = None) -> Tensor:  # noqa: F811
@@ -4255,7 +4263,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
+def _pad(input: Tensor, pad: BroadcastingList1[int], mode: str = "constant", value: Union[int, float] = 0.0) -> Tensor:
     r"""Pads tensor.
 
     Padding size:
@@ -4675,6 +4683,8 @@ def fold(
                                   f"are supported (got {input.dim()}D)")
 
 
+# NOTE: Do not edit. This code will be removed once the forward-compatibility
+#       period is over for PR #73410
 def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
     """Circularly pads tensor.
 
@@ -5313,8 +5323,9 @@ def multi_head_attention_forward(
     # (deep breath) calculate attention and out projection
     #
     attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
-    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+    attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
+    attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
 
     if need_weights:
         # optionally average attention weights over heads

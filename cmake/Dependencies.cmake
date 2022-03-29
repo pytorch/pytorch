@@ -216,7 +216,7 @@ elseif(BLAS STREQUAL "MKL")
     set(CAFFE2_USE_MKL ON)
     set(BLAS_INFO "mkl")
     set(BLAS_FOUND 1)
-    set(BLAS_LIBRARIES caffe2::mkl)
+    set(BLAS_LIBRARIES ${MKL_LIBRARIES})
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
@@ -816,6 +816,10 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
+        # See https://github.com/pytorch/pytorch/issues/74352
+        target_compile_options(asmjit PRIVATE -Wno-deprecated-copy -Wno-unused-but-set-variable)
+    endif()
   endif()
 
   if(USE_FBGEMM)
@@ -1909,10 +1913,11 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/lib64)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
         ${CUDA_INCLUDE_DIRS}
         ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_SOURCE_DIR}/include)
+        ${CUDA_SOURCE_DIR}/include
+        NO_DEFAULT_PATH)
 
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
@@ -1920,6 +1925,32 @@ if(USE_KINETO)
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
+      # I've only tested this sanity check on Linux; if someone
+      # runs into this bug on another platform feel free to
+      # generalize it accordingly
+      if(NOT USE_CUPTI_SO AND UNIX)
+        include(CheckCXXSourceRuns)
+        # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
+        if(NOT APPLE)
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+        endif()
+        set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+        check_cxx_source_runs("#include <stdexcept>
+  int main() {
+    try {
+      throw std::runtime_error(\"error\");
+    } catch (...) {
+      return 0;
+    }
+    return 1;
+  }" EXCEPTIONS_WORK)
+        set(CMAKE_REQUIRED_LINK_OPTIONS "")
+        if(NOT EXCEPTIONS_WORK)
+          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+        endif()
+      endif()
+
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)

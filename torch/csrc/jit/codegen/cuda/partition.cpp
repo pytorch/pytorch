@@ -5,11 +5,14 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+const c10::DeviceIndex INVALID_INDEX = -2;
 
 namespace {
 
@@ -38,26 +41,61 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
-  return value->type()->expectRef<TensorType>().device();
+  auto tensor_type = value->type()->expectRef<TensorType>();
+  // special case for scalar tensor: return c10::nullopt instead of cpu device.
+  // this allows us to fuse scalar cpu tensor with cuda tensor, while avoid
+  // merging ops with pure scalar cpu tensors.
+  if (is_cpu_scalar(tensor_type)) {
+    return c10::nullopt;
+  }
+  return tensor_type.device();
 }
 
 static c10::optional<c10::Device> getDevice(const Node* node) {
-  auto outputs = node->outputs();
-  for (auto output : outputs) {
-    auto device = getDevice(output);
+  c10::optional<c10::Device> ret = c10::nullopt;
+  auto merge_devices = [&ret](const c10::optional<c10::Device>& device) {
     if (device.has_value()) {
-      return device;
+      if (ret.has_value()) {
+        if (ret.value() != device.value()) {
+          // invalidate device to reflect conflicts
+          ret->set_index(INVALID_INDEX);
+          // return false to indicate early termination
+          return false;
+        } else {
+          // same device, do nothing
+          return true;
+        }
+      } else {
+        // initialize return device
+        ret = device.value();
+        return true;
+      }
+    }
+    // no device information, do nothing
+    return true;
+  };
+  for (auto val : node->inputs()) {
+    if (!merge_devices(getDevice(val))) {
+      return ret;
     }
   }
-  return c10::nullopt;
+  for (auto val : node->outputs()) {
+    if (!merge_devices(getDevice(val))) {
+      return ret;
+    }
+  }
+  return ret;
 }
 
 static bool isFusibleDevice(const Node* node, const c10::Device device) {
-  for (auto value : node->outputs()) {
-    auto output_device = getDevice(value);
-    if (output_device.has_value() && output_device.value() != device) {
-      return false;
-    }
+  TORCH_INTERNAL_ASSERT(
+      device.index() != INVALID_INDEX, "fusible device needs to be validate");
+  auto opt_device = getDevice(node);
+  // we can be more relaxed here as we known that this function tries to merge
+  // node into an existing `device`
+  if (opt_device.has_value() &&
+      (opt_device->index() == INVALID_INDEX || opt_device != device)) {
+    return false;
   }
   return true;
 }
@@ -65,10 +103,12 @@ static bool isFusibleDevice(const Node* node, const c10::Device device) {
 // TODO: we need to check input type when we handle `to()`
 static bool isFusibleDevice(const Node* node) {
   auto device = getDevice(node);
+  // be conservative and only fuse cuda operations, this avoids us initializing
+  // operations that produces cpu scalar outputs
   if (!device.has_value()) {
-    return true;
+    return false;
   }
-  return device->is_cuda() &&
+  return device->index() != INVALID_INDEX && device->is_cuda() &&
       (at::cuda::getDeviceProperties(device->index())->major >= 7 ||
        !hasNonElementWiseOperation(node));
 }
@@ -400,7 +440,7 @@ bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
   bool fused = false;
   // TODO: lift the restriction of not fusing producer containing reduction when
   //       we have proper scheduling.
-  if (isFusibleCudaFusionGroup(node)) {
+  if (isFusibleNode(node)) {
     // ensure if the node has a designated device, it's on the same device with
     // fusion.
     // TODO: is there a danger of us fusing operations that's supposed to be on
@@ -408,7 +448,6 @@ bool isFusibleCudaFusionGroup(const Node* fusion, const Node* node) {
     auto device = getDevice(fusion);
     fused = (!device.has_value() || isFusibleDevice(node, device.value()));
   }
-
   return fused;
 }
 

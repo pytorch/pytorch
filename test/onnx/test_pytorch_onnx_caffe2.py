@@ -2383,7 +2383,17 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
             def forward(self, x):
-                return torch.nn.functional.gelu(x)
+                return torch.nn.functional.gelu(x, approximate='none')
+
+        model = GeluModel()
+        inputs = torch.randn(2, 4, 5, 6, requires_grad=True)
+        self.run_model_test(model, train=False, input=(inputs,), batch_size=BATCH_SIZE)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_tanh_gelu(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x, approximate='tanh')
 
         model = GeluModel()
         inputs = torch.randn(2, 4, 5, 6, requires_grad=True)

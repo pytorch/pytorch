@@ -3,12 +3,13 @@ from typing import Callable, List, Tuple
 
 import torch
 import torch.fx
-import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
+import fx2trt_oss.tracer.acc_tracer.acc_tracer as acc_tracer
 from fx2trt_oss.fx import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
 )
+from fx2trt_oss.fx.passes.pass_utils import chain_passes
 from torch.testing._internal.common_utils import TestCase
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
@@ -197,8 +198,8 @@ class AccTestCase(TRTTestCase):
         mod = acc_tracer.trace(mod, inputs)
 
         if apply_passes is not None:
-            for p in apply_passes:
-                mod = p(mod)
+            pass_tracer = chain_passes(*apply_passes)
+            mod = pass_tracer(mod, inputs)
 
         if test_implicit_batch_dim:
             interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
