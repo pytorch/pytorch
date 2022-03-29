@@ -3058,3 +3058,18 @@ TEST(StaticRuntime, ReshapeAs) {
   )JIT";
   testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
 }
+
+TEST(StaticRuntime, MoveCtor) {
+  auto mod = getDeepAndWideSciptModel();
+  std::vector<IValue> args{
+      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
+
+  torch::jit::StaticModule smod(mod);
+
+  torch::jit::StaticRuntime runtime(smod);
+  auto expected = runtime(args);
+
+  torch::jit::StaticRuntime new_runtime(std::move(runtime));
+  auto actual = new_runtime(args);
+  compareResults(expected, actual);
+}
