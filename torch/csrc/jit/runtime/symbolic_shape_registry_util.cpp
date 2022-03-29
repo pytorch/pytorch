@@ -118,8 +118,8 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor", "broadcast_one_three"},
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
-  // clang-format on
-  return tensorexpr_elementwise_set;
+ // clang-format on
+ return tensorexpr_elementwise_set;
 }
 
 }
