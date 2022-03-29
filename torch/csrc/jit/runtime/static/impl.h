@@ -949,6 +949,12 @@ class TORCH_API StaticRuntime {
  public:
   explicit StaticRuntime(const StaticModule& sm);
 
+  StaticRuntime(const StaticRuntime&) = delete;
+  StaticRuntime(StaticRuntime&&) = delete;
+
+  StaticRuntime& operator=(const StaticRuntime&) = delete;
+  StaticRuntime& operator=(StaticRuntime&&) = delete;
+
   using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,

@@ -2007,7 +2007,6 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) {
   std::copy(sm.constants().begin(), sm.constants().end(), values_.begin());
   block_ = std::make_unique<BlockRunner>(
       sm, values_, sm.root_block(), /*is_root_block*/ true);
-  ;
 }
 
 c10::IValue StaticRuntime::operator()(
