@@ -522,6 +522,13 @@ std::unique_ptr<caching::VectorizedTensorInfo> getVectorizedTensorValidationInfo
 void validateAlignedVectorizeExtents(
     const VectorizedSetInfo& info,
     kir::ExpressionEvaluator& expr_eval) {
+  TORCH_INTERNAL_ASSERT(
+      !info.contig_root_ids.empty(),
+      "No root ID found for vectorization with ",
+      info.consumer_tv->toString(),
+      " and ",
+      info.producer_tv->toString());
+
   int64_t vectorized_merged_domain_extent = 1;
   for (auto id : info.contig_root_ids) {
     auto extent_val = expr_eval.evaluate(id->extent());

@@ -291,102 +291,6 @@ class VectorizeValidator : public OptInDispatch {
     return producer_contiguity;
   }
 
-  //! Find the contig root domains that a vectorized leaf domain
-  //! depends on.
-  static void fillVectorizedContigRootDomains(
-      TensorView* consumer_tv,
-      VectorizedSetInfo& info) {
-    auto producer_tv =
-        consumer_tv->definition()->inputs().at(0)->as<TensorView>();
-
-    // For each of the producer and consumer vectorized root domains,
-    // find the contig merged domain if exists. The extent of the
-    // domain is the size that must be divisible by the vectorization
-    // word size. Both of the producer and consumer domains must be
-    // divisible, so pick the one that has the smaller number of
-    // merged domains.
-
-    const auto leaf_dom = consumer_tv->domain()->domain();
-    const auto root_dom = consumer_tv->getRootDomain();
-
-    ContigIDs consumer_contig_finder(
-        leaf_dom, root_dom, consumer_tv->domain()->contiguity());
-
-    // info.vectorized_root_id is validated at this point to be the
-    // last concrete root domain in consumer.
-    auto consumer_root_id = info.vectorized_root_id;
-
-    // Find the root domains that are dependency of the merged contig domain.
-    auto consumer_indexed_it =
-        consumer_contig_finder.rootToIndexedID().find(consumer_root_id);
-    TORCH_INTERNAL_ASSERT(
-        consumer_indexed_it != consumer_contig_finder.rootToIndexedID().end(),
-        "Contiguity information not found for root domain: ",
-        consumer_root_id->toString());
-    auto consumer_indexed_id = consumer_indexed_it->second;
-    // Actual indexed root domains for this consumer root domain. If
-    // contig merge is done, multiple root domains are included.
-    std::unordered_set<IterDomain*> consumer_indexed_root_ids;
-    if (consumer_indexed_id == consumer_root_id) {
-      // Indexed domain is equal to the root domain, meaning no contig
-      // merge is involved.
-      consumer_indexed_root_ids.insert(consumer_root_id);
-    } else {
-      auto consumer_within_contig_it =
-          consumer_contig_finder.withinContigIDs().find(consumer_indexed_id);
-      TORCH_INTERNAL_ASSERT(
-          consumer_within_contig_it !=
-          consumer_contig_finder.withinContigIDs().end());
-      const auto& within_ids = consumer_within_contig_it->second;
-      std::copy_if(
-          root_dom.begin(),
-          root_dom.end(),
-          std::inserter(
-              consumer_indexed_root_ids, consumer_indexed_root_ids.end()),
-          [&](IterDomain* root_id) {
-            return within_ids.find(root_id) != within_ids.end();
-          });
-    }
-
-    // Note: we use the consumer domain with the producer
-    // contiguity.
-    ContigIDs producer_contig_finder(
-        leaf_dom, root_dom, mapProducerContiguity(producer_tv, consumer_tv));
-
-    auto producer_indexed_it =
-        producer_contig_finder.rootToIndexedID().find(consumer_root_id);
-    TORCH_INTERNAL_ASSERT(
-        producer_indexed_it != producer_contig_finder.rootToIndexedID().end(),
-        "Contiguity information not found for root domain: ",
-        consumer_root_id->toString());
-    auto producer_indexed_id = producer_indexed_it->second;
-    std::unordered_set<IterDomain*> producer_indexed_root_ids;
-    if (producer_indexed_id == consumer_root_id) {
-      producer_indexed_root_ids.insert(consumer_root_id);
-    } else {
-      auto producer_within_contig_it =
-          producer_contig_finder.withinContigIDs().find(producer_indexed_id);
-      TORCH_INTERNAL_ASSERT(
-          producer_within_contig_it !=
-          producer_contig_finder.withinContigIDs().end());
-      const auto& within_ids = producer_within_contig_it->second;
-      std::copy_if(
-          root_dom.begin(),
-          root_dom.end(),
-          std::inserter(
-              producer_indexed_root_ids, producer_indexed_root_ids.end()),
-          [&](IterDomain* root_id) {
-            return within_ids.find(root_id) != within_ids.end();
-          });
-    }
-
-    // Pick the smaller merged domain
-    info.contig_root_ids =
-        consumer_indexed_root_ids.size() < producer_indexed_root_ids.size()
-        ? consumer_indexed_root_ids
-        : producer_indexed_root_ids;
-  }
-
  private:
   std::unordered_set<IterDomain*> domains_;
   IterDomain* vectorized_id_ = nullptr;
@@ -544,10 +448,8 @@ class VectorizeValidator : public OptInDispatch {
     // For aligned vectorize, the extent of a vectorized domain must
     // be divisible by the vector word size. The domain is usually
     // just one of the root domains, but can be a merged domain of
-    // contiguous domains.
-    if (!misaligned_vectorize) {
-      fillVectorizedContigRootDomains(tv, vectorized_set_info);
-    }
+    // contiguous domains. Those domains are saved in
+    // VectorizedSetInfo.contig_root_ids at the time of indexing.
     GpuLower::current()->vectorizedSetInfo().emplace_back(vectorized_set_info);
   }
 };
@@ -627,6 +529,111 @@ void validateAndCollectVectorizeInfo(Fusion* fusion) {
       VectorizeValidator::validate(tv);
     }
   }
+}
+
+namespace {
+
+void fillVectorizedContigRootDomains(
+    const TensorView* tv,
+    const ContigIDs& contig_finder,
+    IterDomain* vectorized_root_id,
+    VectorizedSetInfo& info) {
+  const auto& leaf_dom = tv->domain()->domain();
+  const auto& root_dom = tv->getMaybeRFactorDomain();
+
+  // Find the root domains that are dependency of the merged contig
+  // domain.
+
+  auto consumer_indexed_it =
+      contig_finder.rootToIndexedID().find(vectorized_root_id);
+  TORCH_INTERNAL_ASSERT(
+      consumer_indexed_it != contig_finder.rootToIndexedID().end(),
+      "Contiguity information not found for root domain: ",
+      vectorized_root_id->toString());
+  auto consumer_indexed_id = consumer_indexed_it->second;
+
+  // Actual indexed root domains for this root domain. If
+  // contig merge is done, multiple root domains are included.
+  std::unordered_set<IterDomain*> indexed_root_ids;
+
+  if (consumer_indexed_id == vectorized_root_id) {
+    // Indexed domain is equal to the root domain, meaning no contig
+    // merge is involved.
+    indexed_root_ids.insert(vectorized_root_id);
+  } else {
+    auto consumer_within_contig_it =
+        contig_finder.withinContigIDs().find(consumer_indexed_id);
+    TORCH_INTERNAL_ASSERT(
+        consumer_within_contig_it != contig_finder.withinContigIDs().end());
+    const auto& within_ids = consumer_within_contig_it->second;
+    std::copy_if(
+        root_dom.begin(),
+        root_dom.end(),
+        std::inserter(indexed_root_ids, indexed_root_ids.end()),
+        [&](IterDomain* root_id) {
+          return within_ids.find(root_id) != within_ids.end();
+        });
+  }
+
+  // Store the contig merged root domains. If it is already set, pick
+  // the smaller one as it is used for validating divisibility of the
+  // merged extent.
+  if (info.contig_root_ids.empty() ||
+      indexed_root_ids.size() < info.contig_root_ids.size()) {
+    info.contig_root_ids = indexed_root_ids;
+  }
+}
+
+} // namespace
+
+void fillConsumerVectorizedContigRootDomains(
+    const TensorView* consumer_tv,
+    const ContigIDs& contig_finder) {
+  auto& info_vector = GpuLower::current()->vectorizedSetInfo();
+  auto it = std::find_if(
+      info_vector.begin(), info_vector.end(), [&consumer_tv](auto& info) {
+        return info.consumer_tv == consumer_tv;
+      });
+  if (it == info_vector.end()) {
+    return;
+  }
+
+  VectorizedSetInfo& info = *it;
+
+  // info.vectorized_root_id is validated at this point to be the
+  // last concrete root domain in consumer.
+  auto consumer_root_id = info.vectorized_root_id;
+
+  fillVectorizedContigRootDomains(
+      consumer_tv, contig_finder, consumer_root_id, info);
+}
+
+void fillProducerVectorizedContigRootDomains(
+    const TensorView* producer_tv,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& c2p_map,
+    const ContigIDs& contig_finder) {
+  auto& info_vector = GpuLower::current()->vectorizedSetInfo();
+  auto it = std::find_if(
+      info_vector.begin(),
+      info_vector.end(),
+      [&producer_tv, &consumer_tv](auto& info) {
+        return info.consumer_tv == consumer_tv &&
+            info.producer_tv == producer_tv;
+      });
+  if (it == info_vector.end()) {
+    return;
+  }
+
+  VectorizedSetInfo& info = *it;
+
+  // info.vectorized_root_id is validated at this point to be the
+  // last concrete root domain in consumer.
+  auto consumer_root_id = info.vectorized_root_id;
+
+  auto root_id = c2p_map.at(consumer_root_id);
+
+  fillVectorizedContigRootDomains(producer_tv, contig_finder, root_id, info);
 }
 
 namespace {

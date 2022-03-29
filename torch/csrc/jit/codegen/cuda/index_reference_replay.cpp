@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 
+#include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -384,6 +385,14 @@ IndexCompute getReferenceIndexing(
   //   }
   // }
 
+  // No contig indexing is done in reference indexing
+  ContigIDs contig_finder(
+      reference_tensor->domain(),
+      reference_tensor->getMaybeRFactorDomain(),
+      std::vector<bool>(
+          reference_tensor->getMaybeRFactorDomain().size(), false),
+      {});
+
   IndexCompute compute(
       reference_tensor,
       index_map, // NOLINT
@@ -392,7 +401,7 @@ IndexCompute getReferenceIndexing(
       {},
       zero_domains,
       std::unordered_set<IterDomain*>(),
-      reference_tensor->contiguity(),
+      contig_finder,
       preferred_paths,
       halo_extent_map);
 

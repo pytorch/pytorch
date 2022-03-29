@@ -75,6 +75,16 @@ TensorView* makeConcreteTensor(
   return TensorViewBuilder().shape(shape).dtype(dtype).build();
 }
 
+TensorView* makeContigConcreteTensor(
+    std::vector<int64_t> shape,
+    DataType dtype = DataType::Float) {
+  return TensorViewBuilder()
+      .shape(shape)
+      .dtype(dtype)
+      .contiguity(std::vector<bool>(shape.size(), true))
+      .build();
+}
+
 void checkIntValue(
     ExpressionEvaluator& evaluator,
     Val* val,
@@ -21391,6 +21401,93 @@ TEST_F(NVFuserTest, FusionContigIndexingWithBroadcast_CUDA) {
 
     testValidate(&fusion, cg_outputs, {t0, t1}, {t3}, __LINE__, __FILE__);
   }
+}
+
+// Repro of #1534. Validation should detect invalid vectorization.
+TEST_F(NVFuserTest, FusionVectorizeContigIndexValidationFail2_CUDA) {
+  std::vector<int64_t> shape1{2, 3, 2};
+  std::vector<int64_t> shape2{2, 2};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigConcreteTensor(shape1);
+  fusion.addInput(tv0);
+  auto tv1 = makeContigConcreteTensor(shape2);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv1);
+  auto tv3 = broadcast(tv2, {false, true, false});
+  auto tv4 = add(tv0, tv3);
+  fusion.addOutput(tv4);
+
+  tv4->merge(1, 2);
+  tv4->merge(0, 1);
+  tv4->split(0, 4);
+  TransformPropagator::from(tv4);
+
+  tv0->computeAt(tv4, -2);
+  tv1->computeAt(tv4, -2);
+
+  tv2->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape1, options);
+  auto t1 = at::randn(shape2, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+
+  // Vectorization of tv2 should be detected as invalid.
+  ASSERT_ANY_THROW(fe.runFusion({t0, t1}));
+}
+
+TEST_F(NVFuserTest, FusionVectorizeContigIndexWithBroadcast_CUDA) {
+  std::vector<int64_t> shape1{2, 2, 2};
+  std::vector<int64_t> shape2{1, 2, 2};
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // [I0, I1, I2]
+  auto tv0 = makeContigTensor(shape1.size());
+  fusion.addInput(tv0);
+
+  // [B3, I1, I2]
+  auto tv1 = makeContigConcreteTensor(shape2);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv1);
+  auto tv3 = add(tv0, tv2);
+  fusion.addOutput(tv3);
+
+  tv3->merge(1, 2);
+  tv3->merge(0, 1);
+  tv3->split(0, 4);
+
+  // Don't modify tv1 so that it's replayed as tv2 with actual
+  // transformations. It would create temporary IterDomains, and the
+  // validation should still be able to detect vectorization by 4 is valid.
+  // TransformPropagator::from(tv3);
+  tv2->merge(1, 2);
+  tv2->merge(0, 1);
+  tv2->split(0, 4);
+
+  tv2->computeAt(tv3, -2);
+
+  tv2->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn(shape1, options);
+  auto t1 = at::randn(shape2, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

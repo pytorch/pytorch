@@ -24,15 +24,29 @@ class ContigIDs : public OptInDispatch {
  public:
   ContigIDs() = delete;
 
-  // Check through the history of ids whose inputs map to root_domain with
-  // contiguity root_contiguity. Return unordered_set of all merges that are
-  // contiguous. Ignore root order is primarily used for predicate generation.
-  // In this case we can linearize indexing of any ID that only consists of
-  // merge operations.
+  //! Check through the history of ids whose inputs map to root_domain with
+  //! contiguity root_contiguity. Return unordered_set of all merges that are
+  //! contiguous. Ignore root order is primarily used for predicate generation.
+  //! In this case we can linearize indexing of any ID that only consists of
+  //! merge operations.
+  //!
+  //! Mapping information from CA Index concrete to reference domains
+  //! is used to find if merged output domains can be indexed. If there's
+  //! no mapping to a reference domain, there's no corresponding
+  //! index, so it isn't marked as conting merge.
+  //!
+  //! p2c_id_map can be used when replayed producer domains are
+  //! analyzed, in which case producer-to-consumer maps should be
+  //! passed.
+  //!
+  //! Not really sure why but clang-tidy only complains about
+  //! std::unordered_map if passed as a const reference.
   ContigIDs(
       const std::vector<IterDomain*>& ids,
       const std::vector<IterDomain*>& root_domain,
-      const std::vector<bool>& root_contiguity);
+      const std::vector<bool>& root_contiguity,
+      std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
+      std::unordered_map<IterDomain*, IterDomain*> p2c_id_map = {});
 
   const std::unordered_set<IterDomain*>& contigIDs() const {
     return contig_ids_;
@@ -65,11 +79,28 @@ class ContigIDs : public OptInDispatch {
 
   void handle(Merge* merge) override;
 
+  IterDomain* getCAIndexConcreteId(IterDomain* id) const;
+
+  //! True if an ID is indexable.
+  //! E.g., a merged domain with broadcast may not be indexable when
+  //! its corresponding reference tensor has non-broadcast domains.
+  bool isIndexable(IterDomain* id) const;
+
+  //! Return an ID mapped with id_map_ or itself
+  IterDomain* getMappedId(IterDomain* id) const;
+
  private:
   //! Root domains to analyze contiguity
   const std::vector<IterDomain*>& root_domain_;
   //! Contiguity of root_domain_
   const std::vector<bool>& root_contiguity_;
+  //! Mapping of concrete to reference domains. If a concrete domain
+  //! is not mapped, it is not indexable as there's no mapped index.
+  const std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref_;
+  //! Producer-to-consumer index map in the case of analyzing replayed
+  //! producer tensors
+  const std::unordered_map<IterDomain*, IterDomain*> p2c_id_map_;
+
   //! Mapping of root domain to bool indicating contiguity
   std::unordered_map<IterDomain*, bool> is_contig_root_;
   // Mark if ids are result of contigous merges

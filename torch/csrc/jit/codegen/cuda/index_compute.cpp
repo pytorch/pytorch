@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -403,7 +404,7 @@ void IndexCompute::handle(Merge* merge) {
     return;
   }
 
-  if (!hasZeroMerged(out_id) && contig_ids.find(out_id) != contig_ids.end()) {
+  if (!hasZeroMerged(out_id) && contig_ids_.find(out_id) != contig_ids_.end()) {
     // Contiguous indexing path
     auto input_ids = ir_utils::iterDomainInputsOfOrderedAs(
         {merge->out()}, td_->getMaybeRFactorDomain());
@@ -526,15 +527,35 @@ void IndexCompute::handle(Expr* e) {
   BackwardVisitor::handle(e);
 }
 
-// Otherwise warning on runBackward as it hides an overloaded virtual
-// using TransformIter::runBackward;
 IndexCompute::IndexCompute(
     const TensorDomain* _td,
     std::unordered_map<IterDomain*, Val*> initial_index_map,
     std::unordered_map<IterDomain*, Val*> extent_map,
     std::unordered_set<IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> zero_merged_in,
-    const std::vector<bool>& root_contiguity,
+    std::unordered_set<IterDomain*> preferred_paths,
+    std::unordered_map<IterDomain*, Val*> reference_halo_extent_map)
+    : IndexCompute(
+          _td,
+          std::move(initial_index_map),
+          std::move(extent_map),
+          std::move(zero_domains),
+          std::move(zero_merged_in),
+          ContigIDs(
+              _td->domain(),
+              _td->getMaybeRFactorDomain(),
+              std::vector<bool>(_td->getMaybeRFactorDomain().size(), false),
+              {}),
+          std::move(preferred_paths),
+          std::move(reference_halo_extent_map)) {}
+
+IndexCompute::IndexCompute(
+    const TensorDomain* _td,
+    std::unordered_map<IterDomain*, Val*> initial_index_map,
+    std::unordered_map<IterDomain*, Val*> extent_map,
+    std::unordered_set<IterDomain*> zero_domains,
+    std::unordered_set<IterDomain*> zero_merged_in,
+    const ContigIDs& contig_finder,
     std::unordered_set<IterDomain*> preferred_paths,
     std::unordered_map<IterDomain*, Val*> reference_halo_extent_map)
     : td_(_td),
@@ -548,26 +569,16 @@ IndexCompute::IndexCompute(
 
   // Make sure we recompute any indices we can that map to a contiguous access
   // in physical memory.
-  if (std::any_of(root_contiguity.begin(), root_contiguity.end(), [](bool b) {
-        return b;
-      })) {
-    ContigIDs contig_finder(
-        td_->domain(), td_->getMaybeRFactorDomain(), root_contiguity);
-    contig_ids = contig_finder.contigIDs();
-    root_to_contig_id_ = contig_finder.rootToIndexedID();
-    const auto& within_contig = contig_finder.withinContigIDs();
-    for (auto contig_id : contig_ids) {
-      if (index_map_.find(contig_id) != index_map_.end()) {
-        TORCH_INTERNAL_ASSERT(
-            within_contig.find(contig_id) != within_contig.end());
-        for (auto id : within_contig.at(contig_id)) {
-          index_map_.erase(id);
-        }
+  contig_ids_ = contig_finder.contigIDs();
+  root_to_indexed_id_ = contig_finder.rootToIndexedID();
+  const auto& within_contig = contig_finder.withinContigIDs();
+  for (auto contig_id : contig_ids_) {
+    if (index_map_.find(contig_id) != index_map_.end()) {
+      TORCH_INTERNAL_ASSERT(
+          within_contig.find(contig_id) != within_contig.end());
+      for (auto id : within_contig.at(contig_id)) {
+        index_map_.erase(id);
       }
-    }
-  } else {
-    for (auto root_id : td_->getMaybeRFactorDomain()) {
-      root_to_contig_id_[root_id] = root_id;
     }
   }
 }
@@ -602,7 +613,7 @@ bool IndexCompute::isZero(IterDomain* id) const {
 IndexCompute IndexCompute::updateIndexCompute(
     const TensorDomain* new_td,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-    const std::vector<bool>& root_contiguity,
+    const ContigIDs& contig_finder,
     const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map)
     const {
   FUSER_PERF_SCOPE("GpuLower::Lower::updateIndexCompute");
@@ -637,7 +648,7 @@ IndexCompute IndexCompute::updateIndexCompute(
       updated_extent_map,
       updated_zero_domains,
       updated_zero_merged_in,
-      root_contiguity,
+      contig_finder,
       {},
       reference_halo_extent_map);
   updated_index_compute.run();
@@ -767,8 +778,7 @@ IndexSwizzle::IndexSwizzle(
           std::move(initial_index_map),
           std::move(extent_map),
           std::move(zero_domains),
-          std::move(zero_merged_in),
-          std::vector<bool>(tv->getRootDomain().size(), false)),
+          std::move(zero_merged_in)),
       tv_(tv),
       swizzle_type_(tv->swizzleType()),
       ids_to_swizzle_(tv->axesToSwizzle()) {}
@@ -1069,20 +1079,21 @@ Val* hoistConsumerIndex(
     return index;
   }
 
-  auto indexed_consumer_id = consumer_root_id;
-  {
-    // Find the true indexed domain, which can be a merged contiguous domain.
-    auto contig_id_it =
-        consumer_indexing.rootToContigID().find(consumer_root_id);
-    TORCH_INTERNAL_ASSERT(
-        contig_id_it != consumer_indexing.rootToContigID().end(),
-        "Consumer indexed ID not found: ",
-        consumer_root_id->toString());
-    if (consumer_indexing.indexMap().find(contig_id_it->second) !=
-        consumer_indexing.indexMap().end()) {
-      indexed_consumer_id = contig_id_it->second;
-    }
-  }
+  // auto indexed_consumer_id = consumer_root_id;
+  // Find the true indexed domain, which can be a merged contiguous domain.
+  auto contig_id_it = consumer_indexing.rootToContigID().find(consumer_root_id);
+  TORCH_INTERNAL_ASSERT(
+      contig_id_it != consumer_indexing.rootToContigID().end(),
+      "Consumer indexed ID not found: ",
+      consumer_root_id->toString());
+  auto indexed_consumer_id = contig_id_it->second;
+  // Make sure this contig ID is indeed indexed
+  TORCH_INTERNAL_ASSERT(
+      consumer_indexing.indexMap().find(contig_id_it->second) !=
+          consumer_indexing.indexMap().end(),
+      "Invalid contig index: ",
+      contig_id_it->second->toString());
+
   // Insert the index into the common index map. A previously inserted
   // val can be returned.
   auto common_index = GpuLower::current()
@@ -1133,21 +1144,19 @@ Val* hoistProducerIndex(
     return index;
   }
 
-  auto indexed_producer_id = producer_root_id;
-  // If the root domain maps to a contiguous domain that was successfully
-  // indexed, we will use that instead of the root domain.
-  {
-    auto contig_id_it =
-        producer_indexing.rootToContigID().find(producer_root_id);
-    TORCH_INTERNAL_ASSERT(
-        contig_id_it != producer_indexing.rootToContigID().end(),
-        "Producer indexed ID not found: ",
-        producer_root_id->toString());
-    if (producer_indexing.indexMap().find(contig_id_it->second) !=
-        producer_indexing.indexMap().end()) {
-      indexed_producer_id = contig_id_it->second;
-    }
-  }
+  // auto indexed_producer_id = producer_root_id;
+  auto contig_id_it = producer_indexing.rootToContigID().find(producer_root_id);
+  TORCH_INTERNAL_ASSERT(
+      contig_id_it != producer_indexing.rootToContigID().end(),
+      "Producer indexed ID not found: ",
+      producer_root_id->toString());
+  auto indexed_producer_id = contig_id_it->second;
+  // Make sure this contig ID is indeed indexed
+  TORCH_INTERNAL_ASSERT(
+      producer_indexing.indexMap().find(indexed_producer_id) !=
+          producer_indexing.indexMap().end(),
+      "Invalid contig id: ",
+      indexed_producer_id->toString());
 
   // Use the corresponding consumer domain to find matching
   // for-loops. Note that there's no CA mapping with the producer
@@ -1287,11 +1296,18 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   const auto reference_halo_extent_map =
       getReferenceHaloExtentMap(reference, index_map_ref_to_producer);
 
+  ContigIDs contig_finder(
+      producer_tv->domain()->domain(),
+      producer_tv->getMaybeRFactorDomain(),
+      producer_tv->domain()->contiguity(),
+      reference_id_map,
+      p2c_map);
+
   // Index into producer using reference indexing
   auto producer_indexing = ref_compute.updateIndexCompute(
       producer_tv->domain(),
       index_map_ref_to_producer,
-      producer_tv->domain()->contiguity(),
+      contig_finder,
       reference_halo_extent_map);
 
   // Revert p_ids
@@ -1433,8 +1449,51 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
+  // Save indexing info necessary for validating vectorization at launch time
+  fillProducerVectorizedContigRootDomains(
+      producer_tv, consumer_tv, c2p_map, contig_finder);
+
   return strided_inds;
 }
+
+namespace {
+
+// Maps all producer domains to consumer with broadcast
+// forwarding. Used to find the allocation position.
+std::unordered_map<IterDomain*, IterDomain*> mapAllProducerDomainsToConsumer(
+    TensorView* producer_tv,
+    const TensorView* consumer_tv) {
+  // This map has forwarded broadcast axes, it should only be used to compute
+  // the allocation position of the producer, and to figure out which producer
+  // indices are mapped to consumer trivial reductions.
+  std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
+
+  //  We want to replay producer as consumer instead of the other way around
+  //  since consumer may have some broadcasted axes producer doesn't have
+  //  merged into loops producer may use. If we did consumer as producer we
+  //  wouldn't have this information in the mapping.
+  auto replay_PasC = BestEffortReplay::replayPasC(
+      producer_tv,
+      consumer_tv,
+      -1,
+      PairwiseRootDomainMap(producer_tv, consumer_tv));
+
+  // Grab consumer domain entries and reverse replay map. TODO: Maybe
+  // TransformReplay::replayPasC could return this map
+  for (auto id : consumer_tv->domain()->domain()) {
+    const auto& c2p_map = replay_PasC.getReplay();
+    auto c2p_it = c2p_map.find(id);
+    if (c2p_it != c2p_map.end()) {
+      auto c_id = c2p_it->first;
+      auto p_id = c2p_it->second;
+      p2c_alloc_map[p_id] = c_id;
+    }
+  }
+
+  return p2c_alloc_map;
+}
+
+} // namespace
 
 // Producer index for either shared or local memory
 std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
@@ -1458,31 +1517,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   ir_utils::TVDomainGuard domain_guard(
       producer_tv, producer_replayed_as_consumer);
 
-  // This map has forwarded broadcast axes, it should only be used to compute
-  // the allocation position of the producer, and to figure out which producer
-  // indices are mapped to consumer trivial reductions.
-  std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
-
-  //  We want to play producer as consumer instead of the other way around
-  //  since consumer may have some broadcasted axes producer doesn't have
-  //  merged into loops producer may use. If we did consumer as producer we
-  //  wouldn't have this information in the mapping.
-  auto replay_PasC =
-      BestEffortReplay::replayPasC(producer_tv, consumer_tv, -1, pairwise_map);
-
-  const auto& c2p_map = replay_PasC.getReplay();
-  const auto p2c_map = invertOneToOneMap(c2p_map);
-
-  // Grab consumer domain entries and reverse replay map. TODO: Maybe
-  // TransformReplay::replayPasC could return this map
-  for (auto id : consumer_tv->domain()->domain()) {
-    auto c2p_it = c2p_map.find(id);
-    if (c2p_it != c2p_map.end()) {
-      auto c_id = c2p_it->first;
-      auto p_id = c2p_it->second;
-      p2c_alloc_map[p_id] = c_id;
-    }
-  }
+  const auto p2c_alloc_map =
+      mapAllProducerDomainsToConsumer(producer_tv, consumer_tv);
 
   kir::ForLoop* consumer_db_loop =
       gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
@@ -1525,6 +1561,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // more conservative approach, which is to use the consumer as a proxy between
   // producer to reference.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
+  std::unordered_map<IterDomain*, IterDomain*> c2p_index_map;
+  std::unordered_map<IterDomain*, IterDomain*> p2c_index_map;
   {
     // Map sent to best effort replay needs to match the exact incantation for
     // compute_at_mode.cpp with MappingMode::Index
@@ -1550,7 +1588,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         consumer_tv->domain()->domain(),
         c2p_root_map);
 
-    const auto& c2p_map = replay_producer_as_consumer.getReplay();
+    c2p_index_map = replay_producer_as_consumer.getReplay();
+    p2c_index_map = invertOneToOneMap(c2p_index_map);
 
     std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
         indexMapReferenceTo(
@@ -1559,8 +1598,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     for (auto entry : index_map_ref_to_consumer) {
       auto r_id = entry.first;
       auto c_id = entry.second;
-      auto c2p_it = c2p_map.find(c_id);
-      if (c2p_it != c2p_map.end()) {
+      auto c2p_it = c2p_index_map.find(c_id);
+      if (c2p_it != c2p_index_map.end()) {
         auto p_id = c2p_it->second;
         index_map_ref_to_producer[r_id] = p_id;
       }
@@ -1616,10 +1655,17 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   const auto reference_halo_extent_map =
       getReferenceHaloExtentMap(reference, index_map_ref_to_producer);
 
+  ContigIDs contig_finder(
+      producer_tv->domain()->domain(),
+      producer_tv->getMaybeRFactorDomain(),
+      producer_tv->domain()->contiguity(),
+      reference_id_map,
+      p2c_index_map);
+
   auto producer_indexing = ref_compute.updateIndexCompute(
       producer_tv->domain(),
       index_map_ref_to_producer,
-      producer_tv->domain()->contiguity(),
+      contig_finder,
       reference_halo_extent_map);
 
   // Revert p_ids
@@ -1692,7 +1738,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         producer_tv,
         producer_indexing,
         consumer_tv,
-        c2p_map,
+        p2c_index_map,
         reference.domain,
         ref_compute,
         loops,
@@ -1769,6 +1815,11 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
       strided_inds.push_back(db_strided_index);
     }
   }
+
+  // Save indexing info necessary for validating vectorization at launch time
+  fillProducerVectorizedContigRootDomains(
+      producer_tv, consumer_tv, c2p_index_map, contig_finder);
+
   return strided_inds;
 }
 
@@ -1801,10 +1852,16 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   const auto reference_halo_extent_map =
       getReferenceHaloExtentMap(reference, index_map_ref_to_consumer);
 
+  ContigIDs contig_finder(
+      consumer_tv->domain()->domain(),
+      consumer_tv->getMaybeRFactorDomain(),
+      consumer_tv->domain()->contiguity(),
+      reference_id_map);
+
   auto consumer_indexing = ref_compute.updateIndexCompute(
       consumer_tv->domain(),
       index_map_ref_to_consumer,
-      consumer_tv->domain()->contiguity(),
+      contig_finder,
       reference_halo_extent_map);
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
@@ -1933,6 +1990,8 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_inds.size() == consumer_tv->getMaybeRFactorDomain().size());
 
+  fillConsumerVectorizedContigRootDomains(consumer_tv, contig_finder);
+
   return strided_inds;
 }
 
@@ -2007,11 +2066,17 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   const auto reference_halo_extent_map =
       getReferenceHaloExtentMap(reference, index_map_ref_to_consumer);
 
+  ContigIDs contig_finder(
+      consumer_tv->domain()->domain(),
+      consumer_tv->getMaybeRFactorDomain(),
+      consumer_tv->domain()->contiguity(),
+      reference_id_map);
+
   // Index into consumer using reference indexing
   auto consumer_indexing = ref_compute.updateIndexCompute(
       consumer_tv->domain(),
       index_map_ref_to_consumer,
-      consumer_tv->domain()->contiguity(),
+      contig_finder,
       reference_halo_extent_map);
 
   IndexSwizzle index_swizzle(
@@ -2219,6 +2284,9 @@ struct PredicateDomainInfo {
 // want to return every IterDomain that's contiguous, just the one closest to
 // the leaves. Predicates are not associated with physical memory so we can
 // treat all of them as contiguous merges.
+//
+// TODO: This seems to have a large overlap with ContigIDs. Consider
+// refactoring.
 std::vector<PredicateDomainInfo> getPredicateContigIds(
     TensorView* consumer_tv) {
   const auto gpu_lower = GpuLower::current();
@@ -3043,6 +3111,14 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
   auto db_axis = gpu_lower->doubleBufferInfo().getDoubleBufferAxis(consumer_tv);
 
+  // Indexing is done without considering contig merging. Actual
+  // predicated domains are determined by considering contiguity.
+  const ContigIDs contig_finder(
+      consumer_tv->domain()->domain(),
+      consumer_tv->getMaybeRFactorDomain(),
+      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
+      {});
+
   // Both start and stop positions may need to be predicated. Indexing
   // differs when generating predicates for unswitch.
   // NOTE: If we could find-and-replace KIR nodes, we could just
@@ -3053,7 +3129,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
   const auto consumer_stop_indexing = ref_stop_indexing.updateIndexCompute(
       consumer_tv->domain(),
       ref_2_consumer,
-      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
+      contig_finder,
       reference_halo_extent_map);
   const auto& consumer_stop_index_map = consumer_stop_indexing.indexMap();
 
@@ -3069,7 +3145,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     const auto consumer_start_indexing = ref_start_indexing.updateIndexCompute(
         consumer_tv->domain(),
         ref_2_consumer,
-        std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
+        contig_finder,
         reference_halo_extent_map);
     consumer_start_index_map = consumer_start_indexing.indexMap();
   } else {
