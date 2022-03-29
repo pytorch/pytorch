@@ -2352,7 +2352,7 @@ def _get_param_to_unflat_param_names(
     unflattened parameter names should match the keys of the model state dict.
 
     Args:
-        model (torch.nn.model): Root module (which may or may not be a
+        model (torch.nn.Module): Root module (which may or may not be a
             :class:`FullyShardedDataParallel` instance).
     """
     param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
