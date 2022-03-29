@@ -1816,6 +1816,15 @@ struct getTypePtr_<at::optional<T>> final {
     return type;
   }
 };
+
+template<>
+struct getTypePtr_<at::OptionalIntArrayRef> final {
+  static const auto& call() {
+    static auto type = OptionalType::create(getTypePtr_<IntArrayRef>::call());
+    return type;
+  }
+};
+
 template <class... Contained>
 struct getTypePtr_<std::tuple<Contained...>> final {
   static const auto& call() {
