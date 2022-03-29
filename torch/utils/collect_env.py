@@ -294,8 +294,11 @@ def get_cachingallocator_config():
     return ca_config
 
 def is_xnnpack_available():
-    import torch.backends.xnnpack
-    return str(torch.backends.xnnpack.enabled)  # type: ignore[attr-defined]
+    if TORCH_AVAILABLE:
+        import torch.backends.xnnpack
+        return str(torch.backends.xnnpack.enabled)  # type: ignore[attr-defined]
+    else:
+        return "N/A"
 
 def get_env_info():
     run_lambda = run

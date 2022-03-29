@@ -53,6 +53,7 @@ env:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -115,6 +116,7 @@ jobs:
 
   {%- for test_job in test_jobs %}
   !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
     name: !{{ test_job.name }}
     timeout-minutes: !{{ timeout_after + 30 }}
     env:
