@@ -6,6 +6,7 @@ set(TEST_ROOT ${TORCH_ROOT}/test/mobile/lightweight_dispatch)
 add_executable(test_codegen_unboxing
   ${TEST_ROOT}/test_lightweight_dispatch.cpp
   ${TEST_ROOT}/test_codegen_unboxing.cpp
+  ${TEST_ROOT}/test_operator_symbols.cpp
 )
 
 target_include_directories(test_codegen_unboxing PRIVATE ${ATen_CPU_INCLUDE})

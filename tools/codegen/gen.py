@@ -1507,7 +1507,8 @@ def gen_source_files(
             'backend_select_function_registrations':
                 list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), relevant_fns)),
         }
-    cpu_fm.write('RegisterBackendSelect.cpp', gen_backend_select)
+    if not skip_dispatcher_op_registration:
+        cpu_fm.write('RegisterBackendSelect.cpp', gen_backend_select)
 
     schema_selector = selector
     if force_schema_registration:
@@ -1520,16 +1521,17 @@ def gen_source_files(
     def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
         return fn.root_name
 
-    cpu_fm.write_sharded(
-        'Operators.cpp',
-        native_functions,
-        key_fn=key_func,
-        env_callable=lambda fn: {
-            'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
-            'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
-        num_shards=5,
-        sharded_keys={'operator_headers', 'definitions'}
-    )
+    if not skip_dispatcher_op_registration:
+        cpu_fm.write_sharded(
+            'Operators.cpp',
+            native_functions,
+            key_fn=key_func,
+            env_callable=lambda fn: {
+                'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
+                'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
+            num_shards=5,
+            sharded_keys={'operator_headers', 'definitions'}
+        )
 
     cpu_fm.write('Functions.cpp', lambda: {})
 
@@ -1563,10 +1565,10 @@ def gen_source_files(
                 f"#include <ATen/ops/{functions[0].root_name}_native.h>",
                 f"#include <ATen/ops/{functions[0].root_name}_ops.h>",
             ] if functions_needing_functionalization else []),
-            'func_definitions': list(mapMaybe(
+            'func_definitions': [] if skip_dispatcher_op_registration else list(mapMaybe(
                 lambda f: gen_functionalization_definition(selector, f, to_functional_op[f.func.name]),
                 functions_needing_functionalization)),
-            'func_registrations': list(mapMaybe(
+            'func_registrations': [] if skip_dispatcher_op_registration else list(mapMaybe(
                 lambda f: gen_functionalization_registration(
                     selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
                 functions_needing_functionalization)),
