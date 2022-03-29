@@ -191,7 +191,7 @@ class TestExpandedWeightFunctional(TestCase):
                 sample_input = SampleInput(sample_input.args[0].clone(),
                                            args=(sample_input.input.clone(),),
                                            kwargs=sample_input.kwargs)
-                if device == "cuda" and "max_norm" in sample_input.kwargs and "padding_idx" in sample_input.kwargs:
+                if "cuda" in device and "max_norm" in sample_input.kwargs and "padding_idx" in sample_input.kwargs:
                     self.skipTest("embedding is non-determinstic in this case, see issue #74679")
             batch_size = sample_input.input.shape[0] if len(sample_input.input.shape) > 1 else 1
             (ew_input, ew_args, ew_kwargs) = make_expanded_weight(sample_input, batch_size)
