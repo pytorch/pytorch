@@ -76,20 +76,6 @@ class QuantizeHandler(ABC):
         """
         return False
 
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        """
-        Returns true if an observer should be inserted for the output of
-        the pattern matched to this QuantizeHandler instance during the
-        prepare step.
-        """
-        # TODO(future PR): potentially clean up and deduplicate these
-        # mappings.
-        return self.all_node_args_are_tensors and self.input_output_observed()
-
     def get_activation_ctr(
         self,
         qconfig: Any,
@@ -160,18 +146,6 @@ default_op_supported_dtypes = {
     torch.nn.functional.softmax: int8_dtypes,
 }
 
-QAT_CONV_MODULE_CLASSES = \
-    (torch.nn.qat.Conv2d,
-     torch.nn.qat.Conv3d,
-     torch.nn.intrinsic.qat.ConvBn1d,
-     torch.nn.intrinsic.qat.ConvBn2d,
-     torch.nn.intrinsic.qat.ConvBn3d,
-     torch.nn.intrinsic.qat.ConvBnReLU1d,
-     torch.nn.intrinsic.qat.ConvBnReLU2d,
-     torch.nn.intrinsic.qat.ConvBnReLU3d,
-     torch.nn.intrinsic.qat.ConvReLU2d,
-     torch.nn.intrinsic.qat.ConvReLU3d)
-
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
@@ -222,32 +196,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         self.all_node_args_are_tensors = \
             (self.num_tensor_args == len(self.binary_op_node.args))
 
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        """
-        Returns true if an observer should be inserted for the output of
-        the pattern matched to this QuantizeHandler instance during the
-        prepare step.
-        """
-        dtypes = get_qconfig_dtypes(qconfig)
-        if not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
-            return False
-        if self.num_tensor_args == 1:
-            return True
-        elif self.all_node_args_are_tensors and self.input_output_observed():
-            return True
-        else:
-            return False
-
     def is_general_tensor_value_op(self) -> bool:
         return self.num_tensor_args == 1
-
-    def input_output_observed(self):
-        # for x + y where x and y are scalars, we do not observe anything
-        return self.num_tensor_args > 0
 
     def is_output_quantized(self, qconfig):
         dtypes = get_qconfig_dtypes(qconfig)
@@ -295,18 +245,7 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
 # TODO: rename Relu -> ReLU to be more consistent with other classes
 class ConvReluQuantizeHandler(QuantizeHandler):
-    def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-        self.relu_node = None
-        if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
-           (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
-            self.relu_node = node
-            node = node.args[0]  # type: ignore[assignment]
-        self.conv_node = node
-        if node.op == "call_module":
-            self.conv = modules[str(self.conv_node.target)]
-        elif node.op == "call_function":
-            self.conv = node.target  # type: ignore[assignment]
+    pass
 
 @register_quant_pattern(torch.nn.functional.linear)
 @register_quant_pattern(torch.nn.qat.Linear)
@@ -320,45 +259,20 @@ class ConvReluQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Linear))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Linear))
 class LinearReLUQuantizeHandler(QuantizeHandler):
-    def __init__(
-            self,
-            node: Node,
-            modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-        self.relu_node = None
-        if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
-           (node.op == 'call_module' and isinstance(modules[str(node.target)], torch.nn.ReLU)):
-            self.relu_node = node
-            node = node.args[0]  # type: ignore[assignment]
-        self.linear_node = node
-        if node.op == 'call_module':
-            self.linear = modules[str(self.linear_node.target)]
+    pass
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
 class BatchNormQuantizeHandler(QuantizeHandler):
-    def __init__(
-            self,
-            node: Node,
-            modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-        assert node.op == 'call_module'
-        self.bn_node = node
-        self.bn = modules[str(self.bn_node.target)]
+    pass
 
 @register_quant_pattern(torch.nn.qat.Embedding)
 @register_quant_pattern(torch.nn.qat.EmbeddingBag)
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 class EmbeddingQuantizeHandler(QuantizeHandler):
-    def __init__(
-            self,
-            node: Node,
-            modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
-
     def input_output_observed(self) -> bool:
         return False
 
@@ -368,11 +282,7 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.RNNCell)
 @register_quant_pattern(torch.nn.LSTM)
 class RNNDynamicQuantizeHandler(QuantizeHandler):
-    def __init__(
-            self,
-            node: Node,
-            modules: Dict[str, torch.nn.Module]):
-        super().__init__(node, modules)
+    pass
 
 # we currently only support reference patterns for these ops so they have been removed
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
