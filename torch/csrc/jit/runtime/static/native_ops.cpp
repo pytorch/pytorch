@@ -1009,5 +1009,64 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::IntImplicit,
+    aten_IntImplicit,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema("aten::IntImplicit(Tensor a) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& tensor = pnode->Input(0).toTensor();
+        // JIT does a check for requires_grad, but we skip it here since SR is
+        // inference only
+        if (tensor.sizes().size() != 0) {
+          throw std::runtime_error(
+              "Cannot convert a tensor of dimension > 0 to scalar");
+        }
+        if (!isIntegralType(tensor.scalar_type())) {
+          std::stringstream ss;
+          ss << "Cannot input a tensor of type " << tensor.scalar_type()
+             << " as an integral argument";
+          throw std::runtime_error(ss.str());
+        }
+        pnode->Output(0) = at::native::item(tensor).toInt();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::select,
+    aten_select,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::select(Tensor(a) self, int dim, int index) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto dim = pnode->Input(1).toInt();
+        const auto index = pnode->Input(2).toInt();
+        pnode->Output(0) = at::native::select(self, dim, index);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::reshape_as,
+    aten_reshape_as,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* pnode) {
+        const auto& self = pnode->Input(0).toTensor();
+        const auto& other = pnode->Input(1).toTensor();
+        pnode->Output(0) = at::native::reshape(self, other.sizes());
+      };
+    });
+
 } // namespace jit
 } // namespace torch
