@@ -75,7 +75,7 @@ jobs:
         run: |
           git log --format=%B -n 1 HEAD
           git cherry -v "origin/${GIT_DEFAULT_BRANCH}"
-          echo "COMMIT_MESSAGES=${git cherry -v "origin/${GIT_DEFAULT_BRANCH}" >> $GITHUB_ENV
+          echo "COMMIT_MESSAGES=$(git cherry -v origin/${GIT_DEFAULT_BRANCH})" >> $GITHUB_ENV
 
       - name: Test
         env:
