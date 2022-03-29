@@ -831,13 +831,21 @@ class TestTypePromotion(TestCase):
             self.assertEqual(res1.dtype, res2.dtype)
 
     def test_addcdiv_promotion(self, device):
-        op1 = lambda arg1, arg2, arg3: torch.addcdiv(arg1, arg2, arg3)
-        op2 = lambda arg1, arg2, arg3: arg1 + arg2 / arg3
+        def op1(arg1, arg2, arg3):
+            return torch.addcdiv(arg1, arg2, arg3)
+
+        def op2(arg1, arg2, arg3):
+            return arg1 + arg2 / arg3
+
         self._ternary_promotion_common(device, op1, op2)
 
     def test_addcmul_promotion(self, device):
-        op1 = lambda arg1, arg2, arg3: torch.addcmul(arg1, arg2, arg3)
-        op2 = lambda arg1, arg2, arg3: arg1 + arg2 * arg3
+        def op1(arg1, arg2, arg3):
+            return torch.addcmul(arg1, arg2, arg3)
+
+        def op2(arg1, arg2, arg3):
+            return arg1 + arg2 * arg3
+
         self._ternary_promotion_common(device, op1, op2)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
