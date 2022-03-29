@@ -267,7 +267,7 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 Runtime::Runtime(const RuntimeConfiguration config)
   : instance_(create_instance(config)),
     adapters_(enumerate_adapters(instance_)),
-    default_adapter_i_(-1),
+    default_adapter_i_{},
     debug_report_callback_(create_debug_report_callback(instance_, config)) {
   if (config.initDefaultDevice) {
     try {
