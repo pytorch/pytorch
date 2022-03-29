@@ -7,7 +7,7 @@ from typing import Optional, List, Tuple, Union, cast
 import math
 import collections.abc
 
-complex_float_map = {torch.complex32: torch.half, torch.complex64: torch.float, torch.complex128: torch.double}
+complex_float_map = {torch.complex32: torch.float16, torch.complex64: torch.float32, torch.complex128: torch.float64}
 
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
