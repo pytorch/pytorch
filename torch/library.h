@@ -693,7 +693,7 @@ class TORCH_API Library final {
   }
 
   template <typename Name, typename Func>
-  Library& impl_UNBOXED(Name name, Func* raw_f) & {
+  Library& impl_UNBOXED(Name /*name*/, Func* /*raw_f*/) & {
     static_assert(
         c10::guts::false_t<Func>(),
         ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
@@ -710,7 +710,7 @@ class TORCH_API Library final {
     return def(raw_schema.operator const char*());
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& raw_f) & {
+  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Func>
@@ -720,15 +720,15 @@ class TORCH_API Library final {
   }
 
   template <typename Func>
-  Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & {
+  Library& impl(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Dispatch, typename Func>
-  Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & {
+  Library& impl(detail::SelectiveStr<false>, Dispatch&& /*key*/, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
+  Library& impl_UNBOXED(detail::SelectiveStr<false> /*name*/, Func* /*raw_f*/) & {
     static_assert(
         c10::guts::false_t<Func>(),
         ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
@@ -750,7 +750,7 @@ class TORCH_API Library final {
         std::forward<Func>(raw_f));
   }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
+  Library& impl_UNBOXED(detail::SelectiveStr<true> /*name*/, Func* /*raw_f*/) & {
     static_assert(
         c10::guts::false_t<Func>(),
         ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");

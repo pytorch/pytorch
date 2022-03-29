@@ -1,23 +1,21 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
 #include <torch/csrc/lazy/core/cache.h>
+#include <torch/csrc/lazy/core/debug_util.h>
+
+namespace {
+  std::string GetFirstUserFrameInPythonIfEnabled() {
+    static const auto LTC_ENABLE_SOURCE_INFO = std::getenv("LTC_ENABLE_SOURCE_INFO");
+    if (!LTC_ENABLE_SOURCE_INFO) {
+      return {};
+    }
+
+    return torch::lazy::GetFirstUserFrameInPython();
+  }
+}
 
 namespace torch {
 namespace lazy {
-
-const Shape& GetShapeFromTsOutput(const Output& output) {
-  if (auto* tsnode = dynamic_cast<const TsNode*>(output.node)) {
-    return tsnode->shape(output.index);
-  }
-  throw std::runtime_error("Expected TsNode but could not dynamic cast");
-}
-
-const Shape& GetShapeFromTsValue(const Value& value) {
-  if (auto* tsnode = dynamic_cast<const TsNode*>(value.node.get())) {
-    return tsnode->shape(value.index);
-  }
-  throw std::runtime_error("Expected TsNode but could not dynamic cast");
-}
 
 void TsNodeSetShapeDeferred(
     NodePtr node, const std::function<Shape()>& shape_fn) {
@@ -28,14 +26,15 @@ void TsNodeSetShapeDeferred(
   throw std::runtime_error("Expected TsNode but could not dynamic cast");
 }
 
-hash_t OperandHashes(const OpList& operands, const hash_t& seed) {
+hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes) {
   hash_t hash = seed;
   for (auto& operand : operands) {
     if (!operand) {
       hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
       continue;
     }
-    hash = HashCombine(hash, operand.hash());
+    auto operand_hash = bakeInSizes ? operand.hash_with_sizes() : operand.hash_without_sizes();
+    hash = HashCombine(hash, operand_hash);
   }
   return hash;
 }
@@ -48,8 +47,9 @@ TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
            // initialization to a separate function?
            /* node_hash */ HashCombine(op.hash(), hash_seed),
            /* dag_hash */
-           OperandHashes(operands, HashCombine(op.hash(), hash_seed))),
-      shapes_(shapes) {
+           [&](bool bakeInSizes) { return OperandHashes(operands, HashCombine(op.hash(), hash_seed), bakeInSizes); }),
+      shapes_(shapes),
+      python_stacktrace_(GetFirstUserFrameInPythonIfEnabled()) {
   for (auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
     // but it's just much easier to do it here.
@@ -80,7 +80,8 @@ void TsNode::SetShapeDeferred(
 }
 
 TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs, GetOpHash(op, shape, hash_seed))
+    : Node(op, num_outputs, [&](bool bakeInSizes) -> hash_t { return GetOpHash(op, shape, hash_seed, bakeInSizes); }),
+    python_stacktrace_(GetFirstUserFrameInPythonIfEnabled())
 {
   shapes_.push_back(std::move(shape));
 }
@@ -98,10 +99,11 @@ ShapeCache* GetShapeCache() {
 
 Shape TsNode::GetOpShape(
     const std::function<Shape()>& shape_fn) const {
+  auto hash = hash_with_sizes();
   ShapeCache* shape_cache = GetShapeCache();
-  auto shape = shape_cache->Get(hash());
+  auto shape = shape_cache->Get(hash);
   if (shape == nullptr) {
-    shape = shape_cache->Add(hash(),
+    shape = shape_cache->Add(hash,
                              std::make_shared<Shape>(shape_fn()));
   }
   return *shape;
@@ -120,8 +122,8 @@ std::string TsNode::ToString() const {
   return ss.str();
 }
 
-hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed) {
-  hash_t h = HashCombine(op.hash(), shape.hash());
+hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed, bool bakeInSizes) {
+  hash_t h = HashCombine(op.hash(), shape.hash(bakeInSizes));
   return HashCombine(h, hash_seed);
 }
 
@@ -139,6 +141,26 @@ TSOpVector TsNode::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
   // non-codegen ops.  For now, returning empty list here triggers fallback to
   // old lowering path.
   return {};
+}
+
+TensorList::TensorList(OpList values)
+  : TsNode(/*op=*/tensor_list_opkind,
+           /*operands=*/values,
+           /*shapes=*/std::vector<Shape>(),
+         /*num_outputs=*/1,
+         /*hash_seed=*/OperandHashes(values, /*seed=*/kHashSeed, enableDynamicShape())) {}
+
+TSOpVector TensorList::Lower(std::shared_ptr<torch::jit::GraphFunction> function,
+                             TSLoweringContext* loctx) const {
+
+  std::vector<torch::jit::Value*> tensor_list;
+  CHECK(!operands().empty());
+  for (const torch::lazy::Output& operand : operands()) {
+    tensor_list.emplace_back(loctx->GetOutputOp(operand));
+  }
+  auto graph = function->graph();
+  auto listnode = graph->insertNode(graph->createList(tensor_list[0]->type(), tensor_list));
+  return {listnode->output()};
 }
 
 }  // namespace lazy

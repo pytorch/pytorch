@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import itertools
 import sys
 from unittest import mock
 
@@ -27,7 +28,7 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.distributed.fsdp import CPUOffload
-from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch
+from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch, ShardingStrategy
 
 
 if not dist.is_available():
@@ -41,6 +42,23 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+params = "cpu_offload,backward_prefetch,sharding_strategy"
+cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+backward_prefetch_config = [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
+sharding_strategy_config = [ShardingStrategy.SHARD_GRAD_OP, None]
+configs = list(itertools.product(cpu_offload_config,
+                                 backward_prefetch_config,
+                                 sharding_strategy_config))
+test_name_mapping = {
+    str(CPUOffload(offload_params=True)): "offload_true",
+    str(CPUOffload(offload_params=False)): "offload_false",
+    str(BackwardPrefetch.BACKWARD_PRE): "prefetch_pre",
+    str(BackwardPrefetch.BACKWARD_POST): "prefetch_post",
+    str(ShardingStrategy.SHARD_GRAD_OP): "shard_grad_op",
+}
+
+def subtest_name(*args):
+    return '_'.join([test_name_mapping[str(s)] if s is not None else "none" for s in args])
 
 class TestParityWithDDP(FSDPTest):
     """
@@ -63,15 +81,8 @@ class TestParityWithDDP(FSDPTest):
         return modes
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_nested_wrapped_model(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    def test_nested_wrapped_model(self, cpu_offload, backward_prefetch, sharding_strategy):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -80,18 +91,13 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_nested_all_wrapped_model(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    @parametrize("clip_norm_type", [2.0, None])
+    def test_nested_all_wrapped_model(self, cpu_offload, backward_prefetch, sharding_strategy, clip_norm_type):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -101,18 +107,14 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    norm_type=clip_norm_type,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_transformer_parameterized(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    @parametrize("clip_norm_type", [2.0, None])
+    def test_transformer_parameterized(self, cpu_offload, backward_prefetch, sharding_strategy, clip_norm_type):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -121,18 +123,13 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    norm_type=clip_norm_type,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_delayed_optim_step(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    def test_delayed_optim_step(self, cpu_offload, backward_prefetch, sharding_strategy):
         # We use a model with a long CUDA delay right before the optimizer step.
         # This tests our streams logic, and that we don't start the allgather
         # until after the optimization step completes.
@@ -147,18 +144,12 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_delayed_reduce_scatter(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    def test_delayed_reduce_scatter(self, cpu_offload, backward_prefetch, sharding_strategy):
         # We insert a delay in the torch.distributed._reduce_scatter_base op, so that
         # the post_backward_stream takes much longer than the backward pass.
         # This tests that we properly block at the end of the backward pass for
@@ -174,21 +165,16 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
     def _dummy_ddp_fn(self, model):
         return DummyDDP(model)
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_mixture_of_experts(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    @parametrize("clip_norm_type", [2.0, None])
+    def test_mixture_of_experts(self, cpu_offload, backward_prefetch, sharding_strategy, clip_norm_type):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -200,18 +186,13 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    norm_type=clip_norm_type,
+                    sharding_strategy=sharding_strategy,
                 )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "backward_prefetch",
-        [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-    )
-    def test_mixture_of_experts_with_delay_before_free(self, cpu_offload, backward_prefetch):
+    @parametrize(params, configs, subtest_name)
+    def test_mixture_of_experts_with_delay_before_free(self, cpu_offload, backward_prefetch, sharding_strategy):
         init_modes = self._get_init_modes_for_test(cpu_offload)
         for fsdp_init_mode in init_modes:
             with self.subTest(fsdp_init_mode=fsdp_init_mode):
@@ -222,6 +203,7 @@ class TestParityWithDDP(FSDPTest):
                     fsdp_init_mode=fsdp_init_mode,
                     cpu_offload=cpu_offload,
                     backward_prefetch=backward_prefetch,
+                    sharding_strategy=sharding_strategy,
                 )
 
 

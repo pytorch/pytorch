@@ -10,6 +10,10 @@
 #include <caffe2/serialize/inline_container.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/mobile/file_format.h>
+#if defined(ENABLE_FLATBUFFER)
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#endif
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
@@ -248,9 +252,8 @@ void BytecodeDeserializer::parseFunctionSchema(
     auto parseArgList = [this,
                          function](c10::ivalue::TupleElements&& argTables) {
       std::vector<c10::Argument> args;
-      for (auto&& argTable : std::move(argTables)) {
-        auto argTableElements =
-            std::move(*std::move(argTable).toTuple()).elements();
+      for (auto& argTable : argTables) {
+        auto argTableElements = std::move(argTable.toTupleRef()).elements();
         auto name =
             expect_field(argTableElements, "name", BYTECODE_INDEX_ARGUMENT_NAME)
                 .toStringRef();
@@ -271,19 +274,18 @@ void BytecodeDeserializer::parseFunctionSchema(
       tryRegisterMethod(args, *function);
       return args;
     };
-    auto schemaTableElements =
-        std::move(*std::move(*schemaTable).toTuple()).elements();
-    auto arg_list = std::move(*expect_field(
-                                   schemaTableElements,
-                                   "arguments",
-                                   BYTECODE_INDEX_SCHEMA_ARGUMENTS)
-                                   .toTuple())
+    auto schemaTableElements = std::move(schemaTable->toTupleRef()).elements();
+    auto arg_list = std::move(expect_field(
+                                  schemaTableElements,
+                                  "arguments",
+                                  BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+                                  .toTupleRef())
                         .elements();
     auto ret_list =
         std::move(
-            *expect_field(
-                 schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
-                 .toTuple())
+            expect_field(
+                schemaTableElements, "returns", BYTECODE_INDEX_SCHEMA_RETURNS)
+                .toTupleRef())
             .elements();
     c10::FunctionSchema schema(
         function_name,
@@ -338,10 +340,10 @@ void BytecodeDeserializer::parseMethods(
   // Process all methods in this mobile module.
   for (const auto i : c10::irange(method_i_start, vals.size())) {
     auto element = std::move(vals[i]);
-    auto m_tuple = std::move(*element.toTuple()).elements();
+    auto m_tuple = std::move(element.toTupleRef()).elements();
     const std::string& function_name = m_tuple[0].toStringRef();
     auto codeTableElements =
-        std::move(*std::move(m_tuple[1]).toTuple()).elements();
+        std::move(std::move(m_tuple[1]).toTupleRef()).elements();
     IValue* schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
         ? &m_tuple[2]
@@ -351,23 +353,23 @@ void BytecodeDeserializer::parseMethods(
 
     auto ins_list =
         std::move(
-            *expect_field(
-                 codeTableElements, "instructions", BYTECODE_INDEX_INSTRUCTION)
-                 .toTuple())
+            expect_field(
+                codeTableElements, "instructions", BYTECODE_INDEX_INSTRUCTION)
+                .toTupleRef())
             .elements();
     auto ops_list =
-        std::move(*expect_field(
-                       codeTableElements, "operators", BYTECODE_INDEX_OPERATOR)
-                       .toTuple())
+        std::move(expect_field(
+                      codeTableElements, "operators", BYTECODE_INDEX_OPERATOR)
+                      .toTupleRef())
             .elements();
     auto consts_list =
-        std::move(*expect_field(
-                       codeTableElements, "constants", BYTECODE_INDEX_CONSTANT)
-                       .toTuple())
+        std::move(expect_field(
+                      codeTableElements, "constants", BYTECODE_INDEX_CONSTANT)
+                      .toTupleRef())
             .elements();
     auto types_list =
-        std::move(*expect_field(codeTableElements, "types", BYTECODE_INDEX_TYPE)
-                       .toTuple())
+        std::move(expect_field(codeTableElements, "types", BYTECODE_INDEX_TYPE)
+                      .toTupleRef())
             .elements();
     int64_t register_size =
         expect_field(
@@ -377,7 +379,7 @@ void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements debug_handles_m_tuple;
     if (debug_handles) {
       debug_handles_m_tuple =
-          std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
+          std::move(std::move((*debug_handles)[i]).toTupleRef()).elements();
     }
     init_upgrader(function.get());
     // 1. First pass all operators from models
@@ -454,13 +456,13 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
-  auto bvals = std::move(*readArchive("bytecode", mcu).toTuple()).elements();
+  auto bvals = std::move(readArchive("bytecode", mcu).toTupleRef()).elements();
 
   c10::optional<c10::ivalue::TupleElements> debug_handles;
   bool has_debug_handles{false};
   if (reader_->hasRecord("mobile_debug_handles.pkl")) {
     debug_handles =
-        std::move(*readArchive("mobile_debug_handles", mcu).toTuple())
+        std::move(readArchive("mobile_debug_handles", mcu).toTupleRef())
             .elements();
     has_debug_handles = true;
   }
@@ -538,18 +540,47 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  return module;
+  auto format = getFileFormat(in);
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<IStreamAdapter> rai =
+          std::make_unique<IStreamAdapter>(&in);
+      auto module = _load_for_mobile(std::move(rai), device, extra_files);
+      return module;
+    }
+#if defined(ENABLE_FLATBUFFER)
+    case FileFormat::FlatbufferFileFormat: {
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_stream_content(in);
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
+    }
+#else
+    case FileFormat::FlatbufferFileFormat: {
+      TORCH_CHECK(
+          false,
+          "Flatbuffer input file but the build hasn't enabled flatbuffer");
+    }
+#endif
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device, extra_files);
-  return module;
+  return _load_for_mobile(
+      filename,
+      device,
+      extra_files,
+      /*module_load_options=*/_default_mobile_module_load_options);
 }
 
 mobile::Module _load_for_mobile(
@@ -557,10 +588,37 @@ mobile::Module _load_for_mobile(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, module_load_options);
-  return module;
+  auto format = getFileFormat(filename);
+  switch (format) {
+    case FileFormat::ZipFileFormat: {
+      std::unique_ptr<FileAdapter> rai =
+          std::make_unique<FileAdapter>(filename);
+      auto module = _load_for_mobile_impl(
+          std::move(rai), device, extra_files, module_load_options);
+      return module;
+    }
+#if defined(ENABLE_FLATBUFFER)
+    case FileFormat::FlatbufferFileFormat: {
+      std::shared_ptr<char> data;
+      size_t size = 0;
+      std::tie(data, size) = get_file_content(filename.c_str());
+      auto* flatbuffer_module =
+          mobile::serialization::GetMutableModule(data.get());
+      mobile::Module m = initialize_mobile_module(flatbuffer_module);
+      parseExtraFiles(flatbuffer_module, extra_files);
+      return m;
+    }
+#else
+    case FileFormat::FlatbufferFileFormat: {
+      TORCH_CHECK(
+          false,
+          "Flatbuffer input file but the build hasn't enabled flatbuffer");
+    }
+#endif
+    default: {
+      TORCH_CHECK(false, "Format error");
+    }
+  }
 }
 
 mobile::Module _load_for_mobile(

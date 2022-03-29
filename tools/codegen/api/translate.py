@@ -5,7 +5,8 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
                                      memoryFormatT, tensorOptionsT, scalarTypeT,
                                      boolT, deviceT, layoutT, optionalTensorRefT,
                                      scalarT, optionalScalarRefT,
-                                     VectorCType, longT, intArrayRefT)
+                                     VectorCType, longT, intArrayRefT,
+                                     scalar_t, opmath_t, optionalIntArrayRefT)
 
 # This file implements a small program synthesis engine that implements
 # conversions between one API to another.
@@ -38,6 +39,7 @@ from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
 options_ctype = NamedCType("options", ConstRefCType(BaseCType(tensorOptionsT)))
 
 longVec_ctype = VectorCType(BaseCType(longT))
+optionalLongVec_ctype = OptionalCType(VectorCType(BaseCType(longT)))
 optionalScalar_ctype = OptionalCType(BaseCType(scalarT))
 optionalTensor_ctype = OptionalCType(BaseCType(tensorT))
 
@@ -92,9 +94,34 @@ def translate(
 
         # While we're at it, do some simple forward inference, looking through
         # constructors.
+        #
+        # NB: When should you do forward inference versus backward inference?
+        # The general idea:
+        #
+        #   - Backward inference WHEN the goal gets smaller
+        #   - Forward inference WHEN the hypothesis gets smaller
+        #
+        # This helps ensure termination: backward inference starts with a goal
+        # and tries to make it simpler and simpler until it's trivial; if the
+        # goal can grow in size, we blow up to a really huge goal size.
+        # Similarly, with forward inference we take hypotheses and decompose
+        # them into simpler hypotheses; if hypotheses could expand in size,
+        # we also have potential nontermination.  (In the code below, forward
+        # inference is only ever carried out at a single step, but you could
+        # imagine repeated application of forward inference being profitable.)
+        #
+        # A good starting point in the literature for exploring more about proof
+        # search are these lecture notes
+        # https://www.cs.cmu.edu/~fp/courses/oregon-m10/04-focusing.pdf
+        #
         # TODO: My kingdom for a pattern matcher
         # https://www.python.org/dev/peps/pep-0634/
-        # TODO: This could get us in recomputation trouble if b.expr is nontrivial
+        #
+        # TODO: This could get us in recomputation trouble if b.expr is nontrivial.
+        # Fix this by implementing some sort of sharing so that if multiple
+        # goals share the same expression, we only compute it once.  This seems
+        # to matter in practice as compiler is often unwilling to CSE nontrivial
+        # expressions like scalar.to<scalar_t>()
         t = b.type
         if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
                 isinstance(t.elem.elem, BaseCType) and str(t.elem.elem.type) == 'at::Tensor':
@@ -105,9 +132,15 @@ def translate(
             ctx[NamedCType(t.name, BaseCType(optionalTensorRefT))] = \
                 f'(({b.expr}.has_value() && (*{b.expr}).defined()) ? at::OptionalTensorRef(*{b.expr}) : at::OptionalTensorRef())'
 
+        if t.type == ConstRefCType(BaseCType(scalarT)):
+            ctx[NamedCType(t.name, BaseCType(opmath_t))] = f'({b.expr}).to<opmath_t>()'
+
         if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
             ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
                 f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
+
+        if t.type == BaseCType(scalar_t):
+            ctx[NamedCType(t.name, BaseCType(opmath_t))] = f'static_cast<opmath_t>({b.expr})'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
@@ -129,7 +162,8 @@ Check this module for more information.
 ''')
 
     # A shitty backtracking search implementation.  It's shitty because it
-    # doesn't actually do backtracing or search. In particular, if
+    # does backtracking via stack (bad idea!) and for the most part tries to
+    # avoid backtracking.  In particular, if
     # direct=True, we won't try to do any fancy synthesis, just trivial
     # conversions (e.g., "T a" is OK for "const T& a").  So all of the
     # existing rules in this function simply try to solve immediately,
@@ -176,7 +210,6 @@ Check this module for more information.
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"
             except UnsatError:
                 return memory_format
-
         elif goal == NamedCType("options", BaseCType(tensorOptionsT)):
             dtype = direct_solve(NamedCType("dtype", OptionalCType(BaseCType(scalarTypeT))))
             pin_memory = direct_solve(NamedCType("pin_memory", OptionalCType(BaseCType(boolT))))
@@ -203,6 +236,8 @@ Check this module for more information.
         # We can always do translations from value types to reference types, like vector<int> -> IntArrayRef
         elif goal.type == BaseCType(intArrayRefT):
             return direct_solve(NamedCType(goal.name, longVec_ctype))
+        elif goal.type == BaseCType(optionalIntArrayRefT):
+            return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):
@@ -222,6 +257,10 @@ Check this module for more information.
                 intArrayRef_ctype = NamedCType(goal.name, BaseCType(intArrayRefT))
                 argname = direct_solve(intArrayRef_ctype)
                 return f'{argname}.vec()'
+            elif goal.type == OptionalCType(VectorCType(BaseCType(longT))):
+                optionalIntArrayRef_ctype = NamedCType(goal.name, BaseCType(optionalIntArrayRefT))
+                argname = direct_solve(optionalIntArrayRef_ctype)
+                return f'{argname}.has_value() ? c10::make_optional({argname}->vec()) : c10::nullopt'
             elif goal.type == OptionalCType(BaseCType(scalarT)):
                 optionalScalarRef_ctype = NamedCType(goal.name, BaseCType(optionalScalarRefT))
                 argname = direct_solve(optionalScalarRef_ctype)

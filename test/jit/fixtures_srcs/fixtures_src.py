@@ -42,3 +42,18 @@ class TestVersionedLogspaceOutV8(torch.nn.Module):
 
     def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
         return torch.logspace(a, b, out=out)
+
+class TestVersionedGeluV9(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return torch._C._nn.gelu(x)
+
+class TestVersionedGeluOutV9(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        out = torch.zeros_like(x)
+        return torch._C._nn.gelu(x, out=out)

@@ -4,8 +4,9 @@
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-#include <caffe2/core/tensor.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/boxing/BoxedKernel.h>
+#include <caffe2/core/tensor.h>
 #include <vector>
 
 namespace c10 {
@@ -54,61 +55,20 @@ struct TORCH_API RegisterDefinition {
   RegisterDefinition(const char *name, c10::BoxedKernel kernel);
 };
 
-extern template struct RegisterDefinition<c10::DispatchKey::CPU>;
-extern template struct RegisterDefinition<c10::DispatchKey::CUDA>;
-extern template struct RegisterDefinition<c10::DispatchKey::HIP>;
-
 struct TORCH_API RegisterSchema {
-  explicit RegisterSchema(const char *schema_str);
+  RegisterSchema(
+    const char *schema_str,
+    c10::optional<c10::AliasAnalysisKind> optional_alias_analysis_kind);
 };
 
-} // namespace detail
-} // namespace caffe2
-
-/**
- * To register a caffe2 operator caffe2::MyOperator with the c10 dispatcher,
- * call:
- *
- * In caffe2/operators/MyOperator.h:
- *
- * > C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(C10MyOperator) // C10MyOperator is the
- * name
- *                                              // used by c10 for this operator
- *
- * In caffe2/operators/MyOperator.cc
- *
- * > C10_EXPORT_CAFFE2_OP_TO_C10_CPU (
- * >    C10MyOperator,
- * >    "_caffe2::C10MyOperator(Tensor input1, int argument2, float argument3)
- * -> (Tensor output1, Tensor output2)" > caffe2::MyOperator<caffe2::CPUContext>
- * // This is the caffe2 operator >                                           //
- * class template > )
- *
- * In caffe2/operators/MyOperator.cu
- *
- * > C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(C10MyOperator ,
- *   caffe2::MyOperator<caffe2::CUDAContext>)
- *
- * Notes:
- * - all macros must be defined in the top level namespace, not in namespace
- *   caffe2.
- * - all operators must call C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10 and
- *   C10_EXPORT_CAFFE2_OP_TO_C10_CPU .
- * - calling C10_EXPORT_CAFFE2_OP_TO_C10_CUDA is optional and can be omitted i f
- *   you don't want to expose the operator for CUDA operations.
- * - caffe2 arguments must come after caffe2 inputs, in other words, any tensor
- *   inputs must precede any non-tensor inputs.
- *
- * More complex use cases:
- * - If your operator has a variable number of input tensors, make the first (!)
- *   input an input of type TensorList. There must be no other tensor inputs.
- */
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)
 
-#define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
-  /* Register the op schema with the c10 dispatcher */                        \
-  static const caffe2::detail::RegisterSchema                                 \
-    C10_ANONYMOUS_VARIABLE(RegisterSchema_static_init_)(OperatorSchema);
+#define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(                        \
+    OperatorName, OperatorSchema, OptionalAliasAnalysisKind)            \
+  /* Register the op schema with the c10 dispatcher */                  \
+  static const caffe2::detail::RegisterSchema                           \
+  C10_ANONYMOUS_VARIABLE(RegisterSchema_static_init_)(                  \
+    OperatorSchema, OptionalAliasAnalysisKind);
 
 #define _C10_EXPORT_CAFFE2_OP_TO_C10_KEY(                                     \
     OperatorName, OperatorClass, Key)                                         \
@@ -125,7 +85,8 @@ struct TORCH_API RegisterSchema {
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CPU(                                \
     OperatorName, OperatorSchema, OperatorClass)                        \
-  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema) \
+  C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(                              \
+    OperatorName, OperatorSchema, c10::nullopt)                         \
   C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(OperatorName, OperatorClass)
 
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CUDA(OperatorName, OperatorClass)   \
@@ -142,7 +103,8 @@ struct TORCH_API RegisterSchema {
 #else
 // Don't use c10 dispatcher on mobile because of binary size
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)
-#define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY(OperatorName, OperatorSchema)
+#define C10_EXPORT_CAFFE2_OP_TO_C10_SCHEMA_ONLY( \
+    OperatorName, OperatorSchema, OptionalAliasAnalysisKind)
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CPU_KERNEL_ONLY(OperatorName, OperatorClass)
 #define C10_EXPORT_CAFFE2_OP_TO_C10_CPU( \
     OperatorName, OperatorSchema, OperatorClass)

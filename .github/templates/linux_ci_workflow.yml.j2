@@ -6,35 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if is_default %}
-  pull_request:
-{%- endif %}
-  push:
-{%- if enable_doc_jobs and is_scheduled %}
-    tags:
-      # NOTE: Binary build pipelines should only get triggered on release candidate builds
-      # Release candidate tags look like: v1.11.0-rc1
-      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
-{%- endif %}
-{%- for label in ciflow_config.labels | sort %}
-  {%- if loop.first and not (enable_doc_jobs  and is_scheduled) %}
-    tags:
-  {%- endif %}
-  {%- if label != "ciflow/default" %}
-      - '!{{ label }}/*'
-  {%- endif %}
-{%- endfor %}
-{%- if not is_scheduled and not only_on_pr %}
-    branches:
-      - master
-      - release/*
-{%- endif %}
-{%- if is_scheduled and not only_on_pr %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, branches, enable_doc_jobs) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
@@ -55,6 +27,11 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+{%- if enable_xla_test == 1 %}
+  # This is used for XLA tests only
+  XLA_CUDA: 0
+  XLA_IMAGE_TAG: v0.2
+{%- endif %}
 {%- if build_with_debug %}
   DEBUG: 1
 {%- endif %}
@@ -63,6 +40,7 @@ env:
 jobs:
 {% block build +%}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
@@ -74,7 +52,19 @@ jobs:
         run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout() }}
+    {%- if enable_xla_test == 1 %}
+      - name: Calculate docker image tag
+        id: calculate-tag
+        run: |
+          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
+          DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+          echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_ENV}"
+          echo "::set-output name=docker_tag::${DOCKER_TAG}"
+          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+    {%- else %}
       !{{ common.calculate_docker_image(false) }}
+    {%- endif %}
       - name: Pull Docker image
         run: |
           !{{ common.add_retry_to_env() }}
@@ -96,6 +86,9 @@ jobs:
             -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
+          {%- if enable_xla_test == 1 %}
+            -e XLA_CUDA \
+          {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -156,56 +149,21 @@ jobs:
 {%- endblock %}
 {%- if not exclude_test %}
 {% block test +%}
-  generate-test-matrix:
+  {%- for test_job in test_jobs %}
+  !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: !{{ test_job.name }}
     needs: build
-    runs-on: ubuntu-18.04
-    timeout-minutes: !{{ common.timeout_minutes }}
+    runs-on: !{{ test_job.runner }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
-      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
-      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
-      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
-      ENABLE_DOCS_TEST: !{{ enable_docs_test }}
-      ENABLE_BACKWARDS_COMPAT_TEST: !{{ enable_backwards_compat_test }}
-      ENABLE_XLA_TEST: !{{ enable_xla_test }}
-      ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: !{{ multigpu_runner_type }}
-      DISTRIBUTED_GPU_RUNNER_TYPE: !{{ distributed_gpu_runner_type }}
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-      PR_BODY: ${{ github.event.pull_request.body }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
 {%- if 'rocm' in test_runner_type %}
       !{{ common.setup_rocm_linux() }}
@@ -217,17 +175,20 @@ jobs:
         run: |
           !{{ common.add_retry_to_env() }}
           retry docker pull "${DOCKER_IMAGE}"
-{%- if 'rocm' in test_runner_type %}
+{%- if 'rocm' in test_runner_type and "nogpu" not in test_job.config %}
       - name: ROCm set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-{%- else %}
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+{%- elif "cuda" in build_environment and "nogpu" not in test_job.config %}
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
 {%- endif %}
       - name: Determine shm-size
         run: |
@@ -302,11 +263,14 @@ jobs:
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PR_BODY \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+          {%- if enable_xla_test == 1 %}
+            -e XLA_CUDA \
+          {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
 {%- if 'rocm' not in test_runner_type %}
             ${PROXY_ENV} \
@@ -344,11 +308,12 @@ jobs:
 {%- endif %}
       !{{ common.render_test_results() }}
 {%- if 'rocm' in test_runner_type %}
-      !{{ common.upload_downloaded_files(name='linux', use_s3=False) }}
-      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False) }}
+      !{{ common.upload_downloaded_files(name='linux', use_s3=False, config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False, config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
 {%- else %}
-      !{{ common.upload_downloaded_files(name='linux') }}
-      !{{ common.upload_test_reports(name='linux') }}
+      !{{ common.upload_downloaded_files(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_cores(config=test_job.config, shard=test_job.shard) }}
 {%- endif %}
       !{{ common.upload_test_statistics(build_environment) }}
 {%- if 'rocm' in test_runner_type %}
@@ -356,10 +321,12 @@ jobs:
 {%- else %}
       !{{ common.teardown_ec2_linux() }}
 {%- endif %}
+{%- endfor %}
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
   build-docs:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:

@@ -90,7 +90,9 @@ void call_caffe2_op_from_c10(
   //                to.
 }
 
-static FunctionSchema make_function_schema_for_c10(const char* schema_str) {
+static FunctionSchema make_function_schema_for_c10(
+  const char* schema_str,
+  c10::optional<c10::AliasAnalysisKind> optional_alias_analysis_kind) {
 #if !defined(EXPOSE_C2_OPS) &&                              \
   (defined(CAFFE2_IS_XPLAT_BUILD) || defined(C10_MOBILE))
   throw std::logic_error(
@@ -104,13 +106,17 @@ static FunctionSchema make_function_schema_for_c10(const char* schema_str) {
       nullopt,
       IValue());
 
-  return FunctionSchema(
+  auto schema = FunctionSchema(
       parsed_schema.name(),
       parsed_schema.overload_name(),
       std::move(arguments),
       parsed_schema.returns(),
       parsed_schema.is_vararg(),
       parsed_schema.is_varret());
+  if (optional_alias_analysis_kind) {
+    schema.setAliasAnalysis(*optional_alias_analysis_kind);
+  }
+  return schema;
 #endif
 }
 
@@ -127,9 +133,11 @@ template struct RegisterDefinition<c10::DispatchKey::CPU>;
 template struct RegisterDefinition<c10::DispatchKey::CUDA>;
 template struct RegisterDefinition<c10::DispatchKey::HIP>;
 
-RegisterSchema::RegisterSchema(const char *schema_str) {
+RegisterSchema::RegisterSchema(
+    const char *schema_str,
+    c10::optional<c10::AliasAnalysisKind> optional_alias_analysis_kind) {
   static torch::Library m(
-      torch::Library::FRAGMENT, "_caffe2", c10::nullopt,
+    torch::Library::FRAGMENT, "_caffe2", c10::nullopt,
       __FILE__, __LINE__);
   m.def(make_function_schema_for_c10(schema_str));
 }

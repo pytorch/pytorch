@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/record_function.h>
+#include <c10/util/Synchronized.h>
 #include <map>
 #include <set>
 #include <string>
@@ -27,20 +28,8 @@ struct BuildFeatureTracer final {
    */
   typedef std::set<std::string> build_feature_type;
 
-  BuildFeatureTracer() {
-    auto recorder_cb = [](const at::RecordFunction& fn)
-        -> std::unique_ptr<at::ObserverContext> {
-      std::string name = fn.name();
-      getBuildFeatures().insert(name);
-      return nullptr;
-    };
-
-    handle_ =
-        at::addGlobalCallback(at::RecordFunctionCallback(recorder_cb)
-                                  .scopes({at::RecordScope::BUILD_FEATURE}));
-  }
-
-  static build_feature_type& getBuildFeatures();
+  BuildFeatureTracer();
+  static c10::Synchronized<build_feature_type>& getBuildFeatures();
 
   ~BuildFeatureTracer() {
     at::removeCallback(handle_);
