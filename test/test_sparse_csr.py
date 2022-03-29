@@ -1010,6 +1010,9 @@ class TestSparseCSR(TestCase):
             m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             _test_addmm_addmv(self, torch.addmm, M, m1, m2, transpose_out=t4, layout=torch.sparse_csr, mode="dense_result")
 
+    @parametrize("k", [0, 1, 8])
+    @parametrize("n", [0, 1, 10])
+    @parametrize("m", [0, 1, 25])
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(torch.complex64,
@@ -1022,20 +1025,17 @@ class TestSparseCSR(TestCase):
     )
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    def test_addmm_sizes_all_sparse_csr(self, device, dtype):
-        for m in [0, 1, 25]:
-            for n in [0, 1, 10]:
-                for k in [0, 1, 8]:
-                    M = torch.randn(n, m, device=device).to(dtype)
-                    m1 = torch.randn(n, k, device=device).to(dtype)
-                    m2 = torch.randn(k, m, device=device).to(dtype)
-                    _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, mode="all_sparse")
+    def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
+        M = torch.randn(n, m, device=device).to(dtype)
+        m1 = torch.randn(n, k, device=device).to(dtype)
+        m2 = torch.randn(k, m, device=device).to(dtype)
+        _test_addmm_addmv(self, torch.addmm, M, m1, m2, layout=torch.sparse_csr, mode="all_sparse")
 
-                    M = torch.randn(n, m, device=device).to(dtype).to_sparse_csr()
-                    m1 = torch.randn(n, k + 1, device=device).to(dtype).to_sparse_csr()
-                    m2 = torch.randn(k, m, device=device).to(dtype).to_sparse_csr()
-                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
-                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
+        M = torch.randn(n, m, device=device).to(dtype).to_sparse_csr()
+        m1 = torch.randn(n, k + 1, device=device).to(dtype).to_sparse_csr()
+        m2 = torch.randn(k, m, device=device).to(dtype).to_sparse_csr()
+        self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
+        self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.float)
