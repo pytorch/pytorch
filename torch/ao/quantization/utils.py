@@ -362,7 +362,7 @@ def _parent_name(target):
     else:
         return r[0], r[1]
 
-def nonparam_type(module):
+def type_before_parametrizations(module):
     """
     Returns type(module) or the original
     type if module is currently parametrized
