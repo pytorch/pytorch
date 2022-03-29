@@ -315,6 +315,10 @@ class TestSparse(TestCase):
             self.assertEqual(res, dense_x)
             self.assertEqual(res, safe_dense_x)
 
+            # Only run autograd test for float64
+            if x.dtype != torch.float64:
+                return
+
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
@@ -346,6 +350,7 @@ class TestSparse(TestCase):
             ], dtype=dtype, device=device)
 
             test_tensor(x, res)
+            test_tensor(res, res)
 
             i = self.index_tensor([
                 [0, 1, 2, 2],
