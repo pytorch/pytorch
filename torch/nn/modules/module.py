@@ -1562,7 +1562,7 @@ class Module:
                                self.__class__.__name__, "\n\t".join(error_msgs)))
         return _IncompatibleKeys(missing_keys, unexpected_keys)
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True):
+    def _named_members(self, get_members_fn, prefix='', recurse=True, return_module=False):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
         modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
@@ -1573,7 +1573,10 @@ class Module:
                     continue
                 memo.add(v)
                 name = module_prefix + ('.' if module_prefix else '') + k
-                yield name, v
+                if return_module:
+                    yield name, v, module
+                else:
+                    yield name, v
 
     def parameters(self, recurse: bool = True) -> Iterator[Parameter]:
         r"""Returns an iterator over module parameters.
