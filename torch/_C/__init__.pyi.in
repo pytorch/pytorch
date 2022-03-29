@@ -22,6 +22,8 @@ import builtins
 from . import _nn as _nn
 from . import _onnx as _onnx
 from . import _VariableFunctions as _VariableFunctions
+from . import _lazy as _lazy
+from . import _lazy_ts_backend as _lazy_ts_backend
 
 T = TypeVar('T')
 
@@ -822,9 +824,6 @@ class ThroughputBenchmark(object):
     def add_input(self, *args: Any, **kwargs: Any) -> None: ...
     def run_once(self, *args: Any, **kwargs: Any) -> Any: ...
     def benchmark(self, config: BenchmarkConfig) -> BenchmarkExecutionStats: ...
-
-# IDK if these are actually exposed here, hope they are
-${namedtuple_defs}
 
 # Defined in torch/csrc/generic/Storage.cpp
 ${legacy_storage_base_hints}

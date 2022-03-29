@@ -2048,7 +2048,10 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        return t.coalesce().to_dense()
+        # coalesce is only implemented for COO
+        if t.layout == torch.sparse_coo:
+            t = t.coalesce()
+        return t.to_dense()
 
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
@@ -3109,20 +3112,17 @@ def sandcastle_skip_if(condition, reason):
     skipping continuously.
     """
     def decorator(func):
-
-        if not IS_SANDCASTLE and condition:
-            func.__unittest_skip__ = True
-            func.__unittest_skip_why__ = reason
-            return func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if condition and IS_SANDCASTLE:
-                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
-                return
+        if condition:
+            if IS_SANDCASTLE:
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return wrapper
             else:
-                return func(*args, **kwargs)
-        return wrapper
+                func.__unittest_skip__ = True
+                func.__unittest_skip_why__ = reason
+
+        return func
 
     return decorator
 

@@ -264,7 +264,8 @@ class TestLinalg(TestCase):
                 else:
                     # driver == 'gelsy'
                     # QR based algorithm; setting the value too high might lead to non-unique solutions and flaky tests
-                    rcond = 1e-4
+                    # so we skip this case
+                    continue
 
             # specifying rcond value has no effect for gels driver so no need to run the tests again
             if driver == 'gels' and rcond is not None:

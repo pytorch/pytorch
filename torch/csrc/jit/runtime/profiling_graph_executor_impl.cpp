@@ -472,6 +472,7 @@ void ProfilingGraphExecutorImpl::runNoGradOptimizations(
     }
 
     // Run custom post-fusion passes
+    // e.g. NVFuser
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
