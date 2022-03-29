@@ -51,6 +51,8 @@ class QuantizeHandler(ABC):
         """ Records pattern information in __init__, which will be used
         in convert
         """
+        self.node_pattern = node_pattern
+        self.modules = modules
         # this is an indicator of whether all the inputs are Node or not
         # since some op might be quantized differently depending on whether
         # all inputs are tensors or not, e.g. add/mul
@@ -101,7 +103,6 @@ class QuantizeHandler(ABC):
         """
         return qconfig.activation
 
-@register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
 @register_quant_pattern(operator.truediv)

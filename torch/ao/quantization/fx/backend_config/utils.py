@@ -18,8 +18,9 @@ def get_pattern_to_quantize_handlers(
         pattern = config["pattern"]
         observation_type = config["observation_type"]
         dtype_configs = config["dtype_configs"]
+        observation_type_getter = config.get("observation_type_getter", None)
         pattern_to_quantize_handlers[pattern] = \
-            get_quantize_handler_cls(observation_type, dtype_configs)
+            get_quantize_handler_cls(observation_type, dtype_configs, observation_type_getter)
 
     return pattern_to_quantize_handlers
 
