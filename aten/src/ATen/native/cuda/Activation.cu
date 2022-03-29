@@ -195,7 +195,7 @@ void launch_prelu_cuda_kernel_multi_weights(
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), input_numel));
   dim3 grid;
   int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  C10_CUDA_CHECK(cudaGetDevice(&curDevice));
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
   TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu: input too large or too many dimensions");
 
@@ -273,7 +273,7 @@ void launch_prelu_cuda_backward_kernel_multi_weights(
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), input_numel));
   dim3 grid;
   int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  C10_CUDA_CHECK(cudaGetDevice(&curDevice));
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
   TORCH_CHECK(cuda::getApplyGrid(input_numel, grid, curDevice), "prelu_backward_cuda: input too large or too many dimensions");
 

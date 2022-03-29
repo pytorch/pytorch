@@ -308,7 +308,7 @@ class CUDAHostAllocator {
       {
         // now, see if we can handle this element
         auto& event = processed->first;
-        cudaError_t err = cudaEventQuery(*event);
+        cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(*event));
         if (err == cudaErrorNotReady) {
           cudaGetLastError();
           // push the event onto the back of the queue if it's not

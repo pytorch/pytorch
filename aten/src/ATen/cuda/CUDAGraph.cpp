@@ -187,7 +187,7 @@ void CUDAGraph::replay() {
     // certain topologies to be corrupted (kernels elided, internal syncs
     // ignored) when replayed back to back without a sync in between.
     // The bug is fixed in CUDA 11.4+.
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");

@@ -314,7 +314,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     const dim3 block = cuda::getApplyBlock();
     dim3 grid;
     int curDevice = -1;
-    cudaGetDevice(&curDevice);
+    C10_CUDA_CHECK(cudaGetDevice(&curDevice));
     cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
@@ -498,7 +498,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
   dim3 grid;
   int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  C10_CUDA_CHECK(cudaGetDevice(&curDevice));
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
   TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
@@ -642,7 +642,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
     }
     else {
       int curDevice = -1;
-      cudaGetDevice(&curDevice);
+      C10_CUDA_CHECK(cudaGetDevice(&curDevice));
       cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
       at::cuda::ThrustAllocator allocator;
       auto policy = thrust::cuda::par(allocator).on(stream);
@@ -747,7 +747,7 @@ __global__ void search_end_matrix_indices_cuda_kernel(
 // indices to find the end index for each matrix
 void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices, const Tensor& indices_1D) {
   int curDevice = -1;
-  cudaGetDevice(&curDevice);
+  C10_CUDA_CHECK(cudaGetDevice(&curDevice));
   cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
 
   auto indices_1D_ti = getTensorInfo<int64_t, int64_t>(indices_1D);
@@ -763,7 +763,7 @@ void search_end_matrix_indices(int64_t* mat_el_end_indices, int64_t num_matrices
   );
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
 cudaDataType getTensorCudaDataType(Tensor self) {

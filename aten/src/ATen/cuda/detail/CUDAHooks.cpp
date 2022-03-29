@@ -94,7 +94,7 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
   cudaPointerAttributes attr;
-  cudaError_t err = cudaPointerGetAttributes(&attr, data);
+  cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaPointerGetAttributes(&attr, data));
 #if !defined(USE_ROCM)
   if (err == cudaErrorInvalidValue) {
     cudaGetLastError();
@@ -175,7 +175,7 @@ const at::cuda::NVRTC& CUDAHooks::nvrtc() const {
 
 int64_t current_device() {
   int device;
-  cudaError_t err = cudaGetDevice(&device);
+  cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaGetDevice(&device));
   if (err == cudaSuccess) {
     return device;
   }
@@ -288,7 +288,7 @@ std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
   int runtimeVersion;
-  cudaRuntimeGetVersion(&runtimeVersion);
+  C10_CUDA_CHECK(cudaRuntimeGetVersion(&runtimeVersion));
 
   auto printCudaStyleVersion = [&](int v) {
 #ifdef USE_ROCM

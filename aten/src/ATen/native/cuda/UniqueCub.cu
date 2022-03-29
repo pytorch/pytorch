@@ -60,7 +60,7 @@ std::tuple<Tensor, Tensor, Tensor, int64_t> compute_unique(
         dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), num_inp));
     dim3 grid;
     int curDevice = -1;
-    cudaGetDevice(&curDevice);
+    C10_CUDA_CHECK(cudaGetDevice(&curDevice));
     cuda::getApplyGrid(num_inp, grid, curDevice);
     adjacent_difference_kernel<scalar_t>
         <<<grid, block, 0, stream>>>(num_inp, data, inv_loc_ptr);

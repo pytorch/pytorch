@@ -49,7 +49,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
   int access = 0;
   C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&access, dev, dev_to_access));
   if (access) {
-    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
+    cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaDeviceEnablePeerAccess(dev_to_access, 0));
     if (err == cudaErrorPeerAccessAlreadyEnabled) {
       // ignore and clear the error if access was already enabled
       cudaGetLastError();

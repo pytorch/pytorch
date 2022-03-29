@@ -162,10 +162,7 @@ __global__ void kernelHistogram1D(
 inline int64_t getFreeGlobalMemory() {
   // no need to use `cudaSetDevice`
   size_t free_mem, total_mem;
-  cudaMemGetInfo(&free_mem, &total_mem);
-  TORCH_INTERNAL_ASSERT(
-      cudaGetLastError() == cudaSuccess,
-      "CUDA_tensor_histogram failed to get free global memory");
+  C10_CUDA_CHECK(cudaMemGetInfo(&free_mem, &total_mem));
   return static_cast<int64_t>(free_mem);
 }
 

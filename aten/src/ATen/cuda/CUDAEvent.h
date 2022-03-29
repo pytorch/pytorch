@@ -45,7 +45,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     try {
       if (is_created_) {
         CUDAGuard guard(device_index_);
-        cudaEventDestroy(event_);
+        // Error checks in destructors are intentionally omitted,
+        // otherwise segfaults happen during shutdown
+        C10_CUDA_ERROR_HANDLED(cudaEventDestroy(event_));
       }
     } catch (...) { /* No throw */ }
   }
@@ -84,7 +86,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       return true;
     }
 
-    cudaError_t err = cudaEventQuery(event_);
+    cudaError_t err = C10_CUDA_ERROR_HANDLED(cudaEventQuery(event_));
     if (err == cudaSuccess) {
       return true;
     } else if (err != cudaErrorNotReady) {
