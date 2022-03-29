@@ -361,7 +361,7 @@ def unpackage_script_module(importer: PackageImporter, script_module_id: str) ->
         importer.storage_context,
         validate_map_location(importer.last_map_location),
         script_module_id,
-    )
+    )  # ignore: type[arg-type]
     return wrap_cpp_module(cpp_module)
 
 
