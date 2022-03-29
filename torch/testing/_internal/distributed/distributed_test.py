@@ -1057,7 +1057,7 @@ class DistributedTest:
                             if params.grad is None:
                                 continue
                             params.data = torch.ones_like(param.data) * rank
- 
+
                     averager.average_parameters(opt.param_groups)
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         for param_group in opt.param_groups:
@@ -1184,7 +1184,7 @@ class DistributedTest:
             )
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
-            
+
             expected_avg_tensor_within_subgroup1 = (
                 torch.ones_like(param.data) * sum(list(_pg_group_ranks[subgroup1].keys())) / subgroup_size1
             )
@@ -4923,7 +4923,7 @@ class DistributedTest:
                             continue
                         self.assertEqual(params1.data, params2.data)
 
-    
+
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
