@@ -7,7 +7,6 @@ from typing import Optional, List, Tuple, Union, cast
 import math
 import collections.abc
 
-complex_float_map = {torch.complex32: torch.float16, torch.complex64: torch.float32, torch.complex128: torch.float64}
 
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
@@ -127,7 +126,9 @@ def make_tensor(
         rand_val = torch.rand(shape, device=device, dtype=dtype)
         result = high * rand_val + low * (1 - rand_val)
     elif dtype in _complex_types:
-        float_dtype = complex_float_map[dtype]
+        float_dtype = {torch.complex32: torch.float16,
+                       torch.complex64: torch.float32,
+                       torch.complex128: torch.float64}[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         real_rand_val = torch.rand(shape, device=device, dtype=float_dtype)
