@@ -8,6 +8,8 @@ from unittest import skipIf
 
 from torch.package import PackageExporter, PackageImporter
 from torch.testing._internal.common_utils import run_tests
+from torch.package.package_importer_no_torch import PackageImporter as PackageImporterNoTorch
+from torch.package.package_exporter_no_torch import PackageExporter as PackageExporterNoTorch
 
 try:
     from .common import PackageTestCase
@@ -20,10 +22,15 @@ except ImportError:
 class TestResources(PackageTestCase):
     """Tests for access APIs for packaged resources."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporter
+        self.PackageExporter = PackageExporter
+
     def test_resource_reader(self):
         """Test compliance with the get_resource_reader importlib API."""
         buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             # Layout looks like:
             #    package
             #    ├── one/
@@ -47,7 +54,7 @@ class TestResources(PackageTestCase):
             pe.save_text("two", "g.txt", "hello, g!")
 
         buffer.seek(0)
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
 
         reader_one = importer.get_resource_reader("one")
         with self.assertRaises(FileNotFoundError):
@@ -91,19 +98,19 @@ class TestResources(PackageTestCase):
             """
         )
         buffer = BytesIO()
-        with PackageExporter(buffer) as pe:
+        with self.PackageExporter(buffer) as pe:
             pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
         buffer.seek(0)
-        importer = PackageImporter(buffer)
+        importer = self.PackageImporter(buffer)
         self.assertEqual(
             importer.import_module("foo.bar").secret_message(), "my sekrit plays"
         )
 
     def test_importer_access(self):
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with self.PackageExporter(buffer) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -117,7 +124,7 @@ class TestResources(PackageTestCase):
             )
             he.save_source_string("main", src, is_package=True)
         buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = self.PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.t, "my string")
         self.assertEqual(m.b, "my string".encode("utf-8"))
@@ -127,7 +134,7 @@ class TestResources(PackageTestCase):
         Tests that packaged code can used importlib.resources.path.
         """
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with self.PackageExporter(buffer) as he:
             he.save_binary("string_module", "my_string", "my string".encode("utf-8"))
             src = dedent(
                 """\
@@ -141,10 +148,15 @@ class TestResources(PackageTestCase):
             )
             he.save_source_string("main", src, is_package=True)
         buffer.seek(0)
-        hi = PackageImporter(buffer)
+        hi = self.PackageImporter(buffer)
         m = hi.import_module("main")
         self.assertEqual(m.s, "my string")
 
+class TestResourcesNoTorch(TestResources):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.PackageImporter = PackageImporterNoTorch
+        self.PackageExporter = PackageExporterNoTorch
 
 if __name__ == "__main__":
     run_tests()
