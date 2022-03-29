@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
 )
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
+    (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
@@ -678,7 +678,6 @@ class TestSortAndSelect(TestCase):
 
     @onlyCUDA
     @dtypes(torch.bfloat16)
-    @skipCUDAIfRocm
     def test_topk_bfloat16(self, device, dtype):
 
         small = 10
@@ -690,9 +689,6 @@ class TestSortAndSelect(TestCase):
     @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
         expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
@@ -727,9 +723,6 @@ class TestSortAndSelect(TestCase):
                                    include_bfloat16=True)))
     @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
     def test_topk_zero(self, device, dtype):
-        if TEST_WITH_ROCM and dtype == torch.bfloat16:
-            return
-
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)
         val, idx = torch.topk(t, k=0, largest=False)
