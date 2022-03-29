@@ -182,7 +182,7 @@ class PackageImporter(Importer):
                 tensor = self.zip_reader.get_storage_from_record(
                     ".data/" + name, size, dtype
                 )
-                if isinstance(self.zip_reader, TorchScriptPackageZipFileReader):
+                if not self.zip_reader.is_directory():
                     storage_context.add_storage(name, tensor)
                 storage = tensor.storage()
             loaded_storages[key] = restore_location(storage, location)
