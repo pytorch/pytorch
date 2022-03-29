@@ -41,10 +41,8 @@ __device__ void sync() {
   // threads have incremented the counter.
   while (local_sync_counter < next && old < local_sync_counter) {
 #if __CUDA_ARCH__ >= 700
-    __nanosleep(backoff);
-#else
-    // __nanosleep is not available for sm < 70
-    assert(false);
+    // __nanosleep only available on compute capability 7.0 or higher
+    __nanosleep(backoff); // avoids busy waiting
 #endif
     if (backoff < backoff_max) {
       backoff *= 2;
