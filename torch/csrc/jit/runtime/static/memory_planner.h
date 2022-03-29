@@ -105,6 +105,12 @@ class MemoryPlanner {
   MemoryPlanner& operator=(MemoryPlanner&&) = delete;
   virtual ~MemoryPlanner() = default;
 
+  virtual std::unique_ptr<MemoryPlanner> maybe_clone(
+      BlockRunner* /*new_block_runner*/,
+      const FastMap<at::Tensor*, at::Tensor*>& /*old_tensor_to_new*/) const {
+    return nullptr;
+  }
+
   void allocate();
   void deallocate();
   void deallocateOutputTensors();
@@ -276,6 +282,11 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
     size_t offset;
   };
 
+  std::unique_ptr<MemoryPlanner> maybe_clone(
+      BlockRunner* new_block_runner,
+      const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new)
+      const override;
+
  protected:
   void allocateManagedTensors() override;
   void deallocateManagedTensors() override;
@@ -283,6 +294,8 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
   BlockRunner* block_runner_;
   const BlockInfo& block_info_;
 
+  bool enable_out_variant_;
+  bool manage_output_tensors_;
   bool optimize_memory_;
 
   std::vector<ManagedTensor> managed_tensors_;

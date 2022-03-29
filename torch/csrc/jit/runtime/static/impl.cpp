@@ -853,6 +853,15 @@ BlockRunner::BlockRunner(BlockRunner&&) noexcept = default;
 
 BlockRunner::~BlockRunner() = default;
 
+void BlockRunner::maybe_clone_memory_planner(
+    const BlockRunner& src,
+    const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new) {
+  if (!src.planner_) {
+    return;
+  }
+  planner_ = src.planner_->maybe_clone(this, old_tensor_to_new);
+}
+
 void BlockRunner::set_arg(const size_t idx, std::vector<IValue>&& args) {
   DCHECK(idx < args.size());
   Input(idx + first_input_is_self_) = std::move(args[idx]);
@@ -2011,11 +2020,35 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
 }
 
 StaticRuntime::StaticRuntime(const StaticModule& sm)
-    : values_(sm.value_buffer_size()) {
+    : values_(sm.value_buffer_size()), parent_module_(sm) {
   std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
   block_ = std::make_unique<BlockRunner>(
       sm, values_.data(), sm.root_block(), /*is_root_block*/ true);
-  ;
+}
+
+StaticRuntime StaticRuntime::clone() const {
+  StaticRuntime runtime(parent_module_);
+  if (!parent_module_.opts().precompute_offsets) {
+    return runtime;
+  }
+  auto* values = values_.data();
+  auto* new_values = runtime.values_.data();
+  DCHECK_EQ(runtime.values_.size(), values_.size());
+  FastMap<at::Tensor*, at::Tensor*> old_tensor_to_new;
+  for (const auto i :
+       c10::irange(parent_module_.constants().size(), values_.size())) {
+    if (values[i].isTensor()) {
+      new_values[i] = at::native::empty_like(values[i].toTensor());
+      old_tensor_to_new.emplace(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+          const_cast<at::Tensor*>(&values[i].toTensor()),
+          &new_values[i].toTensor());
+    }
+  }
+  DCHECK(runtime.block_ != nullptr);
+  DCHECK(block_ != nullptr);
+  runtime.block_->maybe_clone_memory_planner(*block_, old_tensor_to_new);
+  return runtime;
 }
 
 c10::IValue StaticRuntime::operator()(

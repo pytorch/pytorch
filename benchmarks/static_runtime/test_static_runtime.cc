@@ -3073,3 +3073,32 @@ TEST(StaticRuntime, MoveCtor) {
   auto actual = new_runtime(args);
   compareResults(expected, actual);
 }
+
+namespace {
+void testClone(bool precompute_offsets) {
+  auto mod = getDeepAndWideSciptModel();
+  std::vector<IValue> args{
+      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
+  auto smod = StaticModule(
+      mod,
+      /*is_frozen=*/false,
+      StaticModuleOptions{
+          .enable_out_variant = true,
+          .optimize_memory = true,
+          .precompute_offsets = precompute_offsets});
+
+  auto& runtime = smod.runtime();
+  auto cloned_runtime = runtime.clone();
+  compareResults(runtime(args), cloned_runtime(args));
+  auto cloned_from_warm_runtime = runtime.clone();
+  compareResults(runtime(args), cloned_from_warm_runtime(args));
+}
+} // namespace
+
+TEST(StaticRuntime, CloneWithRegularMemoryPlanner) {
+  testClone(/*precompute_offsets=*/false);
+}
+
+TEST(StaticRuntime, CloneWithPrecomputedOffsets) {
+  testClone(/*precompute_offsets=*/true);
+}

@@ -599,7 +599,43 @@ PrecomputedOffsetsMemoryPlanner::PrecomputedOffsetsMemoryPlanner(
           manage_output_tensors),
       block_runner_(block_runner),
       block_info_(block_info),
+      enable_out_variant_(enable_out_variant),
+      manage_output_tensors_(manage_output_tensors),
       optimize_memory_(optimize_memory) {}
+
+std::unique_ptr<MemoryPlanner> PrecomputedOffsetsMemoryPlanner::maybe_clone(
+    BlockRunner* new_block_runner,
+    const FastMap<at::Tensor*, at::Tensor*>& old_tensor_to_new) const {
+  auto result = std::make_unique<PrecomputedOffsetsMemoryPlanner>(
+      new_block_runner,
+      block_info_,
+      enable_out_variant_,
+      manage_output_tensors_,
+      optimize_memory_);
+  result->managed_tensor_storage_impls_.reserve(
+      managed_tensor_storage_impls_.size());
+  result->managed_tensors_.reserve(managed_tensors_.size());
+  for (const auto& managed_tensor : managed_tensors_) {
+    auto* old_tensor = managed_tensor.tensor;
+    auto* new_tensor = old_tensor_to_new.at(old_tensor);
+    auto* value = managed_tensor.value;
+    const auto& storage = new_tensor->storage();
+    size_t current_size = compute_aligned_tensor_size(storage.nbytes());
+    auto* storage_impl = storage.unsafeGetStorageImpl();
+
+    storage_impl->reset();
+    result->managed_tensor_storage_impls_.emplace_back(
+        current_size, std::move(*storage_impl));
+    auto* new_impl = &result->managed_tensor_storage_impls_.back().second;
+    result->managed_tensors_.emplace_back(
+        new_tensor, value, new_impl, current_size, managed_tensor.offset);
+    new_tensor->unsafeGetTensorImpl()->set_storage_keep_dtype(at::Storage(
+        c10::intrusive_ptr<at::StorageImpl>::unsafe_adapt_non_heap_allocated(
+            new_impl, 1)));
+  }
+  result->managed_bytes_ = managed_bytes_;
+  return result;
+}
 
 void PrecomputedOffsetsMemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
