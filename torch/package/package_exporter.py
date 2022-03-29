@@ -27,6 +27,7 @@ class PackageExporter(DefaultPackageExporter):
 
 
     def persistent_id(self, obj):
+        assert isinstance(self.zip_file, TorchScriptPackageZipFileWriter)
         # needed for 'storage' typename which is a way in which torch models are saved
         if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
             if isinstance(obj, torch.storage._TypedStorage):
