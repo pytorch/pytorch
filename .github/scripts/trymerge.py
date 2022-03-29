@@ -303,16 +303,16 @@ def gh_get_pr_info(org: str, proj: str, pr_no: int) -> Any:
 
 @lru_cache(maxsize=None)
 def gh_get_team_members(org: str, name: str) -> List[str]:
-    rc=[]
-    team_members = {"pageInfo": {"hasNextPage": "true", "endCursor": None}}
+    rc: List[str] = []
+    team_members: Dict[str, Any] = {"pageInfo": {"hasNextPage": "true", "endCursor": None}}
     while bool(team_members["pageInfo"]["hasNextPage"]):
         query = gh_graphql(GH_GET_TEAM_MEMBERS_QUERY, org=org, name=name, cursor=team_members["pageInfo"]["endCursor"])
         team = query["data"]["organization"]["team"]
         if team is None:
             warn(f"Requested non-existing team {org}/{name}")
             return []
-        team_members=team["members"]
-        rc += [x["login"] for x in team_members["nodes"]]
+        team_members = team["members"]
+        rc += [member["login"] for member in team_members["nodes"]]
     return rc
 
 
