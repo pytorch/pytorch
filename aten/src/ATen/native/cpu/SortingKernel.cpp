@@ -66,7 +66,8 @@ void _dim_apply(
         }
       };
 
-      iter.for_each(loop);
+      int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
+      iter.for_each(loop, /*grain_size=*/grain_size);
     }
   );
 }
