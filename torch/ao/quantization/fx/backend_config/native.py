@@ -241,6 +241,20 @@ def _get_conv_configs():
             "root_module": convs.root,
             "reference_quantized_module_for_root": convs.reference,
         })
+        # conv relu, conv module + relu module
+        conv_configs.append({
+            "pattern": (torch.nn.ReLU, convs.root),
+            "observation_type": observation_type,
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse_sequential_wrapper2(convs.relu),
+        })
+        # conv relu, conv module + functional relu
+        conv_configs.append({
+            "pattern": (F.relu, convs.root),
+            "observation_type": observation_type,
+            "dtype_configs": dtype_configs,
+            "fuser_method": reverse_sequential_wrapper2(convs.relu),
+        })
         # conv relu, functional conv + relu module
         conv_configs.append({
             "pattern": (torch.nn.ReLU, convs.func),
