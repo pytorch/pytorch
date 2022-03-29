@@ -11,6 +11,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
+#include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -411,6 +412,7 @@ void addmm_out_sparse_csr_native_cpu(
 }
 
 // Functions for matrix multiplication.
+// result = beta * self + alpha (mat1 @ mat2)
 Tensor& addmm_out_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& mat1,
@@ -418,84 +420,56 @@ Tensor& addmm_out_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT(mat1.is_sparse_csr());
-
   // TODO: remove this, there are no codegenerated checks for devices yet
-  TORCH_CHECK(
-      !self.is_cuda(),
-      "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(
-      !result.is_cuda(),
-      "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(
-      !mat1.is_cuda(),
-      "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(
-      !mat2.is_cuda(),
-      "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  sparse::impl::_check_is_cpu(self, "self");
+  sparse::impl::_check_is_cpu(mat1, "mat1");
+  sparse::impl::_check_is_cpu(mat2, "mat2");
+  sparse::impl::_check_is_cpu(result, "result");
 
   // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
   // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
   // TODO: remove code duplication and unify code
-  TORCH_CHECK(
-      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat1.sizes()[1] == mat2.sizes()[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.sizes()[0],
-      "x",
-      mat1.sizes()[1],
-      " and ",
-      mat2.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ")");
-
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
-  IntArrayRef self__sizes;
-  c10::MaybeOwned<Tensor> self_;
-  if (&result != &self && self.layout() == kStrided) {
-    self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
-    self__sizes = self_->sizes();
-  } else {
-    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-    self__sizes = self_->sizes();
-  }
+  sparse::impl::_check_dim(mat1, 2, "mat1");
+  sparse::impl::_check_dim(mat2, 2, "mat2");
 
   TORCH_CHECK(
-      ((self_->dim() == 2) && (self_->sizes()[0] == mat1.sizes()[0]) &&
-       (self_->sizes()[1] == mat2.sizes()[1])),
-      "The input tensor must be a matrix with size ",
-      mat1.sizes()[0],
-      "x",
-      mat2.sizes()[1],
-      ", but got a ",
-      self_->dim(),
-      "-D tensor with size ",
-      self__sizes[0],
-      "x",
-      self__sizes[1]);
+      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+
+  c10::MaybeOwned<at::Tensor> self_ =
+      expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+
+
+  TORCH_CHECK(((self_->dim() == 2) &&
+               (self_->size(0) == mat1.size(0)) &&
+               (self_->size(1) == mat2.size(1))),
+              "The input tensor must be a matrix with size ",
+              mat1.size(0),
+              "x",
+              mat2.size(1),
+              ", but got a ",
+              self_->dim(),
+              "-D tensor with size ",
+              self_->size(0),
+              "x",
+              self_->size(1));
 
   if (&result != &self) {
     if (result.layout() == kStrided) {
-      at::native::resize_output(result, self__sizes);
+      result.resize_as_(*self_);
     } else {
-      at::native::resize_as_sparse_csr_(result, *self_);
+      result.resize_as_sparse_(*self_);
     }
     result.copy_(*self_);
   }
 
-  IntArrayRef result_sizes = result.sizes();
-  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
+  if (result.numel() == 0) {
     return result;
   }
 
-  if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
-    // According to docs, when beta==0 values in self should be ignored. nans
-    // and infs should not propagate
+  if (sparse::impl::_is_all_zero(mat1) || sparse::impl::_is_all_zero(mat2)) {
+    // According to docs, when beta==0 values in self should be ignored.
+    // nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
       result.zero_();
     } else {
@@ -504,22 +478,13 @@ Tensor& addmm_out_sparse_csr_cpu(
     return result;
   }
 
-  if (mat2.is_sparse_csr() && (mat1._nnz() == 0 || mat2._nnz() == 0)) {
-    if (beta.toComplexDouble() == 0.) {
-      result.values().zero_();
-    } else {
-      result.values().mul_(beta);
-    }
-    return result;
-  }
-
 #if !AT_USE_MKL_SPARSE()
-  if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    TORCH_CHECK(
-        false,
-        "Calling addmm on sparse CPU tensors requires Linux platform. ",
-        "Please use PyTorch built with MKL on Linux.");
-  }
+  TORCH_CHECK(
+      (mat1.is_sparse_csr() ||
+       (mat2.is_sparse_csr() && result.is_sparse_csr())),
+      false,
+      "Calling addmm on sparse CPU tensors requires Linux platform. ",
+      "Please use PyTorch built with MKL on Linux.");
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmm_sparse_dense", [&] {
