@@ -38,7 +38,7 @@ from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
 from ._zip_file_torchscript import TorchScriptPackageZipFileWriter
 from ._zip_file import PackageZipFileWriter
-from torch.serialization import location_tag
+from torch.serialization import location_tag, normalize_storage_type
 
 _gate_torchscript_serialization = True
 
@@ -891,6 +891,7 @@ class PackageExporter:
             location = location_tag(storage)
 
             # serialize storage if not already written
+            assert isinstance(self.zip_file, TorchScriptPackageZipFileWriter)
             storage_present = self.zip_file.storage_context.has_storage(storage)
             storage_id = self.zip_file.storage_context.get_or_add_storage(storage)
             if not storage_present:
