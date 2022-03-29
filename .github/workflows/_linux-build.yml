@@ -62,15 +62,6 @@ jobs:
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: printt testing thing
-        env:
-          AAAAA: ${{ toJson(github.event) }}
-          BBBBB: ${{ github.event.pull_request.body }}
-          CCCCC: ${{ github.event.head_commit.message }}
-        run: |
-          git log --format=%B -n 1 HEAD
-          git cherry -v "origin/master"
-
       - name: Calculate docker image
         id: calculate-docker-image
         uses: ./.github/actions/calculate-docker-image
