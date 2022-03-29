@@ -29,6 +29,7 @@ jobs:
   test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
+    timeout-minutes: 270
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
