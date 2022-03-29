@@ -1,6 +1,6 @@
 import warnings
 from abc import ABC, abstractmethod
-
+import types
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
@@ -83,6 +83,7 @@ class PeriodicModelAverager(ModelAverager):
         period,
         warmup_steps=0,
         process_group=None,
+        comm_memory_efficient=False
     ):
         super().__init__(process_group)
         if warmup_steps < 0:
@@ -98,6 +99,9 @@ class PeriodicModelAverager(ModelAverager):
                 "DistributedDataParallel should be used for this case."
             )
         self.period = period
+        # comm_memory_efficient is False, use a faster communication but more memory average strategy
+        # comm_memory_efficient is True, use a slower communication but less memory average strategy
+        self.comm_memory_efficient = comm_memory_efficient
 
     def average_parameters(self, params):
         r"""
@@ -109,5 +113,13 @@ class PeriodicModelAverager(ModelAverager):
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            utils.average_parameters(iter(params), self.process_group)
+            if isinstance(params, types.GeneratorType):
+                # compatible with model.parameters() input
+                utils.average_parameters(params, self.process_group)
+            else:
+                # support optim.param_group input
+                if not self.comm_memory_efficient:
+                    utils.comm_average_param_fast(params, self.process_group)
+                else:
+                    utils.comm_average_param_memory_efficient(params, self.process_group)
         self.step += 1

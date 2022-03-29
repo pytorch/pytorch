@@ -2,7 +2,7 @@
 import warnings
 from collections import OrderedDict
 import logging
-
+import types
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as utils
@@ -92,7 +92,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         `HierarchicalModelAverager` is experimental and subject to change.
     """
 
-    def __init__(self, period_group_size_dict=None, warmup_steps=0, process_group=None):
+    def __init__(self, period_group_size_dict=None, warmup_steps=0, process_group=None, comm_memory_efficient=False):
         super().__init__(process_group)
         if not period_group_size_dict:
             raise ValueError("Arg ``period_group_size_dict`` must not be empty.")
@@ -128,6 +128,10 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
+        # comm_memory_efficient is False, use a faster communication but more memory average strategy
+        # comm_memory_efficient is True, use a slower communication but less memory average strategy
+        self.comm_memory_efficient = comm_memory_efficient
+        logger.info("HierarchicalModelAverager comm_memory_efficient:{}".format(comm_memory_efficient))
 
     def _find_process_group(self):
         """
@@ -153,5 +157,13 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         if self.step >= self.warmup_steps:
             found, group = self._find_process_group()
             if found:
-                utils.average_parameters(iter(params), group)
+                if isinstance(params, types.GeneratorType):
+                    # compatible with model.parameters() input
+                    utils.average_parameters(params, group)
+                else:
+                    # support optim.param_group input
+                    if not self.comm_memory_efficient:
+                        utils.comm_average_param_fast(params, group)
+                    else:
+                        utils.comm_average_param_memory_efficient(params, group)
         self.step += 1

@@ -1036,6 +1036,81 @@ class DistributedTest:
                         # No model averaging, so the parameters are not updated.
                         self.assertEqual(param.data, tensor)
 
+        @skip_if_lt_x_gpu(2)
+        def test_periodic_model_averager_param_group_fast(self):
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+            device_id = rank_to_GPU[rank][0]
+    
+            model = nn.Linear(1, 5, bias=False).cuda(device_id)
+            param = next(model.parameters())
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+    
+            period = 4
+            for warmup_steps in [12, 13, 14, 15]:
+                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
+                for step in range(0, 20):
+                    # Reset the parameters at every step.
+                    for param_group in opt.param_groups:
+                        for params in param_group["params"]:
+                            if params.grad is None:
+                                continue
+                            params.data = torch.ones_like(param.data) * rank
+                    
+                    averager.average_parameters(opt.param_groups)
+                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
+                        for param_group in opt.param_groups:
+                            for params in param_group["params"]:
+                                if params.grad is None:
+                                    continue
+                                self.assertEqual(param.data, torch.ones_like(param.data) * sum(range(world_size)) / world_size)
+                    else:
+                        # No model averaging, so the parameters are not updated.
+                        for param_group in opt.param_groups:
+                            for params in param_group["params"]:
+                                if params.grad is None:
+                                    continue
+                                self.assertEqual(param.data, torch.ones_like(param.data) * rank)
+
+        @skip_if_lt_x_gpu(2)
+        def test_periodic_model_averager_param_group_memory_efficient(self):
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+            rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
+            device_id = rank_to_GPU[rank][0]
+    
+            model = nn.Linear(1, 5, bias=False).cuda(device_id)
+            param = next(model.parameters())
+            opt = torch.optim.SGD(model.parameters(), lr=0.1)
+    
+            period = 4
+            for warmup_steps in [12, 13, 14, 15]:
+                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps, comm_memory_efficient=True)
+                for step in range(0, 20):
+                    # Reset the parameters at every step.
+                    for param_group in opt.param_groups:
+                        for params in param_group["params"]:
+                            if params.grad is None:
+                                continue
+                            params.data = torch.ones_like(param.data) * rank
+            
+                    averager.average_parameters(opt.param_groups)
+                    if step >= warmup_steps and (step - warmup_steps) % period == 0:
+                        for param_group in opt.param_groups:
+                            for params in param_group["params"]:
+                                if params.grad is None:
+                                    continue
+                                self.assertEqual(param.data,
+                                                 torch.ones_like(param.data) * sum(range(world_size)) / world_size)
+                    else:
+                        # No model averaging, so the parameters are not updated.
+                        for param_group in opt.param_groups:
+                            for params in param_group["params"]:
+                                if params.grad is None:
+                                    continue
+                                self.assertEqual(param.data, torch.ones_like(param.data) * rank)
+
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices"
@@ -1079,6 +1154,7 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
+            from torch.distributed.distributed_c10d import _pg_group_ranks
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1106,11 +1182,14 @@ class DistributedTest:
             averager = hierarchicalSGD.HierarchicalModelAverager(
                 period_group_size_dict=period_group_size_dict, warmup_steps=warmup_steps
             )
+            subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
+            subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
+            
             expected_avg_tensor_within_subgroup1 = (
-                torch.ones_like(param.data) * sum(range(subgroup_size1)) / subgroup_size1
+                torch.ones_like(param.data) * sum(list(_pg_group_ranks[subgroup1].keys())) / subgroup_size1
             )
             expected_avg_tensor_within_subgroup2 = (
-                torch.ones_like(param.data) * sum(range(subgroup_size2)) / subgroup_size2
+                torch.ones_like(param.data) * sum(list(_pg_group_ranks[subgroup2].keys())) / subgroup_size2
             )
             expected_global_avg_tensor = (
                 torch.ones_like(param.data) * sum(range(world_size)) / world_size
@@ -1124,7 +1203,7 @@ class DistributedTest:
                     self.assertEqual(param.data, expected_global_avg_tensor)
                 elif step == 12 or step == 20:
                     # Run model averaging within subgroup when `step` can be divided by 4 but not by 8.
-                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup1)
+                    self.assertEqual(param.data, expected_avg_tensor_within_subgroup2)
                 elif step == 10 or step == 14 or step == 18 or step == 22:
                     # Run model averaging within subgroup when `step` can be divided by 2 but not by 4 or 8.
                     self.assertEqual(param.data, expected_avg_tensor_within_subgroup1)
@@ -4830,16 +4909,20 @@ class DistributedTest:
                 loss = loss_fn(output, target)
                 loss.backward()
                 opt.step()
-                averager.average_parameters(net.parameters())
+                averager.average_parameters(opt.param_groups)
 
                 post_localSGD_opt.zero_grad()
                 post_localSGD_output = post_localSGD_net(input)
                 post_localSGD_loss = loss_fn(post_localSGD_output, target)
                 post_localSGD_loss.backward()
                 post_localSGD_opt.step()
+                
+                for param_group1, param_group2 in zip(opt.param_groups, post_localSGD_opt.param_groups):
+                    for params1, params2 in zip(param_group1["params"], param_group2["params"]):
+                        if params1.grad is None:
+                            continue
+                        self.assertEqual(params1.data, params2.data)
 
-                for p1, p2 in zip(net.parameters(), post_localSGD_net.parameters()):
-                    self.assertEqual(p1.data, p2.data)
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
