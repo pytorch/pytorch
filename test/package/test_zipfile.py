@@ -107,6 +107,7 @@ class ZipfileTest(PackageTestCase):
         zip_file_contents = zip_file.get_all_records()
         self.assertCountEqual(
             zip_file_contents, ['.data/version',
+                                '.data/python_version',
                                 'my_cool_resources/sekrit.txt',
                                 'my_cool_resources/bar.txt',
                                 'my_less_cool_resources/another_one.txt',
