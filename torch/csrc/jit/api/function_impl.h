@@ -13,10 +13,14 @@ struct TORCH_API GraphFunction : public Function {
   GraphFunction(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
-      std::function<void(GraphFunction&)> function_creator)
+      std::function<void(GraphFunction&)> function_creator,
+      c10::optional<ExecutorExecutionMode> executor_execution_mode =
+          c10::nullopt)
       : name_(std::move(name)),
         graph_(std::move(graph)),
-        function_creator_(std::move(function_creator)) {}
+        function_creator_(std::move(function_creator)) {
+    executor_execution_mode_ = executor_execution_mode;
+  }
 
   bool isGraphFunction() const override {
     return true;
@@ -92,7 +96,13 @@ struct TORCH_API GraphFunction : public Function {
       return *executor;
     }
     check_single_output();
-    executor = GraphExecutor(optimized_graph(), name_.name());
+    const std::string& name = name_.name();
+    std::shared_ptr<Graph> opt_graph = optimized_graph();
+    if (!executor_execution_mode_) {
+      executor = GraphExecutor(opt_graph, name);
+    } else {
+      executor = GraphExecutor(opt_graph, name, *executor_execution_mode_);
+    }
     return *executor;
   }
 
@@ -127,6 +137,10 @@ struct TORCH_API GraphFunction : public Function {
   c10::QualifiedName name_;
   // The original, non-optimized graph
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
+
+  // allows users to specify Simple/Profiling Executor for function
+  // TODO: add more executors
+  mutable c10::optional<ExecutorExecutionMode> executor_execution_mode_;
 
   // Optimized graph, computed lazily. Used for inlining.
   mutable std::array<
