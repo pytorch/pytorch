@@ -31,15 +31,24 @@ const char op_name[] = "prod";
 
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct prod_functor {
+  #if AT_USE_JITERATOR()
   void operator()(TensorIterator& iter) {
     std::string func = jiterator_stringify(
-    scalar_t combine(arg_t a, arg_t b) {
-      return a+b;
+    arg_t combine(arg_t a, arg_t b) {
+      return a * b;
     }
     );
     jitted_gpu_reduce_kernel<op_name, scalar_t, out_t>(
-        iter, func, 0);
+        iter, func, 1.);
   }
+  #else
+  void operator()(TensorIterator& iter) {
+    gpu_reduce_kernel<scalar_t, out_t>(
+        iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
+          return a * b;
+        }), 1.);
+  }
+  #endif
 };
 
 // Workaround for the error: '*' in boolean context, suggest '&&' instead [-Werror=int-in-bool-context]
