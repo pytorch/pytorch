@@ -63,7 +63,7 @@ void i0_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // See note [Jiterator]
-const char i0e_name[] = "i0e";
+const char i0e_name[] = "calc_i0e";
 void i0e_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0e_cuda", [&]() {
