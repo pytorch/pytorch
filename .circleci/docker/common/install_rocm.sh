@@ -6,7 +6,7 @@ install_magma() {
     # "install" hipMAGMA into /opt/rocm/magma by copying after build
     git clone https://bitbucket.org/icl/magma.git
     pushd magma
-    # Mar 7 - Fixes memory leaks for many linalg UTs
+    # Fixes memory leaks of magma found while executing linalg UTs
     git checkout 5959b8783e45f1809812ed96ae762f38ee701972
     cp make.inc-examples/make.inc.hip-gcc-mkl make.inc
     echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
