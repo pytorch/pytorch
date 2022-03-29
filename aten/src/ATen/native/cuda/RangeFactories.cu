@@ -9,8 +9,6 @@
 #include <cmath>
 #include <limits>
 
-#define GPU_LAMBDA __device__ __host__
-
 namespace {
 
 
