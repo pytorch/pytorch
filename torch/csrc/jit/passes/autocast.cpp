@@ -12,15 +12,14 @@
 
 #include <stack>
 #include <unordered_set>
+#include <vector>
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-// TODO: Turn on autocast by default. default turned off to avoid tests failures
-// as we prototype the support
-bool autocast_enabled = false;
+bool autocast_enabled = true;
 
 struct AutocastContext {
   bool gpu_enabled = false;
@@ -149,17 +148,23 @@ void castTensorInputs(
   const auto graph = node->owningGraph();
 
   std::unordered_set<Value*> casted_inputs;
+  // need to also keep the inputs in order, otherwise tracing fails
+  // sanity checks because casting ops are inserted in random order
+  std::vector<Value*> casted_inputs_ordered;
   for (auto input : node->inputs()) {
     // TODO: update cast_op signature to take dynamic context flags
     auto input_tensor_type = input->type()->cast<TensorType>();
     if (input_tensor_type && input->node()->kind() != cast_op) {
-      casted_inputs.insert(input);
+      auto has_inserted = casted_inputs.insert(input);
+      if (has_inserted.second) {
+        casted_inputs_ordered.push_back(input);
+      }
     }
   }
 
   WithInsertPoint insert_point(node);
 
-  for (auto input : casted_inputs) {
+  for (auto input : casted_inputs_ordered) {
     if (cast_op == aten::_autocast_to_full_precision) {
       const auto new_input = graph->insert(
           cast_op,
@@ -437,7 +442,9 @@ void handleBlock(Block* block, AutocastContext initial_state) {
 
       // Banned in autocast, see binary_cross_entropy_banned()
       case aten::binary_cross_entropy:
-        AT_ERROR("Unsafe to autocast");
+        if (current_state()) {
+          AT_ERROR("Unsafe to autocast");
+        }
     }
 
     // process sub-blocks, if any
