@@ -20,7 +20,6 @@ python -m tools.codegen.gen
 
 python tools/setup_helpers/generate_code.py                 \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
-  --tags-path aten/src/ATen/native/tags.yaml \
   --nn-path aten/src
 
 popd
