@@ -1,10 +1,16 @@
 #pragma once
 
-#include <ATen/Functions.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 // Different combinations of row, col, and offset can lead to two cases:

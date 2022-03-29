@@ -3,7 +3,6 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/ir/scope.h>
-#include <torch/csrc/jit/serialization/source_range_serialization.h>
 
 namespace torch {
 namespace jit {

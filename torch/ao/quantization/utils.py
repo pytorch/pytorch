@@ -184,17 +184,33 @@ def activation_is_statically_quantized(qconfig):
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
 
+def activation_is_dynamically_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    dynamically quantized or not, this includes dynamically quantizing to
+    quint8, qint8 and float16
+    """
+    activation_dtype, _, activation_compute_dtype = \
+        get_qconfig_dtypes(qconfig)
+    return activation_dtype == torch.float and \
+        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized to int8 or not, this includes quantizing to quint8, qint8
     """
     return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
+def activation_is_int32_quantized(qconfig):
+    """ Given a qconfig, decide if the activation needs to be
+    quantized to int32 or not
+    """
+    return activation_dtype(qconfig) == torch.qint32
+
 def weight_is_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be
     quantized or not
     """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return weight_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16, torch.quint4x2]
 
 def weight_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the weight needs to be statically
@@ -229,7 +245,7 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8]
+    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
     if weight.dtype in static_dtypes:
         if activation.dtype in static_dtypes:
             return QuantType.STATIC
@@ -283,6 +299,7 @@ def calculate_qmin_qmax(quant_min: int, quant_max: int, has_customized_qrange: b
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
+    # TODO(jerryzh): Figure out why custom quant_min/quant_max are still adjusted.
     if has_customized_qrange:
         # This initialization here is to be resolve TorchScript compilation issues and allow
         # using of refinement to decouple initial_qmin and initial_qmax from quantization range.

@@ -9,6 +9,15 @@ from typing import Any, Callable, Dict, Generator, Optional, Set, Tuple, Type, c
 import torch.nn as nn
 
 
+def always_wrap_policy(*args, **kwargs) -> bool:
+    """
+    A simple wrapper policy that always returns ``True``,
+    i.e. when passed as the `auto_wrap_policy` into FSDP,
+    this will result in all submodules being wrapped as
+    distinct FSDP instances.
+    """
+    return True
+
 def default_auto_wrap_policy(
     module: nn.Module,
     recurse: bool,
@@ -103,7 +112,7 @@ def enable_wrap(
         **{"wrapper_cls": wrapper_cls},
         **wrapper_kwargs,
     }
-    with ConfigAutoWrap(**kwargs):
+    with _ConfigAutoWrap(**kwargs):
         yield
 
 
@@ -132,13 +141,13 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
         **wrap_overrides: configuration overrides that will take priority over
             the values provided by the :func:`enable_wrap` context
     """
-    if ConfigAutoWrap.in_autowrap_context:
-        assert ConfigAutoWrap.wrapper_cls is not None
+    if _ConfigAutoWrap.in_autowrap_context:
+        assert _ConfigAutoWrap.wrapper_cls is not None
 
-        wrap_overrides = {**ConfigAutoWrap.kwargs, **wrap_overrides}
+        wrap_overrides = {**_ConfigAutoWrap.kwargs, **wrap_overrides}
         return _wrap(
             module,
-            ConfigAutoWrap.wrapper_cls,
+            _ConfigAutoWrap.wrapper_cls,
             **wrap_overrides,
         )
     return module
@@ -158,7 +167,7 @@ def _recursive_wrap(
 ) -> Tuple[nn.Module, int]:
     """
     Automatically wrap child modules of *module* that meet the given
-    criteria with :func:`auto_wrap`. Does not rely on ConfigAutoWrap.
+    criteria with :func:`auto_wrap`. Does not rely on _ConfigAutoWrap.
     Args:
         module (nn.Module):
             module to recursively wrap
@@ -204,7 +213,7 @@ def _recursive_wrap(
     return module, 0
 
 
-class ConfigAutoWrap:
+class _ConfigAutoWrap:
     """
     Helper class to wrap modules based on default config args via a context manager.
     See :func:`enable_wrap` for more information.
@@ -219,25 +228,25 @@ class ConfigAutoWrap:
 
     @staticmethod
     def enable_autowrap_context(kwargs: Any) -> None:
-        if ConfigAutoWrap.in_autowrap_context:
+        if _ConfigAutoWrap.in_autowrap_context:
             raise NotImplementedError(
                 "You are already within an autowrap context and we currently do not supported nested autowrap."
             )
-        ConfigAutoWrap.in_autowrap_context = True
+        _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
         assert (
             "wrapper_cls" in kwargs.keys()
-        ), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
-        ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
+        ), "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
+        _ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.
-        ConfigAutoWrap.kwargs = kwargs
+        _ConfigAutoWrap.kwargs = kwargs
 
     @staticmethod
     def disable_autowrap_context() -> None:
-        ConfigAutoWrap.in_autowrap_context = False
-        ConfigAutoWrap.wrapper_cls = None
-        ConfigAutoWrap.kwargs = {}
+        _ConfigAutoWrap.in_autowrap_context = False
+        _ConfigAutoWrap.wrapper_cls = None
+        _ConfigAutoWrap.kwargs = {}
 
     def __enter__(self) -> None:
         self.enable_autowrap_context(self.kwargs)

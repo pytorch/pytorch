@@ -1,11 +1,12 @@
-#include<ATen/native/ReduceOps.h>
-#include<ATen/native/ReduceAllOps.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ReduceOps.h>
+#include <ATen/native/ReduceAllOps.h>
+#include <ATen/native/ReduceOpsUtils.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/SharedReduceOps.h>
-#include <ATen/native/ReduceOpsUtils.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/TensorIterator.h>
 
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
