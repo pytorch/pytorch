@@ -18,7 +18,7 @@ import warnings
 # inferred erroneously runs or skips
 # some tests
 torch._C._jit_set_profiling_executor(True)
-torch._C._jit_set_profiling_mode(True)
+torch._C._get_graph_executor_optimize(True)
 
 from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests, slowTest
@@ -2608,7 +2608,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
         torch._C._jit_override_can_fuse_on_gpu(True)
 
         self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
+        self.old_profiling_mode = torch._C._get_graph_executor_optimize(True)
 
         self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
@@ -2625,7 +2625,7 @@ class TestLoopnestRandomization(TestLoopnestRandomizationParent):
 
     def tearDown(self):
         torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
+        torch._C._get_graph_executor_optimize(self.old_profiling_mode)
 
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
