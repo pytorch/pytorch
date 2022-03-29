@@ -215,7 +215,7 @@ inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dim
   return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 
-/// Computes the argument, x, for which the area under the Gaussian probability density 
+/// Computes the argument, x, for which the area under the Gaussian probability density
 /// function (integrated from minus infinity to x) is equal to input, elementwise.
 /// See https://pytorch.org/docs/master/special.html#torch.special.ndtri
 ///

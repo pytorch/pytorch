@@ -554,7 +554,7 @@ Computes the log of the area under the standard Gaussian probability density fun
 integrated from minus infinity to :attr:`input`, elementwise.
 
 .. math::
-    \text{log_ndtr}(x) = \log\left(\frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt \right)
+    \text{log\_ndtr}(x) = \log\left(\frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt \right)
 
 """ + r"""
 Args:
