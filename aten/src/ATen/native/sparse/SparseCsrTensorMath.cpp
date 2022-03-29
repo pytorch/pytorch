@@ -558,14 +558,35 @@ Tensor& _sparse_csr_mm_out(
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
-  Tensor zero;
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
+    // Return sparse
     // TODO: replace with at::zeros when it's implemented for sparse csr
-    zero = at::empty({mat1.size(0), mat2.size(1)}, mat2.options());
-  } else {
-    zero = at::zeros({mat1.size(0), mat2.size(1)}, mat2.options());
+    return at::addmm(
+        at::empty({mat1.size(0), mat2.size(1)}, mat2.options()),
+        mat1,
+        mat2,
+        0.0,
+        1.0);
   }
-  return at::addmm(zero, mat1, mat2, 0.0, 1.0);
+  if (mat1.is_sparse_csr() && mat2.layout() == c10::kStrided) {
+    // Return dense
+    return at::addmm(
+        at::zeros({mat1.size(0), mat2.size(1)}, mat2.options()),
+        mat1,
+        mat2,
+        0.0,
+        1.0);
+  }
+  if (mat1.layout() == c10::kStrided && mat2.is_sparse_csr()) {
+    // Return dense
+    return at::addmm(
+        at::zeros({mat1.size(0), mat2.size(1)}, mat1.options()),
+        mat1,
+        mat2,
+        0.0,
+        1.0);
+  }
+  TORCH_INTERNAL_ASSERT(false, "Shouldn't get here. Please open an issue.");
 }
 
 Tensor _sparse_csr_addmm(

@@ -3,6 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
+#include <ATen/native/sparse/SparseCsrTensorMath.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -103,6 +104,7 @@ Tensor sparse_sampled_addmm_sparse_csr_cuda(
   return result;
 }
 
+// result = beta * self + alpha * (mat1 @ mat2)
 Tensor& addmm_out_sparse_csr_cuda(
     const Tensor& self,
     const Tensor& mat1,
@@ -110,79 +112,63 @@ Tensor& addmm_out_sparse_csr_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
+  sparse::impl::_check_is_cuda(self, "self");
+  sparse::impl::_check_is_cuda(mat1, "mat1");
+  sparse::impl::_check_is_cuda(mat2, "mat2");
+  sparse::impl::_check_is_cuda(result, "result");
 
   // Same checks as in TORCH_META_FUNC(addmm) at
   // aten/src/ATen/native/LinearAlgebra.cpp
-  TORCH_CHECK(
-      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
-  TORCH_CHECK(
-      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  sparse::impl::_check_dim(mat1, 2, "mat1");
+  sparse::impl::_check_dim(mat2, 2, "mat2");
 
-  IntArrayRef mat1_sizes = mat1.sizes();
-  IntArrayRef mat2_sizes = mat2.sizes();
   TORCH_CHECK(
-      mat1_sizes[1] == mat2_sizes[0],
-      "mat1 and mat2 shapes cannot be multiplied (",
-      mat1_sizes[0],
-      "x",
-      mat1_sizes[1],
-      " and ",
-      mat2_sizes[0],
-      "x",
-      mat2_sizes[1],
-      ")");
+      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   // From addmm_out_cuda_impl at ATen/native/cuda/Blas.cpp
   // TODO: remove code duplication and unify code
   // There were undefined symbol problems,
   // when using the same function for CUDA and SparseCsrCUDA dispatch keys
   // Also structured kernels do not support sparse output
-  IntArrayRef self__sizes;
-  c10::MaybeOwned<Tensor> self_;
-  if (&result != &self && self.layout() == kStrided) {
-    self_ = expand_size(self, {mat1_sizes[0], mat2_sizes[1]}, "addmm");
-    self__sizes = self_->sizes();
-  } else {
-    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
-    self__sizes = self_->sizes();
-    TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");
-    TORCH_CHECK(
-        self__sizes[0] == mat1_sizes[0], "self_ dim 0 must match mat1 dim 0");
-    TORCH_CHECK(
-        self__sizes[1] == mat2_sizes[1], "self_ dim 1 must match mat2 dim 1");
-  }
+  c10::MaybeOwned<at::Tensor> self_ =
+      expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+
+  sparse::impl::_check_dim(*self_, 2, "self");
+  TORCH_CHECK(((self_->dim() == 2) &&
+               (self_->size(0) == mat1.size(0)) &&
+               (self_->size(1) == mat2.size(1))),
+              "The input tensor must be a matrix with size ",
+              mat1.size(0),
+              "x",
+              mat2.size(1),
+              ", but got a ",
+              self_->dim(),
+              "-D tensor with size ",
+              self_->size(0),
+              "x",
+              self_->size(1));
 
   if (&result != &self) {
     if (result.layout() == kStrided) {
-      at::native::resize_output(result, self__sizes);
+      result.resize_as_(*self_);
     } else {
-      at::native::resize_as_sparse_csr_(result, *self_);
+      result.resize_as_sparse_(*self_);
     }
     result.copy_(*self_);
   }
 
-  IntArrayRef result_sizes = result.sizes();
-  if ((result_sizes[0] == 0) || (result_sizes[1] == 0)) {
+  if (result.numel() == 0) {
     return result;
   }
 
-  if (mat1._nnz() == 0 && mat2.layout() == kStrided) {
-    // According to docs, when beta==0 values in self should be ignored
+  if (sparse::impl::_is_all_zero(mat1) || sparse::impl::_is_all_zero(mat2)) {
+    // According to docs, when beta==0 values in self should be ignored.
     // nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
       result.zero_();
     } else {
       result.mul_(beta);
-    }
-    return result;
-  }
-
-  if (mat2.is_sparse_csr() && (mat1._nnz() == 0 || mat2._nnz() == 0)) {
-    if (beta.toComplexDouble() == 0.) {
-      result.values().zero_();
-    } else {
-      result.values().mul_(beta);
     }
     return result;
   }

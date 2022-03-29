@@ -340,18 +340,21 @@ void addmm_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
-  if (mat2.layout() == kStrided && result.layout() == kStrided) {
+  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
     return addmm_dense_result(mat1, mat2, beta, alpha, result);
-  } else if (
-      mat1.is_sparse_csr() && mat2.is_sparse_csr() &&
-      result.layout() == kStrided) {
-    return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
-  } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return addmm_sparse_result(mat1, mat2, beta, alpha, result);
-  } else {
-    TORCH_CHECK(false, "addmm: computation on CPU is not implemented for ",
-                result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
   }
+  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
+    // TODO: We can use MKL's transposition flags once we have CSC support.
+    return addmm_dense_result(mat2.transpose(0, 1), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+  }
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.layout() == kStrided) {
+    return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
+  }
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
+    return addmm_sparse_result(mat1, mat2, beta, alpha, result);
+  }
+  TORCH_CHECK(false, "addmm: computation on CPU is not implemented for ",
+              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
 }
 
 /*
