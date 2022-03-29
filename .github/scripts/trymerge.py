@@ -691,7 +691,7 @@ def main() -> None:
         return
 
     try:
-        pr.merge_into(repo, dry_run=args.dry_run)
+        pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
     except Exception as e:
         msg = f"Merge failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
