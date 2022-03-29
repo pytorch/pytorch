@@ -114,7 +114,15 @@ def find_matches(
 
     match_map: Dict[str, MatchResult] = {}
     all_matched : Set[str] = set()
-    def _recursive_record_node_in_match_map(last_node, match_map, node_pattern, matched_node_pattern, pattern, match_value, qconfig):
+
+    def _recursive_record_node_in_match_map(
+            last_node,
+            match_map,
+            node_pattern,
+            matched_node_pattern,
+            pattern,
+            match_value,
+            qconfig):
         if isinstance(node_pattern, Node):
             match_map[node_pattern.name] = (
                 last_node, matched_node_pattern, pattern, match_value, qconfig)
