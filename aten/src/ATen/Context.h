@@ -124,6 +124,8 @@ class TORCH_API Context {
   void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
   void setBenchmarkCuDNN(bool);
+  int benchmarkLimitCuDNN() const;
+  void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
@@ -251,6 +253,7 @@ class TORCH_API Context {
   bool _deterministic_algorithms_warn_only = false;
   bool benchmark_cudnn = false;
   Float32MatmulPrecision float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;
+  int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
