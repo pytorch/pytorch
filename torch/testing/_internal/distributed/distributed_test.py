@@ -1042,11 +1042,11 @@ class DistributedTest:
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
-    
+
             model = nn.Linear(1, 5, bias=False).cuda(device_id)
             param = next(model.parameters())
             opt = torch.optim.SGD(model.parameters(), lr=0.1)
-    
+
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
                 averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
@@ -1057,7 +1057,7 @@ class DistributedTest:
                             if params.grad is None:
                                 continue
                             params.data = torch.ones_like(param.data) * rank
-                    
+ 
                     averager.average_parameters(opt.param_groups)
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         for param_group in opt.param_groups:
@@ -1079,11 +1079,11 @@ class DistributedTest:
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
             device_id = rank_to_GPU[rank][0]
-    
+
             model = nn.Linear(1, 5, bias=False).cuda(device_id)
             param = next(model.parameters())
             opt = torch.optim.SGD(model.parameters(), lr=0.1)
-    
+
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
                 averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps, comm_memory_efficient=True)
@@ -1094,7 +1094,7 @@ class DistributedTest:
                             if params.grad is None:
                                 continue
                             params.data = torch.ones_like(param.data) * rank
-            
+
                     averager.average_parameters(opt.param_groups)
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         for param_group in opt.param_groups:
@@ -4916,14 +4916,14 @@ class DistributedTest:
                 post_localSGD_loss = loss_fn(post_localSGD_output, target)
                 post_localSGD_loss.backward()
                 post_localSGD_opt.step()
-                
+
                 for param_group1, param_group2 in zip(opt.param_groups, post_localSGD_opt.param_groups):
                     for params1, params2 in zip(param_group1["params"], param_group2["params"]):
                         if params1.grad is None:
                             continue
                         self.assertEqual(params1.data, params2.data)
 
-
+    
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
             f"The {BACKEND} backend does not support DistributedDataParallel"
