@@ -12,6 +12,7 @@ from torch.distributed.fsdp import (
     StateDictType,
     CPUOffload
 )
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.nn import Linear, Module
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
@@ -21,8 +22,9 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
     _get_full_detached_param,
-    _zero_model,
     _get_state_dict,
+    SkipModel,
+    _zero_model,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -273,6 +275,42 @@ class TestFSDPStateDict(FSDPTest):
         local_params = list(blank_local_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("double_nest", [True])
+    def test_state_dict_skip_module(self, double_nest):
+        torch.cuda.set_device(self.rank)
+
+        def _create_module():
+            LINEAR_SKIP = "linear_skip"
+            with enable_wrap(wrapper_cls=FSDP):
+                module = SkipModel(double_nest=double_nest)
+                # Full name of linear_skip param tensors in SkipModel, as would be
+                # stored in checkpoint.
+                linear_skip_tensor_names = [
+                    k for k in dict(module.named_parameters()).keys()
+                    if LINEAR_SKIP in k
+                ]
+                # skip SkipModule
+                linear_skip = getattr(module, LINEAR_SKIP)
+                delattr(module, LINEAR_SKIP)
+                # Wrap FSDP
+                fsdp = wrap(module)
+                # reattach
+                setattr(module, LINEAR_SKIP, linear_skip)
+                return fsdp, linear_skip_tensor_names
+
+        fsdp, linear_skip_tensor_names = _create_module()
+        # Run a forward pass
+        inp = torch.randn((1, 10), device=torch.cuda.current_device())
+        loss = fsdp(inp)
+        loss.sum().backward()
+
+        state_dict = fsdp.state_dict()
+        if self.rank == 0:
+            sd_keys = list(state_dict.keys())
+            expected = list(SkipModel(double_nest=False).state_dict().keys())
+            self.assertEqual(sorted(sd_keys), sorted(expected))
 
 
 instantiate_parametrized_tests(TestFSDPStateDict)
