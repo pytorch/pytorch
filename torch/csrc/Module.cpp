@@ -7,6 +7,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/cudnn/Macros.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/LinalgBackend.h>
@@ -511,6 +512,31 @@ PyObject *THPModule_benchmarkCuDNN(PyObject *_unused, PyObject *noargs)
   Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setBenchmarkLimitCuDNN(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(THPUtils_checkLong(arg), "set_benchmark_limit_cudnn expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
+#if defined(USE_ROCM)
+  if (benchmark_limit != 0 && benchmark_limit != 10) {
+    TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
+  }
+#endif
+#if HAS_CUDNN_V8()
+  at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
+#else
+  if (benchmark_limit != 0 && benchmark_limit != 10) {
+    TORCH_WARN_ONCE("cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
+  }
+#endif
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_benchmarkLimitCuDNN(PyObject *_unused, PyObject *noargs)
+{
+  return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
+}
+
 PyObject *THPModule_setAllowTF32CuBLAS(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_allow_tf32_cublas expects a bool, "
@@ -683,6 +709,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_allow_tf32", THPModule_setAllowTF32CuDNN, METH_O,  nullptr},
   {"_get_cudnn_benchmark", THPModule_benchmarkCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
+  {"_get_cudnn_benchmark_limit", THPModule_benchmarkLimitCuDNN, METH_NOARGS,     nullptr},
+  {"_set_cudnn_benchmark_limit", THPModule_setBenchmarkLimitCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
   {"_get_deterministic_algorithms", THPModule_deterministicAlgorithms, METH_NOARGS,     nullptr},

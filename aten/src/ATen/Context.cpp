@@ -137,6 +137,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+int Context::benchmarkLimitCuDNN() const {
+  return benchmark_limit_cudnn;
+}
+
+void Context::setBenchmarkLimitCuDNN(int b) {
+  benchmark_limit_cudnn = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
   return allow_tf32_cublas;
 }
