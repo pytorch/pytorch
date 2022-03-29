@@ -655,7 +655,7 @@ class Tensor(torch._C._TensorBase):
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__format__, (self,), self, format_spec)
-        if self.dim() == 0:
+        if self.dim() == 0 and not self.is_meta:
             return self.item().__format__(format_spec)
         return object.__format__(self, format_spec)
 
@@ -1061,39 +1061,6 @@ class Tensor(torch._C._TensorBase):
 
        """
         return self.to_sparse()
-
-    def to_sparse_csr(self):
-        """ Convert a tensor to compressed row storage format. Only works with 2D tensors.
-
-        Examples::
-
-            >>> dense = torch.randn(5, 5)
-            >>> sparse = dense.to_sparse_csr()
-            >>> sparse._nnz()
-            25
-
-        """
-        shape = self.size()
-        fill_value = 0
-        if len(shape) != 2:
-            raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
-
-        if self.is_sparse:
-            coalesced_self = self.coalesce()
-            row_indices = coalesced_self.indices()[0]
-            device = coalesced_self.values().device
-            crow_indices = torch._convert_indices_from_coo_to_csr(
-                row_indices, self.shape[0], out_int32=row_indices.dtype == torch.int32)
-            return torch.sparse_csr_tensor(crow_indices,
-                                           coalesced_self.indices()[1].contiguous(),
-                                           coalesced_self.values(),
-                                           size=coalesced_self.shape,
-                                           dtype=coalesced_self.dtype,
-                                           device=device)
-        elif self.is_sparse_csr:
-            return self
-        else:
-            return self.to_sparse().to_sparse_csr()
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):
