@@ -996,11 +996,11 @@ class TORCH_API StaticRuntime {
     IValueArray() = default;
     explicit IValueArray(size_t size) : array_(allocate(size)), size_(size) {}
 
-    IValue* data() {
+    IValue* data() const {
       return array_.get();
     }
 
-    size_t size() {
+    size_t size() const {
       return size_;
     }
 
