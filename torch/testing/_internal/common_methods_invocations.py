@@ -15063,6 +15063,7 @@ op_db: List[OpInfo] = [
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
             DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
         ),
+        supports_expanded_weight=True,
         supports_out=False,
     ),
     OpInfo(
