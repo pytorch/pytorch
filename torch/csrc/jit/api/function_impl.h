@@ -57,6 +57,13 @@ struct TORCH_API GraphFunction : public Function {
     return name_;
   }
 
+  // private/unstable api. sets the initial execution mode
+  // will not affect executor if there is an existing executor
+  // created for this function
+  void _set_initial_executor_execution_mode(ExecutorExecutionMode mode) {
+    executor_execution_mode_ = mode;
+  }
+
   // if this isn't yet defined, run its method_creator function
   void ensure_defined() override;
 

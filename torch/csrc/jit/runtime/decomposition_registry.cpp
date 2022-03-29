@@ -22,22 +22,30 @@ auto compilation_unit = std::make_shared<CompilationUnit>();
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     schema_to_decomposition;
 
+std::unordered_map<const FunctionSchema*, Function*> schema_to_function;
+
 void loadModule(const CompilationUnit& module) {
   const auto& mappings = GetDecompositionMapping().getAllKeysAndValues();
   for (const auto& pair : mappings) {
     const FunctionSchema* schema = &pair.first->schema();
     const std::string& decomposition_function_name = pair.second;
 
-    Function& shape_compute_function =
+    Function& decomposition_function =
         module.get_function(decomposition_function_name);
     std::shared_ptr<Graph> graph =
-        toGraphFunction(shape_compute_function).graph();
+        toGraphFunction(decomposition_function).graph();
 
+    schema_to_function[schema] = &decomposition_function;
     schema_to_decomposition[schema] = graph;
   }
 }
 
 void loadDecompositionFunctions() {
+  std::lock_guard<std::mutex> guard(lock);
+  if (schema_to_decomposition.size() != 0) {
+    return;
+  }
+
   auto src = std::make_shared<Source>(GetSerializedDecompositions());
   std::stringstream ss;
   std::vector<at::IValue> constantTable;
@@ -53,22 +61,6 @@ void loadDecompositionFunctions() {
 
 } // anonymous namespace
 
-c10::optional<std::shared_ptr<Graph>> DecompositionGraphForSchema(
-    const FunctionSchema& schema) {
-  std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_decomposition.size() == 0) {
-    loadDecompositionFunctions();
-  }
-
-  GRAPH_DEBUG("Trying to find schema: ", schema);
-  auto cache_it = schema_to_decomposition.find(&schema);
-  if (cache_it != schema_to_decomposition.end()) {
-    return cache_it->second;
-  }
-  GRAPH_DEBUG("Could not find schema: ", schema);
-
-  return c10::nullopt;
-}
 
 void DecomposeOp(Node* n) {
   auto schema = n->maybeSchema();
@@ -106,6 +98,33 @@ void RunDecompositions(std::shared_ptr<Graph> g) {
     PeepholeOptimize(g, /*disable_shape_peephole*/ true);
     ConstantPropagation(g);
   }
+}
+
+c10::optional<std::shared_ptr<Graph>> DecompositionGraphForSchema(
+    const FunctionSchema& schema) {
+  loadDecompositionFunctions();
+  GRAPH_DEBUG("Trying to find schema: ", schema);
+  auto cache_it = schema_to_decomposition.find(&schema);
+  if (cache_it != schema_to_decomposition.end()) {
+    return cache_it->second;
+  }
+  GRAPH_DEBUG("Could not find schema: ", schema);
+
+  return c10::nullopt;
+}
+
+c10::optional<GraphFunction*> GetDecompositionFunction(
+    const FunctionSchema& schema) {
+  loadDecompositionFunctions();
+  auto cache_it = schema_to_function.find(&schema);
+  GRAPH_DEBUG("Trying to find schema: ", schema);
+  if (cache_it == schema_to_function.end()) {
+    GRAPH_DEBUG("Could not find schema: ", schema);
+    return c10::nullopt;
+  }
+  auto& func = toGraphFunction(*cache_it->second);
+  func._set_initial_executor_execution_mode(ExecutorExecutionMode::SIMPLE);
+  return &func;
 }
 
 } // namespace jit
