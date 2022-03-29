@@ -49,7 +49,7 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[str, torch._C.PyTorchFileReader, PackageZipFileReader, Path, BinaryIO],
+        file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
         zip_file_reader_type: Type[PackageZipFileReader] = TorchScriptPackageZipFileReader
     ):
@@ -66,7 +66,8 @@ class PackageImporter(Importer):
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader: Any
-        self.zip_reader = zip_file_reader_type(file_or_buffer)
+        # TODO: @sahanp delete type ignore
+        self.zip_reader = zip_file_reader_type(file_or_buffer)  # type: ignore
         self.root = _PackageNode(None)
         self.modules = {}
         self.extern_modules = self._read_extern()
