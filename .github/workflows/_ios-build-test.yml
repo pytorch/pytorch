@@ -163,8 +163,10 @@ jobs:
             pip install six==1.16.0
             python coreml_backend.py
           else
-            python trace_model.py
+            cd "${GITHUB_WORKSPACE}/test/mobile/model_test"
+            python gen_test_model.py ios-test
           fi
+          cd "${GITHUB_WORKSPACE}/ios/benchmark"
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             echo "Setting up the TestApp for LiteInterpreter"
             ruby setup.rb --lite 1
@@ -178,7 +180,7 @@ jobs:
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
               fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
             else
-              fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
+              fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
             fi
           else
             fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
