@@ -2,6 +2,7 @@ import torch
 import torch.nn.qat as nnqat
 import operator
 from torch.fx import Node
+from typing import Dict
 
 from .observation_type import ObservationType
 from ..utils import all_node_args_have_no_tensors
