@@ -294,9 +294,9 @@ TEST(ShapeAnalysisTest, MovingConstantOutOfFusionGroups) {
 namespace {
 
 void assertShapeEqual(
-    std::unique_ptr<std::vector<c10::SymbolicShape>>& actual,
+    c10::optional<std::vector<c10::SymbolicShape>>& actual,
     std::vector<c10::optional<int64_t>> expected) {
-  ASSERT_TRUE(actual);
+  ASSERT_TRUE(actual.has_value());
   ASSERT_EQ(actual->size(), 1);
   auto a_canonical = CanonicalizedSymbolicShape(actual->at(0));
 
