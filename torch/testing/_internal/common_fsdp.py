@@ -248,6 +248,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         cpu_offload=None,
         backward_prefetch=None,
         sharding_strategy=None,
+        mixed_precision=None,
         **kwargs
     ):
         super().__init__(
@@ -258,6 +259,7 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
                 sharding_strategy=sharding_strategy,
+                mixed_precision=mixed_precision,
             ),
             **kwargs
         )
