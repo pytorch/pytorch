@@ -223,13 +223,35 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
   }
 }
 
-std::vector<Tensor> foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
+std::vector<Tensor> foreach_tensor_norm_per_tensor_slow(TensorList tensors, const Scalar& ord) {
+  TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm supports int and float ord");
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
     result.emplace_back(at::linalg_vector_norm(t, ord));
   }
   return result;
+}
+
+Tensor foreach_tensor_norm_slow(TensorList tensors, const Scalar& ord) {
+  TORCH_CHECK((ord.isIntegral(false) || ord.isFloatingPoint()), "foreach_norm supports int and float ord");
+  double p;
+  if (ord.isIntegral(false)) {
+    p = static_cast<int64_t>(ord.to<int64_t>());
+  }
+  if (ord.isFloatingPoint()) {
+    p = ord.to<double>();
+  }
+  check_foreach_api_restrictions(tensors);
+  auto result = std::accumulate(
+    tensors.begin(), tensors.end(),
+    at::zeros({1}, tensors[0].options()),
+    [&](const Tensor &cumulative_sum, const Tensor &t) {
+      auto norm = at::linalg_vector_norm(t, ord);
+      return cumulative_sum + (p == 0.0 ? norm : at::pow(norm, ord));
+    }
+  );
+  return p == 0.0 ? result : at::pow(result, 1 / p);
 }
 
 }} // namespace at::native

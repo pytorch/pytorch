@@ -49,6 +49,7 @@ class RegularFuncWrapper:
         self.func = func
 
     def __call__(self, inputs, values=None, **kwargs):
+        is_foreach_norm = kwargs.pop("is_foreach_norm", False)
         if values is not None:
             assert len(inputs) == 3
             if isinstance(values, Number):
@@ -57,7 +58,16 @@ class RegularFuncWrapper:
         if len(inputs) == 2 and isinstance(inputs[1], Number):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
-        return [self.func(*i, **kwargs) for i in zip(*inputs)]
+        ret = [self.func(*i, **kwargs) for i in zip(*inputs)]
+        if not is_foreach_norm:
+            return ret
+        else:
+            global_norm = sum(ret)
+            ord = kwargs.get("ord")
+            if ord == 0:
+                return global_norm
+            else:
+                return torch.pow(sum(ret), 1 / kwargs.get("ord"))
 
 
 class ForeachFuncWrapper:
@@ -410,7 +420,8 @@ class TestForeach(TestCase):
 
     def _reduce_test(self, opinfo, inputs, ord, is_fastpath, n_expected_cudaLaunchKernels):
         op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        self.assertEqual(ref(inputs, ord=ord), op(inputs, self.is_cuda, is_fastpath, ord=ord))
+        print(f"opinfo.name = {opinfo.name}")
+        self.assertEqual(ref(inputs, ord=ord, is_foreach_norm=opinfo.name == "_foreach_norm"), op(inputs, self.is_cuda, is_fastpath, ord=ord))
 
     @ops(foreach_reduce_op_db)
     def test_reduce_fastpath(self, device, dtype, op):
