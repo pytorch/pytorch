@@ -2,8 +2,12 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Union
 
 import torch
 import torch.distributed as dist
-
-from .flatten_params_wrapper import FlatParameter
+# Import the entire FSDP file to avoid circular imports
+import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
+from torch.distributed.fsdp.flatten_params_wrapper import (
+    FPW_MODULE,
+    FlatParameter,
+)
 
 OPTIM_TARGET_RANK = 0  # rank on which to save full optimizer state
 
@@ -194,24 +198,22 @@ def _unflatten_communicated_optim_state(
 
 
 def _flatten_optim_state(
-    unflat_osd_state: Dict[int, Dict[str, Any]],
-    unflat_param_ids: List[int],
+    unflat_osd_state: Dict[str, Dict[str, Any]],
+    unflat_param_names: List[str],
     fsdp_module,
     flat_param: FlatParameter,
 ) -> Dict[str, Any]:
     """
     Flattens the optimizer state in ``full_optim_state_dict`` for a single
     flattened parameter ``flat_param`` in ``fsdp_module`` corresponding to
-    the unflattened parameter IDs in ``unflat_param_ids`` with shapes
-    ``unflat_param_shapes``.
+    the unflattened parameter names in ``unflat_param_names``.
 
     Args:
-        unflat_osd_state (Dict[int, Dict[str, Any]]): The "state" part of the
+        unflat_osd_state (Dict[str, Dict[str, Any]]): The "state" part of the
             optimizer state dict corresponding to the unflattened parameters.
-        unflat_param_ids (List[int]): A :class:`list` of unflattened parameter
-            IDs used in ``full_optim_state_dict`` corresponding to a single
-            flattened parameter; the :class:`list` should consist of
-            consecutive increasing non-negative integers.
+        unflat_param_names (List[str]): A :class:`list` of unflattened
+            parameter names corresponding to the flattened parameter
+            ``flat_param``.
         fsdp_module (FullyShardedDataParallel): FSDP module owning the
             flattened parameter.
         flat_param (FlatParameter): The flattened parameter.
@@ -222,18 +224,19 @@ def _flatten_optim_state(
             optimizer state dict's "state" part will map the flattened
             parameter ID to this returned value.
     """
-    assert len(unflat_param_ids) > 0, \
-        "Expects at least one unflattened parameter ID corresponding to " \
-        "the flattened parameter"
+    num_unflat_params = len(unflat_param_names)
+    assert num_unflat_params > 0, \
+        "Expects at least one unflattened parameter corresponding to the " \
+        "flattened parameter"
     unflat_param_shapes = flat_param._param_shapes
-    assert len(unflat_param_ids) == len(unflat_param_shapes), \
-        f"`unflat_param_ids`: {len(unflat_param_ids)} " \
-        f"`unflat_param_shapes`: {len(unflat_param_shapes)}"
+    num_unflat_param_shapes = len(unflat_param_shapes)
+    assert num_unflat_params == num_unflat_param_shapes, \
+        f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
 
-    # Check if these unflattened parameter IDs have any optimizer state
+    # Check if these unflattened parameters have any optimizer state
     has_state = [
-        bool(unflat_param_id in unflat_osd_state)
-        for unflat_param_id in unflat_param_ids
+        bool(unflat_param_name in unflat_osd_state)
+        for unflat_param_name in unflat_param_names
     ]
     # If none of the unflattened parameters comprising this flattened parameter
     # have any state, then we do not want an entry in the optimizer state dict
@@ -242,9 +245,9 @@ def _flatten_optim_state(
     # There may still be some unflattened parameters with state and some
     # without
     unflat_param_states = [
-        unflat_osd_state[unflat_param_id]
-        if unflat_param_id in unflat_osd_state else None
-        for unflat_param_id in unflat_param_ids
+        unflat_osd_state[unflat_param_name]
+        if unflat_param_name in unflat_osd_state else None
+        for unflat_param_name in unflat_param_names
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
@@ -256,8 +259,8 @@ def _flatten_optim_state(
         else:
             if state_names != set(unflat_param_state.keys()):
                 raise ValueError(
-                    "Differing optimizer state names for the "
-                    f"unflattened parameter IDs: {unflat_param_ids}"
+                    "Differing optimizer state names for the unflattened "
+                    f"parameters: {unflat_param_names}"
                 )
     assert state_names is not None
 
@@ -282,11 +285,11 @@ def _flatten_optim_state(
             raise ValueError(
                 f"Differing optimizer state types for state {state_name}, "
                 f"values {non_none_state_values}, and unflattened parameter "
-                f"IDs {unflat_param_ids} "
+                f"names {unflat_param_names}"
             )
         if are_pos_dim_tensors:
             flat_tensor = _flatten_tensor_optim_state(
-                state_name, state_values, unflat_param_ids,
+                state_name, state_values, unflat_param_names,
                 unflat_param_shapes, flat_param,
             )
             # Shard the flattened tensor immediately to minimize the max memory
@@ -295,12 +298,12 @@ def _flatten_optim_state(
             flat_state[state_name] = sharded_flat_tensor
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
-                state_name, state_values, unflat_param_ids,
+                state_name, state_values, unflat_param_names,
             )
         else:
             assert are_non_tensors
             flat_state[state_name] = _flatten_non_tensor_optim_state(
-                state_name, state_values, unflat_param_ids,
+                state_name, state_values, unflat_param_names,
             )
 
     return flat_state
@@ -309,15 +312,15 @@ def _flatten_optim_state(
 def _flatten_tensor_optim_state(
     state_name: str,
     pos_dim_tensors: List[torch.Tensor],
-    unflat_param_ids: List[int],
+    unflat_param_names: List[str],
     unflat_param_shapes: List[torch.Size],
     flat_param: FlatParameter,
 ) -> torch.Tensor:
     """
     Flattens the positive-dimension tensor optimizer state given by the values
     ``tensors`` for the state ``state_name`` for a single flattened parameter
-    ``flat_param`` corresponding to the unflattened parameter IDs
-    ``unflat_param_ids`` and unflatted parameter shapes
+    ``flat_param`` corresponding to the unflattened parameter names
+    ``unflat_param_names`` and unflatted parameter shapes
     ``unflat_param_shapes``. This flattens each unflattened parameter's tensor
     state into one tensor.
 
@@ -330,10 +333,10 @@ def _flatten_tensor_optim_state(
     Args:
         state_name (str): Optimizer state name.
         pos_dim_tensors (List[torch.Tensor]): Positive-dimension tensor
-            optimizer state values for the unflattened parameters comprising
-            the single flattened parameter.
-        unflat_param_ids (List[int]): Unflattened parameter IDs corresponding
+            optimizer state values for the unflattened parameters corresponding
             to the single flattened parameter.
+        unflat_param_names (List[str]): A :class:`list` of unflattened
+            parameter names corresponding to the single flattened parameter.
         unflat_param_shapes (List[torch.Size]): Unflattened parameter shapes
             corresponding to the single flattened parameter.
         flat_param (FlatParameter): The flattened parameter.
@@ -356,7 +359,7 @@ def _flatten_tensor_optim_state(
             "All unflattened parameters comprising a single flattened "
             "parameter must have positive-dimension tensor state with the "
             f"same dtype but got dtypes {dtypes} for state {state_name} and "
-            f"unflattened parameter IDs {unflat_param_ids}"
+            f"unflattened parameter names {unflat_param_names}"
         )
     dtype = next(iter(dtypes))
     # Check that each tensor state matches its parameter's shape
@@ -405,13 +408,13 @@ def _flatten_tensor_optim_state(
 def _flatten_zero_dim_tensor_optim_state(
     state_name: str,
     zero_dim_tensors: List[torch.Tensor],
-    unflat_param_ids: List[int],
+    unflat_param_names: List[str],
 ) -> torch.Tensor:
     """
     Flattens the zero-dimension tensor optimizer state given by the values
     ``zero_dim_tensors`` for the state ``state_name`` for a single flattened
-    parameter corresponding to the unflattened parameter IDs
-    ``unflat_param_ids`` by enforcing that all tensors are the same and using
+    parameter corresponding to the unflattened parameter names
+    ``unflat_param_names`` by enforcing that all tensors are the same and using
     that common value.
 
     NOTE: The requirement that the tensors are the same across all unflattened
@@ -425,15 +428,15 @@ def _flatten_zero_dim_tensor_optim_state(
     Args:
         state_name (str): Optimizer state name.
         zero_dim_tensors (List[torch.Tensor]): Zero-dimension optimizer state
-            for the unflattened parameters comprising the single flattened
-            parameter.
-        unflat_param_ids (List[int]): Unflattened parameter IDs corresponding
-            to the single flattened parameter.
+            for the unflattened parameters corresponding to the single
+            flattened parameter.
+        unflat_param_names (List[str]): A :class:`list` of unflattened
+            parameter names corresponding to the single flattened parameter.
 
     Returns:
         zero_dim_tensor (torch.Tensor): A zero-dimensional tensor giving the
             value of the state ``state_name`` for all unflattened parameters
-            corresponding to the IDs ``unflat_param_ids``.
+            corresponding to the names ``unflat_param_names``.
     """
     non_none_tensors = [t for t in zero_dim_tensors if t is not None]
     # Enforce that all have the same value and dtype
@@ -445,7 +448,8 @@ def _flatten_zero_dim_tensor_optim_state(
             "All unflattened parameters comprising a single flattened "
             "parameter must have scalar state with the same value and dtype "
             f"but got values {values_set} and dtypes {dtypes} for state "
-            f"{state_name} and unflattened parameter IDs {unflat_param_ids}"
+            f"{state_name} and unflattened parameter names "
+            f"{unflat_param_names}"
         )
     value = next(iter(values_set))
     dtype = next(iter(dtypes))
@@ -455,41 +459,109 @@ def _flatten_zero_dim_tensor_optim_state(
 def _flatten_non_tensor_optim_state(
     state_name: str,
     non_tensors: List[Any],
-    unflat_param_ids: List[int],
+    unflat_param_names: List[str],
 ) -> Any:
     """
     Flattens the non-tensor optimizer state given by the values ``non_tensors``
     for the state ``state_name`` for a single flattened parameter corresponding
-    to the unflattened parameter IDs ``unflat_param_ids`` by enforcing that all
-    vlaues are the same and using that common value.
+    to the unflattened parameter names ``unflat_param_names`` by enforcing that
+    all values are the same and using that common value.
 
     See the note in :func:`_flatten_zero_dim_tensor_optim_state`.
 
     Args:
         state_name (str): Optimizer state name.
         non_tensors (List[Any]): Non-tensor optimizer state for the unflattened
-            parameters comprising the single flattened parameter.
-        unflat_param_ids (List[int]): Unflattened parameter IDs corresponding
-            to the single flattened parameter.
+            parameters corresponding to the single flattened parameter.
+        unflat_param_names (List[str]): A :class:`list` of unflattened
+            parameter names corresponding to the single flattened parameter.
 
     Returns:
         non_tensor (Any): A non-tensor giving the value of the state
             ``state_name`` for all unflattened parameters corresponding to the
-            IDs ``unflat_param_ids``.
+            names ``unflat_param_names``.
     """
     non_none_non_tensors = [nt for nt in non_tensors if nt is not None]
     # Enforce that all have the same value (same type already checked)
     non_tensor_set = set(non_tensors)
-    if len(non_none_non_tensors) != len(non_tensors) or len(non_tensor_set) != 1:
+    if len(non_none_non_tensors) != len(non_tensors) or \
+            len(non_tensor_set) != 1:
         raise ValueError(
             "All unflattened parameters comprising a single flattened "
             "parameter must have scalar state with the same value and dtype "
             f"but got values {non_tensor_set} for state {state_name} and  "
-            f"unflattened parameter IDs {unflat_param_ids}"
+            f"unflattened parameter names {unflat_param_names}"
         )
     non_tensor = next(iter(non_tensor_set))
     return non_tensor
 
+
+def _get_flat_param_to_fsdp_module(
+    model: torch.nn.Module,
+):
+    """
+    Constructs a mapping from FSDP flattened parameters to their owning FSDP
+    modules and ensures that all FSDP modules are initialized.
+
+    Args:
+        model (torch.nn.model): Root module (which may or may not be a
+            :class:`FullyShardedDataParallel` instance).
+    """
+    flat_param_to_fsdp_module = {}
+    for module in model.modules():
+        if isinstance(module, FSDP.FullyShardedDataParallel):
+            module._lazy_init()
+            for param in module.params:  # may have none
+                flat_param_to_fsdp_module[param] = module
+    return flat_param_to_fsdp_module
+
+
+def _get_param_to_unflat_param_names(
+    model: torch.nn.Module,
+) -> Dict[torch.nn.Parameter, List[str]]:
+    """
+    Constructs a mapping from flattened parameters (including non-FSDP-module
+    parameters) to their unflattened parameter names. For non-FSDP-module
+    parameters, these mapped-to lists always contain a single element.
+
+    Args:
+        model (torch.nn.model): Root module (which may or may not be a
+            :class:`FullyShardedDataParallel` instance).
+    """
+    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
+
+    def clean_param_name(prefix, param_info):
+        """This replicates the parameter name cleaning logic in model state
+        dict but avoids gathering any parameters."""
+        name = prefix + param_info.module_name + "." + param_info.param_name
+        # FSDP full parameter names may not have both (i.e. `FSDP_PREFIX`), so
+        # we call `replace()` twice separately
+        name = name.replace(FSDP.FSDP_WRAPPED_MODULE + ".", "")
+        name = name.replace(FPW_MODULE + ".", "")
+        return name
+
+    def f(param_to_unflat_param_names, module: torch.nn.Module, prefix: str):
+        # For FSDP modules, only add the entry when considering the contained
+        # `FlattenParamsWrapper` to avoid duplication
+        if not isinstance(module, FSDP.FullyShardedDataParallel):
+            for param_name, param in module.named_parameters(recurse=False):
+                assert param not in param_to_unflat_param_names, \
+                    f"Incorrect recursion; already visited {param_name}"
+                if isinstance(param, FlatParameter):
+                    param_to_unflat_param_names[param] = [
+                        clean_param_name(prefix, param_info)
+                        for param_info in param._param_infos
+                    ]
+                else:
+                    param_to_unflat_param_names[param] = [prefix + param_name]
+
+        for submodule_name, submodule in module.named_children():
+            if submodule is not None:
+                new_prefix = prefix + submodule_name + "."
+                f(param_to_unflat_param_names, submodule, new_prefix)
+
+    f(param_to_unflat_param_names, model, "")
+    return param_to_unflat_param_names
 
 def _get_flat_param_id_to_param(
     model: torch.nn.Module,
@@ -599,53 +671,6 @@ def _get_unflat_to_flat_param_ids(
         unflat_to_flat_param_ids[unflat_param_id]
         for unflat_param_id in range(num_unflat_param_ids)
     ]
-
-
-def _is_compatible_fsdp_wrapping(
-    flat_param_id_to_param: List[torch.nn.Parameter],
-    unflat_to_flat_param_ids: List[int],
-) -> bool:
-    """
-    Checks if a model's ``FSDP`` wrapping scheme is compatible with the
-    parameter ID mapping given by ``unflat_to_flat_param_ids``. Note that in
-    some edge cases, two wrapping schemes may be different but still
-    compatible since compatibility only requires that unflattened parameter IDs
-    map to the same flattened parameter IDs. However, in general, the optimizer
-    state checkpointing should only be used when the wrapping scheme does not
-    change.
-
-    Args:
-        flat_param_id_to_param (List[torch.nn.Parameter]): A mapping from
-            flattened parameter ID to the parameter itself.
-        unflat_to_flat_param_ids (List[int]): A mapping from unflattened
-            parameter ID to flattened parameter ID, where the unflattened
-            parameter ID is the index in the :class:`list`.
-
-    Returns:
-        is_compatible_fsdp_wrapping (bool): ``True`` if the wrapping scheme
-            corresponding to ``unflat_to_flat_param_ids`` (from the saved state
-            dict) is compatible with that corresponding to
-            ``flat_param_id_to_param`` (for the candidate model for loading).
-    """
-    curr_unflat_param_id = 0
-    new_unflat_to_flat_param_ids = {}
-    for flat_param_id, param in enumerate(flat_param_id_to_param):
-        if isinstance(param, FlatParameter):  # FSDP parameter
-            # Unflattened parameter IDs for a flattened parameter are saved to
-            # be consecutive
-            unflat_param_ids = list(range(
-                curr_unflat_param_id,
-                curr_unflat_param_id + param._num_unflattened_params,
-            ))  # corresponding to the flattened parameter `param`
-        else:  # non-FSDP parameter
-            unflat_param_ids = [curr_unflat_param_id]
-        for unflat_param_id in unflat_param_ids:
-            new_unflat_to_flat_param_ids[unflat_param_id] = flat_param_id
-            if unflat_param_id >= len(unflat_to_flat_param_ids) or \
-                    unflat_to_flat_param_ids[unflat_param_id] != flat_param_id:
-                return False
-        curr_unflat_param_id += len(unflat_param_ids)
-    return True
 
 
 def _is_zero_dim_tensor(x: Any) -> bool:

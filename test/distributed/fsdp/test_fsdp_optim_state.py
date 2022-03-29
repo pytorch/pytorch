@@ -262,26 +262,32 @@ class TestFSDPOptimState(FSDPTest):
                     return False
         return True
 
-    def _check_same_state(self, full_osd, ref_osd, check_same_param_ids: bool):
-        """Checks that ``full_osd`` and ``ref_osd`` have the same "state" part,
-        allowing the parameter IDs to be different but still isomorphic if
-        ``check_same_param_ids=False``."""
+    def _check_same_state(
+        self,
+        full_osd,
+        ref_osd,
+        check_same_param_keys: bool,
+    ):
+        """Checks that ``full_osd`` and ``ref_osd`` have the same "state" part.
+        If ``check_same_param_keys=True``, then checks that the parameter keys
+        match (e.g. when both should be parameter names), and does not check
+        the parameter keys otherwise."""
         assert "state" in ref_osd
         self.assertTrue("state" in full_osd)
         ref_osd_state = ref_osd["state"]
         full_osd_state = full_osd["state"]
-        # Check parameter IDs are the same
-        ref_osd_param_ids = set(ref_osd_state.keys())
-        full_osd_param_ids = set(full_osd_state.keys())
-        self.assertTrue(ref_osd_param_ids == full_osd_param_ids)
-        # Perform strict check that accounts for parameter IDs matching
-        if check_same_param_ids:
+        if check_same_param_keys:
+            # Check parameter keys are the same
+            ref_osd_param_ids = set(ref_osd_state.keys())
+            full_osd_param_ids = set(full_osd_state.keys())
+            self.assertTrue(ref_osd_param_ids == full_osd_param_ids)
             for param_id, param_state in full_osd_state.items():
                 for state_name, value in param_state.items():
                     ref_value = ref_osd_state[param_id][state_name]
                     self.assertEqual(value, ref_value)
             return
-        # Otherwise, only require the parameter IDs to be isomorphic
+        # Otherwise, only require the parameter keys to be isomorphic (e.g.
+        # between IDs and names)
         ref_osd_states = list(ref_osd["state"].values())
         full_osd_states = list(full_osd["state"].values())
         assert len(ref_osd_states) == len(full_osd_states)
@@ -290,27 +296,38 @@ class TestFSDPOptimState(FSDPTest):
         for full_osd_state in full_osd_states:
             # Check for at least one match (may be > 1 in toy edge cases, e.g.
             # multiple biases); nonetheless, each having >= 1 match and the two
-            # lists have equal length imply that the list contents are equal
+            # lists having equal length imply that the list contents are equal
             self.assertTrue(any(
                 self._are_equal_states(full_osd_state, ref_osd_state)
                 for ref_osd_state in ref_osd_states
             ))
 
-    def _check_same_param_groups(self, full_osd, ref_osd):
+    def _check_same_param_groups(
+        self,
+        full_osd,
+        ref_osd,
+        check_same_param_keys: bool,
+    ):
         """Checks that ``full_osd`` and ``ref_osd`` have the same
-        "param_groups" part."""
+        "param_groups" part. If ``check_same_param_keys=True`, then checks that
+        the parameter keys match (e.g. when both should be parameter names),
+        and does not check the parameter keys otherwise."""
         assert "param_groups" in ref_osd
         self.assertTrue("param_groups" in full_osd)
         ref_osd_param_groups = ref_osd["param_groups"]
         full_osd_param_groups = full_osd["param_groups"]
         self.assertTrue(len(full_osd_param_groups), len(ref_osd_param_groups))
-        for full_osd_pg, ref_osd_pg in zip(full_osd_param_groups, ref_osd_param_groups):
-            self.assertEqual(set(full_osd_pg.keys()), set(ref_osd_pg.keys()))
-            for name, full_osd_value in full_osd_pg.items():
-                # Even if the parameter IDs map differently to parameters,
-                # "params" should still contain the same IDs and be in
-                # increasing order; thus, the two values should equal
-                self.assertEqual(full_osd_value, ref_osd_pg[name])
+        if self.rank == 0:
+            for full_osd_pg, ref_osd_pg in zip(
+                full_osd_param_groups, ref_osd_param_groups,
+            ):
+                self.assertEqual(
+                    set(full_osd_pg.keys()), set(ref_osd_pg.keys()),
+                )
+                for name, full_osd_value in full_osd_pg.items():
+                    if name == "params" and not check_same_param_keys:
+                        continue
+                    self.assertEqual(full_osd_value, ref_osd_pg[name])
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_multiple_param_groups", [False, True])
@@ -323,8 +340,9 @@ class TestFSDPOptimState(FSDPTest):
         an FSDP-wrapped model with that of an equivalent non-wrapped model.
 
         The parameter groups in the "param_groups" part and the values in the
-        "state" part should be the same, but the parameter IDs (i.e. the keys
-        in the "state" part) may be rearranged.
+        "state" part should be the same, but the parameter keys may be
+        different (e.g. the full optimizer state dict uses parameter names
+        while the non-wrapped equivalent uses parameter IDs).
         """
         NUM_ITERS = 3
         model1, optim1, optim_input = self._init_nested_model(
@@ -334,34 +352,47 @@ class TestFSDPOptimState(FSDPTest):
         full_osd = FSDP.full_optim_state_dict(model1, optim1, optim_input)
         if self.rank != OPTIM_TARGET_RANK:
             return
-
         model2, optim2, _ = self._init_nested_model(
             wrap=False, use_multiple_param_groups=use_multiple_param_groups,
         )
         losses2 = self._step_model(model2, optim2, num_iters=NUM_ITERS)
         ref_osd = optim2.state_dict()
-
+        # Check the losses to eliminate model drift as a source of error
         for i, (l1, l2) in enumerate(zip(losses1, losses2)):
             assert l1 == l2, f"Losses differ on iter {i}: {l1:.5f} {l2:.5f}"
+        # Do not check the parameter keys since the full optimizer state dict
+        # uses parameter names, while the non-wrapped equivalent uses parameter
+        # IDs
+        check_same_param_keys = False
+        self._check_same_param_groups(
+            full_osd, ref_osd, check_same_param_keys=check_same_param_keys,
+        )
+        self._check_same_state(
+            full_osd, ref_osd, check_same_param_keys=check_same_param_keys,
+        )
 
-        self._check_same_param_groups(full_osd, ref_osd)
-        self._check_same_state(full_osd, ref_osd, check_same_param_ids=False)
-
-    @skip_if_lt_x_gpu(2)
+    # Require 4 GPUs since we test halving the world size
+    @skip_if_lt_x_gpu(4)
     @parametrize("use_multiple_param_groups", [False, True])
+    @parametrize("wrap_alt", [False, True])
+    @parametrize("halve_world_size", [False, True])
     def test_shard_full_optim_state_dict_nested(
         self,
         use_multiple_param_groups: bool,
-    ) -> None:
+        wrap_alt: bool,
+        halve_world_size: bool,
+    ):
         """Tests :meth:`shard_full_optim_state_dict` for a non-FSDP-root model
         with nested FSDP instances."""
         self._test_shard_full_optim_state(
             model_class="nested",
             use_multiple_param_groups=use_multiple_param_groups,
-            halve_world_size=True,
+            halve_world_size=halve_world_size,
+            wrap_alt=wrap_alt,
         )
 
-    @skip_if_lt_x_gpu(2)
+    # Require 4 GPUs since we test halving the world size
+    @skip_if_lt_x_gpu(4)
     def test_shard_full_optim_state_dict_transformer(self) -> None:
         """Tests :meth:`shard_full_optim_state_dict` for an FSDP-root
         transformer model with shared parameters."""
@@ -369,30 +400,6 @@ class TestFSDPOptimState(FSDPTest):
             model_class="transformer", use_multiple_param_groups=False,
             halve_world_size=True,
         )
-
-    @skip_if_lt_x_gpu(2)
-    def test_shard_full_optim_state_dict_diff_wrap(self):
-        """Check that :meth:`shard_full_optim_state_dict` raises a
-        ``ValueError`` if the FSDP wrapping scheme changes."""
-        error_context = self.assertRaisesRegex(
-            ValueError,
-            "The passed-in full optimizer state dict was from a model with "
-            "an incompatible FSDP wrapping scheme as the passed-in model"
-        )
-        with error_context:
-            self._test_shard_full_optim_state(
-                model_class="nested",
-                use_multiple_param_groups=False,
-                halve_world_size=False,
-                wrap_alt=True,
-            )
-        with error_context:
-            self._test_shard_full_optim_state(
-                model_class="nested",
-                use_multiple_param_groups=True,
-                halve_world_size=False,
-                wrap_alt=True,
-            )
 
     def _test_shard_full_optim_state(
         self,
@@ -451,9 +458,14 @@ class TestFSDPOptimState(FSDPTest):
         sharded_osd2 = FSDP.shard_full_optim_state_dict(
             full_osd2, model2, optim_input2,
         )
-        self._check_same_param_groups(sharded_osd2, local_osd2)
+        check_same_param_keys = True  # should all have matching parameter IDs
+        self._check_same_param_groups(
+            sharded_osd2, local_osd2,
+            check_same_param_keys=check_same_param_keys,
+        )
         self._check_same_state(
-            sharded_osd2, local_osd2, check_same_param_ids=True,
+            sharded_osd2, local_osd2,
+            check_same_param_keys=check_same_param_keys,
         )
         # Check that sharding the full-world-size model's full optimizer state
         # dict according to the halved-world-size model is equivalent to the
@@ -461,9 +473,13 @@ class TestFSDPOptimState(FSDPTest):
         sharded_osd1 = FSDP.shard_full_optim_state_dict(
             full_osd1, model2, optim_input2,
         )
-        self._check_same_param_groups(sharded_osd1, local_osd2)
+        self._check_same_param_groups(
+            sharded_osd1, local_osd2,
+            check_same_param_keys=check_same_param_keys,
+        )
         self._check_same_state(
-            sharded_osd1, local_osd2, check_same_param_ids=True,
+            sharded_osd1, local_osd2,
+            check_same_param_keys=check_same_param_keys,
         )
         # As a sanity check, check that we can load and run a few iterations
         optim2.load_state_dict(sharded_osd1)
