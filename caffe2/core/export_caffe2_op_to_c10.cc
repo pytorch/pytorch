@@ -139,7 +139,7 @@ RegisterSchema::RegisterSchema(
   static torch::Library m(
     torch::Library::FRAGMENT, "_caffe2", c10::nullopt,
       __FILE__, __LINE__);
-  m.def(make_function_schema_for_c10(schema_str));
+  m.def(make_function_schema_for_c10(schema_str, optional_alias_analysis_kind));
 }
 
 }  // namespace detail

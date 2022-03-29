@@ -55,11 +55,18 @@ struct TORCH_API RegisterDefinition {
   RegisterDefinition(const char *name, c10::BoxedKernel kernel);
 };
 
+extern template struct RegisterDefinition<c10::DispatchKey::CPU>;
+extern template struct RegisterDefinition<c10::DispatchKey::CUDA>;
+extern template struct RegisterDefinition<c10::DispatchKey::HIP>;
+
 struct TORCH_API RegisterSchema {
   RegisterSchema(
     const char *schema_str,
     c10::optional<c10::AliasAnalysisKind> optional_alias_analysis_kind);
 };
+
+} // namespace detail
+} // namespace caffe2
 
 #define C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(OperatorName)
 
