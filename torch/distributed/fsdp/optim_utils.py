@@ -202,8 +202,7 @@ def _flatten_optim_state(
     """
     Flattens the optimizer state in ``full_optim_state_dict`` for a single
     flattened parameter ``flat_param`` in ``fsdp_module`` corresponding to
-    the unflattened parameter IDs in ``unflat_param_ids`` with shapes
-    ``unflat_param_shapes``.
+    the unflattened parameter IDs in ``unflat_param_ids``.
 
     Args:
         unflat_osd_state (Dict[int, Dict[str, Any]]): The "state" part of the
@@ -282,7 +281,7 @@ def _flatten_optim_state(
             raise ValueError(
                 f"Differing optimizer state types for state {state_name}, "
                 f"values {non_none_state_values}, and unflattened parameter "
-                f"IDs {unflat_param_ids} "
+                f"IDs {unflat_param_ids}"
             )
         if are_pos_dim_tensors:
             flat_tensor = _flatten_tensor_optim_state(
@@ -461,7 +460,7 @@ def _flatten_non_tensor_optim_state(
     Flattens the non-tensor optimizer state given by the values ``non_tensors``
     for the state ``state_name`` for a single flattened parameter corresponding
     to the unflattened parameter IDs ``unflat_param_ids`` by enforcing that all
-    vlaues are the same and using that common value.
+    values are the same and using that common value.
 
     See the note in :func:`_flatten_zero_dim_tensor_optim_state`.
 

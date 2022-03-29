@@ -195,7 +195,7 @@ class FullyShardedDataParallel(nn.Module):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
     is inspired by `Xu et al.`_ as well as the ZeRO Stage 3 from DeepSpeed_.
-    FullyShardedDataParallel is commonly shorten to FSDP.
+    FullyShardedDataParallel is commonly shortened to FSDP.
 
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
@@ -219,7 +219,7 @@ class FullyShardedDataParallel(nn.Module):
 
     .. warning::
         Module should be already placed on the destination device or
-        device is set properly using torch.cuda.set_device(device_id).
+        device is set properly using ``torch.cuda.set_device(device_id)``.
         FSDP will get compute device from module first, if module device
         is CPU, FSDP will then get compute device from current device.
 
@@ -235,10 +235,10 @@ class FullyShardedDataParallel(nn.Module):
         process_group (Optional[ProcessGroup]):
             process group for sharding
         sharding_strategy (Optional[ShardingStrategy]):
-            Config sharding algorithm, different sharding algorithm has trade off
-            between memory saving and communication overhead. 'FULL_SHARD' will
-            be chose if sharding_strategy is not specified.
-        cpu_offload (Optional [CPUOffload]):
+            Config sharding algorithm, different sharding algorithm has trade
+            off between memory saving and communication overhead. ``FULL_SHARD``
+            will be chosen if sharding_strategy is not specified.
+        cpu_offload (Optional[CPUOffload]):
             CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
             ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
@@ -246,7 +246,7 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        auto_wrap_policy: (Optional [callable]):
+        auto_wrap_policy (Optional[Callable]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
             the passed in module. The remainder modules are always wrapped in
@@ -270,7 +270,7 @@ class FullyShardedDataParallel(nn.Module):
                 >>> ) -> bool:
                 >>>     return unwrapped_params >= min_num_params
 
-        backward_prefetch: (Optional[BackwardPrefetch]):
+        backward_prefetch (Optional[BackwardPrefetch]):
             This is an experimental feature that is subject to change in the
             the near future. It allows users to enable two different backward_prefetch
             algorithms to help backward communication and computation overlapping.
@@ -837,22 +837,30 @@ class FullyShardedDataParallel(nn.Module):
     @contextlib.contextmanager
     def state_dict_type(module: nn.Module, state_dict_type: StateDictType) -> Generator:
         """
-        A context manager to set the state_dict_type of all the descendant FSDP
-        modules of the target module. The target module does not have to be a FSDP
-        module. If the target module is a FSDP module, its state_dict_type will
-        also be changed.
-        .. note:: This API should be called for only the top-level (root) module.
-        .. note:: The default state_dict_type is StateDictTyp.FULL_STATE_DICT.
+        A context manager to set the ``state_dict_type`` of all the descendant
+        FSDP modules of the target module. The target module does not have to
+        be a FSDP module. If the target module is a FSDP module, its
+        ``state_dict_type`` will also be changed.
+
+        .. note:: This API should be called for only the top-level (root)
+            module.
+
         .. note:: This API enables users to transparently use the conventional
-        ``state_dict`` API to take model checkpoints in cases where the root
-        FSDP module is wrapped by another ``nn.Module``. For example, the
-        following will ensure `state_dict`  is called on all non-FSDP instances,
-        while dispatching into `local_state_dict` implementation for FSDP:
+            ``state_dict`` API to take model checkpoints in cases where the
+            root FSDP module is wrapped by another ``nn.Module``. For example,
+            the following will ensure ``state_dict``  is called on all non-FSDP
+            instances, while dispatching into `local_state_dict` implementation
+            for FSDP:
+
+        Example::
+
         >>> model = DDP(FSDP(...))
-        >> fsdp_root = model.module
-        >>> with fsdp_root.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>> fsdp_root = model.module
+        >>> with FSDP.state_dict_type(fsdp_root, StateDictType.LOCAL_STATE_DICT):
         >>>     checkpoint = model.state_dict()
+
         Args:
+            module (torch.nn.Module): Root module.
             state_dict_type (StateDictType): the desired state_dict_type to set.
         """
         prev_state_dict_type = None
@@ -974,12 +982,12 @@ class FullyShardedDataParallel(nn.Module):
         >>> torch.cuda.set_device(device_id)
         >>> my_module = nn.Linear(...)
         >>> sharded_module = FSDP(my_module)
-        >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
         >>>     full_dict = sharded_module.state_dict()
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
-        >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
         >>>     local_dict = sharded_module.state_dict()
         >>> local_dict.keys()
         >>> odict_keys(['flat_param', 'inner.flat_param'])
@@ -1112,13 +1120,13 @@ class FullyShardedDataParallel(nn.Module):
         >>> sharded_module = FSDP(my_module)
         >>> checkpoint = torch.load(PATH)
         >>> full_state_dict = checkpoint['full_state_dict']
-        >>> with sharded_module.state_dict_type(StateDictType.FULL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.FULL_STATE_DICT):
         >>>     sharded_module.load_state_dict(full_state_dict)
         >>> full_dict.keys()
         >>> odict_keys(['weight', 'bias'])
         >>> # using local state dict
         >>> local_state_dict = checkpoint['local_state_dict]
-        >>> with sharded_module.state_dict_type(StateDictType.LOCAL_STATE_DICT):
+        >>> with FSDP.state_dict_type(sharded_module, StateDictType.LOCAL_STATE_DICT):
         >>>     sharded_module.load_state_dict(local_state_dict)
         >>> local_dict.keys()
         >>> odict_keys(['flat_param', 'inner.flat_param'])
@@ -1232,7 +1240,7 @@ class FullyShardedDataParallel(nn.Module):
             corresponding to the local param shard will persist after the
             context manager exits (unless ``writeback=False``, in which case
             changes will be discarded). In the case where FSDP does not shard
-            the parameters, currently only when world_size == 1, the
+            the parameters, currently only when ``world_size == 1``, the
             modification is persisted regardless of ``writeback``.
 
         .. warning:: Note that ``rank0_only=True`` in conjunction with
