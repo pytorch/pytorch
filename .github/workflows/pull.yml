@@ -176,7 +176,7 @@ jobs:
         ]}
 
   linux-bionic-rocm5_0-py3_7-build:
-    name: linux-bionic-rocm4.5-py3.7
+    name: linux-bionic-rocm5.0-py3.7
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-bionic-rocm5.0-py3.7
