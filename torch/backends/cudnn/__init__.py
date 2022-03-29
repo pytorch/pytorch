@@ -104,9 +104,9 @@ def set_flags(_enabled=None, _benchmark=None, _benchmark_limit=None, _determinis
 
 
 @contextmanager
-def flags(enabled=False, benchmark=False, benchmark_list=10, deterministic=False, allow_tf32=True):
+def flags(enabled=False, benchmark=False, benchmark_limit=10, deterministic=False, allow_tf32=True):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, benchmark, benchmark_list, deterministic, allow_tf32)
+        orig_flags = set_flags(enabled, benchmark, benchmark_limit, deterministic, allow_tf32)
     try:
         yield
     finally:
