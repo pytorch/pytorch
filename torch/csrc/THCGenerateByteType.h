@@ -1,5 +1,5 @@
 #ifndef THC_GENERIC_FILE
-#error "You must define THC_GENERIC_FILE before including THGenerateByteType.h"
+#error "You must define THC_GENERIC_FILE before including THCGenerateByteType.h"
 #endif
 
 #define scalar_t uint8_t

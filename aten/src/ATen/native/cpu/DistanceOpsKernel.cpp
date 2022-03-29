@@ -1,11 +1,12 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Distance.h>
 
-#include <numeric>
-#include <iterator>
 #include <algorithm>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vml.h>
 #include <c10/util/irange.h>
 
