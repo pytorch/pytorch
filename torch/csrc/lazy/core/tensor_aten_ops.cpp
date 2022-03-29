@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/ts_backend/tensor_aten_ops.h>
+#include <torch/csrc/lazy/core/tensor_aten_ops.h>
 
 #include <ATen/InferSize.h>
 #include <c10/util/Optional.h>
@@ -19,7 +19,6 @@
 #include <torch/csrc/lazy/core/view_ops/unsqueeze.h>
 #include <torch/csrc/lazy/core/view_ops/view.h>
 #include <torch/csrc/lazy/generated/LazyIr.h>
-#include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <algorithm>
 #include <functional>
 
@@ -146,7 +145,7 @@ torch::lazy::LazyTensorPtr narrow(const torch::lazy::LazyTensorPtr& input, int64
   return input->CreateViewTensor(std::move(view_info));
 }
 
-std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> ts_native_batch_norm(
+std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> native_batch_norm(
     const torch::lazy::LazyTensorPtr& input, const torch::lazy::LazyTensorPtr& weight, const torch::lazy::LazyTensorPtr& bias,
     torch::lazy::LazyTensorPtr& running_mean, torch::lazy::LazyTensorPtr& running_var, bool training,
     double momentum, double eps) {
@@ -171,7 +170,7 @@ std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::
                          std::move(running_var_output));
 }
 
-std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> ts_native_batch_norm_backward(
+std::tuple<torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr, torch::lazy::LazyTensorPtr> native_batch_norm_backward(
     const torch::lazy::LazyTensorPtr& grad_out, const torch::lazy::LazyTensorPtr& input,
     const torch::lazy::LazyTensorPtr& weight, const torch::lazy::LazyTensorPtr& running_mean,
     const torch::lazy::LazyTensorPtr& running_var, const torch::lazy::LazyTensorPtr& save_mean,

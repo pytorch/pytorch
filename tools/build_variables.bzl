@@ -441,6 +441,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/shape.cpp",
     "torch/csrc/lazy/core/shape_inference.cpp",
     "torch/csrc/lazy/core/tensor.cpp",
+    "torch/csrc/lazy/core/tensor_aten_ops.cpp",
     "torch/csrc/lazy/core/tensor_list.cpp",
     "torch/csrc/lazy/core/tensor_impl.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
@@ -470,7 +471,6 @@ lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
     "torch/csrc/lazy/ts_backend/ts_node_lowering.cpp",
-    "torch/csrc/lazy/ts_backend/tensor_aten_ops.cpp",
     "torch/csrc/lazy/ts_backend/ts_eager_fallback.cpp",
 ]
 
