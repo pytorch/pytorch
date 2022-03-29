@@ -4,10 +4,7 @@ import torch
 import torch.distributed as dist
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
-from torch.distributed.fsdp.flatten_params_wrapper import (
-    FPW_MODULE,
-    FlatParameter,
-)
+from torch.distributed.fsdp.flatten_params_wrapper import FlatParameter
 
 OPTIM_TARGET_RANK = 0  # rank on which to save full optimizer state
 
@@ -515,53 +512,6 @@ def _get_flat_param_to_fsdp_module(
                 flat_param_to_fsdp_module[param] = module
     return flat_param_to_fsdp_module
 
-
-def _get_param_to_unflat_param_names(
-    model: torch.nn.Module,
-) -> Dict[torch.nn.Parameter, List[str]]:
-    """
-    Constructs a mapping from flattened parameters (including non-FSDP-module
-    parameters) to their unflattened parameter names. For non-FSDP-module
-    parameters, these mapped-to lists always contain a single element.
-
-    Args:
-        model (torch.nn.model): Root module (which may or may not be a
-            :class:`FullyShardedDataParallel` instance).
-    """
-    param_to_unflat_param_names: Dict[torch.nn.Parameter, List[str]] = {}
-
-    def clean_param_name(prefix, param_info):
-        """This replicates the parameter name cleaning logic in model state
-        dict but avoids gathering any parameters."""
-        name = prefix + param_info.module_name + "." + param_info.param_name
-        # FSDP full parameter names may not have both (i.e. `FSDP_PREFIX`), so
-        # we call `replace()` twice separately
-        name = name.replace(FSDP.FSDP_WRAPPED_MODULE + ".", "")
-        name = name.replace(FPW_MODULE + ".", "")
-        return name
-
-    def f(param_to_unflat_param_names, module: torch.nn.Module, prefix: str):
-        # For FSDP modules, only add the entry when considering the contained
-        # `FlattenParamsWrapper` to avoid duplication
-        if not isinstance(module, FSDP.FullyShardedDataParallel):
-            for param_name, param in module.named_parameters(recurse=False):
-                assert param not in param_to_unflat_param_names, \
-                    f"Incorrect recursion; already visited {param_name}"
-                if isinstance(param, FlatParameter):
-                    param_to_unflat_param_names[param] = [
-                        clean_param_name(prefix, param_info)
-                        for param_info in param._param_infos
-                    ]
-                else:
-                    param_to_unflat_param_names[param] = [prefix + param_name]
-
-        for submodule_name, submodule in module.named_children():
-            if submodule is not None:
-                new_prefix = prefix + submodule_name + "."
-                f(param_to_unflat_param_names, submodule, new_prefix)
-
-    f(param_to_unflat_param_names, model, "")
-    return param_to_unflat_param_names
 
 def _get_flat_param_id_to_param(
     model: torch.nn.Module,
