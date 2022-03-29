@@ -139,6 +139,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+int Context::benchmarkLimitCuDNN() const {
+  return benchmark_limit_cudnn;
+}
+
+void Context::setBenchmarkLimitCuDNN(int b) {
+  benchmark_limit_cudnn = b;
+}
+
 bool Context::allowTF32CuBLAS() const {
   return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
 }
