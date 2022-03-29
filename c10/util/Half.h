@@ -402,6 +402,8 @@ struct alignas(4) complex<Half> {
   complex() = default;
   // Half constructor is not constexpr so the following constructor can't
   // be constexpr
+  C10_HOST_DEVICE explicit inline complex(const Half& real, const Half& imag)
+      : real_(real), imag_(imag) {}
   C10_HOST_DEVICE explicit inline complex(const c10::complex<float>& value)
       : real_(value.real()), imag_(value.imag()) {}
 
