@@ -118,9 +118,10 @@ void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
 
         if (either_nan(v.real(), v.imag()) || both_inf(v.real(), v.imag())) {
           // If either is Nan or both are infinite, return {nan, nan}
-          return {};
-	} else if () {
-          return {};
+          return {std::numeric_limits<T>::quiet_NaN(), std::numeric_limits<T>::quiet_NaN()};
+	} else if (either_inf(v.real(), v.imag())) {
+          // If either is Inf, return {0, 0}
+          return {0, 0};
         }
         const c10::complex<T> one = c10::complex<T>(1.0, 0);
         return one/v;
