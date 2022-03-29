@@ -4799,11 +4799,11 @@ class DistributedTest:
                 gradient_as_bucket_view=grad_is_view,
             )
             opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
+
             averager = averagers.PeriodicModelAverager(
                 period=period, warmup_steps=warmup_steps
             )
-
-            net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
+            post_localSGD_net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank],
                 gradient_as_bucket_view=grad_is_view,
@@ -4812,7 +4812,7 @@ class DistributedTest:
             # See: https://github.com/pytorch/pytorch/pull/74737#pullrequestreview-922487496
             averager2 = averagers.PeriodicModelAverager(
                 period=period, warmup_steps=warmup_steps
-            )            
+            )
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
                 optim=torch.optim.SGD(net_using_post_localSGD_opt.parameters(), lr=learning_rate),
                 averager=averager2,
