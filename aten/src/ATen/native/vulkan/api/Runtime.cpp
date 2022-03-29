@@ -121,7 +121,7 @@ std::vector<Adapter> enumerate_adapters(const VkInstance instance) {
   std::vector<Adapter> adapters;
   adapters.reserve(device_count);
   for (const VkPhysicalDevice physical_device : devices) {
-    adapters.emplace_back(Adapter(physical_device));
+    adapters.emplace_back(physical_device);
   }
 
   return adapters;
@@ -199,7 +199,7 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 // Adapter selection methods
 //
 
-size_t select_first(const std::vector<Adapter>& adapters) {
+int32_t select_first(const std::vector<Adapter>& adapters) {
   if (adapters.size() == 0) {
     TORCH_WARN("Pytorch Vulkan Runtime: no device adapters are available for selection!");
     return -1;
@@ -327,13 +327,13 @@ Runtime::Runtime(Runtime&& other) noexcept
   other.debug_report_callback_ = {};
 }
 
-size_t Runtime::init_adapter(const Selector& selector) {
+int32_t Runtime::init_adapter(const Selector& selector) {
   TORCH_CHECK(
       adapters_.size() > 0,
       "Pytorch Vulkan Runtime: Could not initialize adapter because no "
       "devices were found by the Vulkan instance.");
 
-  size_t i = selector(adapters_);
+  int32_t i = selector(adapters_);
   TORCH_CHECK(
       i >= 0 && i < adapters_.size(),
       "Pytorch Vulkan Runtime: no suitable device adapter was selected! "

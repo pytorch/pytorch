@@ -33,7 +33,7 @@ class Adapter final {
   void init_device();
 
   VkPhysicalDevice physical_handle() const;
-  uint32_t compute_queue_family_index() const;
+  int32_t compute_queue_family_index() const;
   VkDevice device_handle() const;
   VkQueue compute_queue() const;
 
@@ -42,7 +42,7 @@ class Adapter final {
   VkPhysicalDeviceProperties properties_;
   VkPhysicalDeviceMemoryProperties memory_properties_;
   std::vector<VkQueueFamilyProperties> queue_families_;
-  uint32_t compute_queue_family_index_;
+  int32_t compute_queue_family_index_;
 
   VkDevice handle_;
   VkQueue queue_;
@@ -68,7 +68,7 @@ inline VkPhysicalDevice Adapter::physical_handle() const {
   return physical_handle_;
 }
 
-inline uint32_t Adapter::compute_queue_family_index() const {
+inline int32_t Adapter::compute_queue_family_index() const {
   return compute_queue_family_index_;
 }
 

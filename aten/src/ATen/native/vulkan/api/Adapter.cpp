@@ -40,7 +40,8 @@ Adapter::Adapter(const VkPhysicalDevice handle)
   : physical_handle_(handle),
     properties_{},
     memory_properties_{},
-    compute_queue_family_index_{},
+    queue_families_{},
+    compute_queue_family_index_{-1},
     handle_(VK_NULL_HANDLE),
     queue_(VK_NULL_HANDLE) {
   vkGetPhysicalDeviceProperties(physical_handle_, &properties_);
@@ -50,6 +51,7 @@ Adapter::Adapter(const VkPhysicalDevice handle)
   vkGetPhysicalDeviceQueueFamilyProperties(
       physical_handle_, &queue_family_count, nullptr);
 
+  queue_families_.resize(queue_family_count);
   vkGetPhysicalDeviceQueueFamilyProperties(
       physical_handle_, &queue_family_count, queue_families_.data());
 
@@ -92,6 +94,10 @@ void Adapter::init_device() {
   if C10_LIKELY(VK_NULL_HANDLE != handle_) {
     return;
   }
+
+  TORCH_CHECK(
+      compute_queue_family_index_ >= 0,
+      "Pytorch Vulkan Adapter: Device does not have any queue families with compute capabilities.");
 
   const float queue_priorities = 1.0f;
   const VkDeviceQueueCreateInfo device_queue_create_info{
