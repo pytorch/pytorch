@@ -648,8 +648,6 @@ static bool checkStackInputShape(const std::vector<BufHandle>& bufList) {
       buildErrorMessage("Empty input list is passed to aten::stack"));
 
   auto buf0 = bufList.at(0);
-  TORCH_INTERNAL_ASSERT(
-      buf0.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
   // Check if any of the dims is 0
   bool hasEmptyDims = false;
   std::vector<ExprHandle> dims;
