@@ -113,7 +113,15 @@ def find_matches(
 
     match_map: Dict[str, MatchResult] = {}
     all_matched : Set[str] = set()
-    def _recursive_record_node_in_match_map(last_node, match_map, node_pattern, matched_node_pattern, pattern, match_value, qconfig):
+
+    def _recursive_record_node_in_match_map(
+            last_node,
+            match_map,
+            node_pattern,
+            matched_node_pattern,
+            pattern,
+            match_value,
+            qconfig):
         if isinstance(node_pattern, Node):
             match_map[node_pattern.name] = (
                 last_node, matched_node_pattern, pattern, match_value, qconfig)
@@ -139,14 +147,28 @@ def find_matches(
         else:
             matched_node_pattern.append(node)
             # record the match for all nodes in the pattern
-            _recursive_record_node_in_match_map(last_node, match_map, matched_node_pattern, matched_node_pattern, pattern, match_value, qconfig)
+            _recursive_record_node_in_match_map(
+                last_node,
+                match_map,
+                matched_node_pattern,
+                matched_node_pattern,
+                pattern,
+                match_value,
+                qconfig)
 
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
             for pattern, value in patterns.items():
                 if is_match(modules, node, pattern):
                     matched_node_pattern: List[Node] = []
-                    record_match(pattern, node, node, value(node, modules), qconfig_map[node.name], matched_node_pattern, match_map)
+                    record_match(
+                        pattern,
+                        node,
+                        node,
+                        value(node, modules),  # type: ignore[operator]
+                        qconfig_map[node.name],
+                        matched_node_pattern,
+                        match_map)
 
     # add custom module instances to the match result
     assert modules is not None

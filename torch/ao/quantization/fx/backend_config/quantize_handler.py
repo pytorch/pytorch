@@ -1,6 +1,5 @@
 import torch
 from typing import Dict, Callable
-from torch.fx.graph import Node
 from .observation_type import ObservationType
 from ..quantization_patterns import QuantizeHandler
 from ..quantization_types import NodePattern
