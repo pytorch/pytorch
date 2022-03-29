@@ -66,12 +66,12 @@ void floor_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 template <typename scalar_t>
-__host__ __device__ static inline scalar_t reciprocal_wrapper(scalar_t a) {
+C10_HOST_DEVICE static inline scalar_t reciprocal_wrapper(scalar_t a) {
   return static_cast<scalar_t>(1)/a;
 }
 
 template<typename T>
-__host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::complex<T> v) {
+C10_HOST_DEVICE static inline c10::complex<T> reciprocal_wrapper(c10::complex<T> v) {
   // Handle extreme cases for numpy compatibility
   auto both_inf = [](T real, T imag) {
     return (::isinf(real) && ::isinf(imag));
@@ -97,14 +97,58 @@ __host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::comple
 }
 
 void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  auto dtype = iter.common_dtype();
+  if (at::isComplexType(dtype)) {
+#if AT_USE_JITERATOR()
+  static const auto reciprocal_string = jiterator_stringify(
+      template <typename T>
+      T reciprocal_kernel(T a) {
+        // Handle extreme cases for numpy compatibility
+        auto both_inf = [](T real, T imag) {
+          return ::isinf(real) && ::isinf(imag);
+        };
+
+        auto either_inf = [](T real, T imag) {
+	  return ::isinf(real) || ::isinf(imag);
+        };
+
+        auto either_nan = [](T real, T imag) {
+          return ::isnan(real) || ::isnan(imag);
+        };
+
+        if (either_nan(v.real(), v.imag()) || both_inf(v.real(), v.imag())) {
+          // If either is Nan or both are infinite, return {nan, nan}
+          return {};
+	} else if () {
+          return {};
+        }
+        const c10::complex<T> one = c10::complex<T>(1.0, 0);
+        return one/v;
+      }
+  );
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "reciprocal_cuda", [&]() {
+      jitted_gpu_kernel<
+        /*name=*/ reciprocal_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, reciprocal_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES(dtype, "reciprocal_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) {
+      return reciprocal_wrapper(a);
+    });
+  });
+  } else { 
+    AT_DISPATCH_FLOATING_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "reciprocal_cuda",
+      dtype, "reciprocal_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return reciprocal_wrapper(a);
         });
       });
+  }
 }
 
 // We manually overload nearbyint because std::nearbyint does not work with std::complex types and ROCm.
