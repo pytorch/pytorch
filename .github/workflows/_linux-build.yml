@@ -54,6 +54,15 @@ jobs:
             exit 1
           fi
 
+      - name: printt testing thing
+        env:
+          AAAAA: ${{ toJson(github.event) }}
+          BBBBB: ${{ github.event.pull_request.body }}
+          CCCCC: ${{ github.event.head_commit.message }}
+        run: |
+          git log --format=%B -n 1 HEAD
+          git log --format=%B -n 1 HEAD^2
+
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
@@ -77,15 +86,6 @@ jobs:
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
-
-      - name: printt testing thing
-        env:
-          AAAAA: ${{ toJson(github.event) }}
-          BBBBB: ${{ github.event.pull_request.body }}
-          CCCCC: ${{ github.event.head_commit.message }}
-        run: |
-          git log --format=%B -n 1 HEAD
-          git log --format=%B -n 1 HEAD^2
 
       - name: Build
         env:
