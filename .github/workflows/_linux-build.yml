@@ -69,7 +69,7 @@ jobs:
           CCCCC: ${{ github.event.head_commit.message }}
         run: |
           git log --format=%B -n 1 HEAD
-          git cherry -v "origin/${GITHUB_DEFAULT_BRANCH}"
+          git cherry -v origin/master
 
       - name: Calculate docker image
         id: calculate-docker-image
