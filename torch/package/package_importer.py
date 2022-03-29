@@ -5,7 +5,7 @@ from torch.serialization import _get_restore_location
 from .package_importer_no_torch import _maybe_decode_ascii
 from .package_importer_no_torch import PackageImporter as DefaultPackageImporter
 from contextlib import contextmanager
-from typing import Any, Union, BinaryIO, Callable
+from typing import Any, Union, BinaryIO, Callable, Dict
 from pathlib import Path
 import io
 
@@ -27,7 +27,7 @@ class PackageImporter(DefaultPackageImporter):
             if self.storage_context.has_storage(name):
                 storage = self.storage_context.get_storage(name, dtype).storage()
             else:
-                tensor = self.zip_reader.get_storage_from_record(
+                tensor = self.zip_reader.get_storage_from_record(  #type: ignore[attr-defined]
                     ".data/" + name, size, dtype
                 )
                 if not self.zip_reader.is_directory():
