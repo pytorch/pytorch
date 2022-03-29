@@ -92,7 +92,6 @@ from .backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_pattern_to_input_type_to_index,
     get_module_to_qat_module,
-    get_fusion_pattern_to_root_node_getter,
 )
 from .backend_config import (
     get_native_backend_config_dict,
@@ -1402,8 +1401,6 @@ def prepare(
         # in the future we can just assign backend_config_dict when everything is defined
         for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
             patterns[pattern] = quantize_handler
-
-        root_node_getter_mapping = get_fusion_pattern_to_root_node_getter(get_native_backend_config_dict())
     else:
         patterns = get_pattern_to_quantize_handlers(backend_config_dict)
 
@@ -1424,9 +1421,6 @@ def prepare(
                     index_dict[pattern].append(index)  # type: ignore[index]
                 else:
                     index_dict[pattern] = [index]  # type: ignore[index]
-
-        root_node_getter_mapping = \
-            get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
@@ -1474,8 +1468,8 @@ def prepare(
     custom_module_classes = get_custom_module_class_keys(
         prepare_custom_config_dict, "float_to_observed_custom_module_class")
     matches = find_matches(
-        model.graph, modules, patterns, root_node_getter_mapping, qconfig_map,
-        standalone_module_names, standalone_module_classes, custom_module_classes)
+        model.graph, modules, patterns, qconfig_map, standalone_module_names,
+        standalone_module_classes, custom_module_classes)
 
     input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
         "input_quantized_idxs", [])

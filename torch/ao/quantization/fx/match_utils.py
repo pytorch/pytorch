@@ -76,7 +76,6 @@ def find_matches(
         graph: Graph,
         modules: Dict[str, torch.nn.Module],
         patterns: Dict[Pattern, QuantizeHandler],
-        root_node_getter_mapping: Dict[Pattern, Callable],
         qconfig_map: Dict[str, QConfigAny],
         standalone_module_names: List[str] = None,
         standalone_module_classes: List[Callable] = None,
@@ -123,80 +122,31 @@ def find_matches(
                 _recursive_record_node_in_match_map(last_node, match_map, n, matched_node_pattern, pattern, match_value, qconfig)
 
     # TODO: 1. merge with fuse matcher 2. document the code
-    def record_match(
-            pattern,
-            node,
-            last_node,
-            quantize_handler_cls,
-            modules,
-            root_node_getter,
-            qconfig,
-            matched_node_pattern,
-            match_map):
+    def record_match(pattern, node, last_node, match_value, qconfig, matched_node_pattern, match_map):
         if node.name in match_map:
             return
         if isinstance(pattern, tuple):
             s, *args = pattern
             current_node_pattern: List[Node] = []
-            record_match(
-                s,
-                node,
-                last_node,
-                quantize_handler_cls,
-                modules,
-                root_node_getter,
-                qconfig,
-                matched_node_pattern,
-                match_map)
+            record_match(s, node, last_node, match_value, qconfig, matched_node_pattern, match_map)
             if pattern[0] is not getattr:
                 for subpattern, arg in zip(args, node.args):
-                    record_match(
-                        subpattern,
-                        arg,
-                        node,
-                        quantize_handler_cls,
-                        modules,
-                        root_node_getter,
-                        qconfig,
-                        current_node_pattern,
-                        match_map)
+                    record_match(subpattern, arg, node, match_value, qconfig, current_node_pattern, match_map)
             if len(current_node_pattern) > 1:
                 matched_node_pattern.append(tuple(current_node_pattern))
             else:
                 matched_node_pattern.append(current_node_pattern[0])
         else:
             matched_node_pattern.append(node)
-            quantize_handler = quantize_handler_cls(
-                matched_node_pattern,
-                modules,
-                root_node_getter)
             # record the match for all nodes in the pattern
-            _recursive_record_node_in_match_map(
-                last_node,
-                match_map,
-                # we need to record all nodes in the matched pattern in the match_map
-                matched_node_pattern,
-                # this is a part of the value corresponding to the node
-                matched_node_pattern,
-                pattern,
-                quantize_handler,
-                qconfig)
+            _recursive_record_node_in_match_map(last_node, match_map, matched_node_pattern, matched_node_pattern, pattern, match_value, qconfig)
 
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
-            for pattern, quantize_handler_cls in patterns.items():
-                root_node_getter = root_node_getter_mapping.get(pattern, None)
+            for pattern, value in patterns.items():
                 if is_match(modules, node, pattern):
                     matched_node_pattern: List[Node] = []
-                    record_match(
-                        pattern,
-                        node,
-                        node,
-                        quantize_handler_cls,
-                        modules,
-                        root_node_getter,
-                        qconfig_map[node.name],
-                        matched_node_pattern, match_map)
+                    record_match(pattern, node, node, value(node, modules), qconfig_map[node.name], matched_node_pattern, match_map)
 
     # add custom module instances to the match result
     assert modules is not None
