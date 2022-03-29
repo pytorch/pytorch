@@ -2038,7 +2038,8 @@ StaticRuntime StaticRuntime::clone() const {
   for (const auto i :
        c10::irange(parent_module_.constants().size(), values_.size())) {
     if (values[i].isTensor()) {
-      new_values[i] = at::native::empty_like(values[i].toTensor());
+      auto& old_tensor = values[i].toTensor();
+      new_values[i] = create_empty_from(old_tensor.sizes(), old_tensor);
       old_tensor_to_new.emplace(
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<at::Tensor*>(&values[i].toTensor()),
