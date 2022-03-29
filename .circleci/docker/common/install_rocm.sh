@@ -30,7 +30,7 @@ ver() {
 }
 
 # Map ROCm version to AMDGPU version
-declare -A AMDGPU_VERSIONS=( ["4.5.2"]="21.40.2" ["5.0"]="21.50" ["5.0.1"]="21.50.1" )
+declare -A AMDGPU_VERSIONS=( ["4.5.2"]="21.40.2" ["5.0"]="21.50" ["5.0.1"]="21.50.1" ["5.1"]="22.10" )
 
 install_ubuntu() {
     apt-get update
