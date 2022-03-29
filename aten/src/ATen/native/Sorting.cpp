@@ -871,17 +871,25 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(const Tensor& self,
     bool descending,
     Tensor& values,
     Tensor& indices) {
-  values.resize_(self.sizes()).copy_(self);
+  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
+  values.resize_(self.sizes());
   indices.resize_(self.sizes());
 
   // check if self is scalar
   if (self.dim() == 0 && self.numel() == 1) {
+    values.copy_(self);
     indices.zero_();
     return std::forward_as_tuple(values, indices);
   }
 
-  TORCH_INTERNAL_ASSERT(stable.has_value(), "sort_out(): c10::optional<bool> for stable has to have value.");
-  sort_stub(kCPU, values, indices, dim, descending, stable.value());
+  if (self.scalar_type() == kBFloat16) {
+    Tensor values_acc = self.toType(kFloat);
+    sort_stub(kCPU, values_acc, indices, dim, descending, stable.value());
+    values.copy_(values_acc);
+  } else {
+    values.copy_(self);
+    sort_stub(kCPU, values, indices, dim, descending, stable.value());
+  }
 
   return std::forward_as_tuple(values, indices);
 }
