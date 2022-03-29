@@ -283,7 +283,6 @@ class PrecomputedOffsetsMemoryPlanner : public MemoryPlanner {
   BlockRunner* block_runner_;
   const BlockInfo& block_info_;
 
-  size_t num_managed_tensors_{0};
   bool optimize_memory_;
 
   std::vector<ManagedTensor> managed_tensors_;
