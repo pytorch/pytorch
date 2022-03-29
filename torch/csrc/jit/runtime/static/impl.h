@@ -518,7 +518,7 @@ class TORCH_API BlockRunner {
  public:
   BlockRunner(
       const StaticModule& sm,
-      std::vector<IValue>& values,
+      IValue* values,
       Block* block,
       bool is_root_block = false);
   BlockRunner(BlockRunner&&) noexcept;
@@ -569,14 +569,8 @@ class TORCH_API BlockRunner {
   // Input is readwrite
   IValue& Input(uint32_t i) {
     DCHECK_LT(i, block_info_.num_inputs());
-    DCHECK_LT(i, values_.size());
     return values_[i + block_info_.block_inputs_idx()];
   }
-
-  size_t init_sub_blocks(
-      const StaticModule& sm,
-      std::vector<IValue>& values,
-      size_t block_idx);
 
   // Output is readonly. The writing process happens inside ProcessedNodes
   C10_NODISCARD const IValue& Output(uint32_t i) const {
@@ -734,7 +728,8 @@ class TORCH_API BlockRunner {
   // [block_i] = [inputs_i][intermediates_i]
   // Each BlockRunner knows where its inputs start. Each ProcessedNode
   // knows how to find the indices of its outputs/inputs in this array.
-  std::vector<IValue>& values_;
+  IValue* values_;
+
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
 };
@@ -995,8 +990,43 @@ class TORCH_API StaticRuntime {
   }
 
  private:
+  // An array of IValues with unchanging size/data ptr.
+  class IValueArray {
+   public:
+    IValueArray() = default;
+    explicit IValueArray(size_t size) : array_(allocate(size)), size_(size) {}
+
+    IValue* data() const {
+      return array_.get();
+    }
+
+    size_t size() const {
+      return size_;
+    }
+
+   private:
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    static std::unique_ptr<IValue[]> allocate(size_t size) {
+      if (size) {
+        auto result = std::make_unique<IValue[]>(size);
+        auto* data = result.get();
+        for (const auto i : c10::irange(size)) {
+          data[i] = IValue();
+        }
+        return result;
+      }
+      return nullptr;
+    }
+
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays)
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays)
+    std::unique_ptr<IValue[]> array_ = nullptr;
+    size_t size_;
+  };
+
   std::unique_ptr<BlockRunner> block_;
-  std::vector<IValue> values_;
+  IValueArray values_;
 };
 
 } // namespace jit
