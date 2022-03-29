@@ -1,4 +1,3 @@
-#include "c10/core/ScalarType.h"
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
@@ -17,6 +16,7 @@
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/utils/ParamsHash.h>
 #include <ATen/TensorUtils.h>
+#include <c10/core/ScalarType.h>
 #include <cudnn_frontend.h>
 #include <torch/library.h>
 
@@ -48,7 +48,13 @@ std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, at::native
 // reference: https://github.com/NVIDIA/cudnn-frontend/blob/main/samples/conv_sample.cpp#L293
 //static cudnn_frontend::ExecutionPlanCache plan_cache("sample_cache");
 
-// the parameter quantized_output is a quantized tensor
+// currently we only support int8 symmetric (zero_point = 0 for inputs and output) quantized linear op
+// We implement relu(act_int8 * transpose(w_int8) + [bias_fp32/(act_scale * w_scale] ) * ( act_scale * w_scale / out_scale )
+// which requires 5 cudnn ops (1 matmul, 2 multiplication, 1 add, and 1 relu ops)
+// matmul op: linear_op
+// Multiplication ops: rhs_mult_op, requant_op
+// Addition op: add_op
+// Relu op: relu_op
 template <bool kReluFused>
 void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_output, const at::Tensor& input, double output_scale) {
   if (quantized_output.numel() == 0) {
@@ -142,7 +148,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     return;
   }
 
-  // linear_op computes act_fp32 * w_fp32 (matrix multiplication)
+  // linear_op computes act_fp32 * tranpose(w_fp32) (matrix multiplication)
   // where act_fp32 and w_fp32 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
