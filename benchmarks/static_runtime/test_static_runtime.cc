@@ -3015,3 +3015,61 @@ TEST(StaticRuntime, ConcatEmpty) {
   torch::jit::StaticModule smod(mod);
   EXPECT_THROW(smod({}), c10::Error);
 }
+
+TEST(StaticRuntime, IntImplicit) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  testStaticRuntime(src, {at::tensor({1}, at::kInt).squeeze()});
+}
+
+TEST(StaticRuntime, IntImplicit_ThrowOnBadInputs) {
+  const auto src = R"IR(
+    graph(%a: Tensor):
+        %y: int = aten::IntImplicit(%a)
+        return (%y)
+  )IR";
+  auto graph = getGraphFromIR(src);
+  torch::jit::StaticModule smod(graph);
+  // Not 0D tensor
+  EXPECT_THROW(smod({at::tensor({1, 2}, at::kInt)}), std::runtime_error);
+  // Wrong dtype
+  EXPECT_THROW(
+      smod({at::tensor({1}, at::kFloat).squeeze()}), std::runtime_error);
+}
+
+TEST(StaticRuntime, Select) {
+  const auto src = R"IR(
+    graph(%a: Tensor, %dim: int, %index: int):
+        %none: NoneType = prim::Constant()
+        %b: Tensor = aten::select(%a, %dim, %index)
+        %c: Tensor = aten::clone(%b, %none)
+        return (%c)
+  )IR";
+  testStaticRuntime(src, {at::randn({2, 2}), 0, 1});
+}
+
+TEST(StaticRuntime, ReshapeAs) {
+  const auto src = R"JIT(
+    def forward(self, a, b):
+        return a.reshape_as(b).clone()
+  )JIT";
+  testStaticRuntime(src, {at::randn({2, 2}), at::randn({4})});
+}
+
+TEST(StaticRuntime, MoveCtor) {
+  auto mod = getDeepAndWideSciptModel();
+  std::vector<IValue> args{
+      at::randn({1, 1, 32}), at::randn({1, 1, 32}), at::randn({1, 50})};
+
+  torch::jit::StaticModule smod(mod);
+
+  torch::jit::StaticRuntime runtime(smod);
+  auto expected = runtime(args);
+
+  torch::jit::StaticRuntime new_runtime(std::move(runtime));
+  auto actual = new_runtime(args);
+  compareResults(expected, actual);
+}
