@@ -4,7 +4,8 @@ from pprint import pformat
 
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
-                                      PythonSignatureNativeFunctionPair)
+                                      PythonSignatureNativeFunctionPair,
+                                      returns_named_tuple_pyi)
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
@@ -77,6 +78,7 @@ blocklist = [
     'range',
     # defined in functional
     'einsum',
+    'histogramdd',
     # reduction argument; these bindings don't make sense
     'binary_cross_entropy_with_logits',
     'ctc_loss',
@@ -396,7 +398,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
 
-        named_tuple = group.signature.returns.named_tuple_pyi()
+        named_tuple = returns_named_tuple_pyi(group.signature)
         if named_tuple is not None and not group.signature.deprecated:
             # deprecated namedtuples are currently not included for torch functions
             tuple_name, tuple_def = named_tuple
@@ -524,7 +526,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
-        named_tuple = group.signature.returns.named_tuple_pyi()
+        named_tuple = returns_named_tuple_pyi(group.signature)
         if named_tuple is not None and not group.signature.deprecated:
             # deprecated namedtuples are currently not included for torch functions
             tuple_name, tuple_def = named_tuple
@@ -613,6 +615,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     })
     fm.write_with_template('torch/_VF.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
         'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
+        **env,
+    })
+    fm.write_with_template('torch/return_types.pyi', 'torch/_C/return_types.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/return_types.pyi',
         **env,
     })
     gen_nn_functional(fm)
