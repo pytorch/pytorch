@@ -47,20 +47,30 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
+      - name: Check for new workflows
+        run: |
+          if [ ! -f "./.github/actions/setup-linux/action.yml" ]; then
+            echo "::error::Your PR is based on a version of master that is too old for our CI to work. Please rebase your PR on latest master and resubmit."
+            exit 1
+          fi
+
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/pytorch/.github/actions/calculate-docker-image@master
+        uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
           xla: ${{ contains(inputs.build-environment, 'xla') }}
 
       - name: Pull docker image
-        uses: pytorch/pytorch/.github/actions/pull-docker-image@master
+        uses: ./.github/actions/pull-docker-image
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -130,7 +140,7 @@ jobs:
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
       - name: Chown workspace
-        uses: pytorch/pytorch/.github/actions/chown-workspace@master
+        uses: ./.github/actions/chown-workspace
         if: always()
 
       - name: Archive artifacts into zip
@@ -148,5 +158,5 @@ jobs:
           path: artifacts.zip
 
       - name: Teardown Linux
-        uses: pytorch/pytorch/.github/actions/teardown-linux@master
+        uses: ./.github/actions/teardown-linux
         if: always()
