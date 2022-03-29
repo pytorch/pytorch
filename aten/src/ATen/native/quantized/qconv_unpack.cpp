@@ -33,74 +33,19 @@ class QConvUnpackWeightsInt8 final {
  public:
   static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
-    auto& ctx = at::globalContext();
 
-#ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      return packed_weight->unpack();
-    }
-#endif
-
-#ifdef USE_PYTORCH_QNNPACK
-    if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      TORCH_CHECK(
-          kSpatialDim == 2,
-          "quantized::conv2d_unpack (qnnpack): QNNPACK only supports Conv2d "
-          "now.");
-      return packed_weight->unpack();
-    }
-#endif
-
-#if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
-      return packed_weight->unpack();
-    }
-#endif
-
-    TORCH_CHECK(
-        false,
-        "Didn't find engine for operation quantized::conv2d_unpack ",
-        toString(ctx.qEngine()));
-  }
+    return packed_weight->unpack();
 };
 
 class QConv1dUnpackWeightsInt8 final {
  public:
   static std::tuple<at::Tensor, c10::optional<at::Tensor>> run(
       const c10::intrusive_ptr<ConvPackedParamsBase<2>>& packed_weight) {
-    auto& ctx = at::globalContext();
     at::Tensor weight;
     c10::optional<at::Tensor> bias;
-#ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
-      std::tie(weight, bias) = packed_weight->unpack();
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight, bias);
-    }
-#endif
-
-#ifdef USE_PYTORCH_QNNPACK
-    if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      std::tie(weight, bias) = packed_weight->unpack();
-      at::Tensor new_weight = weight.clone();
-      new_weight = new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
-    }
-#endif
-
-#if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
-      std::tie(weight, bias) = packed_weight->unpack();
-      at::Tensor new_weight = weight.clone();
-      new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
-    }
-#endif
-
-    TORCH_CHECK(
-        false,
-        "Didn't find engine for operation quantized::conv1d_unpack ",
-        toString(ctx.qEngine()));
+    std::tie(weight, bias) = packed_weight->unpack();
+    weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+    return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight, bias);
   }
 };
 
