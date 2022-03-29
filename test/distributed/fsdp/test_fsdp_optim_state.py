@@ -290,7 +290,7 @@ class TestFSDPOptimState(FSDPTest):
         for full_osd_state in full_osd_states:
             # Check for at least one match (may be > 1 in toy edge cases, e.g.
             # multiple biases); nonetheless, each having >= 1 match and the two
-            # lists have equal length imply that the list contents are equal
+            # lists having equal length imply that the list contents are equal
             self.assertTrue(any(
                 self._are_equal_states(full_osd_state, ref_osd_state)
                 for ref_osd_state in ref_osd_states
