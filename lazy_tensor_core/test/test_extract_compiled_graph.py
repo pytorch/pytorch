@@ -50,6 +50,20 @@ class ModuleReturnMulti(nn.Module):
 #         b = torch.randn(2, 3, device="cpu") # eager device
 #         return a + b
 
+# The module was planned to cover the case that a Fx graph return an eager
+# tensor on the default device. It's harder than ModuleEagerTensor because
+# we can not just override the device argument to Lazy since there is no
+# explicit device argument.
+#
+# Unfortunately, the default fx tracer convert the return value of the forward
+# method to a constant.. Comment out for now
+# class ModuleReturnEagerTensorOnDefaultDevice(nn.Module):
+#     def __init__(self):
+#         super(ModuleReturnEagerTensorOnDefaultDevice, self).__init__()
+#
+#     def forward(self):
+#         return torch.tensor((2, 3), dtype=torch.float32)
+
 class ModuleReturnDupTensor(nn.Module):
     """
     Handle the corner case that the same tensor appears multiple times in the
