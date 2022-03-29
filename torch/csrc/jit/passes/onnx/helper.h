@@ -61,5 +61,12 @@ Node* transformToONNXConcatNode(
     bool need_new_input,
     int opset_version);
 
+class ScalarTypeHashFunction {
+ public:
+  size_t operator()(const c10::ScalarType& type) const {
+    return static_cast<size_t>(type);
+  }
+};
+
 } // namespace jit
 } // namespace torch

@@ -8,7 +8,7 @@ graph {
     name: "Atan_0"
     op_type: "Atan"
   }
-  name: "torch-jit-export"
+  name: "torch_jit"
   input {
     name: "onnx::Atan_0"
     type {
