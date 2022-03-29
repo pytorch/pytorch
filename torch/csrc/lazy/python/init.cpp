@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/lazy/core/lazy_mode.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/python/python_util.h>
@@ -59,6 +60,22 @@ void initLazyBindings(PyObject* module){
   lazy.def("_reset_metrics",
         []() { torch::lazy::MetricsArena::Get()->Reset(); });
   lazy.def("_counter_names", []() { return torch::lazy::GetCounterNames(); });
+
+  lazy.def(
+    "_lazy_mode_enter",
+    [](c10::Device device) {
+      pybind11::gil_scoped_release no_gil;
+      torch::lazy::LazyModeEnter(device);
+    },
+    py::arg("device"));
+  lazy.def(
+    "_lazy_mode_exit",
+    [](c10::Device device) {
+      pybind11::gil_scoped_release no_gil;
+      torch::lazy::LazyModeExit(device);
+    },
+    py::arg("device"));
+
 
   lazy_ts_backend.def(
     "_init",

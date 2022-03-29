@@ -5,6 +5,7 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
+#include <torch/csrc/lazy/core/lazy_mode.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
@@ -504,7 +505,8 @@ LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, con
   // TODO: There are places in core where a scalar is wrapped but not marked as
   // wrapped.
   return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
-          (tensor.dim() == 0 && tensor.numel() == 1))
+          (tensor.dim() == 0 && tensor.numel() == 1) ||
+          in_lazy_mode())
              ? GetOrCreateLtcTensor(tensor, device)
              : GetLtcTensor(tensor);
 }

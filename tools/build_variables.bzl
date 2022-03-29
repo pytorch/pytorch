@@ -417,6 +417,7 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir_dump_util.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/lazy_mode.cpp",
     "torch/csrc/lazy/core/lazy_graph_executor.cpp",
     "torch/csrc/lazy/core/lazy_view.cpp",
     "torch/csrc/lazy/core/metrics.cpp",

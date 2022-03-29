@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <torch/csrc/lazy/core/lazy_mode.h>
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 
@@ -66,6 +67,17 @@ c10::optional<BackendDevice> GetBackendDevice(const at::TensorList tensors) {
 c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   if (auto lt = TryGetLtcTensor(tensor)) {
     return lt->GetDevice();
+  } else if (in_lazy_mode()) {
+    // TODO(whc) technically this check is both
+    // - too strict: lazy mode could probably work (with perf penalty) if e.g. eager cpu tensors need to get promoted
+    //   to lazy cuda
+    // - not precise: even if xla backend uses 'cpu' as its fallback, it doesn't make a lot of sense to use lazy mode
+    //   with it unless its non-fallback device is also cpu
+    TORCH_CHECK(tensor.device().type() == getBackend()->EagerFallbackDeviceType());
+    
+    // We allow silent conversion of eager tensors into lazy tensors when in a lazy mode,
+    // but the type of the eager tensor still has to match the underlying type used by the lazy backend
+    return BackendDevice(getBackend()->GetDefaultDeviceType(), tensor.device().index());
   }
   return c10::nullopt;
 }
