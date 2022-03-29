@@ -42,6 +42,7 @@
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/logging.h>
 
 #include <cstdint>
@@ -56,17 +57,16 @@ namespace torch {
 namespace jit {
 
 EnableProfilingGuard::EnableProfilingGuard() {
-  auto& profiling_mode = getProfilingMode();
-  old_profiling_mode = profiling_mode;
-  profiling_mode = true;
   auto& executor_mode = getExecutorMode();
   old_executor_mode = executor_mode;
   executor_mode = true;
+  old_get_optimize = getGraphExecutorOptimize();
+  setGraphExecutorOptimize(true);
 }
 
 EnableProfilingGuard::~EnableProfilingGuard() {
-  getProfilingMode() = old_profiling_mode;
   getExecutorMode() = old_executor_mode;
+  setGraphExecutorOptimize(old_get_optimize);
 }
 
 namespace {
@@ -408,8 +408,7 @@ struct DifferentiableGraphOp {
 
     detachVariables(stack);
     if (IsNewExecutorEnabled()) {
-      const ExecutionPlan& plan =
-          f_ptr->getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+      const ExecutionPlan& plan = f_ptr->getPlanFor(stack);
       InterpreterState(plan.code).run(stack);
     } else {
       InterpreterState(legacy_f).run(stack);
@@ -550,8 +549,7 @@ void GraphExecutorImplBase::run(Stack& stack) {
   logging::getLogger()->addStatValue(
       logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
 
-  const ExecutionPlan& plan =
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
+  const ExecutionPlan& plan = getPlanFor(stack);
   InterpreterState(plan.code).run(stack);
   last_executed_optimized_graph = plan.graph;
 }
@@ -576,9 +574,8 @@ c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
     ExecutionPlan plan;
     InterpreterState state;
   };
-  auto frame = std::make_shared<Frame>(
-      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()),
-      std::move(taskLauncher));
+  auto frame =
+      std::make_shared<Frame>(getPlanFor(stack), std::move(taskLauncher));
   auto res = frame->state.runAsync(stack);
   last_executed_optimized_graph = frame->plan.graph;
   if (!res->completed()) {
@@ -603,8 +600,9 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
 
-  const ExecutionPlan& getPlanFor(Stack& stack, size_t remaining_bailout_depth)
-      override {
+  const ExecutionPlan& getPlanFor(
+      Stack& stack,
+      c10::optional<size_t> remaining_bailout_depth) override {
     return getGraphExecutorOptimize() ? getOrCompile(stack)
                                       : getOrCompileFallback();
   }
@@ -783,13 +781,9 @@ c10::intrusive_ptr<Future> GraphExecutor::runAsync(
   return pImpl->runAsync(stack, std::move(taskLauncher));
 }
 
-size_t GraphExecutor::getDefaultNumBailOuts() {
-  return getProfilingMode() ? getBailoutDepth() : 0;
-}
-
 const ExecutionPlan& GraphExecutor::getPlanFor(
     Stack& inputs,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   return pImpl->getPlanFor(inputs, remaining_bailout_depth);
 }
 
@@ -887,10 +881,8 @@ void runNondiffOptimization(
 
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
-  if (!getProfilingMode()) {
-    DecomposeOps(graph);
-    GRAPH_DEBUG("After DecomposeOps\n", *graph);
-  }
+  DecomposeOps(graph);
+  GRAPH_DEBUG("After DecomposeOps\n", *graph);
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
@@ -901,7 +893,7 @@ void runNondiffOptimization(
   BatchMM(graph);
 
   GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
-  if (getProfilingMode()) {
+  if (getExecutorMode()) {
     if (tensorExprFuserEnabled()) {
       auto min_size = getFusionGroupInlining() ? 2 : 1;
       auto dyn_shapes = tensorExprDynamicShapeFusionEnabled();
