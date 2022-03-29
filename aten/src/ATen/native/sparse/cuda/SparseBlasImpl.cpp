@@ -965,6 +965,18 @@ void add_out_sparse_csr(
   auto B_col_indices_ptr = B_col_indices.data_ptr<int>();
   auto C_col_indices_ptr = C_col_indices.data_ptr<int>();
 
+  // Windows compilers don't support nested macros
+  // so we need this lambda outside of the AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES
+  auto fix_nnz = [&C_crow_indices, &m](int nnz) -> int {
+    // For some reason POINTER_MODE_HOST is not working here
+    // Let's extract manually the nnz from the C_crow_indices
+    #if AT_ROCM_ENABLED()
+    return std::max({nnz, C_crow_indices.narrow(-1, m, 1).item<int>()});
+    #else
+    return nnz;
+    #endif
+  };
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       C.scalar_type(), "add_out_sparse_csr_cuda_impl", [&] {
         auto beta_ = beta.to<scalar_t>();
@@ -1025,11 +1037,7 @@ void add_out_sparse_csr(
             &nnzC,
             work_data.get());
 
-        // For some reason POINTER_MODE_HOST is not working here
-        // Let's extract manually the nnz from the C_crow_indices
-        #if AT_ROCM_ENABLED()
-        nnzC = std::max({nnzC, C_crow_indices.narrow(-1, m, 1).item<int>()});
-        #endif
+        nnzC = fix_nnz(nnzC);
 
         // Resize result using nnz information from cusparse
         col_indices_and_values_resize_(C, nnzC);
