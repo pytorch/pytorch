@@ -13,7 +13,6 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/cudnn/Types.h>
-#include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/utils/ParamsHash.h>
@@ -91,6 +90,15 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   } else {
     key.bias_alignment = -1;
   }
+  // cudnn expects tensors to be at least 3D. act is currently 2D. we will create a 3D view
+  // cudnn expects leading dimensions to be the dummy dimensions
+  std::vector<int64_t> new_sizes(3, 1);
+  new_sizes.back() = orig_weight.size(0);
+  new_sizes[1] = orig_weight.size(1);
+  auto weight_transposed = transpose(orig_weight, 0, 1).view(new_sizes);
+  // TODO: remove this with int8 matmul is supported
+  auto input_fp = input.int_repr().to(at::kFloat);
+  auto weight_fp = weight_transposed.int_repr().to(at::kFloat);
 
   auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor plan_desc) {
     auto workspace_size = 0;
@@ -99,8 +107,8 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
     std::vector<int64_t> uids;
     data_ptrs.reserve(10);
     uids.reserve(10);
-    data_ptrs = {reinterpret_cast<int8_t*>(input.data_ptr()), linear_output.data_ptr(),
-                                           reinterpret_cast<int8_t*>(orig_weight.data_ptr()),
+    data_ptrs = {input_fp.data_ptr(), linear_output.data_ptr(),
+                                           weight_fp.data_ptr(),
                                            requantize_multiplier_tensor.data_ptr(),
                                            reinterpret_cast<int8_t*>(quantized_output.data_ptr())};
     uids = {'x', 'y', 'w', 's', 'r'};
@@ -138,8 +146,11 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
   // where act_fp32 and w_fp32 are the input and weight variables, resp.
   // output is a fp32 tensor
   auto linear_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_MATMUL_DESCRIPTOR)
-      .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
-      .setbMatDesc(cudnn_utils::getTensorDescriptor(orig_weight.sizes(), orig_weight.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
+      // TODO: make these 2 CUDNN_DATA_INT8 when cudnn enables int8 matmul
+      // .setaMatDesc(cudnn_utils::getTensorDescriptor(input.sizes(), input.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
+      .setaMatDesc(cudnn_utils::getTensorDescriptor(input_fp.sizes(), input_fp.strides(), CUDNN_DATA_FLOAT, 'x', key.input_alignment))
+      // .setbMatDesc(cudnn_utils::getTensorDescriptor(orig_weight.sizes(), orig_weight.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
+      .setbMatDesc(cudnn_utils::getTensorDescriptor(weight_fp.sizes(), weight_fp.strides(), CUDNN_DATA_FLOAT, 'w', key.weight_alignment))
       .setcMatDesc(cudnn_utils::getTensorDescriptor(linear_output, 'y', key.output_alignment))
       .setmatmulDesc(getLinearDescriptor(CUDNN_DATA_FLOAT)) // is this right? should it be float?
       .build();
@@ -234,16 +245,12 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
 
   for (auto &cfg : engine_configs) {
     try {
-      std::cout << "0" << std::endl;
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
         .setHandle(handle)
         .setEngineConfig(cfg)
         .build();
-      std::cout << "1" << std::endl;
       auto plan_desc = plan.get_desc();
-      std::cout << "2" << std::endl;
       run(plan_desc);
-      std::cout << "3" << std::endl;
       execution_plan_cache[key] = plan_desc;
       return;
     } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
@@ -260,22 +267,25 @@ at::Tensor PackedLinearWeightCudnn::apply_impl(
     const at::Tensor& act,
     double output_scale,
     int64_t output_zero_point) {
-  // cudnn expects tensors to be at least 3D. Our weight and act tensors were/will be casted to 3D be prepending a dummy dimension
-  // as such, we will do the same for quantized_output
-  std::vector<int64_t> output_shape{1};
-  auto temp_vec = act.sizes();
-  std::move(temp_vec.begin(), temp_vec.end(), std::back_inserter(output_shape));
-  output_shape.back() = orig_weight.size(2); // output channels
+  std::vector<int64_t> original_output_shape{act.sizes().vec()}; // 2D
+  original_output_shape.back() = orig_weight.size(0); // output channels
+  // cudnn expects tensors to be at least 3D. act is currently 2D. we will create a 3D view
+  std::vector<int64_t> output_shape(3, 1);
+  output_shape[1] = original_output_shape[0];
+  output_shape[2] = original_output_shape[1];
   at::Tensor quantized_output = at::_empty_affine_quantized(
       output_shape,
       at::device(at::kCUDA).dtype(at::ScalarType::QInt8),
       output_scale,
       output_zero_point);
-  // requantization
-  // out_int8 = act_int8 * weight_int8 * act_scale * w_scale / output_scale
+  // cudnn expects tensors to be at least 3D. act is currently 2D. we will create a 3D view
+  std::vector<int64_t> new_sizes(3, 1);
+  // cudnn expects leading dimensions to be the dummy dimensions
+  new_sizes.back() = act.sizes().back();
+  new_sizes[1] = act.size(0);
   apply_impl_helper<kReluFused>(
-      quantized_output, act.unsqueeze(0), output_scale);
-  return quantized_output;
+      quantized_output, act.view(new_sizes), output_scale);
+  return quantized_output.view(original_output_shape);
 }
 
 at::Tensor PackedLinearWeightCudnn::apply(

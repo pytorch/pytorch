@@ -9,7 +9,7 @@
 
 #include <ATen/ATen.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
+#include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
@@ -30,10 +30,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightCudnn::prepack(
   }
 
   auto ret_ptr = c10::make_intrusive<PackedLinearWeightCudnn>(
-          // cudnn's expects tensors to be at least 3D. our weight tensor is [out_channels, in_channels]
-          // so we must prepend an additional dummy dimension so it becomes [1, out_channels, in_channels]
-          // note we store the transposed weight here
-          transpose(weight, 0, 1).unsqueeze(0),
+          weight,
           bias,
           qtype);
   return ret_ptr;

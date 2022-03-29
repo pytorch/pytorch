@@ -8,7 +8,7 @@
 #if HAS_CUDNN_V8()
 
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/cudnn/cudnnpack_utils.h>
+#include <ATen/native/quantized/cudnn/utils.h>
 #include <ATen/native/quantized/packed_params.h>
 #include <torch/library.h>
 
