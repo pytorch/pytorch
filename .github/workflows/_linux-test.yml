@@ -74,7 +74,7 @@ jobs:
           CCCCC: ${{ github.event.head_commit.message }}
         run: |
           git log --format=%B -n 1 HEAD
-          git cherry -v trunk
+          git cherry -v main
 
       - name: Test
         env:

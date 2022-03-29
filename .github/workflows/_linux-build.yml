@@ -55,7 +55,10 @@ jobs:
           fi
 
       - name: Setup Linux
-        uses: pytorch/pytorch/.github/actions/setup-linux@master
+        uses: ./.github/actions/setup-linux
+
+      - name: Setup SSH (Click me for login details)
+        uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -66,7 +69,7 @@ jobs:
           CCCCC: ${{ github.event.head_commit.message }}
         run: |
           git log --format=%B -n 1 HEAD
-          git cherry -v trunk
+          git cherry -v main
 
       - name: Calculate docker image
         id: calculate-docker-image
