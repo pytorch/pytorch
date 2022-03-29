@@ -78,6 +78,14 @@ torch.backends.cudnn
     A :class:`bool` that, if True, causes cuDNN to benchmark multiple convolution algorithms
     and select the fastest.
 
+.. attribute::  torch.backends.cudnn.benchmark_limit
+
+    A :class:`int` that specifies the maximum number of cuDNN convolution algorithms to try when
+    `torch.backends.cudnn.benchmark` is True. Set `benchmark_limit` to zero to try every
+    available algorithm. Note that this setting only affects convolutions dispatched via the
+    cuDNN v8 API.
+
+
 torch.backends.mps
 ^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mps
@@ -85,6 +93,7 @@ torch.backends.mps
 .. autofunction::  torch.backends.mps.is_available
 
 .. autofunction::  torch.backends.mps.is_built
+=======
 
 
 torch.backends.mkl
