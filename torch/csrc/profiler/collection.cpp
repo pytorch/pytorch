@@ -3,12 +3,112 @@
 #include <algorithm>
 
 #include <ATen/record_function.h>
+#include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
 namespace torch {
 namespace profiler {
 namespace impl {
+
+void InputOutputEncoder::push(const std::vector<c10::IValue>& values) {
+  for (const auto& value : values) {
+    if (value.isTensor()) {
+      push(value.toTensor());
+    } else if (value.isScalar()) {
+      tags_.emplace_back(Tag::Scalar);
+    } else if (value.isTensorList()) {
+      tags_.emplace_back(Tag::TensorListBegin);
+      // TODO: Skip TensorList for now.
+      tags_.emplace_back(Tag::TERMINATOR);
+    } else {
+      tags_.emplace_back(Tag::Other);
+    }
+  }
+  tags_.emplace_back(Tag::TERMINATOR);
+}
+
+void InputOutputEncoder::push(const at::Tensor& t) {
+  if (t.defined()) {
+    tags_.emplace_back(Tag::Tensor);
+    const auto& sizes = t.sizes();
+    const auto dim = sizes.size();
+    TORCH_CHECK(
+      dim <= std::numeric_limits<uint32_t>::max(),
+      "Cannot profile Tensors of size > uint32 max. Got dim: ", dim);
+
+    tensor_metadata_.emplace_back(
+      /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+      /*dtype_=*/t.scalar_type(),
+      /*dim_=*/(uint32_t)dim
+    );
+
+    for (const auto i : sizes) {
+      tensor_sizes_.emplace_back(i);
+    }
+  } else {
+    tags_.emplace_back(Tag::UndefinedTensor);
+  }
+}
+
+// This is a custom-iterator-like getter to obtain input shapes and dtypes.
+auto InputOutputEncoder::getNextShapesAndDtypes() {
+  return [this, tag_it = tags_.begin(),
+          tensor_metadata_it = tensor_metadata_.begin(),
+          tensor_size_it = tensor_sizes_.begin()]() mutable {
+    struct Inputs out;
+    bool terminate = false;
+    while (!terminate && tag_it != tags_.end()) {
+      out.shapes_.emplace_back();
+      switch (*tag_it) {
+        case Tag::Tensor:
+          {
+            const auto& md = *tensor_metadata_it++;
+            for (const auto _ : c10::irange(md.dim_)) {
+              (void)_; // Suppress unused variable warning
+              out.shapes_.back().push_back(*tensor_size_it++);
+            }
+            out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+          }
+          break;
+
+        case Tag::TensorListBegin:
+            while (*(++tag_it) != Tag::TERMINATOR) {
+              // TODO: Skip TensorLists for now.
+            }
+          out.dtypes_.emplace_back("TensorList");
+          break;
+
+        case Tag::Scalar:
+          out.dtypes_.emplace_back("Scalar");
+          break;
+
+        case Tag::UndefinedTensor:
+        case Tag::Other:
+          out.dtypes_.emplace_back();
+          break;
+
+        case Tag::TERMINATOR:
+          // This marks the end of this op.
+          out.shapes_.pop_back();
+          terminate = true;
+          break;
+
+        default:
+          break;
+      }
+      ++tag_it;
+    }
+    return out;
+  };
+}
+
+void InputOutputEncoder::clear() {
+  tags_.clear();
+  tensor_metadata_.clear();
+  tensor_sizes_.clear();
+}
+
 namespace {
 // See `RecordQueue::getSubqueue()` for an overview of this cache.
 struct SubQueueThreadCache {
@@ -56,9 +156,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
       fn.debugHandle(),
       fn.name());
   if (config_.report_input_shapes) {
-    inputs_.emplace_back(
-        torch::profiler::impl::inputSizes(fn),
-        torch::profiler::impl::inputTypes(fn));
+    inputs_outputs_.push(fn.inputs());
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -152,7 +250,7 @@ std::deque<Result> RecordQueue::getRecords(
       out.push_back(std::move(r));
     }
 
-    auto input_it = queue.inputs_.begin();
+    auto input_getter = queue.inputs_outputs_.getNextShapesAndDtypes();
     auto jit_stack_it = queue.jit_stack_.begin();
     auto jit_module_it = queue.jit_modules_.begin();
     auto extra_args_it = queue.extra_args_.begin();
@@ -164,7 +262,7 @@ std::deque<Result> RecordQueue::getRecords(
       r.start_tid_ = queue.tid();
       r.kineto_info_ = queue.kineto_info();
       r.event_ = std::move(i);
-      r.inputs_ = steal_or_default(input_it);
+      r.inputs_ = input_getter();
       r.jit_stack_ = steal_or_default(jit_stack_it);
       r.jit_modules_ = steal_or_default(jit_module_it);
       r.extra_args_ = steal_or_default(extra_args_it);
@@ -173,7 +271,7 @@ std::deque<Result> RecordQueue::getRecords(
       out.push_back(std::move(r));
     }
     queue.op_events_.clear();
-    queue.inputs_.clear();
+    queue.inputs_outputs_.clear();
     queue.jit_stack_.clear();
     queue.jit_modules_.clear();
     queue.extra_args_.clear();
