@@ -74,3 +74,35 @@ class TestDropout(serial.SerializedTestCase):
             gc, op, [X], reference_dropout_ratio0,
             # Don't check the mask with cuDNN because it's packed data
             outputs_to_check=None if engine != 'CUDNN' else [0])
+
+
+    @given(X=hu.tensor(),
+           in_place=st.booleans(),
+           output_mask=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]),
+           **hu.gcs)
+    @settings(deadline=10000)
+    def test_dropout_ratio1(self, X, in_place, output_mask, engine, gc, dc):
+        """Test with ratio=0 for a deterministic reference impl."""
+        if in_place:
+            # Skip if trying in-place on GPU
+            assume(gc.device_type not in {caffe2_pb2.CUDA, caffe2_pb2.HIP})
+            # If in-place on CPU, don't compare with GPU
+            dc = dc[:1]
+        is_test = not output_mask
+        op = core.CreateOperator("Dropout", ["X"],
+                                 ["X" if in_place else "Y"] +
+                                 (["mask"] if output_mask else []),
+                                 ratio=1.0, engine=engine,
+                                 is_test=is_test)
+
+        self.assertDeviceChecks(dc, op, [X], [0])
+        if not is_test:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
+
+        def reference_dropout_ratio1(x):
+            return (x,) if is_test else (np.zeros(x.shape, dtype=np.float), np.zeros(x.shape, dtype=np.bool))
+        self.assertReferenceChecks(
+            gc, op, [X], reference_dropout_ratio1,
+            # Don't check the mask with cuDNN because it's packed data
+            outputs_to_check=None if engine != 'CUDNN' else [0])

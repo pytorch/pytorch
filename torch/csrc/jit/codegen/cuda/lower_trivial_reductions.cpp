@@ -74,7 +74,7 @@ bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
 
 } // namespace
 
-void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
+void TrivialReductionInfo::build(Fusion* fusion) {
   auto used_vals = fusion->usedMathVals();
 
   for (auto tv : ir_utils::filterByType<TensorView>(used_vals)) {
@@ -99,20 +99,6 @@ void TrivialReductionInfo::build(Fusion* fusion, GpuLower* gpu_lower) {
       }
     }
   }
-
-  buildKir(fusion, gpu_lower);
-}
-
-void TrivialReductionInfo::buildKir(Fusion* fusion, GpuLower* gpu_lower) {
-  for (auto id : domains_) {
-    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-    kir_domains_.insert(kir_trivial_id);
-  }
-
-  for (auto id : domains_derived_from_root_) {
-    auto kir_trivial_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
-    kir_domains_derived_from_root_.insert(kir_trivial_id);
-  }
 }
 
 bool TrivialReductionInfo::isDerived(IterDomain* id) const {
@@ -122,15 +108,6 @@ bool TrivialReductionInfo::isDerived(IterDomain* id) const {
 bool TrivialReductionInfo::isDerivedFromRoot(IterDomain* id) const {
   return domains_derived_from_root_.find(id) !=
       domains_derived_from_root_.end();
-}
-
-bool TrivialReductionInfo::isDerived(kir::IterDomain* id) const {
-  return kir_domains_.find(id) != kir_domains_.end();
-}
-
-bool TrivialReductionInfo::isDerivedFromRoot(kir::IterDomain* id) const {
-  return kir_domains_derived_from_root_.find(id) !=
-      kir_domains_derived_from_root_.end();
 }
 
 } // namespace cuda

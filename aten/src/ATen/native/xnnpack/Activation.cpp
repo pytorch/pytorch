@@ -10,7 +10,7 @@ namespace xnnpack {
 
 bool use_hardswish(
   const Tensor& input) {
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
           (1 <= input.ndimension()) &&
           (input.device().is_cpu()) &&
           (kFloat == input.scalar_type()) &&

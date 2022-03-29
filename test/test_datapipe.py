@@ -562,35 +562,88 @@ def _worker_init_fn(worker_id):
 
 class TestFunctionalIterDataPipe(TestCase):
 
+    def _serialization_test_helper(self, datapipe):
+        serialized_dp = pickle.dumps(datapipe)
+        deserialized_dp = pickle.loads(serialized_dp)
+        try:
+            self.assertEqual(list(datapipe), list(deserialized_dp))
+        except AssertionError as e:
+            print(f"{datapipe} is failing.")
+            raise e
+
+    def _serialization_test_for_single_dp(self, dp):
+        # 1. Testing for serialization before any iteration starts
+        self._serialization_test_helper(dp)
+        # 2. Testing for serialization after DataPipe is partially read
+        it = iter(dp)
+        _ = next(it)
+        self._serialization_test_helper(dp)
+        # 3. Testing for serialization after DataPipe is fully read
+        _ = list(it)
+        self._serialization_test_helper(dp)
+
+    def _serialization_test_for_dp_with_children(self, dp1, dp2):
+        # 1. Testing for serialization before any iteration starts
+        self._serialization_test_helper(dp1)
+        self._serialization_test_helper(dp2)
+        # 2. Testing for serialization after DataPipe is partially read
+        it1, it2 = iter(dp1), iter(dp2)
+        _, _ = next(it1), next(it2)
+        self._serialization_test_helper(dp1)
+        self._serialization_test_helper(dp2)
+        # 2.5. Testing for serialization after one child DataPipe is fully read
+        #      (Only for DataPipes with children DataPipes)
+        _ = list(it1)  # fully read one child
+        self._serialization_test_helper(dp1)
+        self._serialization_test_helper(dp2)
+        # 3. Testing for serialization after DataPipe is fully read
+        _ = list(it2)  # fully read the other child
+        self._serialization_test_helper(dp1)
+        self._serialization_test_helper(dp2)
+
     def test_serializable(self):
-        input_dp = dp.iter.IterableWrapper(range(10))
-        picklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
-            (dp.iter.Batcher, (3, True,), {}),
-            (dp.iter.Collator, (_fake_fn,), {}),
-            (dp.iter.Concater, (dp.iter.IterableWrapper(range(5)),), {}),
-            (dp.iter.Demultiplexer, (2, _fake_filter_fn), {}),
-            (dp.iter.FileLister, (), {}),
-            (dp.iter.FileOpener, (), {}),
-            (dp.iter.Filter, (_fake_filter_fn,), {}),
-            (dp.iter.Filter, (partial(_fake_filter_fn_constant, 5),), {}),
-            (dp.iter.Forker, (2,), {}),
-            (dp.iter.Grouper, (_fake_filter_fn,), {"group_size": 2}),
-            (dp.iter.IterableWrapper, (), {}),
-            (dp.iter.Mapper, (_fake_fn, ), {}),
-            (dp.iter.Mapper, (partial(_fake_add, 1), ), {}),
-            (dp.iter.Multiplexer, (input_dp,), {}),
-            (dp.iter.Sampler, (), {}),
-            (dp.iter.Shuffler, (), {}),
-            (dp.iter.StreamReader, (), {}),
-            (dp.iter.UnBatcher, (), {}),
-            (dp.iter.Zipper, (input_dp,), {}),
+        picklable_datapipes: List = [
+            (dp.iter.Batcher, None, (3, True,), {}),
+            (dp.iter.Collator, None, (_fake_fn,), {}),
+            (dp.iter.Concater, None, (dp.iter.IterableWrapper(range(5)),), {}),
+            (dp.iter.Demultiplexer, None, (2, _fake_filter_fn), {}),
+            (dp.iter.FileLister, ".", (), {}),
+            (dp.iter.FileOpener, None, (), {}),
+            (dp.iter.Filter, None, (_fake_filter_fn,), {}),
+            (dp.iter.Filter, None, (partial(_fake_filter_fn_constant, 5),), {}),
+            (dp.iter.Forker, None, (2,), {}),
+            (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
+            (dp.iter.IterableWrapper, range(10), (), {}),
+            (dp.iter.Mapper, None, (_fake_fn, ), {}),
+            (dp.iter.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.iter.Multiplexer, None, (dp.iter.IterableWrapper(range(10)),), {}),
+            (dp.iter.Sampler, None, (), {}),
+            (dp.iter.Shuffler, dp.iter.IterableWrapper([0] * 10), (), {}),
+            (dp.iter.StreamReader, None, (), {}),
+            (dp.iter.UnBatcher, None, (0,), {}),
+            (dp.iter.Zipper, None, (dp.iter.IterableWrapper(range(10)),), {}),
         ]
-        for dpipe, dp_args, dp_kwargs in picklable_datapipes:
-            print(dpipe)
-            _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+        # Skipping comparison for these DataPipes
+        dp_skip_comparison = {dp.iter.FileOpener, dp.iter.StreamReader}
+        # These DataPipes produce multiple DataPipes as outputs and those should be compared
+        dp_compare_children = {dp.iter.Demultiplexer, dp.iter.Forker}
+
+        for dpipe, custom_input, dp_args, dp_kwargs in picklable_datapipes:
+            if custom_input is None:
+                custom_input = dp.iter.IterableWrapper(range(10))
+            if dpipe in dp_skip_comparison:  # Merely make sure they are picklable and loadable (no value comparison)
+                datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                serialized_dp = pickle.dumps(datapipe)
+                _ = pickle.loads(serialized_dp)
+            elif dpipe in dp_compare_children:  # DataPipes that have children
+                dp1, dp2 = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                self._serialization_test_for_dp_with_children(dp1, dp2)
+            else:  # Single DataPipe that requires comparison
+                datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                self._serialization_test_for_single_dp(datapipe)
 
     def test_serializable_with_dill(self):
-        """Only for DataPipes that take in a function or buffer as argument"""
+        """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
         unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
             (dp.iter.Collator, (lambda x: x,), {}),
@@ -599,9 +652,15 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Grouper, (lambda x: x >= 5,), {}),
             (dp.iter.Mapper, (lambda x: x, ), {}),
         ]
+        dp_compare_children = {dp.iter.Demultiplexer}
         if HAS_DILL:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+                if dpipe in dp_compare_children:
+                    dp1, dp2 = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    self._serialization_test_for_dp_with_children(dp1, dp2)
+                else:
+                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    self._serialization_test_for_single_dp(datapipe)
         else:
             for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
                 with warnings.catch_warnings(record=True) as wa:
@@ -1348,6 +1407,10 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(shuffle_dp_nl)
 
+        # Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_ds.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_ds))
+
     def test_zip_iterdatapipe(self):
 
         # Functional Test: raises TypeError when an input is not of type `IterDataPipe`
@@ -1378,19 +1441,46 @@ class TestFunctionalIterDataPipe(TestCase):
 
 
 class TestFunctionalMapDataPipe(TestCase):
+
+    def _serialization_test_helper(self, datapipe):
+        serialized_dp = pickle.dumps(datapipe)
+        deserialized_dp = pickle.loads(serialized_dp)
+        try:
+            self.assertEqual(list(datapipe), list(deserialized_dp))
+        except AssertionError as e:
+            print(f"{datapipe} is failing.")
+            raise e
+
+    def _serialization_test_for_single_dp(self, dp):
+        # 1. Testing for serialization before any iteration starts
+        self._serialization_test_helper(dp)
+        # 2. Testing for serialization after DataPipe is partially read
+        it = iter(dp)
+        _ = next(it)
+        self._serialization_test_helper(dp)
+        # 3. Testing for serialization after DataPipe is fully read
+        _ = list(it)
+        self._serialization_test_helper(dp)
+
     def test_serializable(self):
-        input_dp = dp.map.SequenceWrapper(range(10))
-        picklable_datapipes: List[
-            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
-        ] = [
-            (dp.map.Mapper, (), {}),
-            (dp.map.Mapper, (_fake_fn, ), {}),
-            (dp.map.Mapper, (partial(_fake_add, 1), ), {}),
+        picklable_datapipes: List = [
+            (dp.map.Batcher, None, (2,), {}),
+            (dp.map.Concater, None, (dp.map.SequenceWrapper(range(10)),), {}),
+            (dp.map.Mapper, None, (), {}),
+            (dp.map.Mapper, None, (_fake_fn, ), {}),
+            (dp.map.Mapper, None, (partial(_fake_add, 1), ), {}),
+            (dp.map.SequenceWrapper, range(10), (), {}),
+            (dp.map.Shuffler, dp.map.SequenceWrapper([0] * 5), (), {}),
+            (dp.map.Zipper, None, (dp.map.SequenceWrapper(range(10)),), {}),
         ]
-        for dpipe, dp_args, dp_kwargs in picklable_datapipes:
-            _ = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
+        for dpipe, custom_input, dp_args, dp_kwargs in picklable_datapipes:
+            if custom_input is None:
+                custom_input = dp.map.SequenceWrapper(range(10))
+            datapipe = dpipe(custom_input, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+            self._serialization_test_for_single_dp(datapipe)
 
     def test_serializable_with_dill(self):
+        """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
         unpicklable_datapipes: List[
             Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
@@ -1589,7 +1679,7 @@ class TestTyping(TestCase):
 
     @skipTyping
     def test_subtype(self):
-        from torch.utils.data._typing import issubtype
+        from torch.utils.data.datapipes._typing import issubtype
 
         basic_type = (int, str, bool, float, complex,
                       list, tuple, dict, set, T_co)
@@ -1637,7 +1727,7 @@ class TestTyping(TestCase):
 
     @skipTyping
     def test_issubinstance(self):
-        from torch.utils.data._typing import issubinstance
+        from torch.utils.data.datapipes._typing import issubinstance
 
         basic_data = (1, '1', True, 1., complex(1., 0.))
         basic_type = (int, str, bool, float, complex)
@@ -1707,7 +1797,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP1, IterDataPipe))
         dp1 = DP1(10)
-        self.assertTrue(DP1.type.issubtype(dp1.type) and dp1.type.issubtype(DP1.type))
+        self.assertTrue(DP1.type.issubtype(dp1.type) and dp1.type.issubtype(DP1.type))  # type: ignore[attr-defined]
         dp1_ = DP1(5)
         self.assertEqual(dp1.type, dp1_.type)
 
@@ -1723,7 +1813,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP2, IterDataPipe))
         dp2 = DP2()  # type: ignore[var-annotated]
-        self.assertTrue(DP2.type.issubtype(dp2.type) and dp2.type.issubtype(DP2.type))
+        self.assertTrue(DP2.type.issubtype(dp2.type) and dp2.type.issubtype(DP2.type))  # type: ignore[attr-defined]
         dp2_ = DP2()  # type: ignore[var-annotated]
         self.assertEqual(dp2.type, dp2_.type)
 
@@ -1739,7 +1829,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP3, IterDataPipe))
         dp3 = DP3(range(10))  # type: ignore[var-annotated]
-        self.assertTrue(DP3.type.issubtype(dp3.type) and dp3.type.issubtype(DP3.type))
+        self.assertTrue(DP3.type.issubtype(dp3.type) and dp3.type.issubtype(DP3.type))  # type: ignore[attr-defined]
         dp3_ = DP3(5)  # type: ignore[var-annotated]
         self.assertEqual(dp3.type, dp3_.type)
 
@@ -1761,7 +1851,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP5, IterDataPipe))
         dp5 = DP5()
-        from torch.utils.data._typing import issubtype
+        from torch.utils.data.datapipes._typing import issubtype
         self.assertTrue(issubtype(dp5.type.param, Any) and issubtype(Any, dp5.type.param))
 
         class DP6(IterDataPipe[int]):
@@ -1778,13 +1868,13 @@ class TestTyping(TestCase):
             r""" DataPipe with abstract base class"""
 
         self.assertTrue(issubclass(DP7, IterDataPipe))
-        self.assertTrue(DP7.type.param == Awaitable[T_co])
+        self.assertTrue(DP7.type.param == Awaitable[T_co])  # type: ignore[attr-defined]
 
         class DP8(DP7[str]):
             r""" DataPipe subclass from a DataPipe with abc type"""
 
         self.assertTrue(issubclass(DP8, IterDataPipe))
-        self.assertTrue(DP8.type.param == Awaitable[str])
+        self.assertTrue(DP8.type.param == Awaitable[str])  # type: ignore[attr-defined]
 
     @skipTyping
     def test_construct_time(self):

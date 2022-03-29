@@ -1,6 +1,6 @@
 from tools.codegen.model import (Argument, FunctionSchema, NativeFunction,
-                                 BackendIndex,
-                                 SelfArgument, TensorOptionsArguments, BaseTy)
+                                 BackendIndex, NativeFunctionsGroup,
+                                 SelfArgument, TensorOptionsArguments, BaseTy, ScalarType)
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
 from enum import Enum
@@ -64,9 +64,31 @@ qschemeT = BaseCppType('at', 'QScheme')
 storageT = BaseCppType('at', 'Storage')
 streamT = BaseCppType('at', 'Stream')
 intArrayRefT = BaseCppType('at', 'IntArrayRef')
+optionalIntArrayRefT = BaseCppType('at', 'OptionalIntArrayRef')
 tensorOptionsT = BaseCppType('at', 'TensorOptions')
 typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
+
+# Types representing template parameters.  Technically, we probably shouldn't
+# represent them this way in codegen, but it was pretty convenient.
+scalar_t = BaseCppType('', 'scalar_t')
+opmath_t = BaseCppType('', 'opmath_t')
+
+ScalarTypeToCppMapping: Dict[ScalarType, BaseCppType] = {
+    ScalarType.Byte: byteT,
+    ScalarType.Char: charT,
+    ScalarType.Short: shortT,
+    ScalarType.Int: int32T,
+    ScalarType.Long: longT,
+    ScalarType.Half: halfT,
+    ScalarType.Float: floatT,
+    ScalarType.Double: doubleT,
+    ScalarType.ComplexHalf: complexHalfT,
+    ScalarType.ComplexFloat: complexFloatT,
+    ScalarType.ComplexDouble: complexDoubleT,
+    ScalarType.Bool: boolT,
+    ScalarType.BFloat16: bfloat16T,
+}
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.int: longT,
@@ -218,6 +240,23 @@ class TupleCType:
     def remove_const_ref(self) -> 'CType':
         return TupleCType([e.remove_const_ref() for e in self.elems])
 
+@dataclass(frozen=True)
+class VectorizedCType:
+    # This template is explicitly specialized, so the only valid
+    # elems are those we have specializations for (e.g., float, double, ...)
+    # scalar_t is also a common argument here (when we are codegen in
+    # a templated context)
+    elem: BaseCType
+
+    def cpp_type(self, *, strip_ref: bool = False) -> str:
+        return f'at::vec::Vectorized<{self.elem.cpp_type()}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        raise NotImplementedError
+
+    def remove_const_ref(self) -> 'CType':
+        return self
+
 CType = Union[
     BaseCType,
     OptionalCType,
@@ -227,7 +266,8 @@ CType = Union[
     ArrayRefCType,
     ArrayCType,
     VectorCType,
-    TupleCType
+    TupleCType,
+    VectorizedCType
 ]
 
 # A NamedCType is short for Named C++ semantic type.  A NamedCType represents a C++ type, plus
@@ -269,6 +309,14 @@ class Binding:
     argument: Union[Argument, TensorOptionsArguments, SelfArgument]
     # TODO: maybe don't represent default here
     default: Optional[str] = None
+
+    def rename(self, name: str) -> 'Binding':
+        return Binding(
+            name=name,
+            nctype=self.nctype,
+            argument=self.argument,
+            default=self.default,
+        )
 
     @property
     def type(self) -> str:
@@ -596,6 +644,19 @@ class FunctionalizationLambda:
         return FunctionalizationLambda(f, functional_op, is_reverse)
 
 
+@dataclass(frozen=True)
+class StructuredImplSignature:
+    g: NativeFunctionsGroup
+    name: str
+
+    def defn(self, name: Optional[str] = None) -> str:
+        args_str = ', '.join(a.defn() for a in self.arguments())
+        return f"TORCH_IMPL_FUNC({self.name})({args_str})"
+
+    def arguments(self) -> List[Binding]:
+        return structured.impl_arguments(self.g)
+
+
 # Helper functions
 
 def kernel_signature(
@@ -615,4 +676,4 @@ def kernel_signature(
         return NativeSignature(f.func, prefix)
 
 # Functions only, no types
-from tools.codegen.api import cpp, dispatcher, native, translate, functionalization
+from tools.codegen.api import cpp, dispatcher, native, translate, functionalization, structured
