@@ -104,6 +104,8 @@ def _get_linear_configs():
     dtype_configs = [weighted_op_int8_dtype_config]
     linear_configs = []
 
+    # (1) Single linear modules/functions
+    # -------------------------------------
     # linear module
     linear_configs.append({
         # Please see README under this folder for pattern format
@@ -131,6 +133,9 @@ def _get_linear_configs():
         "observation_type": observation_type,
         "dtype_configs": dtype_configs,
     })
+
+    # (2) Linear + relu
+    # -------------------
     # linear relu, fused module
     linear_configs.append({
         "pattern": nni.LinearReLU,
@@ -174,6 +179,9 @@ def _get_linear_configs():
         "observation_type": observation_type,
         "dtype_configs": dtype_configs,
     })
+
+    # (3) Linear + batchnorm
+    # ------------------------
     # linear bn, fused module
     linear_configs.append({
         "pattern": nni.LinearBn1d,
@@ -201,6 +209,9 @@ def _get_conv_configs():
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
     dtype_configs = [weighted_op_int8_dtype_config]
     for convs in [_Conv1dMetadata, _Conv2dMetadata, _Conv3dMetadata]:
+
+        # (1) Single conv modules/functions
+        # -----------------------------------
         # conv module
         conv_configs.append({
             "pattern": convs.root,
@@ -224,6 +235,9 @@ def _get_conv_configs():
             "observation_type": observation_type,
             "dtype_configs": dtype_configs,
         })
+
+        # (2) Conv + relu
+        # -----------------
         # conv relu, fused module
         conv_configs.append({
             "pattern": convs.relu,
@@ -267,6 +281,9 @@ def _get_conv_configs():
             "observation_type": observation_type,
             "dtype_configs": dtype_configs,
         })
+
+        # (3) Conv + batchnorm (+ relu)
+        # -------------------------------
         # conv bn, qat fused module
         conv_configs.append({
             "pattern": convs.bn_qat,
