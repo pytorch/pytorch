@@ -814,36 +814,28 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
-    def test_split_module_with_buffer(self):
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.register_buffer('buffer', torch.randn(5, 5))
+    def test_split_module_kwargs_expansion(self):
+        class ModuleWithKwargsExpansion(torch.nn.Module):
+            def forward(self, x, **kwargs):
+                return x + kwargs['foo']
 
-            def forward(self, x):
-                x = torch.relu(x)
-                x = x + self.buffer
-                x = torch.sigmoid(x)
-                return x
+        mod = ModuleWithKwargsExpansion()
+        traced = torch.fx.symbolic_trace(mod)
 
-        f = Foo()
-        traced = torch.fx.symbolic_trace(f)
-        seen_relu = False
+        seen_getitem = False
 
         def split_callback(n):
-            nonlocal seen_relu
-            if n.op == torch.relu:
-                seen_relu = True
+            nonlocal seen_getitem
+            split_idx = int(seen_getitem)
+            if n.target == operator.getitem:
+                seen_getitem = True
+            return split_idx
 
-            if seen_relu:
-                return 0
-            else:
-                return 1
-        split = split_module(traced, f, split_callback)
+        split = split_module(traced, mod, split_callback)
 
-        print([k for k, v in f.named_buffers()])
-        print([k for k, v in traced.named_buffers()])
-        print([k for k, v in split.named_buffers()])
+        x = torch.randn(5, 3)
+        foo = torch.randn(5, 3)
+        torch.testing.assert_allclose(split(x, foo=foo), traced(x, foo=foo))
 
     @skipIfNoTorchVision
     def test_subgraph_trivial_resnet(self):
@@ -1547,6 +1539,7 @@ class TestNormalizeOperators(JitTestCase):
             "igamma",
             "igammac",
             "index_put",
+            "linalg_pinv_singular",  # Implemented with a lambda (only the singular variant)
             "nn.functional.conv2d",
             "nn.functional.dropout",
             "nn.functional.dropout2d",
@@ -1616,6 +1609,9 @@ class TestNormalizeOperators(JitTestCase):
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.formatted_name in op_skip:
             return
 
         if op.name.startswith('_masked.'):

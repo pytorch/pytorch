@@ -350,6 +350,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
     )
+    if(BUILD_LAZY_TS_BACKEND)
+      list(APPEND GENERATED_CXX_TORCH
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.cpp"
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterAutogradLazy.cpp"
+        "${TORCH_SRC_DIR}/csrc/lazy/generated/RegisterLazy.cpp"
+      )
+    endif()
   endif()
 
   set(GENERATED_H_TORCH
@@ -360,6 +367,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyIr.h"
+      "${TORCH_SRC_DIR}/csrc/lazy/generated/LazyNativeFunctions.h"
     )
   endif()
 
@@ -397,6 +406,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_TESTING_PYTHON}
     )
 
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per_operator_headers")
+  endif()
+
   add_custom_command(
     OUTPUT
     ${TORCH_GENERATED_CODE}
@@ -407,8 +421,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
+      --gen_lazy_ts_backend
+      ${GEN_PER_OPERATOR_FLAG}
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/ts_native_functions.yaml"
+    "${TORCH_ROOT}/torch/csrc/lazy/core/shape_inference.h"
+    "${TORCH_ROOT}/torch/csrc/lazy/ts_backend/ts_native_functions.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp"
+    "${TORCH_ROOT}/aten/src/ATen/templates/LazyIr.h"
+    "${TORCH_ROOT}/aten/src/ATen/templates/RegisterDispatchKey.cpp"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
@@ -436,6 +459,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/gen_inplace_or_view_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
+    "${TOOLS_PATH}/codegen/gen_backend_stubs.py"
+    "${TOOLS_PATH}/codegen/gen_lazy_tensor.py"
+    "${TOOLS_PATH}/codegen/api/lazy.py"
+    "${TOOLS_PATH}/codegen/dest/lazy_ir.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -475,7 +502,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
   else()
     append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
-
+    if(BUILD_LAZY_TS_BACKEND)
+      append_filelist("lazy_tensor_ts_sources" LIBTORCH_CMAKE_SRCS)
+    endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       # TODO: Delete this line once https://github.com/pytorch/pytorch/pull/55889 lands
       set_source_files_properties(../torch/csrc/jit/serialization/export.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
@@ -904,15 +933,26 @@ elseif(USE_CUDA)
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
     target_compile_definitions(torch_cuda_linalg PRIVATE USE_CUDA BUILD_LAZY_CUDA_LINALG)
+    # Library order is important during static linking
+    # `torch::magma` should be mentioned before other CUDA
+    # to transitively include all symbols present in torch_cuda/torch_cpu
+    if(USE_MAGMA)
+      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
+      # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
+      get_target_property(HOOKS_INCLUDE_DIRECTORIES torch_cuda INCLUDE_DIRECTORIES)
+      if(NOT "${MAGMA_INCLUDE_DIR}" IN_LIST HOOKS_INCLUDE_DIRECTORIES)
+        set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
+      endif()
+    endif()
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
         ${CUDA_cusolver_LIBRARY}
     )
-    if(USE_MAGMA)
-      target_link_libraries(torch_cuda_linalg PRIVATE torch::magma)
-      # CUDAHooks reports version of MAGMA PyTorch was compiled against, i.e. needs to be able to include magma headers
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/CUDAHooks.cpp PROPERTIES INCLUDE_DIRECTORIES  "${MAGMA_INCLUDE_DIR}")
+    # NS: TODO, is this really necessary?
+    if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
     endif()
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1077,7 +1117,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/QuantizedLinear.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
       set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
       set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+      set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
 
 if(USE_TBB)
@@ -1107,7 +1147,7 @@ endif()
 
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
-    FILES_MATCHING PATTERN "*.h")
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
     FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
@@ -1315,8 +1355,14 @@ if(USE_DISTRIBUTED)
     else()
       if(BUILD_SPLIT_CUDA)
         target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda_cpp PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       else()
         target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       endif()
     endif()
   endif()
