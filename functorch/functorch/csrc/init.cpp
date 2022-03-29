@@ -14,7 +14,6 @@
 #include <functorch/csrc/VmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
-#include <functorch/csrc/PointwiseOperatorCompileCache.h>
 #include <functorch/csrc/CompileCache.h>
 #include <functorch/csrc/CustomFunction.h>
 #include <c10/core/AutogradState.h>
@@ -401,7 +400,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("dump_local_tls", &at::functorch::dump_local_tls);
   m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
-  at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
   at::functorch::initCompileCacheBindings(m.ptr());
   initDispatchBindings(m.ptr());
 }
