@@ -609,13 +609,23 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
   fusion_strategy_ = getFusionStrategy();
 }
 
+size_t ProfilingGraphExecutorImpl::getInstantiatedBailoutDepth() {
+  // Initialize bailout_depth from command-line flag.
+  size_t depth = 0;
+  for (const auto& pair : fusion_strategy_) {
+    depth += pair.second;
+  }
+  return depth;
+}
+
 const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
+  // TODO: instantiate simple executor when getProfilingMode() is false
   // no opt mode
-  if (!getGraphExecutorOptimize()) {
+  if (!getGraphExecutorOptimize() || !getProfilingMode()) {
     if (!fallback_plan_) {
       auto copy = graph->copy();
       GRAPH_DEBUG(
@@ -635,7 +645,11 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   // getPlanFor(remaining_bailout_depth) is corrected and persisted by the Code
   // object in interpreter.
   if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
-    remaining_bailout_depth_ = remaining_bailout_depth;
+    if (remaining_bailout_depth.has_value()) {
+      remaining_bailout_depth_ = *remaining_bailout_depth;
+    } else {
+      remaining_bailout_depth_ = getInstantiatedBailoutDepth();
+    }
   }
 
   // simple executor
@@ -683,14 +697,13 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   replaceFallbackGraphWithFallbackFunction(copy->block());
   runFinalOptimizations(copy);
   GRAPH_DUMP("Optimized Graph: ", copy);
-  optimized_plan_ =
-      ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
+  optimized_plan_ = ExecutionPlan(copy, function_name_);
   return *optimized_plan_;
 }
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
-    size_t remaining_bailout_depth) {
+    c10::optional<size_t> remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
 
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
@@ -698,7 +711,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
   if (optimized_plan_) {
     return *optimized_plan_;
   }
-
+  // if depth is not set, use
   return getOptimizedPlanFor(stack, remaining_bailout_depth);
 }
 
