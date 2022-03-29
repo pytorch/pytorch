@@ -58,6 +58,7 @@ env:
 jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: windows.4xlarge
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
