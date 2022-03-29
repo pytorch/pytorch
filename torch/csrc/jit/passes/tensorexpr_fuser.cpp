@@ -220,6 +220,7 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       // In the future we could consider unifying the types of uses, or adding a
       // type refinement node so uses can have the correct corresponding type.
       if (profiled_type == TensorType::get()) {
+        it.destroyCurrent();
         continue;
       }
 
