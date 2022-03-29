@@ -41,7 +41,7 @@ Adapter::Adapter(const VkPhysicalDevice handle)
     properties_{},
     memory_properties_{},
     queue_families_{},
-    compute_queue_family_index_{-1},
+    compute_queue_family_index_{},
     handle_(VK_NULL_HANDLE),
     queue_(VK_NULL_HANDLE) {
   vkGetPhysicalDeviceProperties(physical_handle_, &properties_);
@@ -56,12 +56,19 @@ Adapter::Adapter(const VkPhysicalDevice handle)
       physical_handle_, &queue_family_count, queue_families_.data());
 
   // Find the compute family index
+  compute_queue_family_index_ = queue_families_.size();
   for (const auto i : c10::irange(queue_families_.size())) {
     const VkQueueFamilyProperties& properties = queue_families_[i];
     // Selecting the first queue family with compute ability
     if (properties.queueCount > 0 && (properties.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
       compute_queue_family_index_ = i;
     }
+  }
+
+  if (compute_queue_family_index_ < queue_families_.size()) {
+    TORCH_WARN(
+        "Pytorch Vulkan Adapter: Device does not have a queue family "
+        "with compute capabilities");
   }
 }
 
@@ -96,8 +103,9 @@ void Adapter::init_device() {
   }
 
   TORCH_CHECK(
-      compute_queue_family_index_ >= 0,
-      "Pytorch Vulkan Adapter: Device does not have any queue families with compute capabilities.");
+      compute_queue_family_index_ < queue_families_.size(),
+      "Pytorch Vulkan Adapter: Device cannot be initialized as it "
+      "does not have any queue families with compute capabilities.");
 
   const float queue_priorities = 1.0f;
   const VkDeviceQueueCreateInfo device_queue_create_info{

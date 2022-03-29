@@ -44,21 +44,21 @@ class Runtime final {
 
   VkInstance instance() const;
 
-  using Selector = std::function<int32_t (const std::vector<Adapter>&)>;
-  int32_t init_adapter(const Selector& selector);
+  using Selector = std::function<uint32_t (const std::vector<Adapter>&)>;
+  uint32_t init_adapter(const Selector& selector);
 
   Adapter* get_adapter_p();
   Adapter& get_adapter();
 
-  Adapter* get_adapter_p(int32_t i);
-  Adapter& get_adapter(int32_t i);
+  Adapter* get_adapter_p(uint32_t i);
+  Adapter& get_adapter(uint32_t i);
 
-  int32_t default_adapter_i() const;
+  uint32_t default_adapter_i() const;
 
  private:
   VkInstance instance_;
   std::vector<Adapter> adapters_;
-  int32_t default_adapter_i_;
+  uint32_t default_adapter_i_;
 
   VkDebugReportCallbackEXT debug_report_callback_;
 };
@@ -89,15 +89,15 @@ inline Adapter& Runtime::get_adapter() {
   return adapters_[default_adapter_i_];
 }
 
-inline Adapter* Runtime::get_adapter_p(int32_t i) {
+inline Adapter* Runtime::get_adapter_p(uint32_t i) {
   return &adapters_[i];
 }
 
-inline Adapter& Runtime::get_adapter(int32_t i) {
+inline Adapter& Runtime::get_adapter(uint32_t i) {
   return adapters_[i];
 }
 
-inline int32_t Runtime::default_adapter_i() const {
+inline uint32_t Runtime::default_adapter_i() const {
   return default_adapter_i_;
 }
 
