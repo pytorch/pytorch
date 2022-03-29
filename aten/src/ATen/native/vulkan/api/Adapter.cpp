@@ -39,6 +39,7 @@ void find_requested_device_extensions(
 Adapter::Adapter(const VkPhysicalDevice handle)
   : physical_handle_(handle),
     properties_{},
+    memory_properties_{},
     compute_queue_family_index_{},
     handle_(VK_NULL_HANDLE),
     queue_(VK_NULL_HANDLE) {
@@ -53,17 +54,16 @@ Adapter::Adapter(const VkPhysicalDevice handle)
       physical_handle_, &queue_family_count, queue_families_.data());
 
   // Find the compute family index
-  uint32_t compute_queue_family_index;
   for (const auto i : c10::irange(queue_families_.size())) {
     const VkQueueFamilyProperties& properties = queue_families_[i];
     // Selecting the first queue family with compute ability
     if (properties.queueCount > 0 && (properties.queueFlags & VK_QUEUE_COMPUTE_BIT)) {
-      compute_queue_family_index = i;
+      compute_queue_family_index_ = i;
     }
   }
 }
 
-Adapter::Adapter(Adapter&& other)
+Adapter::Adapter(Adapter&& other) noexcept
   : physical_handle_(other.physical_handle_),
     properties_(other.properties_),
     memory_properties_(other.memory_properties_),

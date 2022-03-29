@@ -25,7 +25,7 @@ class Adapter final {
   Adapter(const Adapter&) = delete;
   Adapter& operator=(const Adapter&) = delete;
 
-  Adapter(Adapter&&);
+  Adapter(Adapter&&) noexcept;
   Adapter& operator=(Adapter&&) = delete;
 
   ~Adapter();

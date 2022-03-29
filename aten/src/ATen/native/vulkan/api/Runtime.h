@@ -20,7 +20,7 @@ namespace api {
 //
 
 enum AdapterSelector {
-  FIRST,
+  First,
 };
 
 struct RuntimeConfiguration final {
@@ -37,14 +37,14 @@ class Runtime final {
   Runtime(const Runtime&) = delete;
   Runtime& operator=(const Runtime&) = delete;
 
-  Runtime(Runtime&&);
+  Runtime(Runtime&&) noexcept;
   Runtime& operator=(Runtime&&) = delete;
 
   ~Runtime();
 
   VkInstance instance() const;
 
-  typedef std::function<size_t (const std::vector<Adapter>&)> Selector;
+  using Selector = std::function<size_t (const std::vector<Adapter>&)>;
   size_t init_adapter(const Selector& selector);
 
   Adapter* get_adapter_p();

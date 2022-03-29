@@ -121,7 +121,7 @@ std::vector<Adapter> enumerate_adapters(const VkInstance instance) {
   std::vector<Adapter> adapters;
   adapters.reserve(device_count);
   for (const VkPhysicalDevice physical_device : devices) {
-    adapters.push_back(Adapter(physical_device));
+    adapters.emplace_back(Adapter(physical_device));
   }
 
   return adapters;
@@ -200,6 +200,10 @@ VkDebugReportCallbackEXT create_debug_report_callback(
 //
 
 size_t select_first(const std::vector<Adapter>& adapters) {
+  if (adapters.size() == 0) {
+    TORCH_WARN("Pytorch Vulkan Runtime: no device adapters are available for selection!");
+    return -1;
+  }
   return 0;
 }
 
@@ -236,10 +240,11 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
   const RuntimeConfiguration default_config {
     enableValidationMessages,
     initDefaultDevice,
+    AdapterSelector::First,
   };
 
   try {
-    return std::unique_ptr<Runtime>(new Runtime(default_config));
+    return std::make_unique<Runtime>(Runtime(default_config));
   }
   catch (const std::exception& e) {
     TORCH_WARN(
@@ -267,7 +272,7 @@ Runtime::Runtime(const RuntimeConfiguration config)
   if (config.initDefaultDevice) {
     try {
       switch (config.defaultSelector) {
-        case(FIRST):
+        case(AdapterSelector::First):
           default_adapter_i_ = init_adapter(select_first);
       }
     }
@@ -313,7 +318,7 @@ Runtime::~Runtime() {
   instance_ = VK_NULL_HANDLE;
 }
 
-Runtime::Runtime(Runtime&& other)
+Runtime::Runtime(Runtime&& other) noexcept
   : instance_(other.instance_),
     adapters_(std::move(other.adapters_)),
     default_adapter_i_(other.default_adapter_i_),
