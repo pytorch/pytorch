@@ -284,10 +284,7 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     # Even though Python supports this case, we chose to not implement it to
     # avoid overcomplicate logic here for a rare use case. Please report a
     # feature request if you find it necessary.
-    res = torch._C.unify_type_list(ir_types)
-    if not res:
-        return AnyType.get()
-    return res
+    return torch._C.unify_type_list(ir_types)
 
 def is_tensor(ann):
     if issubclass(ann, torch.Tensor):

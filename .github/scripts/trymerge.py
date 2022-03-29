@@ -36,7 +36,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
       mergeCommit {
         oid
       }
-      commits(first: 100) {
+      commits_with_authors:commits(first: 100) {
         nodes {
           commit {
             author {
@@ -47,6 +47,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
               name
             }
             oid
+          }
+        }
+        totalCount
+      }
+      commits(last: 1) {
+        nodes {
+          commit {
             checkSuites(first: 50) {
               nodes {
                 app {
@@ -75,9 +82,9 @@ query ($owner: String!, $name: String!, $number: Int!) {
                 hasNextPage
               }
             }
+            oid
           }
         }
-        totalCount
       }
       changedFiles
       files(first: 100) {
@@ -365,20 +372,20 @@ class GitHubPR:
         return [login for (login, state) in self._get_reviewers() if state == "APPROVED"]
 
     def get_commit_count(self) -> int:
-        return int(self.info["commits"]["totalCount"])
+        return int(self.info["commits_with_authors"]["totalCount"])
 
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
     def get_committer_login(self, num: int = 0) -> str:
-        user = self.info["commits"]["nodes"][num]["commit"]["author"]["user"]
+        user = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]["user"]
         # If author is not github user, user node will be null
         if user is None:
             return ""
         return cast(str, user["login"])
 
     def get_committer_author(self, num: int = 0) -> str:
-        node = self.info["commits"]["nodes"][num]["commit"]["author"]
+        node = self.info["commits_with_authors"]["nodes"][num]["commit"]["author"]
         return f"{node['name']} <{node['email']}>"
 
 
@@ -684,7 +691,7 @@ def main() -> None:
         return
 
     try:
-        pr.merge_into(repo, dry_run=args.dry_run)
+        pr.merge_into(repo, dry_run=args.dry_run, force=args.force)
     except Exception as e:
         msg = f"Merge failed due to {e}"
         run_url = os.getenv("GH_RUN_URL")
