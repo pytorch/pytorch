@@ -2095,8 +2095,7 @@ def generate_elementwise_binary_large_value_tensors(op, *, device, dtype, requir
     yield SampleInput(lhs, args=(rhs,))
 
 def generate_elementwise_binary_extremal_value_tensors(op, *, device, dtype, requires_grad=False):
-    finfo = torch.finfo(dtype)
-    _float_extremals = (float('inf'), float('-inf'), float('nan'), finfo.max, finfo.min, finfo.eps, finfo.tiny)
+    _float_extremals = (float('inf'), float('-inf'), float('nan'))
 
     l_vals = []
     r_vals = []
