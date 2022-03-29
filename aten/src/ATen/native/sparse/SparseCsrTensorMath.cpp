@@ -969,9 +969,5 @@ Tensor _csr_to_block_csr(const Tensor& self, IntArrayRef blocksize) {
       result_values.device());
 }
 
-Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
-  return self.values().sum(dtype);
-}
-
 } // namespace native
 } // namespace at
