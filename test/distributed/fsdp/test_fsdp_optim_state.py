@@ -411,8 +411,8 @@ class TestFSDPOptimState(FSDPTest):
         """
         (1) Runs a model with full world size for K iterations to generate a
         full optimizer state dict;
-        (2) initializes a model with halved world size but the same FSDP
-        wrapping scheme;
+        (2) initializes a model with halved world size and possibly different
+        FSDP wrapping scheme (based on ``new_model_kwargs``);
         (3) shards the full optimizer state dict from (1) according to the
         halved-world-size model;
         (4) runs the halved-world-size model for K iterations; and
@@ -446,7 +446,7 @@ class TestFSDPOptimState(FSDPTest):
         model2, optim2, optim_input2 = initializer(
             wrap=True, group=new_group,
             use_multiple_param_groups=use_multiple_param_groups,
-            **new_model_kwargs,
+            **new_model_kwargs,  # specify `wrap_alt` to change wrapping
         )
         self._step_model(model2, optim2, num_iters=NUM_ITERS)
         full_osd2 = FSDP.full_optim_state_dict(model2, optim2, optim_input2)
