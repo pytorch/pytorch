@@ -231,7 +231,7 @@ def _get_conv_configs():
             "dtype_configs": dtype_configs,
             "root_module": convs.root,
             "reference_quantized_module_for_root": convs.reference,
-            "qat_module": nniqat.ConvReLU1d,
+            "qat_module": convs.relu_qat,
         })
         # conv relu, qat fused module
         conv_configs.append({
