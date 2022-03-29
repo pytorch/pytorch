@@ -1,9 +1,11 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Reduce.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 
@@ -25,8 +27,8 @@ Vectorized<acc_t> load_reduce_vec(const scalar_t* data, F reduce, acc_t ident) {
   constexpr int vstride = vec_t::size() / vacc_t::size();
   alignas(64) std::array<acc_t, vacc_t::size()> acc;
   acc.fill(ident);
-  for (int k = 0; k < vstride; ++k) {
-    for (int i = 0; i < vacc_t::size(); ++i) {
+  for (const auto k : c10::irange(vstride)) {
+    for (const auto i : c10::irange(vacc_t::size())) {
       acc[i] = reduce(acc[i], values[i * vstride + k]);
     }
   }
@@ -137,7 +139,7 @@ struct OuterSumCastLoadPolicy {
     val.store(values);
 
     alignas(64) acc_t acc[vacc_t::size()];
-    for (int i = 0; i < vacc_t::size(); ++i) {
+    for (const auto i : c10::irange(vacc_t::size())) {
       acc[i] = values[i];
     }
 
@@ -279,7 +281,7 @@ template <typename StorePolicy, typename scalar_t, size_t numel>
 static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const std::array<scalar_t, numel> &values) {
   auto *base_ptr = data + stride * index;
-  for (size_t k = 0; k < numel; ++k) {
+  for (const auto k : c10::irange(numel)) {
     auto val = values[k];
     StorePolicy::store(base_ptr, stride, k, val);
   }
@@ -313,7 +315,7 @@ A simplified recursive implementation would look like this:
     scalar_t sum = 0;
     if (n <= min_chunk_size) {
       // Recursive base case, calculate a simple running sum
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         sum += data[i];
       }
       return sum;
@@ -351,16 +353,16 @@ std::array<scalar_t, nrows> multi_row_sum(
       #if !defined(COMPILING_FOR_MIN_SIZE)
       # pragma unroll
       #endif
-      for (int64_t k = 0; k < nrows; ++k) {
+      for (const auto k : c10::irange(nrows)) {
         acc[0][k] += LoadPolicy::load(sum_base, col_stride, k);
       }
     }
 
-    for (int64_t j = 1; j < num_levels; ++j) {
+    for (const auto j : c10::irange(1, num_levels)) {
       #if !defined(COMPILING_FOR_MIN_SIZE)
       # pragma unroll
       #endif
-      for (int64_t k = 0; k < nrows; ++k) {
+      for (const auto k : c10::irange(nrows)) {
         acc[j][k] += acc[j-1][k];
         acc[j-1][k] = scalar_t(0);
       }
@@ -377,23 +379,23 @@ std::array<scalar_t, nrows> multi_row_sum(
     #if !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t k = 0; k < nrows; ++k) {
+    for (const auto k : c10::irange(nrows)) {
       acc[0][k] += LoadPolicy::load(sum_base, col_stride, k);
     }
   }
 
-  for (int64_t j = 1; j < num_levels; ++j) {
+  for (const auto j : c10::irange(1, num_levels)) {
     #if !defined(COMPILING_FOR_MIN_SIZE)
     # pragma unroll
     #endif
-    for (int64_t k = 0; k < nrows; ++k) {
+    for (const auto k : c10::irange(nrows)) {
       acc[0][k] += acc[j][k];
     }
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<scalar_t, nrows> ret;
-  for (int64_t k = 0; k < nrows; ++k) {
+  for (const auto k : c10::irange(nrows)) {
     ret[k] = acc[0][k];
   }
   return ret;
@@ -413,7 +415,7 @@ scalar_t row_sum(const char * C10_RESTRICT in_data,
     partial_sums[0] += LoadPolicy::load(in_data, in_stride, i);
   }
 
-  for (int64_t k = 1; k < ilp_factor; ++k) {
+  for (const auto k : c10::irange(1, ilp_factor)) {
     partial_sums[0] += partial_sums[k];
   }
 
@@ -432,7 +434,7 @@ void vectorized_inner_sum(
   const int64_t vec_size = size0 / vec_numel;
 
   // Input is contiguous over the first (reduced) dimension
-  for (int64_t j = 0; j < size1; ++j) {
+  for (const auto j : c10::irange(size1)) {
     const auto *row_in = data[1] + j * outer_stride;
     auto vec_acc = row_sum<vacc_t, VecLoadPolicy>(row_in, vec_stride, vec_size);
 
@@ -443,7 +445,7 @@ void vectorized_inner_sum(
 
     alignas(64) std::array<acc_t, vacc_t::size()> partials{};
     vec_acc.store(partials.data());
-    for (size_t k = 0; k < partials.size(); ++k) {
+    for (const auto k : c10::irange(partials.size())) {
       final_acc += partials[k];
     }
     store<StorePolicy>(data[0], out_stride, j, final_acc);
@@ -455,7 +457,7 @@ void scalar_inner_sum(
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     char * C10_RESTRICT data[2], int64_t in_strides[2], int64_t out_stride,
     int64_t size0, int64_t size1) {
-  for (int64_t j = 0; j < size1; ++j) {
+  for (const auto j : c10::irange(size1)) {
     const auto *row_in = data[1] + j * in_strides[1];
     auto ans = row_sum<acc_t, LoadPolicy>(row_in, in_strides[0], size0);
     store<StorePolicy>(data[0], out_stride, j, ans);
@@ -479,7 +481,7 @@ void vectorized_outer_sum(
     auto sums = multi_row_sum<vacc_t, nrows, VecLoadPolicy>(
         row_in, inner_stride, vec_stride, size0);
 
-    for (int64_t i = 0; i < nrows; ++i) {
+    for (const auto i : c10::irange(nrows)) {
       const int64_t base_idx = j + i * vacc_t::size();
       store<StorePolicy>(data[0], out_stride, base_idx, sums[i]);
     }
@@ -526,7 +528,7 @@ void scalar_outer_sum(
 // Custom floating point sum for better accuracy
 template <bool ignore_nan, typename scalar_t>
 void cascade_sum(TensorIterator &iter) {
-  iter.output().fill_(scalar_t(0));
+  iter.output_base().fill_(scalar_t(0));
   iter.parallel_reduce(
     [&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -637,7 +639,7 @@ REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 #ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
 #else
-REGISTER_NO_AVX512_DISPATCH(nansum_stub, reduce_fn);
+REGISTER_NO_AVX512_DISPATCH(nansum_stub);
 #endif
 
 }}  // namespace at::native

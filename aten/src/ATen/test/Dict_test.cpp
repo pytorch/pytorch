@@ -354,25 +354,27 @@ TEST(DictTest, whenMoveAssigningDict_thenNewIsCorrect) {
   EXPECT_EQ("4", dict2.at(4));
 }
 
-TEST(DictTest, whenMoveConstructingDict_thenOldIsEmpty) {
+TEST(DictTest, whenMoveConstructingDict_thenOldIsUnchanged) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
   Dict<int64_t, string> dict2(std::move(dict1));
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(dict1.empty());
+  EXPECT_EQ(2, dict1.size());
+  EXPECT_EQ("3", dict1.at(3));
+  EXPECT_EQ("4", dict1.at(4));
 }
 
-TEST(DictTest, whenMoveAssigningDict_thenOldIsEmpty) {
+TEST(DictTest, whenMoveAssigningDict_thenOldIsUnchanged) {
   Dict<int64_t, string> dict1;
   dict1.insert(3, "3");
   dict1.insert(4, "4");
 
   Dict<int64_t, string> dict2;
   dict2 = std::move(dict1);
-  // NOLINTNEXTLINE(bugprone-use-after-move)
-  EXPECT_TRUE(dict1.empty());
+  EXPECT_EQ(2, dict1.size());
+  EXPECT_EQ("3", dict1.at(3));
+  EXPECT_EQ("4", dict1.at(4));
 }
 
 TEST(DictTest, givenIterator_whenPostfixIncrementing_thenMovesToNextAndReturnsOldPosition) {

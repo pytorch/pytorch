@@ -95,13 +95,18 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Report sccache stats for easier debugging
     sccache --zero-stats
     function sccache_epilogue() {
+      echo "::group::Sccache Compilation Log"
       echo '=================== sccache compilation log ==================='
       python "$SCRIPT_DIR/print_sccache_log.py" ~/sccache_error.log 2>/dev/null
       echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
       sccache --show-stats
       sccache --stop-server || true
+      echo "::endgroup::"
     }
-    trap_add sccache_epilogue EXIT
+
+    if [[ "${JOB_BASE_NAME}" == *-build ]]; then
+      trap_add sccache_epilogue EXIT
+    fi
   fi
 
   if which ccache > /dev/null; then
@@ -138,7 +143,7 @@ fi
 # Linux bionic cannot find conda mkl with cmake 3.10, so we need a cmake from conda.
 # Alternatively we could point cmake to the right place
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-if [[ "$BUILD_ENVIRONMENT" == *xla-linux-bionic* ]] || \
+if [[ "${TEST_CONFIG:-}" == *xla* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
   if ! which conda; then

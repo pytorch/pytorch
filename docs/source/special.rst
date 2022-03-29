@@ -7,8 +7,6 @@ torch.special
 The torch.special module, modeled after SciPy's `special <https://docs.scipy.org/doc/scipy/reference/special.html>`_ module.
 
 .. automodule:: torch.special
-    :noindex:
-
 .. currentmodule:: torch.special
 
 Functions
@@ -41,6 +39,7 @@ Functions
 .. autofunction:: ndtri
 .. autofunction:: round
 .. autofunction:: sinc
+.. autofunction:: softmax
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

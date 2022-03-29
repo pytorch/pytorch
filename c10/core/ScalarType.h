@@ -4,9 +4,11 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/Optional.h>
+#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/complex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
+#include <c10/util/quint2x4.h>
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
 
@@ -42,7 +44,8 @@ namespace c10 {
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
   _(at::BFloat16, BFloat16) /* 15 */                     \
-  _(c10::quint4x2, QUInt4x2) /* 16 */
+  _(c10::quint4x2, QUInt4x2) /* 16 */                    \
+  _(c10::quint2x4, QUInt2x4) /* 17 */
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -59,6 +62,21 @@ namespace c10 {
   _(c10::complex<float>, ComplexFloat)                             \
   _(c10::complex<double>, ComplexDouble)                           \
   _(bool, Bool)                                                    \
+  _(at::BFloat16, BFloat16)
+
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
+  _(uint8_t, Byte)                             \
+  _(int8_t, Char)                              \
+  _(int16_t, Short)                            \
+  _(int, Int)                                  \
+  _(int64_t, Long)                             \
+  _(at::Half, Half)                            \
+  _(float, Float)                              \
+  _(double, Double)                            \
+  _(c10::complex<c10::Half>, ComplexHalf)      \
+  _(c10::complex<float>, ComplexFloat)         \
+  _(c10::complex<double>, ComplexDouble)       \
+  _(bool, Bool)                                \
   _(at::BFloat16, BFloat16)
 
 enum class ScalarType : int8_t {
@@ -179,7 +197,8 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
   _(c10::qint8, QInt8)          \
   _(c10::quint8, QUInt8)        \
   _(c10::qint32, QInt32)        \
-  _(c10::quint4x2, QUInt4x2)
+  _(c10::quint4x2, QUInt4x2)    \
+  _(c10::quint2x4, QUInt2x4)
 
 #define AT_FORALL_COMPLEX_TYPES(_)     \
   _(c10::complex<float>, ComplexFloat) \
@@ -248,7 +267,8 @@ static inline bool isComplexType(ScalarType t) {
 static inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
   return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
-      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2;
+      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
+      t == ScalarType::QUInt2x4;
 }
 
 static inline ScalarType toQIntType(ScalarType t) {
@@ -273,6 +293,8 @@ static inline ScalarType toUnderlying(ScalarType t) {
     case ScalarType::QInt32:
       return ScalarType::Int;
     case ScalarType::QUInt4x2:
+      return ScalarType::Byte;
+    case ScalarType::QUInt2x4:
       return ScalarType::Byte;
     default:
       return t;
@@ -301,7 +323,7 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
-static inline ScalarType toValueType(ScalarType t) {
+static inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;

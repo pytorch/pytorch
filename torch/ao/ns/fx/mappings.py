@@ -12,6 +12,7 @@ import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 
 from .ns_types import NSNodeTargetType
 
@@ -24,6 +25,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Conv1d,
             nnq.Conv1d,
+            nnqd.Conv1d,
             nniqat.ConvBn1d,
             nniqat.ConvBnReLU1d,
             nniq.ConvReLU1d,
@@ -32,6 +34,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Conv2d,
             nnq.Conv2d,
+            nnqd.Conv2d,
             nnqat.Conv2d,
             nniqat.ConvBn2d,
             nniqat.ConvBnReLU2d,
@@ -42,6 +45,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Conv3d,
             nnq.Conv3d,
+            nnqd.Conv3d,
             nnqat.Conv3d,
             nniqat.ConvBn3d,
             nniqat.ConvBnReLU3d,
@@ -70,11 +74,14 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
             nn.Linear,
             nnq.Linear,
             nni.LinearReLU,
+            nni.LinearBn1d,
             nniq.LinearReLU,
             nniqd.LinearReLU,
             nnqat.Linear,
+            nnqatd.Linear,
             nnqd.Linear,
             nniqat.LinearReLU,
+            nniqat.LinearBn1d,
             nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
@@ -175,10 +182,21 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.ConvTranspose1d,
             nnq.ConvTranspose1d,
+            nnqd.ConvTranspose1d,
         ]),
         set([
             nn.ConvTranspose2d,
             nnq.ConvTranspose2d,
+            nnqd.ConvTranspose2d,
+        ]),
+        set([
+            nn.ConvTranspose3d,
+            nnq.ConvTranspose3d,
+            nnqd.ConvTranspose3d,
+        ]),
+        set([
+            nn.ConvTranspose3d,
+            nnq.ConvTranspose3d,
         ]),
         # ELU
         set([
@@ -189,11 +207,13 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             nn.Embedding,
             nnq.Embedding,
+            nnqat.Embedding,
         ]),
         # EmbeddingBag
         set([
             nn.EmbeddingBag,
             nnq.EmbeddingBag,
+            nnqat.EmbeddingBag,
         ]),
         # GroupNorm
         set([
@@ -358,7 +378,17 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # dropout
         set([
             nn.Dropout,
+            nnq.Dropout,
+        ]),
+        # F.dropout
+        set([
             F.dropout,
+            toq.dropout,
+        ]),
+        # matmul
+        set([
+            torch.matmul,
+            toq.matmul,
         ]),
     ]
 
@@ -415,6 +445,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.instance_norm,
         F.layer_norm,
         F.leaky_relu,
+        F.dropout,
         F.silu,
         F.mish,
         # TODO(future PR): implement shadowing for binary ops and
@@ -441,6 +472,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         toq.instance_norm,
         toq.layer_norm,
         toq.leaky_relu,
+        toq.dropout,
         # TODO(future PR): implement shadowing for binary ops and
         # uncomment below
         # toq.add,
@@ -487,21 +519,32 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
     MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = set([
         nn.Linear,
         nnqat.Linear,
+        nnqatd.Linear,
         nnqd.Linear,
         torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
+        nnqd.Conv1d,
+        nnqd.Conv2d,
+        nnqd.Conv3d,
         nnqat.Conv2d,
         nnqat.Conv3d,
+        nnqat.Embedding,
+        nnqat.EmbeddingBag,
         nn.LSTM,
         # note: nnqd.Linear is an instance of nnq.Linear, so this
         # check has to happen before the int8 module check
         nnqd.LSTM,
         nn.BatchNorm2d,
         nn.BatchNorm3d,
+        nn.Dropout,
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
+        nn.ConvTranspose3d,
+        nnqd.ConvTranspose1d,
+        nnqd.ConvTranspose2d,
+        nnqd.ConvTranspose3d,
         nn.ELU,
         nn.GroupNorm,
         nn.InstanceNorm1d,
@@ -519,6 +562,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nni.ConvReLU2d,
         nni.ConvReLU3d,
         nni.LinearReLU,
+        nni.LinearBn1d,
         nni.ConvBn1d,
         nni.ConvBn2d,
         nni.ConvBn3d,
@@ -531,6 +575,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqat.LinearBn1d,
         nniqd.LinearReLU,
     ])
 
@@ -542,8 +587,10 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Conv3d,
         nnq.BatchNorm2d,
         nnq.BatchNorm3d,
+        nnq.Dropout,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
+        nnq.ConvTranspose3d,
         nnq.ELU,
         nnq.GroupNorm,
         nnq.InstanceNorm1d,
@@ -553,6 +600,9 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Hardswish,
         nnq.LeakyReLU,
         nnq.ReLU6,
+        nnq.Embedding,
+        nnq.EmbeddingBag,
+        nnq.Dropout,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,

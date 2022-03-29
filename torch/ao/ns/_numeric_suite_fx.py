@@ -1,8 +1,94 @@
+"""
+This module contains tooling to compare weights and activations
+across models. Example usage::
+
+    import copy
+    import torch
+    import torch.quantization.quantize_fx as quantize_fx
+    import torch.ao.ns._numeric_suite_fx as ns
+
+    m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1)).eval()
+    mp = quantize_fx.prepare_fx(m, {'': torch.quantization.default_qconfig})
+    # We convert a copy because we need the original prepared model
+    # to be available for comparisons, and `quantize_fx.convert_fx` is inplace.
+    mq = quantize_fx.convert_fx(copy.deepcopy(mp))
+
+    #
+    # Comparing weights
+    #
+
+    # extract weight pairs
+    weight_comparison = ns.extract_weights('a', mp, 'b', mq)
+
+    # add SQNR for each comparison, inplace
+    ns.extend_logger_results_with_comparison(
+        weight_comparison, 'a', 'b', torch.ao.ns.fx.utils.compute_sqnr,
+        'sqnr')
+
+    # weight_comparison contains the weights from `mp` and `mq` stored
+    # in pairs, and can be used for further analysis.
+
+
+    #
+    # Comparing activations, with error propagation
+    #
+
+    # add loggers
+    mp_ns, mq_ns = ns.add_loggers(
+        'a', copy.deepcopy(mp),
+        'b', copy.deepcopy(mq),
+        ns.OutputLogger)
+
+    # send an example datum to capture intermediate activations
+    datum = torch.randn(1, 1, 1, 1)
+    mp_ns(datum)
+    mq_ns(datum)
+
+    # extract intermediate activations
+    act_comparison = ns.extract_logger_info(
+        mp_ns, mq_ns, ns.OutputLogger, 'b')
+
+    # add SQNR for each comparison, inplace
+    ns.extend_logger_results_with_comparison(
+        act_comparison, 'a', 'b', torch.ao.ns.fx.utils.compute_sqnr,
+        'sqnr')
+
+    # act_comparison contains the activations from `mp_ns` and `mq_ns` stored
+    # in pairs, and can be used for further analysis.
+
+    #
+    # Comparing activations, without error propagation
+    #
+
+    # create shadow model
+    mp_shadows_mq = ns.add_shadow_loggers(
+        'a', copy.deepcopy(mp),
+        'b', copy.deepcopy(mq),
+        ns.OutputLogger)
+
+    # send an example datum to capture intermediate activations
+    datum = torch.randn(1, 1, 1, 1)
+    mp_shadows_mq(datum)
+
+    # extract intermediate activations
+    shadow_act_comparison = ns.extract_shadow_logger_info(
+        mp_shadows_mq, ns.OutputLogger, 'b')
+
+    # add SQNR for each comparison, inplace
+    ns.extend_logger_results_with_comparison(
+        shadow_act_comparison, 'a', 'b', torch.ao.ns.fx.utils.compute_sqnr,
+        'sqnr')
+
+    # shadow_act_comparison contains the activations from `mp_ns` and `mq_ns` stored
+    # in pairs, and can be used for further analysis.
+
+"""
+
 import collections
 
 import torch
 import torch.nn as nn
-import torch.quantization.quantize_fx as quantize_fx
+import torch.ao.quantization.quantize_fx as quantize_fx
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.ao.ns.fx.mappings import (
@@ -39,8 +125,14 @@ from typing import Dict, Tuple, Callable, List, Optional, Set
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 
 class OutputLogger(nn.Module):
+    """
+    Base class for capturing intermediate values.
+    """
     stats: List[torch.Tensor]
     stats_rnn: List[RNNReturnType]
+
+    # Mark as impure so that calls to it will not be removed during DCE.
+    _is_impure = True
 
     def __init__(
         self,
@@ -101,6 +193,8 @@ class OutputLogger(nn.Module):
     # Note: cannot annotate the type of x because TorchScript does not support
     #   the Union type.
     def forward(self, x):
+        """
+        """  # blank docblock to make autodoc happy
         if isinstance(x, torch.Tensor):
             self.stats.append(x.detach())
         elif isinstance(x, tuple) and len(x) == 2 and len(x[1]) == 2:
@@ -118,13 +212,15 @@ index_of_arg={self.index_of_arg}, fqn={self.fqn})"""
 
 class NSTracer(quantize_fx.QuantizationTracer):
     """
-    Just like a regular tracer, but treats observers and fake_quantize
+    Just like a regular FX quantization tracer, but treats observers and fake_quantize
     modules as leaf modules.
     """
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
-        if isinstance(m, torch.quantization.ObserverBase):
+        """
+        """  # blank docblock to make autodoc happy
+        if isinstance(m, torch.ao.quantization.ObserverBase):
             return True
-        elif isinstance(m, torch.quantization.FakeQuantizeBase):
+        elif isinstance(m, torch.ao.quantization.FakeQuantizeBase):
             return True
         return super().is_leaf_module(m, module_qualified_name)
 
@@ -196,6 +292,23 @@ def extract_weights(
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> NSResultsType:
+    """
+    Extract weights from model A and model B, and return a comparison.
+
+    Args:
+        model_name_a: string name of model A to use in results
+        model_a: model A
+        model_name_b: string name of model B to use in results
+        model_b: model B
+        base_name_to_sets_of_related_ops: optional override of subgraph base nodes, subject to change
+        unmatchable_types_map: optional override of unmatchable types, subject to change
+        op_to_type_to_weight_extraction_fn: optional override of function which extracts weight
+            from a type, subject to change
+
+    Return:
+        NSResultsType, containing the weight comparisons
+    """
+
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
     if base_name_to_sets_of_related_ops is None:
         base_name_to_sets_of_related_ops = \
@@ -297,6 +410,22 @@ def add_loggers(
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> Tuple[nn.Module, nn.Module]:
+    """
+    Instrument model A and model B with loggers.
+
+    Args:
+        model_name_a: string name of model A to use in results
+        model_a: model A
+        model_name_b: string name of model B to use in results
+        model_b: model B
+        logger_cls: class of Logger to use
+        base_name_to_sets_of_related_ops: optional override of subgraph base nodes, subject to change
+        unmatchable_types_map: optional override of unmatchable types, subject to change
+
+    Return:
+        Returns a tuple of (model_a_with_loggers, model_b_with_loggers).  Modifies both models inplace.
+    """
+
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.add_loggers")
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
@@ -371,12 +500,18 @@ def extract_logger_info(
     model_name_to_use_for_layer_names: str,
 ) -> NSResultsType:
     """
-    Same thing as ns.extract_logger_info, but for models prepared with
-    this module.
+    Traverse all loggers in `model_a` and `model_b`, and extract the logged
+    information.
 
-    TODO(future PR): real docblock
+    Args:
+        model_a: model A
+        model_b: model B
+        logger_cls: class of Logger to use
+        model_name_to_use_for_layer_names: string name of model to use for
+          layer names in the output
 
-    Output format: NSResultsType
+    Return:
+        NSResultsType, containing the logged comparisons
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_logger_info")
     results: NSResultsType = {}
@@ -424,8 +559,17 @@ def add_shadow_loggers(
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
 ) -> nn.Module:
     """
-    Same thing as add_loggers, but for an `a_shadows_b` model.
-    TODO(future PR): real docblock
+    Instrument model A and model B with shadow loggers.
+
+    Args:
+        model_name_a: string name of model A to use in results
+        model_a: model A
+        model_name_b: string name of model B to use in results
+        model_b: model B
+        logger_cls: class of Logger to use
+        should_log_inputs: whether to log inputs
+        base_name_to_sets_of_related_ops: optional override of subgraph base nodes, subject to change
+        unmatchable_types_map: optional override of unmatchable types, subject to change
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.add_shadow_loggers")
     # TODO(future PR): expose these
@@ -453,8 +597,17 @@ def extract_shadow_logger_info(
     model_name_to_use_for_layer_names: str,
 ) -> NSResultsType:
     """
-    Same thing as extract_logger_info, but for an `a_shadows_b` model.
-    TODO(future PR): real docblock
+    Traverse all loggers in a shadow model, and extract the logged
+    information.
+
+    Args:
+        model_a_shadows_b: shadow model
+        logger_cls: class of Logger to use
+        model_name_to_use_for_layer_names: string name of model to use for
+          layer names in the output
+
+    Return:
+        NSResultsType, containing the logged comparisons
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_shadow_logger_info")
     results: NSResultsType = collections.defaultdict(dict)
@@ -477,7 +630,16 @@ def extend_logger_results_with_comparison(
     """
     Compares the logged values from `model_name_2` against the corresponding
     values in `model_name_1`, using `comparison_fn`. Records the result
-    in `model_name_2`'s results under `comparison_name`.
+    in `model_name_2`'s results under `comparison_name`. Modifies `results` inplace.
+
+    Args:
+        results: the result data structure from `extract_logger_info` or
+          `extract_shadow_logger_info`.
+        model_name_1: string name of model 1
+        model_name_2: string name of model 2
+        comparison_fn: function to compare two Tensors
+        model_name_to_use_for_layer_names: string name of model to use for
+          layer names in the output
     """
     for _, results_type_to_results in results.items():
         for _, model_name_to_results in results_type_to_results.items():

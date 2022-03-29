@@ -33,6 +33,7 @@ void functionCallSubstitution(Block* block) {
               cur->outputs().size());
           interpolate_node->output()->copyMetadata(cur->output());
           interpolate_node->insertAfter(cur);
+          interpolate_node->copyMetadata(cur);
           cur->replaceAllUsesWith(interpolate_node);
           cur->removeAllInputs();
           cur->destroy();
@@ -42,7 +43,7 @@ void functionCallSubstitution(Block* block) {
               "' to aten::__interpolate");
           GRAPH_UPDATE(
               "Function in ONNX function call substitution body: ",
-              *fun_type->function()->optimized_graph());
+              toGraphFunction(*fun_type->function()).optimized_graph());
         } else {
           // Remove input[0] and the node that feeds into it
           auto input_node_0 = cur->input(0)->node();
@@ -50,19 +51,19 @@ void functionCallSubstitution(Block* block) {
           if (!input_node_0->hasUses()) {
             input_node_0->destroy();
           }
-          functionCallSubstitution(fun_type->function()->graph()->block());
-          inlineCallTo(cur, fun_type->function(), false);
+          auto& graphFunction = toGraphFunction(*fun_type->function());
+          functionCallSubstitution(graphFunction.graph()->block());
+          inlineCallTo(cur, &graphFunction, false);
         }
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
         if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
           Function& function = class_type->getMethod(name);
-          if (!function.isGraphFunction()) {
-            continue;
+          if (auto graphFunction = tryToGraphFunction(function)) {
+            functionCallSubstitution(graphFunction->graph()->block());
+            inlineCallTo(cur, graphFunction, false);
           }
-          functionCallSubstitution(function.graph()->block());
-          inlineCallTo(cur, &function, false);
         }
       } break;
       default: {

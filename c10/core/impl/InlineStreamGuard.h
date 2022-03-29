@@ -2,6 +2,7 @@
 
 #include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/irange.h>
 
 namespace c10 {
 namespace impl {
@@ -237,7 +238,7 @@ class InlineMultiStreamGuard {
   static DeviceType getDeviceTypeOfStreams(ArrayRef<Stream> streams) {
     TORCH_INTERNAL_ASSERT(!streams.empty());
     DeviceType type = streams[0].device_type();
-    for (size_t idx = 1; idx < streams.size(); idx++) {
+    for (const auto idx : c10::irange(1, streams.size())) {
       TORCH_CHECK_VALUE(
           streams[idx].device_type() == type,
           "Streams have a mix of device types: stream 0 is on ",

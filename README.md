@@ -8,6 +8,8 @@ PyTorch is a Python package that provides two high-level features:
 
 You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
+Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.org](https://hud.pytorch.org/ci/pytorch/pytorch/master).
+
 <!-- toc -->
 
 - [More About PyTorch](#more-about-pytorch)
@@ -38,18 +40,6 @@ You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to 
 - [License](#license)
 
 <!-- tocstop -->
-
-| System | 3.6 | 3.7 | 3.8 |
-| :---: | :---: | :---: | :--: |
-| Linux CPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
-| Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | <center>—</center> |
-| Windows CPU / GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/) |  <center>—</center> |
-| Linux (ppc64le) CPU | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le/) | <center>—</center> |
-| Linux (ppc64le) GPU | <center>—</center> | [![Build Status](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/badge/icon)](https://powerci.osuosl.org/job/pytorch-master-nightly-py3-linux-ppc64le-gpu/) | <center>—</center> |
-| Linux (aarch64) CPU | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py36) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py37) | [![Build Status](http://openlabtesting.org:15000/badge?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38)](https://status.openlabtesting.org/builds/builds?project=pytorch%2Fpytorch&job_name=pytorch-arm64-build-daily-master-py38) |
-
-See also the [ci.pytorch.org HUD](https://hud.pytorch.org/build2/pytorch-master).
-
 
 ## More About PyTorch
 
@@ -150,8 +140,7 @@ No wrapper code needs to be written. You can see [a tutorial here](https://pytor
 ## Installation
 
 ### Binaries
-Commands to install from binaries via Conda or pip wheels are on our website:
-[https://pytorch.org](https://pytorch.org)
+Commands to install binaries via Conda or pip wheels are on our website: [https://pytorch.org/get-started/locally/](https://pytorch.org/get-started/locally/)
 
 
 #### NVIDIA Jetson Platforms
@@ -168,13 +157,13 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 ### From Source
 
-If you are installing from source, you will need Python 3.6.2 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+If you are installing from source, you will need Python 3.7 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
 
 If you want to compile with CUDA support, install
-- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 9.2 or above
+- [NVIDIA CUDA](https://developer.nvidia.com/cuda-downloads) 10.2 or above
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v7 or above
 - [Compiler](https://gist.github.com/ax3l/9489132) compatible with CUDA
 Note: You could refer to the [cuDNN Support Matrix](https://docs.nvidia.com/deeplearning/cudnn/pdf/cuDNN-Support-Matrix.pdf) for cuDNN versions with the various supported CUDA, CUDA driver and NVIDIA hardwares
@@ -263,13 +252,21 @@ Choose Correct Visual Studio Version.
 
 Sometimes there are regressions in new versions of Visual Studio, so
 it's best to use the same Visual Studio Version [16.8.5](https://github.com/pytorch/pytorch/blob/master/.circleci/scripts/vs_install.ps1) as Pytorch CI's.
-You can use Visual Studio Enterprise, Professional or Community though PyTorch CI uses Visual Studio BuildTools.
+
+PyTorch CI uses Visual C++ BuildTools, which come with Visual Studio Enterprise,
+Professional, or Community Editions. You can also install the build tools from
+https://visualstudio.microsoft.com/visual-cpp-build-tools/. The build tools *do not*
+come with Visual Studio Code by default.
 
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
 Build with CPU
 
 It's fairly easy to build with CPU.
+```cmd
+conda activate
+python setup.py install
+```
 
 Note on OpenMP: The desired OpenMP implementation is Intel OpenMP (iomp). In order to link against iomp, you'll need to manually download the library and set up the building environment by tweaking `CMAKE_INCLUDE_PATH` and `LIB`. The instruction [here](https://github.com/pytorch/pytorch/blob/master/docs/source/notes/windows.rst#building-from-source) is an example for setting up both MKL and Intel OpenMP. Without these configurations for CMake, Microsoft Visual C OpenMP runtime (vcomp) will be used.
 
@@ -366,23 +363,23 @@ readthedocs theme.
 cd docs/
 pip install -r requirements.txt
 ```
-You can then build the documentation by running ``make <format>`` from the
-``docs/`` folder. Run ``make`` to get a list of all available output formats.
+You can then build the documentation by running `make <format>` from the
+`docs/` folder. Run `make` to get a list of all available output formats.
 
-If you get a katex error run ```npm install katex```.  If it persists, try
-```npm install -g katex```
+If you get a katex error run `npm install katex`.  If it persists, try
+`npm install -g katex`
 
 ### Previous Versions
 
 Installation instructions and binaries for previous PyTorch versions may be found
-on [Our Website](https://pytorch.org/previous-versions).
+on [our website](https://pytorch.org/previous-versions).
 
 
 ## Getting Started
 
 Three-pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
+- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
 - [Glossary](https://github.com/pytorch/pytorch/blob/master/GLOSSARY.md)
 

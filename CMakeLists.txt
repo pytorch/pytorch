@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
+if(CMAKE_GENERATOR STREQUAL "Ninja" AND CMAKE_VERSION VERSION_LESS 3.13)
+  message(FATAL_ERROR "Using the Ninja generator requires CMake version 3.13 or greater")
+endif()
+
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
 # Not setting this sometimes makes XCode C compiler gets detected as "Clang",
 # even when the C++ one is detected as "AppleClang".
@@ -148,7 +152,7 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+option(BUILD_CAFFE2 "Master flag to build Caffe2" OFF)
 option(BUILD_LITE_INTERPRETER "Master flag to build Lite Interpreter" OFF)
 cmake_dependent_option(
     BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
@@ -185,6 +189,8 @@ option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
     BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
     "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
+cmake_dependent_option(
+     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -195,15 +201,15 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
-    "USE_STATIC_CUDNN" OFF)
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
+    "USE_CUDA;BUILD_TEST" OFF)
 cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_BREAKPAD "Use breakpad crash dump library" ON)
-option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
+option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -245,7 +251,7 @@ option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 cmake_dependent_option(
     USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF
-    "CMAKE_VERSION VERSION_LESS \"3.16\"" OFF)
+    "CMAKE_VERSION VERSION_GREATER_EQUAL \"3.16\"" OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
@@ -270,12 +276,20 @@ if(IOS)
   set(USE_BREAKPAD OFF)
 endif()
 
+option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
-option(USE_XNNPACK "Use XNNPACK" ON)
+# option USE_XNNPACK: try to enable xnnpack by default.
+set(XNNPACK_MIN_CMAKE_VER 3.12)
+cmake_dependent_option(
+    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
+    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
+if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
+  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
+endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
@@ -290,6 +304,7 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
     "USE_MKLDNN" OFF)
+option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -298,18 +313,21 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+  USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
 cmake_dependent_option(
+    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
+    "USE_C10D_NCCL" OFF)
+cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
-option(USE_TBB "Use TBB" OFF)
+option(USE_TBB "Use TBB (Deprecated)" OFF)
 cmake_dependent_option(
     USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
@@ -320,6 +338,12 @@ cmake_dependent_option(
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
+option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
+cmake_dependent_option(
+    BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
+    "NOT INTERN_BUILD_MOBILE" OFF)
+
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -418,10 +442,18 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(OP_DEPENDENCY "" CACHE STRING
-    "Path to the yaml file that contains the op dependency graph for custom build.")
-set(STATIC_DISPATCH_BACKEND "" CACHE STRING
-    "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+    STATIC_DISPATCH_BACKEND
+    "Name of the backend for which static dispatch code is generated, e.g.: CPU."
+    "")
+option(USE_LIGHTWEIGHT_DISPATCH "Enable codegen unboxing for ATen ops, need to work with static dispatch in order to work properly." OFF)
+if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
+  message(FATAL_ERROR "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
+endif()
+option(
+  TRACING_BASED
+  "Master flag to build Lite Interpreter with tracing build option"
+  OFF)
 
 # This is a fix for a rare build issue on Ubuntu:
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
@@ -508,16 +540,14 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "/w" "-w")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 endif(MSVC)
 
-list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
-list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
-list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
+string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 if(NOT MSVC)
-  list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
-  list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
 endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
@@ -527,11 +557,21 @@ endif(NOT MSVC)
 # purpose.
 if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
+  message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
+  set(BUILD_LAZY_TS_BACKEND OFF)
 
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
     # c10/macros/Macros.h, so it needs to be explicitly set here.
     string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE")
+  endif()
+
+  if(DEFINED ENV{PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET})
+    # If PYTORCH_MOBILE_TRIM_DISPATCH_KEY_SET is defined (env var),
+    # then define C10_MOBILE_TRIM_DISPATCH_KEYS, which limits the
+    # number of dispatch keys in OperatorEntry::dispatchTable_
+    # to reduce peak memory during library initialization.
+    string(APPEND CMAKE_CXX_FLAGS " -DC10_MOBILE_TRIM_DISPATCH_KEYS")
   endif()
 endif()
 
@@ -650,6 +690,16 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
+if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
+  # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
+  # one call, so instead CMake calls nvcc twice with && in between.
+  # However, on windows cmd.exe has a 8191 character limit for commands which we
+  # start hitting. This moves most argments into a file to avoid going over the limit
+
+  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS ON)
+  set(CMAKE_NINJA_FORCE_RESPONSE_FILE ON CACHE INTERNAL "")
+endif()
+
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
 endif()
@@ -660,6 +710,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_SLEEF_FOR_ARM_VEC256)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
 endif()
 
 if(USE_XNNPACK)
@@ -687,6 +741,10 @@ if(BUILD_LITE_INTERPRETER)
   string(APPEND CMAKE_CXX_FLAGS " -DBUILD_LITE_INTERPRETER")
 endif()
 
+if(TRACING_BASED)
+  string(APPEND CMAKE_CXX_FLAGS " -DTRACING_BASED")
+endif()
+
 if(USE_PYTORCH_METAL)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_METAL")
 endif()
@@ -701,6 +759,10 @@ endif()
 
 if(USE_LITE_INTERPRETER_PROFILER)
   string(APPEND CMAKE_CXX_FLAGS " -DEDGE_PROFILER_USE_KINETO")
+endif()
+
+if(USE_COREML_DELEGATE)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_COREML_DELEGATE")
 endif()
 
 # ---[ Allowlist file if allowlist is specified
@@ -727,13 +789,16 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
+  endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
   endif()
@@ -1051,6 +1116,9 @@ endif()
 
 # ---[ JNI
 if(BUILD_JNI)
+  if(NOT MSVC)
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-variable")
+  endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
   add_subdirectory(android/pytorch_android)

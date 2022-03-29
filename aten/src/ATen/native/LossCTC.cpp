@@ -11,6 +11,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Fill.h>
+#include <c10/util/irange.h>
 
 #include <numeric>
 #include <type_traits>
@@ -60,7 +61,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   std::vector<int64_t> tg_batch_offsets(batch_size);
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -72,7 +73,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   else { // batch x max_target_length
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = i * tg_batch_stride;
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
@@ -84,7 +85,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
              " (while checking arguments for ", c, ")");
   }
   int64_t max_input_length = log_probs.size(0);
-  for (int64_t b = 0; b < batch_size; b++) {
+  for (const auto b : c10::irange(batch_size)) {
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -103,7 +104,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   // first the default
   log_alpha.narrow(1, 0, 1).fill_(neginf);
   at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
-    for (int64_t b = start; b < end; b++) {
+    for (const auto b : c10::irange(start, end)) {
       int64_t input_length = input_lengths[b];
       int64_t target_length = target_lengths[b];
       auto log_probs_a = log_probs_a_global[b];
@@ -116,8 +117,8 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
         log_alpha_a[0][1] = log_probs_a[0][get_target_prime(targets_data, tg_batch_offset, tg_target_stride, 1, BLANK)];
 
       // now the loop over the inputs
-      for (int64_t t=1; t<input_length; t++) {
-        for (int64_t s=0; s<2*target_length+1; s++) {
+      for (const auto t : c10::irange(1, input_length)) {
+        for (const auto s : c10::irange(2*target_length+1)) {
           auto current_target_prime = get_target_prime(targets_data, tg_batch_offset, tg_target_stride, s, BLANK);
           // this loop over s could be parallel/vectorized, too, but the required items are one index apart
           // alternatively, one might consider moving s to the outer loop to cache current_target_prime more (but then it needs to be descending)
@@ -189,7 +190,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     max_target_length = 0;
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -200,7 +201,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
   else { // batch x max_target_length
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
-    for (int64_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       tg_batch_offsets[i] = i * tg_batch_stride;
     }
     tg_target_stride = targets.stride(1);
@@ -234,7 +235,7 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
     TensorIterator fill_1d_iter_local(fill_1d_iter);
     TensorIterator fill_log_beta_1d_iter_local(fill_log_beta_1d_iter);
 
-    for (int64_t b = start; b < end; b++) {
+    for (const auto b : c10::irange(start, end)) {
       scalar_t nll = neg_log_likelihood.accessor<scalar_t, 1>()[b];
       auto grad_a = grad_a_global[b];
       if (zero_infinity && nll == std::numeric_limits<scalar_t>::infinity()) {
@@ -322,8 +323,8 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
       // this could be a great target for further vectorization.
       // grad is the output gradient, nll is the loss. Note that the likelihood -nll is the Z of eq (16)
       scalar_t gr = grad_out.accessor<scalar_t, 1>()[b];
-      for (int64_t t = 0; t < input_length; t++) { // or go for the full thing?
-        for (int64_t c = 0; c < num_labels; c++) {
+      for (const auto t : c10::irange(input_length)) { // or go for the full thing?
+        for (const auto c : c10::irange(num_labels)) {
           scalar_t& res = grad_a[t][c];
           scalar_t lp = log_probs_a[t][c];
           res = (std::exp(lp)-std::exp(res + nll - lp)) * gr;
@@ -368,7 +369,9 @@ Tensor ctc_loss_backward_cpu(const Tensor& grad, const Tensor& log_probs, const 
 // this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
-Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  auto is_batched = log_probs_.dim() == 3;
+  Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =
       (log_probs.device().type() == at::kCUDA) &&
       at::_use_cudnn_ctc_loss(
@@ -400,7 +403,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef inpu
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
   }
-  return res;
+  return is_batched ? res : res.squeeze(0);
 }
 
 // Convenience function accepting Tensors

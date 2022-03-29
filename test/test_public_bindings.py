@@ -1,9 +1,10 @@
-from torch.testing._internal.common_utils import run_tests
+# Owner(s): ["module: autograd"]
+
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 import torch
-import unittest
 
-class TestPublicBindings(unittest.TestCase):
+class TestPublicBindings(TestCase):
     def test_no_new_bindings(self):
         """
         This test aims to stop the introduction of new JIT bindings into torch._C
@@ -172,6 +173,7 @@ class TestPublicBindings(unittest.TestCase):
             "QInt8StorageBase",
             "qscheme",
             "QUInt4x2StorageBase",
+            "QUInt2x4StorageBase",
             "QUInt8StorageBase",
             "read_vitals",
             "REMOVE_DROPOUT",

@@ -1,5 +1,6 @@
 #include "caffe2/operators/elementwise_ops.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
@@ -118,6 +119,9 @@ void device_reduce<at::Half>(
     int N,
     Tensor* buffer,
     CUDAContext* context) {
+  (void)N; // Suppress unused variable warning
+  (void)buffer; // Suppress unused variable warning
+  (void)context; // Suppress unused variable warning
 #if TORCH_HIP_VERSION >= 210
   auto buffer_size = 1;
 

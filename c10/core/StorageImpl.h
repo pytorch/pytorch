@@ -30,12 +30,12 @@ namespace c10 {
 // - Version counts won't work correctly, because we do all VC tracking at the
 //   level of storages (unless you explicitly disconnect the VC with detach);
 //   mutation because data pointers are the same are totally untracked
-struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
+struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  public:
   struct use_byte_size_t {};
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
+      use_byte_size_t /*use_byte_size*/,
       size_t size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
@@ -52,7 +52,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
   }
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
+      use_byte_size_t /*use_byte_size*/,
       size_t size_bytes,
       at::Allocator* allocator,
       bool resizable)
@@ -112,8 +112,9 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
 
   // Returns the previous data_ptr
   at::DataPtr set_data_ptr(at::DataPtr&& data_ptr) {
-    std::swap(data_ptr_, data_ptr);
-    return std::move(data_ptr);
+    at::DataPtr old_data_ptr(std::move(data_ptr_));
+    data_ptr_ = std::move(data_ptr);
+    return old_data_ptr;
   };
 
   void set_data_ptr_noswap(at::DataPtr&& data_ptr) {

@@ -41,6 +41,7 @@ def run_autogen() -> None:
             "aten/src/ATen",
             "-d",
             "build/aten/src/ATen",
+            "--per-operator-headers",
         ]
     )
 
@@ -48,12 +49,11 @@ def run_autogen() -> None:
         [
             sys.executable,
             "tools/setup_helpers/generate_code.py",
-            "--declarations-path",
-            "build/aten/src/ATen/Declarations.yaml",
             "--native-functions-path",
             "aten/src/ATen/native/native_functions.yaml",
             "--nn-path",
             "aten/src",
+            "--gen_lazy_ts_backend",
         ]
     )
 

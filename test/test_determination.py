@@ -1,15 +1,16 @@
+# Owner(s): ["module: ci"]
+
 import os
-import unittest
 
 import run_test
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class DummyOptions(object):
     verbose = False
 
 
-class DeterminationTest(unittest.TestCase):
+class DeterminationTest(TestCase):
     # Test determination on a subset of tests
     TESTS = [
         "test_nn",

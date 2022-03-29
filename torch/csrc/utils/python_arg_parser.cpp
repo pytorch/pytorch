@@ -79,8 +79,11 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
     "add", "add_", "add_out",
     "div", "div_", "div_out",
+    "divide", "divide_", "divide_out", // alias of div
     "mul", "mul_", "mul_out",
+    "multiply", "multiply_", "multiply_out", // alias of mul
     "sub", "sub_", "sub_out",
+    "subtract", "subtract_", "subtract_out", // alias of sub
     "true_divide", "true_divide_", "true_divide_out",
     "floor_divide", "floor_divide_", "floor_divide_out"
   };
@@ -293,12 +296,14 @@ auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* v
   }
   std::vector<py::handle> overridable_args;
   is_tensor_and_append_overloaded(self, &overridable_args);
-  Py_ssize_t size = PyTuple_GET_SIZE(index_tup.ptr());
-  for (Py_ssize_t i = 0; i < size; i++) {
-    PyObject *obj = PyTuple_GetItem(index_tup.ptr(), i);
+  auto  size = PyTuple_GET_SIZE(index_tup.ptr());
+  for (auto i : c10::irange(size)) {
+    auto *obj = PyTuple_GetItem(index_tup.ptr(), i);
     is_tensor_and_append_overloaded(obj, &overridable_args);
   }
-  if (val != nullptr) is_tensor_and_append_overloaded(val, &overridable_args);
+  if (val != nullptr) {
+    is_tensor_and_append_overloaded(val, &overridable_args);
+  }
   py::object func = PyObject_FastGetAttrString(THPVariableClass, (char *)func_name);
   py::object args = (val == nullptr) ? py::make_tuple(py::handle(self), py::handle(index)) : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
   return handle_torch_function_no_python_arg_parser(overridable_args, args.ptr(), nullptr, func_name, func.ptr(), "torch.Tensor");
@@ -462,9 +467,11 @@ static bool is_int_list(PyObject* obj, int broadcast_size) {
     }
     auto item = py::reinterpret_steal<py::object>(
         PySequence_GetItem(obj, 0));
-    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
-    // in an intlist argument. Even float or complex scalar tensors.
-    return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
+    return (
+      THPUtils_checkIndex(item.ptr()) ||
+      // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+      // in an intlist argument. Even float or complex scalar tensors.
+      (jit::tracer::isTracing() && THPVariable_Check(item.ptr())));
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
   return broadcast_size > 0 && THPUtils_checkLong(obj);
@@ -825,7 +832,7 @@ std::string FunctionSignature::toString() const {
 }
 
 [[noreturn]]
-static void extra_args(const FunctionSignature& signature, ssize_t nargs) {
+static void extra_args(const FunctionSignature& signature, Py_ssize_t nargs) {
   const long max_pos_args = signature.max_pos_args;
   const long min_args = signature.min_args;
   const long nargs_ = nargs;
@@ -862,8 +869,8 @@ static void missing_args(const FunctionSignature& signature, int idx) {
       ss.str().c_str());
 }
 
-static ssize_t find_param(FunctionSignature& signature, PyObject* name) {
-  ssize_t i = 0;
+static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
+  Py_ssize_t i = 0;
   for (auto& param : signature.params) {
     int cmp = PyObject_RichCompareBool(name, param.python_name, Py_EQ);
     if (cmp < 0) {
@@ -877,10 +884,10 @@ static ssize_t find_param(FunctionSignature& signature, PyObject* name) {
 }
 
 [[noreturn]]
-static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t num_pos_args) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *key, *value;
-  ssize_t pos = 0;
+static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, Py_ssize_t num_pos_args) {
+  PyObject *key = nullptr;
+  PyObject *value  = nullptr;
+  Py_ssize_t pos = 0;
 
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
@@ -906,8 +913,8 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
 bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* dst[],  // NOLINT
                               bool raise_exception) {
   auto nargs = args ? PyTuple_GET_SIZE(args) : 0;
-  ssize_t remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
-  ssize_t arg_pos = 0;
+  auto remaining_kwargs = kwargs ? PyDict_Size(kwargs) : 0;
+  Py_ssize_t arg_pos = 0;
   bool allow_varargs_intlist = false;
 
   // if there is a single positional IntArrayRef argument, i.e. expand(..), view(...),
@@ -1073,8 +1080,8 @@ PythonArgs PythonArgParser::raw_parse(PyObject* self, PyObject* args, PyObject* 
 void PythonArgParser::print_error(PyObject* self, PyObject* args, PyObject* kwargs, PyObject* parsed_args[]) {  // NOLINT
   // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
   auto num_args = PyTuple_GET_SIZE(args) + (kwargs ? PyDict_Size(kwargs) : 0);
-  std::vector<int> plausible_idxs;
-  ssize_t i = 0;
+  std::vector<unsigned> plausible_idxs;
+  unsigned i = 0;
   for (auto& signature : signatures_) {
     if (num_args >= signature.min_args && num_args <= signature.max_args && !signature.hidden) {
       plausible_idxs.push_back(i);
@@ -1141,7 +1148,7 @@ at::Scalar PythonArgs::scalar_slow(int i) {
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::NumberType::get());
+        signature.params[i].name, idx, var, c10::NumberType::get());
   }
 
   return scalar_slow(args[i]);

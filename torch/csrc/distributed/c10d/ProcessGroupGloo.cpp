@@ -190,6 +190,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -255,6 +259,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bor<T>);
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -755,6 +763,8 @@ ProcessGroupGloo::ProcessGroupGloo(
   for(const auto i : c10::irange(threads_.size())) {
     threads_[i] = std::thread(&ProcessGroupGloo::runLoop, this, i);
   }
+
+  init();
 }
 
 ProcessGroupGloo::~ProcessGroupGloo() {
@@ -1155,7 +1165,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Sanity check dimensionality across ranks.
     {
       const auto expected = metadata[context->rank].sizes();
-      for (auto i = 0; i < context->size; i++) {
+      for (const auto i : c10::irange(context->size)) {
         if (i == context->rank) {
           continue;
         }
@@ -1173,7 +1183,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     AT_ASSERT(static_cast<int>(values.size()) == context->size);
     auto output = at::sparse_coo_tensor(
         indices[0], values[0], input.sizes(), input.options());
-    for (auto i = 1; i < context->size; i++) {
+    for (const auto i : c10::irange(1, context->size)) {
       output += at::sparse_coo_tensor(
           indices[i], values[i], input.sizes(), input.options());
     }
@@ -1201,7 +1211,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Prepare metadata vector (1 entry per rank)
     std::vector<SparseTensorMetadata> metadata;
     metadata.reserve(context->size);
-    for (auto i = 0; i < context->size; i++) {
+    for (const auto i : c10::irange(context->size)) {
       metadata.emplace_back(buffer.select(0, i));
     }
 
@@ -2733,7 +2743,7 @@ void ProcessGroupGloo::monitoredBarrier(
           "Rank ",
           rank,
           " successfully reached monitoredBarrier, but received errors while waiting",
-          " to be unblocked by rank 0. Please check rank 0 logs for faulty rank.");
+          " for send/recv from rank 0. Please check rank 0 logs for faulty rank.");
       logAndThrow(
           error, c10::str(error, "\n Original exception: \n", e.what()));
     }
@@ -2772,7 +2782,7 @@ void ProcessGroupGloo::monitoredBarrier(
             rankResponded = true;
           } catch (const std::exception& e) {
             const std::string error = c10::str(
-                "Rank ",
+                "[Rank 0]: Rank ",
                 work.first,
                 " failed to pass monitoredBarrier in ",
                 monitoredBarrierTimeout.count(),
@@ -2806,7 +2816,7 @@ void ProcessGroupGloo::monitoredBarrier(
           TORCH_INTERNAL_ASSERT(!failedRanks.empty());
           const std::string ranksStr = c10::Join(", ", failedRanks);
           const std::string error = c10::str(
-              "Ranks ",
+              "[Rank 0]: Ranks ",
               ranksStr,
               " failed to pass monitoredBarrier in ",
               monitoredBarrierTimeout.count(),

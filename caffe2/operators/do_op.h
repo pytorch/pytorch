@@ -11,6 +11,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/create_scope_op.h"
 #include "caffe2/proto/caffe2_pb.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -46,7 +47,7 @@ class DoOp final : public Operator<Context> {
 
     const auto& outer_blob_names = checkAndGetOuterNames(operator_def);
     std::unordered_set<std::string> used_outer_names;
-    for (size_t blob_idx = 0; blob_idx < inner_blobs.size(); ++blob_idx) {
+    for (const auto blob_idx : c10::irange(inner_blobs.size())) {
       CAFFE_ENFORCE(
           !blob_bindings_.count(inner_blobs[blob_idx]),
           "Invalid blob bindings: redefinition of inner blob " +
@@ -154,7 +155,7 @@ class DoOp final : public Operator<Context> {
       const OperatorDef& operator_def) const {
     std::vector<std::string> names;
     names.reserve(operator_def.input_size());
-    for (auto idx = 0; idx < operator_def.input_size(); ++idx) {
+    for (const auto idx : c10::irange(operator_def.input_size())) {
       names.push_back(operator_def.input(idx));
     }
     return names;
@@ -164,7 +165,7 @@ class DoOp final : public Operator<Context> {
       const OperatorDef& operator_def) const {
     std::vector<std::string> names;
     names.reserve(operator_def.output_size());
-    for (auto idx = 0; idx < operator_def.output_size(); ++idx) {
+    for (const auto idx : c10::irange(operator_def.output_size())) {
       names.push_back(operator_def.output(idx));
     }
     return names;

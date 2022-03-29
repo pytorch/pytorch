@@ -2,14 +2,25 @@
 
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
+#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+struct SmallSizeTPairHash {
+ public:
+  std::size_t operator()(const std::pair<size_t, size_t>& x) const {
+    // hashing input index and then dim index
+    return x.first * 128 + x.second;
+  }
+};
 
 // Returns true if the TE fuser supports this conv2d.
 bool conv2dIsSupportedJit(const Node* node);
@@ -23,35 +34,6 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
-
-enum ElementType {
-  kAllTypes = 0,
-  kIntegralTypes = 1 << 0,
-  kFloatingPointTypes = 1 << 1,
-  kBoolType = 1 << 2,
-  kComplexTypes = 1 << 3,
-  kQintTypes = 1 << 4,
-  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
-};
-
-using ArgNone = c10::monostate;
-using BufList = std::vector<tensorexpr::BufHandle>;
-using IntList = std::vector<int64_t>;
-using ArgValue = c10::variant<
-    tensorexpr::BufHandle,
-    tensorexpr::VarHandle,
-    double,
-    int64_t,
-    bool,
-    BufList,
-    IntList,
-    ArgNone>;
-
-using NNCLoweringFunction = std::function<Tensor(
-    const std::vector<ArgValue>&,
-    const std::vector<ExprHandle>&,
-    const c10::optional<ScalarType>&,
-    at::Device)>;
 
 // Get the dimensions of a value.
 std::vector<ExprHandle> valueShape(const ArgValue& v);
@@ -72,18 +54,6 @@ std::vector<ExprHandle> computeIndicesToBroadcast(
     const std::vector<ExprHandle>& outputAxes,
     const std::vector<ExprHandle>& inputSizes);
 
-void promoteInputs(
-    std::vector<ExprHandle>& inputs,
-    const int typeConstraints = kAllTypes);
-
-ExprHandle promoteToDtype(ExprHandle e, ScalarType dt);
-
-ExprHandle promoteIntegerToDefaultType(const ExprHandle& e);
-
-ExprHandle demoteOutput(
-    const ExprHandle& e,
-    const c10::optional<ScalarType> type);
-
 inline std::string getArgValueName(const ArgValue& a) {
   if (c10::get_if<tensorexpr::BufHandle>(&a)) {
     return "BufHandle";
@@ -97,6 +67,8 @@ inline std::string getArgValueName(const ArgValue& a) {
     return "bool";
   } else if (c10::get_if<BufList>(&a)) {
     return "BufList";
+  } else if (c10::get_if<DoubleList>(&a)) {
+    return "DoubleList";
   } else if (c10::get_if<IntList>(&a)) {
     return "IntList";
   } else if (c10::get_if<ArgNone>(&a)) {
@@ -122,39 +94,70 @@ std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   return res;
 }
 
-struct TensorInfo {
-  std::vector<int64_t> dims;
-  c10::ScalarType dtype;
-};
-
-TORCH_API Tensor computeOperandValue(
-    c10::Symbol op,
-    const std::vector<ArgValue>& inputs,
-    const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType,
-    at::Device = at::kCPU);
-
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
     BufPtr buf;
-    void* ptr;
+    // Only one of ptr and node is used at a time
+    // 1) ptr for the constant tensors
+    // 2) node for the constant custom class ojects
+    void* ptr = nullptr;
+    Node* node = nullptr;
   };
 
  public:
+  // Constructor Params:
+  //  * subgraph
+  //      - the graph that needs to be compiled.
+  //  * kernel_func_name
+  //      - the name that should be used for the generated kernel.
+  //  * custom_lowerings
+  //      - map that represents custom lowering definitions for a set of ops.
+  //  * symbolic_shape_inputs
+  //      - a list of symbolic graph inputs that represent the symbolic dims of
+  //        the input tensors.
+  //  * pre_alloc
+  //      - a flag to control pre-allocation of buffers.
+  explicit TensorExprKernel(
+      const std::shared_ptr<Graph>& subgraph,
+      const std::string& kernel_func_name,
+      std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
+          {},
+      std::vector<int64_t> symbolic_shape_inputs = {},
+      bool pre_alloc = false,
+      std::unordered_map<
+          const torch::jit::Value*,
+          std::vector<torch::jit::StrideInput>> symbolic_strides = {});
+
   explicit TensorExprKernel(
       const std::shared_ptr<Graph>& subgraph,
       std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
           {},
-      bool pre_alloc = false);
+      std::vector<int64_t> symbolic_shape_inputs = {},
+      bool pre_alloc = false,
+      std::unordered_map<
+          const torch::jit::Value*,
+          std::vector<torch::jit::StrideInput>> symbolic_strides = {})
+      : TensorExprKernel(
+            subgraph,
+            SubgraphUtils::generateNameForGraph(subgraph),
+            custom_lowerings,
+            symbolic_shape_inputs,
+            pre_alloc,
+            symbolic_strides) {}
 
-  void run(Stack& stack);
+  void run(Stack& stack) const;
   void runFast(
       const std::vector<void*>& inputs,
-      const std::vector<void*>& outputs);
+      const std::vector<void*>& outputs) const;
+  // Expected format of stack:
+  //  ... <outputs> <inputs>
+  // i.e., output IValues must be below the input IValues in the stack.
+  void runWithAllocatedOutputs(Stack& stack) const;
 
-  void fallback(Stack& stack) {
+  void fallback(Stack& stack) const {
     InterpreterState(code_).run(stack);
   }
+  void recompile();
 
   StmtPtr getCodeGenStmt();
 
@@ -174,6 +177,14 @@ class TORCH_API TensorExprKernel {
     return bufferArgs_;
   }
 
+  const std::string& getKernelName() const {
+    return codegen_->kernel_func_name();
+  }
+
+  const std::vector<int64_t>& getSymbolicShapeInputs() const {
+    return symbolic_shape_inputs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -185,13 +196,9 @@ class TORCH_API TensorExprKernel {
 
   void compile();
   void genInputDebugNames();
-  void runKernel(Stack& stack);
+  void runKernel(Stack& stack) const;
 
-  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
-  std::vector<ExprHandle> inferSizesForValue(const torch::jit::Value* v);
-  std::vector<ExprHandle> sizesFromVaryingShape(
-      const c10::VaryingShape<int64_t>& shape);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
   std::vector<ExprHandle> broadcastShapesMut(
@@ -200,19 +207,8 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> broadcastShapesMut(
       std::vector<std::vector<ExprHandle>> shapes);
 
-  ExprHandle chunk(
-      BufPtr b,
-      size_t chunkIdx,
-      int64_t dim,
-      int64_t chunks,
-      const std::vector<ExprHandle>& axes);
-
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);
-
-  ExprHandle tensorOrConstant(
-      const torch::jit::Value* v,
-      const std::vector<ExprHandle>& axes);
 
   Tensor computeValue(const torch::jit::Value* v);
 
@@ -222,23 +218,26 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
+  void getStaticOutputSizesAndStrides(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<std::vector<int64_t>>* static_sizes,
+      std::vector<std::vector<int64_t>>* static_strides) const;
+
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
-      std::vector<at::Tensor>& outputs);
+      std::vector<at::Tensor>& outputs) const;
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   Tensor bindInput(const torch::jit::Value* input);
+  BlockPtr bindAllInputs();
 
-  Tensor convertOutputToCorrectStrides(torch::jit::Value* v);
-
-  // Captures the information for reduction operation nodes.
-  struct ReductionInfo {
-    std::vector<DimArg> reductionDims;
-    std::vector<DimArg> outputDims;
-    std::vector<size_t> axes;
-    bool keepdim;
-    c10::optional<Dtype> dtype;
-  };
+  Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
+  Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
+  Tensor convertSymbolicOutputToCorrectStrides(
+      const std::vector<ExprHandle>& sizes,
+      const std::vector<size_t>& sorted_stride_indices_descending,
+      const std::vector<ExprPtr>& strides,
+      BufPtr& buf);
 
   NNCLoweringFunction getCustomLoweringFor(c10::Symbol op) const;
   std::unordered_map<c10::Symbol, NNCLoweringFunction> getCustomLowerings()
@@ -250,9 +249,9 @@ class TORCH_API TensorExprKernel {
   // Specifically, we pre-allocate memory for intermediate buffers with static
   // size and manage these buffers in the way we manage JIT constant tensors:
   // push the buf args into the stack so NNC IR can access them at runtime.
-  void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
+  std::vector<BufPtr> preAllocIntermediateBufs(
+      const std::vector<BufPtr>& interm_bufs);
 
- private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
     c10::optional<c10::Layout> layout;
@@ -266,10 +265,25 @@ class TORCH_API TensorExprKernel {
           pinned_memory(opts.pinned_memory_opt()) {}
   };
 
+  ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
+  std::vector<ExprHandle> computeInputTensorDims(
+      const torch::jit::Value* input);
+  ExprHandle getStrideArg(size_t tensor_input, size_t stride_index);
+  std::vector<ExprHandle> sizesFromSymbolicShape(
+      const c10::SymbolicShape& shape);
+  std::vector<ExprHandle> getInputStrides(
+      const torch::jit::Value* input,
+      const std::vector<ExprHandle>& inputTensorDims);
+  std::vector<torch::jit::StrideInput>& getSymbolicInputStrideDesc(
+      const torch::jit::Value* value);
+
   int64_t nInputs_ = 0;
+  int64_t nOutputs_ = 0;
   std::vector<CodeGen::BufferArg> bufferArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
+  std::vector<torch::jit::StrideInput> tensorOutputStrideDesc_;
+  std::vector<bool> isOutputScalar_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
@@ -286,11 +300,33 @@ class TORCH_API TensorExprKernel {
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
       known_sizes_;
 
+  std::vector<std::vector<ExprHandle>> tensorOutputSymbolicSizes_;
+  // A map from ShapeSymbol.value() to the corresponding Var.
+  std::unordered_map<int64_t, VarHandle> shapeSymbolToVar_;
+  std::unordered_map<ExprPtr, size_t> shapeSymbolInputPos_;
+  // List of values corresponding to the ShapeSymbols that are inputs to
+  // kernel being compiled. The order of these values correspond to the order
+  // of the symbolic inputs at the end of the list of inputs to the kernel.
+  std::vector<int64_t> symbolic_shape_inputs_;
+  bool has_symbolic_shapes_{false};
+
   std::vector<at::Tensor> unpacked_constant_tensors_;
   std::vector<ConstantDescr> constants_;
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
+  StmtPtr stmt_ = nullptr;
   bool pre_alloc_{false};
+  std::string kernel_func_name_;
+
+  // index of stack, stride index of tensor that will be appended as a codegen
+  // arg
+  std::vector<std::pair<size_t, size_t>> input_stride_args_;
+  // map from <input index, tensor dimension> to stride as arg VarHandle
+  std::unordered_map<std::pair<size_t, size_t>, VarHandle, SmallSizeTPairHash>
+      strideArgToVar_;
+  std::unordered_map<size_t, std::vector<torch::jit::StrideInput>>
+      sym_stride_inputs_;
+  std::unordered_map<size_t, torch::jit::StrideInput> sym_stride_outputs_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

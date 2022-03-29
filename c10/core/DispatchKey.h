@@ -21,7 +21,6 @@ namespace c10 {
 //
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
-
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // This is not a "real" tensor id, but it exists to give us a "nullopt"
   // element we can return for cases when a DispatchKeySet contains no elements.
@@ -140,7 +139,6 @@ enum class DispatchKey : uint8_t {
   BackendSelect,
 
   Python,
-  FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -165,6 +163,8 @@ enum class DispatchKey : uint8_t {
   // negation
   // This is implemented at a dispatch level right before any backends run
   Negative,
+
+  ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -207,7 +207,6 @@ enum class DispatchKey : uint8_t {
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
   ADInplaceOrView,
-
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends. It inspects the autograd
@@ -275,6 +274,20 @@ enum class DispatchKey : uint8_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+  // Alias and mutation removal.
+  // If some backends want to opt into only alias removal or only mutation
+  // removal,
+  // we can consider adding separate keys dedicated to those individual passes.
+  // See Note [Functionalization Pass In Core] for details.
+  Functionalize,
+
+  // Used by Python key logic to know the set of tls on entry to the dispatcher
+  // This kernel assumes it is the top-most non-functorch-related DispatchKey.
+  // If you add a key above, make sure to update the fallback implementation for
+  // this.
+  PythonTLSSnapshot,
+
+  // This key should be at the very top of the dispatcher
   FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
@@ -355,13 +368,58 @@ enum class DispatchKey : uint8_t {
 // built-in autograd formulas for operators are not appropriate.
 
 static_assert(
-    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
+    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) <= 64,
     "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
+
+#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
+/**
+ * The method below maps the dispatch key in the enum DispatchKey to an
+ * integer index in the dispatchTable_ array in OperatorEntry. The array
+ * is trimmed for mobile to reduce peak memory usage since it's
+ * unnecessary to reserve additional space for dispatch keys that will
+ * never be used on mobile.
+ */
+C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
+  switch (dk) {
+    case DispatchKey::Undefined:
+      return 0;
+    case DispatchKey::CPU:
+      return 1;
+    case DispatchKey::QuantizedCPU:
+      return 2;
+    case DispatchKey::SparseCPU:
+      return 3;
+    case DispatchKey::BackendSelect:
+      return 4;
+    case DispatchKey::ADInplaceOrView:
+      return 5;
+    case DispatchKey::AutogradOther:
+      return 6;
+    case DispatchKey::AutogradCPU:
+      return 7;
+    case DispatchKey::NumDispatchKeys: // Sentinel, end of runtime keys.
+      return 8;
+    default:
+      return -1;
+  }
+}
+#else
+/**
+ * For the server use-case, make this a simple pass-through.
+ */
+C10_API constexpr int getDispatchTableIndexForDispatchKey(DispatchKey dk) {
+  return static_cast<int>(dk);
+}
+#endif
 
 C10_API const char* toString(DispatchKey);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
 
 C10_API DispatchKey getAutogradKeyFromBackend(DispatchKey t);
+
+// Parses a string into a dispatch key.
+// If the string cannot be correctly parsed, throws an exception.
+C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 
 // These are some convenience identifiers for dispatch keys which are
 // shorter to type than their long counterparts.  Note that some of these

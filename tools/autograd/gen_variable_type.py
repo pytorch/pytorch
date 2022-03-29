@@ -39,7 +39,8 @@ from .gen_inplace_or_view_type import (
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
-                                     ListCType, SpecialArgName, scalarT, stringT)
+                                     ListCType, SpecialArgName, scalarT, stringT,
+                                     VectorCType)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -47,8 +48,7 @@ from tools.codegen.api.autograd import (
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
@@ -77,25 +77,27 @@ DONT_REQUIRE_DERIVATIVE = {
     'isnan', 'isposinf', 'isneginf', 'isinf', 'signbit', 'isin',
     # Functions return none are not differentiable
     'record_stream',
+    # These functions are not differentiable
+    'logical_and', 'logical_xor', 'logical_not', 'logical_or',
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
 # but will not error out.
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
-    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
+    't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone', 'diag_embed',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
     'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
     '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
-    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
-    'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex', 'index_put',
+    'neg', 'complex', 'select', 'where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'outer',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
     'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'matrix_exp', 'linalg_matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_linalg_svd', '_fft_c2c', '_fft_r2c',
     'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv', 'linalg_inv_ex',
     'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr', 'linalg_householder_product',
     'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d', 'reflection_pad3d', 'linalg_cholesky_ex', 'linalg_eig',
@@ -103,15 +105,16 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'reflection_pad1d_backward', 'reflection_pad2d_backward', 'reflection_pad3d_backward', 'symeig', '_sparse_sparse_matmul',
     'replication_pad1d', 'replication_pad2d', 'replication_pad3d', 'take', 'put_', '_to_copy',
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
-    'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
+    'diag', 'masked_scatter', 'masked_select', 'index_add', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical', 'linalg_lu_factor_ex',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
-    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
+    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
+    'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
-    'to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
+    '_to_dense', '_coalesce', 'coalesce', 'values', '_sparse_coo_tensor_with_dims_and_tensors',
     'sparse_mask_helper_cuda', '_sparse_addmm',
 }
 
@@ -240,7 +243,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     # These non-view functions return tensors with storage use_count != 1
-    'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
+    '_slow_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
 
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
@@ -318,7 +321,9 @@ isFwGradDefined(${req_inp})\
 
 FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE = CodeTemplate("""\
 auto ${inp}_t_raw = toNonOptFwGrad(${inp});
-auto ${inp}_t = ${inp}_t_raw.defined() ? ${inp}_t_raw : at::zeros_like(toNonOptTensor(${inp}));
+auto ${inp}_tensor = toNonOptTensor(${inp});
+auto ${inp}_t = (${inp}_t_raw.defined() || !${inp}_tensor.defined())
+  ? ${inp}_t_raw : at::${zeros_fn}(${inp}_tensor.sizes(), ${inp}_tensor.options());
 """)
 
 FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE = CodeTemplate("""\
@@ -326,27 +331,30 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 """)
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate("""\
-if (${out_arg}_new_fw_grad.defined()) {
+if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
-  ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad, /* level */ 0, /* is_inplace_op */ ${is_inplace});
+  ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad_opt.value(), /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
 """)
 
 FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate("""\
-TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
-for (auto i=0; i<${out_arg}.size(); ++i) {
-  if (${out_arg}_new_fw_grad[i].defined()) {
-  // The hardcoded 0 here will need to be updated once we support multiple levels.
-    ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
+if (${out_arg}_new_fw_grad_opt.has_value()) {
+  auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
+  TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
+  for (auto i=0; i<${out_arg}.size(); ++i) {
+    if (${out_arg}_new_fw_grad[i].defined()) {
+      // The hardcoded 0 here will need to be updated once we support multiple levels.
+      ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
+    }
   }
 }
 """)
 
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
+${fw_grad_opt_definition}
 if (${requires_fw_grad}) {
     ${unpacked_arguments}
-    auto ${out_arg}_new_fw_grad = ${formula};
-    ${fw_grad_setter}
+    ${out_arg}_new_fw_grad_opt = ${formula};
 }
 """)
 
@@ -472,7 +480,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     is_out_fn = f.func.kind() == SchemaKind.out
     returns_void = len(f.func.returns) == 0
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -516,8 +524,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     undifferentiable = (base_name in DONT_REQUIRE_DERIVATIVE) or (name in DONT_REQUIRE_DERIVATIVE)
 
     requires_derivative = (not undifferentiable) and (len(differentiable_inputs) > 0) and (len(differentiable_outputs) > 0)
-
-    requires_fw_derivatives = not undifferentiable and len(fw_derivatives) > 0
 
     if info is not None and info.has_derivatives and not requires_derivative:
         raise RuntimeError(f'ERROR: derivative ignored for {name} -- specified an autograd function without derivative')
@@ -812,7 +818,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
-        if get_view_info(fn) is not None or modifies_arguments(f):
+        if get_view_info(f) is not None or modifies_arguments(f):
             guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
             guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
@@ -892,6 +898,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     def emit_fw_derivatives() -> List[str]:
         content: List[str] = []
+        fw_grad_setters: List[str] = []
         for derivative in fw_derivatives:
             res = derivative.var_name
             if f.func.name.name.inplace:
@@ -902,12 +909,13 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
             unpacked_arguments = ""
             for inp in differentiable_inputs:
+                zeros_fn = "zeros" if inplace and inp.name == "self" else "_efficientzerotensor"
                 if inp.name in derivative.required_inputs_fw_grad:
-                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
+                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name, zeros_fn=zeros_fn)
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
             if derivative.required_original_self_value:
-                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp="original_self")
+                unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp="original_self", zeros_fn=zeros_fn)
                 unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp="original_self")
             elif inplace and derivative.is_reusing_outplace_formula:
                 # The gradient wasn't already cloned, do it if grad mode is enabled
@@ -919,15 +927,26 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 is_inplace_str = "false"
 
             if isinstance(derivative.var_type, BaseType) and derivative.var_type.is_tensor_like():
+                # Is there a way to get from BaseType to BaseCType
+                opt_res_grad_type = OptionalCType(BaseCType(tensorT)).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res, is_inplace=is_inplace_str)
             elif isinstance(derivative.var_type, ListType) and derivative.var_type.is_tensor_like():
+                opt_res_grad_type = OptionalCType(VectorCType(BaseCType(tensorT))).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR_LIST.substitute(out_arg=res, is_inplace=is_inplace_str)
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
+
+            fw_grad_opt_definition = f"{opt_res_grad_type} {res}_new_fw_grad_opt = c10::nullopt;"
+
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(
+                fw_grad_opt_definition=fw_grad_opt_definition,
                 requires_fw_grad=get_any_has_forward_grad_name(derivative.var_name), formula=derivative.formula, out_arg=res,
-                unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
+                unpacked_arguments=unpacked_arguments))
+            fw_grad_setters.append(fw_grad_setter)
+
+        # Set all the grads at the end to avoid: https://github.com/pytorch/pytorch/issues/67367
+        content.append('\n'.join(fw_grad_setters))
         return content
 
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
@@ -976,10 +995,17 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     if is_out_fn:
         body.append(emit_forbid_fw_derivatives(is_out_fn=True))
     else:
-        if requires_fw_derivatives:
+        if requires_derivative:
             body.extend(emit_fw_derivatives())
-        else:
-            body.append(emit_forbid_fw_derivatives())
+            if len(fw_derivatives) == 0:
+                body.append(emit_forbid_fw_derivatives())
+            else:
+                assert len(fw_derivatives) == len(differentiable_outputs), (
+                    "Expected the number of forward derivatives implemented to match the "
+                    "number of differentiable outputs. NB: This only applies when at least "
+                    "one forward derivative is implemented. Not implementing any forward "
+                    "derivatives is also okay, and we would require inputs to the op to "
+                    "not have associated tangents in that case.")
 
     if requires_derivative:
         # Save only after the forward AD has been set up

@@ -527,4 +527,16 @@ inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarT
   return torch::special_log_softmax(self, dim, dtype);
 }
 
+/// Computes softmax of the input along a given dimension
+/// See https://pytorch.org/docs/master/special.html#torch.special.softmax.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, 128, dtype=kDouble);
+/// torch::special::softmax(t, 0);
+/// ```
+inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  return torch::special_softmax(self, dim, dtype);
+}
+
 }} // torch::special

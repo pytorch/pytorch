@@ -36,11 +36,21 @@ class SelectiveBuilder:
     # of the kernel function implementation itself.
     kernel_metadata: Dict[str, List[str]]
 
+    # A set of all the custom torch bind classes used by the selected models
+    # Stored as a set internally to remove duplicates proactively, but written
+    # as a list to yamls
+    custom_classes: Set[str]
+
+    # A set of all the build features used by the selected models
+    # Stored as a set internally to remove duplicates proactively, but written
+    # as a list to yamls
+    build_features: Set[str]
+
     # If true, then fragments for all dtypes for all kernel functions
-    # are included. This is typically set when any one of the
+    # are included as well as all custom classes. This is typically set when any one of the
     # operator lists is generated from a mechanism other than
     # tracing based selective build.
-    include_all_kernel_dtypes: bool
+    include_all_non_op_selectives: bool
 
     @staticmethod
     def get_nop_selector() -> 'SelectiveBuilder':
@@ -49,11 +59,13 @@ class SelectiveBuilder:
     @staticmethod
     def from_yaml_dict(data: Dict[str, object]) -> 'SelectiveBuilder':
         valid_top_level_keys = {
-            'include_all_kernel_dtypes',
+            'include_all_non_op_selectives',
             'include_all_operators',
             'debug_info',
             'operators',
             'kernel_metadata',
+            'custom_classes',
+            'build_features',
         }
         top_level_keys = set(data.keys())
         if len(top_level_keys - valid_top_level_keys) > 0:
@@ -84,15 +96,23 @@ class SelectiveBuilder:
         for (k, v) in kernel_metadata_dict.items():
             kernel_metadata[str(k)] = list(map(lambda dtype: str(dtype), v))
 
-        include_all_kernel_dtypes = data.get('include_all_kernel_dtypes', False)
-        assert isinstance(include_all_kernel_dtypes, bool)
+        custom_classes = data.get('custom_classes', [])
+        custom_classes = set(custom_classes)  # type: ignore[arg-type]
+
+        build_features = data.get('build_features', [])
+        build_features = set(build_features)  # type: ignore[arg-type]
+
+        include_all_non_op_selectives = data.get('include_all_non_op_selectives', False)
+        assert isinstance(include_all_non_op_selectives, bool)
 
         return SelectiveBuilder(
             include_all_operators,
             debug_info,
             operators,
             kernel_metadata,
-            include_all_kernel_dtypes,
+            custom_classes,  # type: ignore[arg-type]
+            build_features,  # type: ignore[arg-type]
+            include_all_non_op_selectives,
         )
 
     @staticmethod
@@ -121,7 +141,7 @@ class SelectiveBuilder:
             }
         return SelectiveBuilder.from_yaml_dict({
             'operators': operators,
-            'include_all_kernel_dtypes': True,
+            'include_all_non_op_selectives': True,
         })
 
     def is_operator_selected(self, name: str) -> bool:
@@ -184,14 +204,14 @@ class SelectiveBuilder:
         return base_op.include_all_overloads and base_op.is_root_operator
 
     def is_kernel_dtype_selected(self, kernel_tag: str, dtype: str) -> bool:
-        if self.include_all_operators or self.include_all_kernel_dtypes:
+        if self.include_all_operators or self.include_all_non_op_selectives:
             return True
 
         return kernel_tag in self.kernel_metadata and dtype in self.kernel_metadata[kernel_tag]
 
     def to_dict(self) -> Dict[str, object]:
         ret: Dict[str, object] = {
-            'include_all_kernel_dtypes': self.include_all_kernel_dtypes,
+            'include_all_non_op_selectives': self.include_all_non_op_selectives,
             'include_all_operators': self.include_all_operators,
         }
         operators = {}
@@ -203,6 +223,10 @@ class SelectiveBuilder:
             ret['debug_info'] = sorted(self._debug_info)
 
         ret['kernel_metadata'] = {k: sorted(list(v)) for (k, v) in self.kernel_metadata.items()}
+
+        ret['custom_classes'] = sorted(self.custom_classes)
+
+        ret['build_features'] = sorted(self.build_features)
 
         return ret
 
@@ -226,13 +250,17 @@ def combine_selective_builders(lhs: SelectiveBuilder, rhs: SelectiveBuilder) -> 
     debug_info = merge_debug_info(lhs._debug_info, rhs._debug_info)
     operators = merge_operator_dicts(lhs.operators, rhs.operators)
     kernel_metadata = merge_kernel_metadata(lhs.kernel_metadata, rhs.kernel_metadata)
-    include_all_kernel_dtypes = lhs.include_all_kernel_dtypes or rhs.include_all_kernel_dtypes
+    include_all_non_op_selectives = lhs.include_all_non_op_selectives or rhs.include_all_non_op_selectives
+    custom_classes = lhs.custom_classes.union(rhs.custom_classes)
+    build_features = lhs.build_features.union(rhs.build_features)
     return SelectiveBuilder(
         include_all_operators,
         debug_info,
         operators,
         kernel_metadata,
-        include_all_kernel_dtypes,
+        custom_classes,
+        build_features,
+        include_all_non_op_selectives,
     )
 
 

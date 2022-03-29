@@ -63,6 +63,52 @@ TORCH_API void annotateInputShapes(
     const std::vector<c10::optional<at::Tensor>>& example_inputs);
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
+TORCH_API std::shared_ptr<Graph> removeGraphOutput(
+    const std::shared_ptr<Graph>& graph,
+    size_t idx);
+TORCH_API std::shared_ptr<Graph> replaceListOutputWithTuple(
+    const std::shared_ptr<Graph>& graph);
+
+// Perform \p ITERS rounds of "trimming" for the given \p GRAPH.
+//
+// Trimming means that we try to remove a small portion of the graph while
+// keeping it valid. This is useful for debugging when we try to find a minimal
+// example reproducing the issue at hand. When ITERS is 0, the graph remains
+// unchanged, when ITERS is a big number, the graph usually becomes empty.
+TORCH_API std::shared_ptr<Graph> trimGraph(
+    const std::shared_ptr<Graph>& graph,
+    int64_t iters);
+
+// Scan all values in the given graph and replace each dimension with a size Xi
+// present in \p SIZES with a symbolic shape Yi. Return a vector of symbol
+// values [Y0, Y1, .., Yn].
+//
+// For example:
+// Input:
+// graph(%x : Float(10, 20, 30, 40)):
+//   %y : Float(10, 20, 30, 40) = aten::relu(%x)
+//   return %y
+//
+// If we run makeShapesSymbolic(graph, {20, 40}), then we'll get:
+//
+// graph(%x : Float(10, SS(-3), 30, SS(-5))):
+//   %y : Float(10, SS(-3), 30, SS(-5)) = aten::relu(%x)
+//   return %y
+//
+// and get {-3, -5} as the return value.
+TORCH_API std::vector<int64_t> makeShapesSymbolic(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<int64_t>& sizes);
+
+// Inspect the graph and report whether it can be converted to TE IR.
+// TODO: add error reporting for graphs that can't be converted.
+TORCH_API bool isGraphCompilable(const std::shared_ptr<Graph>& graph);
+
+// Examine the graph and (hackily) fill in missing tensor type info, such as
+// scalar type, device, and strides. Ideally, this should be done by a proper
+// dtype/device/shape propagation passes, but until they are ready we can use
+// this, not always correct, workaround pass.
+TORCH_API void fixupMissingShapeInfo(const std::shared_ptr<Graph>& graph);
 
 } // namespace tensorexpr
 } // namespace jit

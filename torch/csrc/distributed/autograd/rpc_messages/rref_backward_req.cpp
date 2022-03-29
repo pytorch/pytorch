@@ -46,7 +46,7 @@ std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  const auto& tupleElements = std::move(*std::move(tuple).toTuple()).elements();
 
   // Build RRefBackwardReq.
   TORCH_INTERNAL_ASSERT(tupleElements.size() == 3);

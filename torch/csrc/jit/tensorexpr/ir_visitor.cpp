@@ -104,6 +104,12 @@ void IRVisitor::visit(LoadPtr v) {
 
 void IRVisitor::visit(BufPtr v) {
   v->base_handle()->accept(this);
+  if (v->qscale()) {
+    v->qscale()->accept(this);
+  }
+  if (v->qzero()) {
+    v->qzero()->accept(this);
+  }
 }
 
 void IRVisitor::visit(StorePtr v) {
@@ -131,6 +137,24 @@ void IRVisitor::visit(ExternalCallPtr v) {
   }
   for (ExprPtr arg : v->args()) {
     arg->accept(this);
+  }
+}
+
+void IRVisitor::visit(ExternalCallWithAllocPtr v) {
+  for (const auto& buf_out_arg : v->buf_out_args()) {
+    buf_out_arg->accept(this);
+  }
+  for (const auto& buf_arg : v->buf_args()) {
+    buf_arg->accept(this);
+  }
+  for (const auto& arg : v->args()) {
+    arg->accept(this);
+  }
+}
+
+void IRVisitor::visit(FreeExtPtr v) {
+  for (const auto& buf : v->bufs()) {
+    buf->accept(this);
   }
 }
 
@@ -175,6 +199,11 @@ void IRVisitor::visit(AllocatePtr v) {
 
 void IRVisitor::visit(FreePtr v) {
   v->buffer_var()->accept(this);
+}
+
+void IRVisitor::visit(PlacementAllocatePtr v) {
+  v->buf()->accept(this);
+  v->buf_to_reuse()->accept(this);
 }
 
 void IRVisitor::visit(LetPtr v) {

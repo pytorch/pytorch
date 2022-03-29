@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 import torch
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -9,6 +10,7 @@ import torch.onnx.utils
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
+from torch.onnx.symbolic_opset9 import linear, conv2d, add, mul, hardswish, relu
 
 from sys import maxsize
 
@@ -166,7 +168,7 @@ upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
 upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor, antialias):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Resize", input, scales, mode_s=mode)
@@ -205,23 +207,23 @@ def slice(g, self, *args):
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
-    is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
-    is_start_onnx_const = start.node().kind() == 'onnx::Constant'
-    is_end_onnx_const = end.node().kind() == 'onnx::Constant'
-    step = sym_help._parse_arg(step, 'i')
+    is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_start_onnx_const = start.node().kind() == "onnx::Constant"
+    is_end_onnx_const = end.node().kind() == "onnx::Constant"
+    step = sym_help._parse_arg(step, "i")
     if (not is_start_none and not is_start_onnx_const) or \
        (not isinstance(end, int) and not is_end_none and not is_end_onnx_const) or \
-       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant'):
+       (not isinstance(dim, int) and dim.node().kind() != "onnx::Constant"):
         dynamic_slice = True
         if is_start_none:
             start = g.op("Constant", value_t=torch.tensor(0))
         if is_end_none:
             end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
     else:
-        start = [0 if is_start_none else sym_help._parse_arg(start, 'i')]
-        end = [9223372036854775807 if is_end_none else sym_help._parse_arg(end, 'i')]
-        dim = [sym_help._parse_arg(dim, 'i')]
+        start = [0 if is_start_none else sym_help._parse_arg(start, "i")]
+        end = [9223372036854775807 if is_end_none else sym_help._parse_arg(end, "i")]
+        dim = [sym_help._parse_arg(dim, "i")]
         dynamic_slice = False
     return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
 
@@ -307,6 +309,128 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
     zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
 
+
 def isinf(g, input):
     from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
     return g.op("IsInf", _cast_Double(g, input, False))
+
+
+def isfinite(g, input):
+    from torch.onnx.symbolic_opset9 import isnan, __not_, __or_
+    inf_node = isinf(g, input)
+    nan_node = isnan(g, input)
+    return __not_(g, __or_(g, inf_node, nan_node))
+
+
+def quantize_per_tensor(g, input, scale, zero_point, dtype):
+    dtype = sym_help._get_const(dtype, "i", "dtype")
+    zero_point = g.op("Cast", zero_point, to_i=sym_help.scalar_type_to_onnx[dtype])
+    scale = g.op("Cast", scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+    return sym_help.quantize_helper(g, input, scale, zero_point)
+
+
+def dequantize(g, input):
+    return sym_help.dequantize_helper(g, input)[0]
+
+
+@parse_args("v", "f", "f", "f")
+def nan_to_num(g, input, nan, posinf, neginf):
+    from torch.onnx.symbolic_opset9 import isnan, lt, gt, logical_and
+
+    # Cannot create a int type tensor with inf/nan values, so we simply
+    # return the original tensor
+    if not sym_help._is_fp(input):
+        return input
+    input_dtype = sym_help.pytorch_name_to_type[input.type().scalarType()]
+    if nan is None:
+        nan = 0.0
+    nan_cond = isnan(g, input)
+    nan_result = g.op("Where", nan_cond,
+                      g.op("Constant", value_t=torch.tensor([nan], dtype=input_dtype)), input)
+
+    # For None values of posinf, neginf we use the greatest/lowest finite
+    # value representable by input’s dtype.
+    finfo = torch.finfo(input_dtype)
+    if posinf is None:
+        posinf = finfo.max
+    posinf_cond = logical_and(g, isinf(g, nan_result),
+                              gt(g, nan_result, g.op("Constant", value_t=torch.LongTensor([0]))))
+    nan_posinf_result = g.op("Where", posinf_cond,
+                             g.op("Constant", value_t=torch.tensor([posinf], dtype=input_dtype)), nan_result)
+
+    if neginf is None:
+        neginf = finfo.min
+    neginf_cond = logical_and(g, isinf(g, nan_posinf_result),
+                              lt(g, nan_posinf_result, g.op("Constant", value_t=torch.LongTensor([0]))))
+    return g.op("Where", neginf_cond,
+                g.op("Constant", value_t=torch.tensor([neginf], dtype=input_dtype)), nan_posinf_result)
+
+
+# https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+class Quantized:
+    """
+    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+
+    Support starts from opset 10 because `DequantizeLinear` and `QuantizeLinear` were introduced in opset version 10.
+    """
+    domain = "quantized"
+
+    @staticmethod
+    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
+        bias, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = linear(g, input, weight, bias)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def add(g, x, y, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+        y, _, _ = sym_help.dequantize_helper(g, y)
+
+        output = add(g, x, y)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def mul(g, x, y, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+        y, _, _ = sym_help.dequantize_helper(g, y)
+
+        output = mul(g, x, y)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def hardswish(g, x, op_scale, op_zero_point):
+        x, _, _ = sym_help.dequantize_helper(g, x)
+
+        output = hardswish(g, x)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d_relu(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
+        bias, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+        output = relu(g, output)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def conv2d(g, q_input, q_weight, bias, stride, padding, dilation, groups, op_scale, op_zero_point):
+        input, input_scale, _ = sym_help.dequantize_helper(g, q_input)
+        weight, weight_scale, _ = sym_help.dequantize_helper(g, q_weight)
+        q_bias = sym_help.requantize_bias_helper(g, bias, input_scale, weight_scale)
+        bias, _, _ = sym_help.dequantize_helper(g, q_bias)
+
+        output = conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+        return sym_help.quantize_helper(g, output, op_scale, op_zero_point)

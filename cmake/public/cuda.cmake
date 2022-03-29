@@ -35,11 +35,18 @@ if(NOT CUDA_FOUND)
   set(CAFFE2_USE_CUDA OFF)
   return()
 endif()
+
+# Enable CUDA language support
+set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
-if(CUDA_VERSION VERSION_LESS 9.2)
-  message(FATAL_ERROR "PyTorch requires CUDA 9.2 or above.")
+if(CUDA_VERSION VERSION_LESS 10.2)
+  message(FATAL_ERROR "PyTorch requires CUDA 10.2 or above.")
 endif()
 
 if(CUDA_FOUND)
@@ -95,11 +102,7 @@ if(CUDA_FOUND)
 endif()
 
 # Find cuDNN.
-if(CAFFE2_STATIC_LINK_CUDA AND NOT USE_STATIC_CUDNN)
-  message(WARNING "cuDNN will be linked statically because CAFFE2_STATIC_LINK_CUDA is ON. "
-    "Set USE_STATIC_CUDNN to ON to suppress this warning.")
-endif()
-if(CAFFE2_STATIC_LINK_CUDA OR USE_STATIC_CUDNN)
+if(USE_STATIC_CUDNN)
   set(CUDNN_STATIC ON CACHE BOOL "")
 else()
   set(CUDNN_STATIC OFF CACHE BOOL "")
@@ -281,17 +284,15 @@ if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
-    if(CUDA_VERSION VERSION_GREATER_EQUAL 10.1)
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
-      # Add explicit dependency to cudart_static to fix
-      # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
-      # error adding symbols: DSO missing from command line
-      set_property(
-        TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_cudart_static_LIBRARY}" rt dl)
-    endif()
+    set_property(
+      TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+    # Add explicit dependency to cudart_static to fix
+    # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
+    # error adding symbols: DSO missing from command line
+    set_property(
+      TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+      "${CUDA_cudart_static_LIBRARY}" rt dl)
 else()
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
@@ -317,15 +318,9 @@ if(CAFFE2_USE_CUDNN)
     TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    if(USE_WHOLE_CUDNN)
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
-    else()
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDNN_LIBRARY_PATH})
-    endif()
+    set_property(
+      TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+      ${CUDNN_LIBRARY_PATH})
     set_property(
       TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
       "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
@@ -429,88 +424,16 @@ else()
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=onnx_c2")
 endif()
 
-# CUDA 9.0 & 9.1 require GCC version <= 5
-# Although they support GCC 6, but a bug that wasn't fixed until 9.2 prevents
-# them from compiling the std::tuple header of GCC 6.
-# See Sec. 2.2.1 of
-# https://developer.download.nvidia.com/compute/cuda/9.2/Prod/docs/sidebar/CUDA_Toolkit_Release_Notes.pdf
-if((CUDA_VERSION VERSION_EQUAL   9.0) OR
-    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
-  if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
-      CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
-    message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
-      ">= 6. Please upgrade to CUDA 9.2 or set the following environment "
-      "variable to use another version (for example): \n"
-      "  export CUDAHOSTCXX='/usr/bin/gcc-5'\n")
-  endif()
-endif()
-
-# CUDA 9.0 / 9.1 require MSVC version < 19.12
-# CUDA 9.2 require MSVC version < 19.13
-# CUDA 10.0 require MSVC version < 19.20
-if((CUDA_VERSION VERSION_EQUAL   9.0) OR
-    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.12 AND
-      NOT DEFINED ENV{CUDAHOSTCXX})
-        message(FATAL_ERROR
-          "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-          ">= 19.12. (a.k.a Visual Studio 2017 Update 5, VS 15.5) "
-          "Please upgrade to CUDA >= 9.2 or set the following environment "
-          "variable to use another version (for example): \n"
-          "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-          "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.11.25503\\bin\\HostX64\\x64\\cl.exe\"\n")
-  endif()
-elseif(CUDA_VERSION VERSION_EQUAL   9.2)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.14 AND
-      NOT DEFINED ENV{CUDAHOSTCXX})
-    message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-      ">= 19.14. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
-      "Please upgrade to CUDA >= 10.0 or set the following environment "
-      "variable to use another version (for example): \n"
-      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.13.26132\\bin\\HostX64\\x64\\cl.exe\"\n")
-  endif()
-elseif(CUDA_VERSION VERSION_EQUAL   10.0)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.20 AND
-      NOT DEFINED ENV{CUDAHOSTCXX})
-    message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-      ">= 19.20. (a.k.a Visual Studio 2019, VS 16.0) "
-      "Please upgrade to CUDA >= 10.1 or set the following environment "
-      "variable to use another version (for example): \n"
-      "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.16.27023\\bin\\HostX64\\x64\\cl.exe\"\n")
-  endif()
-endif()
-
 # Don't activate VC env again for Ninja generators with MSVC on Windows if CUDAHOSTCXX is not defined
 # by adding --use-local-env.
 if(MSVC AND CMAKE_GENERATOR STREQUAL "Ninja" AND NOT DEFINED ENV{CUDAHOSTCXX})
   list(APPEND CUDA_NVCC_FLAGS "--use-local-env")
-  # For CUDA < 9.2, --cl-version xxx is also required.
-  # We could detect cl version according to the following variable
-  # https://cmake.org/cmake/help/latest/variable/MSVC_TOOLSET_VERSION.html#variable:MSVC_TOOLSET_VERSION.
-  # 140       = VS 2015 (14.0)
-  # 141       = VS 2017 (15.0)
-  if(CUDA_VERSION VERSION_LESS 9.2)
-    if(MSVC_TOOLSET_VERSION EQUAL 140)
-      list(APPEND CUDA_NVCC_FLAGS "--cl-version" "2015")
-    elseif(MSVC_TOOLSET_VERSION EQUAL 141)
-      list(APPEND CUDA_NVCC_FLAGS "--cl-version" "2017")
-    else()
-      message(STATUS "We could not auto-detect the cl-version for MSVC_TOOLSET_VERSION=${MSVC_TOOLSET_VERSION}")
-    endif()
-  endif()
 endif()
 
 # setting nvcc arch flags
 torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
+# CMake 3.18 adds integrated support for architecture selection, but we can't rely on it
+set(CMAKE_CUDA_ARCHITECTURES OFF)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
@@ -529,14 +452,10 @@ endforeach()
 string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
 list(APPEND CUDA_NVCC_FLAGS -Xcudafe ${SUPPRESS_WARNING_FLAGS})
 
-# Set C++14 support
 set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
 if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
-else()
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # OpenMP flags for NVCC with Clang-cl
@@ -553,9 +472,15 @@ endif()
 # Debug and Release symbol support
 if(MSVC)
   if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MT$<$<CONFIG:Debug>:d>")
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -Xcompiler /MTd")
+    string(APPEND CMAKE_CUDA_FLAGS_MINSIZEREL " -Xcompiler /MT")
+    string(APPEND CMAKE_CUDA_FLAGS_RELEASE " -Xcompiler /MT")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -Xcompiler /MT")
   else()
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD$<$<CONFIG:Debug>:d>")
+    string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -Xcompiler /MDd")
+    string(APPEND CMAKE_CUDA_FLAGS_MINSIZEREL " -Xcompiler /MD")
+    string(APPEND CMAKE_CUDA_FLAGS_RELEASE " -Xcompiler /MD")
+    string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -Xcompiler /MD")
   endif()
   if(CUDA_NVCC_FLAGS MATCHES "Zi")
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-FS")
@@ -569,3 +494,11 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 
 # Set expt-extended-lambda to support lambda on device
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
+
+foreach(FLAG ${CUDA_NVCC_FLAGS})
+  string(FIND "${FLAG}" " " flag_space_position)
+  if(NOT flag_space_position EQUAL -1)
+    message(FATAL_ERROR "Found spaces in CUDA_NVCC_FLAGS entry '${FLAG}'")
+  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " ${FLAG}")
+endforeach()

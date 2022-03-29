@@ -25,7 +25,8 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
     case ncclUnhandledCudaError:
       return "ncclUnhandledCudaError: Call to CUDA function failed.";
     case ncclSystemError:
-      return "ncclSystemError: System call (socket, malloc, munmap, etc) failed.";
+      return "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
+        "It can be also caused by unexpected exit of a remote peer, you can check NCCL warnings for failure reason and see if there is connection closure by a peer.";
     case ncclInternalError:
       return "ncclInternalError: Internal check failed. This is either a bug in NCCL or due to memory corruption";
     case ncclInvalidArgument:
@@ -54,15 +55,6 @@ const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::
 #define ENABLE_NCCL_P2P_SUPPORT
 #elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
 #define ENABLE_NCCL_P2P_SUPPORT
-#endif
-
-// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.9.7+
-#if (defined(__CUDA_BF16_TYPES_EXIST__) && \
-    defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
-    (defined(NCCL_MINOR) && ((NCCL_MINOR > 9) || \
-    ((NCCL_MINOR == 9) && defined(NCCL_PATCH) && (NCCL_PATCH >= 7))))) || \
-    (defined(__HIP_PLATFORM_HCC__) && (TORCH_HIP_VERSION >= 301))
-#define ENABLE_NCCL_BF16_DATATYPE
 #endif
 
 // Macro to throw on a non-successful NCCL return value.

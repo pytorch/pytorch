@@ -6,30 +6,7 @@
 name: !{{ build_environment }}
 {%- endblock %}
 
-on:
-{%- if on_pull_request %}
-  pull_request:
-  {%- if ciflow_config.enabled %}
-    {%- if ciflow_config.trigger_action_only %}
-    types: [!{{ ciflow_config.trigger_action }}]
-    {%- else %}
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-    {%- endif %}
-  {%- endif %}
-{%- else %}
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-{%- endif %}
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  push:
-    branches:
-      - master
-      - release/*
-{%- endif %}
-  workflow_dispatch:
+!{{ common.gen_dispatch_rules(on_pull_request, is_scheduled, ciflow_config.labels, branches, enable_doc_jobs) }}
 
 env:
   BUILD_ENVIRONMENT: !{{ build_environment }}
@@ -38,108 +15,80 @@ env:
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  IS_GHA: 1
   # This is used for the phase of adding wheel tests only, will be removed once completed
   IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  AWS_DEFAULT_REGION: us-east-1
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTORCH_RETRY_TEST_CASES: 1
+{%- if enable_xla_test == 1 %}
+  # This is used for XLA tests only
+  XLA_CUDA: 0
+  XLA_IMAGE_TAG: v0.2
+{%- endif %}
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
-{%- if ciflow_config.enabled %}
-  !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-18.04
-    if: ${{ !{{ ciflow_config.root_job_condition }} }}
-    env:
-      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    steps:
-      - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
-      - name: print labels
-        run: echo "${LABELS}"
-{%- endif %}
-  calculate-docker-image:
+{% block build +%}
+  build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
-    {%- if ciflow_config.enabled %}
-    needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
-      DOCKER_BUILDKIT: 1
-    timeout-minutes: 90
+      JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
+      - name: print labels
+        run: echo "${PR_LABELS}"
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("false") }}
+      !{{ common.checkout() }}
+    {%- if enable_xla_test == 1 %}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
+          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
+          echo "DOCKER_TAG=${DOCKER_TAG}" >> "${GITHUB_ENV}"
+          echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}" >> "${GITHUB_ENV}"
           echo "::set-output name=docker_tag::${DOCKER_TAG}"
-          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"
-      - name: Check if image should be built
-        id: check
+          echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+    {%- else %}
+      !{{ common.calculate_docker_image(false) }}
+    {%- endif %}
+      - name: Pull Docker image
+        run: |
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+      !{{ common.parse_ref() }}
+      - name: Build
         env:
-          DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
-          BASE_REVISION: ${{ github.event.pull_request.base.sha || github.sha }}
-        run: |
-          set -x
-          # Check if image already exists, if it does then skip building it
-          if docker manifest inspect "${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"; then
-            exit 0
-          fi
-          if [[ "$BASE_REVISION" = "$(git rev-parse HEAD)" ]]; then
-            # if we're on the base branch then use the parent commit
-            MERGE_BASE=$(git rev-parse HEAD~)
-          else
-            # otherwise we're on a PR, so use the most recent base commit
-            MERGE_BASE=$(git merge-base HEAD "$BASE_REVISION")
-          fi
-          # Covers the case where a previous tag doesn't exist for the tree
-          # this is only really applicable on trees that don't have `.circleci/docker` at its merge base, i.e. nightly
-          if ! git rev-parse "$MERGE_BASE:.circleci/docker"; then
-            echo "Directory '.circleci/docker' not found in commit $MERGE_BASE, you should probably rebase onto a more recent commit"
-            exit 1
-          fi
-          PREVIOUS_DOCKER_TAG=$(git rev-parse "$MERGE_BASE:.circleci/docker")
-          # If no image exists but the hash is the same as the previous hash then we should error out here
-          if [[ "${PREVIOUS_DOCKER_TAG}" = "${DOCKER_TAG}" ]]; then
-            echo "ERROR: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
-            echo "       contact the PyTorch team to restore the original images"
-            exit 1
-          fi
-          echo ::set-output name=rebuild::yes
-      - name: Build and push docker image
-        if: ${{ steps.check.outputs.rebuild }}
-        env:
-          DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
-          DOCKER_SKIP_S3_UPLOAD: 1
-        run: |
-          export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
-          cd .circleci/docker && ./build_docker.sh
-{% block build +%}
-  build:
-    runs-on: linux.2xlarge
-    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-build
-    steps:
-      !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
-        run: |
-          docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e AWS_DEFAULT_REGION \
+            -e IS_GHA \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
+            -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
+          {%- if enable_xla_test == 1 %}
+            -e XLA_CUDA \
+          {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
@@ -157,19 +106,14 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
-      !{{ common.parse_ref() }}
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          AWS_DEFAULT_REGION: us-east-1
-          IS_GHA: 1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -179,7 +123,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {%- if not is_libtorch %}
+      {%- if build_generates_artifacts %}
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
@@ -205,67 +149,47 @@ jobs:
 {%- endblock %}
 {%- if not exclude_test %}
 {% block test +%}
-  generate-test-matrix:
-    runs-on: ubuntu-18.04
-    {%- if ciflow_config.enabled %}
-    needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
+  {%- for test_job in test_jobs %}
+  !{{ test_job.id }}:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    name: !{{ test_job.name }}
+    needs: build
+    runs-on: !{{ test_job.runner }}
+    timeout-minutes: !{{ timeout_after + 30 }}
     env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
-      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
-      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
-      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
-      ENABLE_DOCS_TEST: !{{ enable_docs_test }}
-      ENABLE_BACKWARDS_COMPAT_TEST: !{{ enable_backwards_compat_test }}
-      ENABLE_XLA_TEST: !{{ enable_xla_test }}
-      ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-      PR_BODY: ${{ github.event.pull_request.body }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [calculate-docker-image, build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      CONTINUE_THROUGH_ERROR: ${{ github.repository == 'pytorch/pytorch' && (github.event_name == 'push' || github.event_name == 'schedule') }}
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
+      PR_BODY: ${{ github.event.pull_request.body }}
     steps:
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.setup_rocm_linux() }}
+{%- else %}
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+{%- endif %}
+      !{{ common.checkout() }}
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
+{%- if 'rocm' in test_runner_type and "nogpu" not in test_job.config %}
+      - name: ROCm set GPU_FLAG
         run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+{%- elif "cuda" in build_environment and "nogpu" not in test_job.config %}
+      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+{%- endif %}
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -287,23 +211,42 @@ jobs:
           unzip -o artifacts.zip
       - name: Output disk space left
         run: |
+{%- if 'rocm' in test_runner_type %}
+          df -H
+{%- else %}
           sudo df -H
-      - name: Test PyTorch
+{%- endif %}
+      !{{ common.parse_ref() }}
+      - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
+          set -x
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
-          if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
-            export SHARD_NUMBER=0
+{%- if 'rocm' not in test_runner_type %}
+          PROXY_ENV=
+          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
+          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
+          #       make it so that we shouldn't have to fully disable squid for XLA tests
+          if [[ $TEST_CONFIG != 'xla' ]]; then
+            # shellcheck disable=SC2089
+            PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
           fi
+{%- endif %}
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -311,21 +254,34 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IS_GHA \
+            -e BRANCH \
+            -e SHA1 \
+            -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
-            -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PR_BODY \
+            -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
-            -e CONTINUE_THROUGH_ERROR \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
+          {%- if enable_xla_test == 1 %}
+            -e XLA_CUDA \
+          {%- endif %}
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+{%- if 'rocm' not in test_runner_type %}
+            ${PROXY_ENV} \
+{%- endif %}
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+{%- if 'rocm' not in test_runner_type %}
+            --ipc=host \
+{%- endif %}
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
@@ -335,41 +291,59 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+{%- if 'rocm' in test_runner_type %}
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
+          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
+          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
+{%- else %}
           docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
+{%- endif %}
+{%- if 'rocm' not in test_runner_type %}
       - name: Chown workspace
         if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- endif %}
       !{{ common.render_test_results() }}
-      {%- if is_coverage %}
-      - name: Report coverage
-        run: |
-          python3 -mpip install codecov==2.1.12
-          python3 -mcodecov
-      {%- endif %}
-      !{{ common.upload_test_reports(name='linux') }}
-      !{{ common.parse_ref() }}
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.upload_downloaded_files(name='linux', use_s3=False, config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False, config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+{%- else %}
+      !{{ common.upload_downloaded_files(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_cores(config=test_job.config, shard=test_job.shard) }}
+{%- endif %}
       !{{ common.upload_test_statistics(build_environment) }}
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.teardown_rocm_linux() }}
+{%- else %}
       !{{ common.teardown_ec2_linux() }}
+{%- endif %}
+{%- endfor %}
 {% endblock %}
 {%- endif -%}
 {%- if enable_doc_jobs %}
   build-docs:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]
-    needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
+    needs: [build]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
+      WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
     steps:
       !{{ common.setup_ec2_linux() }}
-      !{{ common.checkout_pytorch("recursive") }}
-      - name: Pull docker image
+      !{{ common.checkout() }}
+      - name: Pull Docker image
         run: |
-          docker pull "${DOCKER_IMAGE}"
+          !{{ common.add_retry_to_env() }}
+          retry docker pull "${DOCKER_IMAGE}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -377,29 +351,47 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
+{%- if is_scheduled %}
+      - name: Generate netrc (only for docs-push)
+        if: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
+        run: |
+          # set credentials for https pushing
+          echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
+          echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
+{%- endif %}
       - name: Build ${{ matrix.docs_type }} docs
         run: |
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
-          echo "${GITHUB_REF}"
-          ref=${GITHUB_REF##*/}
-          target=${ref//v}
+          # Convert refs/tags/v1.12.0rc3 into 1.12
+          if [[ "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+)\.* ]]; then
+            target="${BASH_REMATCH[1]}"
+          else
+            target="master"
+          fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e CIRCLE_SHA1="$GITHUB_SHA" \
+            -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
             -e PR_LABELS \
+            -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
             --detach \
             --user jenkins \
+{%- if is_scheduled %}
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
+{%- endif %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
@@ -416,7 +408,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/merge/
+          path: pytorch.github.io/docs/master/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload C++ Docs Preview
@@ -427,14 +419,4 @@ jobs:
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
-      - name: Archive artifacts into zip
-        run: |
-          zip -r "docs_${DOCS_TYPE}.zip" "${GITHUB_WORKSPACE}/pytorch.github.io" "${GITHUB_WORKSPACE}/cppdocs"
-      - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts
-        with:
-          name: docs_${{ matrix.docs_type }}
-          path: docs_${{ matrix.docs_type }}.zip
-          if-no-files-found: error
-      !{{ common.teardown_ec2_linux() }}
 {%- endif -%}

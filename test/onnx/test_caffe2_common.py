@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import glob
 import numpy as np
 import onnx.backend.test

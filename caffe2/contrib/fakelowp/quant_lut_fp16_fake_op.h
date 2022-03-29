@@ -30,7 +30,7 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    constexpr int tanhLUTMinOffset = 7000;
+    constexpr int tanhLUTMinOffset = 0;
     constexpr int tanhLUTMaxOffset = 18000;
     constexpr int lutSize = tanhLUTMaxOffset - tanhLUTMinOffset;
 
@@ -39,7 +39,7 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
     Y_scale = 1.0f / Y_scale;
 
     // create table once
-    for (int i = 0; i < lutSize; i++) {
+    for (const auto i : c10::irange(lutSize)) {
         short input = i + tanhLUTMinOffset;
         float x = _cvtsh_ss(input);
         float tanh_x = tanh(x);
@@ -54,7 +54,7 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
     }
 
     const float* X_data = X.template data<float>();
-    for (int i = 0; i < X.numel(); i++) {
+    for (const auto i : c10::irange(X.numel())) {
         short val = _cvtss_sh(X_data[i], 0);
         unsigned short max16BitPositive = 0x7FFF;
         unsigned short input16Bit = (*(unsigned short*)& val);

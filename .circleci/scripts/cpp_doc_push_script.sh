@@ -20,7 +20,7 @@ echo "cpp_doc_push_script.sh: Invoked with $*"
 #       but since DOCS_INSTALL_PATH can be derived from DOCS_VERSION it's probably better to
 #       try and gather it first, just so we don't potentially break people who rely on this script
 # Argument 2: What version of the Python API docs we are building.
-version="${2:-${DOCS_VERSION:-master}}"
+version="${2:-${DOCS_VERSION:-main}}"
 if [ -z "$version" ]; then
 echo "error: cpp_doc_push_script.sh: version (arg2) not specified"
   exit 1
@@ -34,9 +34,9 @@ echo "error: cpp_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
 fi
 
-is_master_doc=false
-if [ "$version" == "master" ]; then
-  is_master_doc=true
+is_main_doc=false
+if [ "$version" == "main" ]; then
+  is_main_doc=true
 fi
 
 echo "install_path: $install_path  version: $version"
@@ -65,7 +65,6 @@ cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files
 time python tools/setup_helpers/generate_code.py \
-  --declarations-path build/aten/src/ATen/Declarations.yaml \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
   --nn-path aten/src/
 
@@ -97,8 +96,12 @@ git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
-git commit -m "Generate C++ docs from pytorch/pytorch@$CIRCLE_SHA1" || true
+git commit -m "Generate C++ docs from pytorch/pytorch@${GITHUB_SHA}" || true
 git status
+
+if [[ "${WITH_PUSH:-}" == true ]]; then
+  git push -u origin
+fi
 
 popd
 # =================== The above code **should** be executed inside Docker container ===================

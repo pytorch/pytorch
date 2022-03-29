@@ -3,6 +3,7 @@ import importlib.machinery
 import io
 import linecache
 import pickletools
+import platform
 import types
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
@@ -18,15 +19,18 @@ from typing import (
     Sequence,
     Set,
     Union,
+    cast,
+    DefaultDict,
 )
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
+from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
-from ._mangling import is_mangled
+from ._mangling import demangle, is_mangled
 from ._package_pickler import create_pickler
 from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
@@ -53,6 +57,10 @@ class _ModuleProviderAction(Enum):
     # we may encounter a `_mock` module from the original package. If we do,
     # just ignore it and write a `_mock` module once.
     REPACKAGED_MOCK_MODULE = 5
+    # Special case: PackageImporter adds a fake module
+    # (`torch_package_importer`) that allows packaged code to access it. Don't
+    # re-export this.
+    SKIP = 6
 
 
 class PackagingErrorReason(Enum):
@@ -77,6 +85,11 @@ class PackagingErrorReason(Enum):
         "Module did not match against any action pattern. Extern, mock, or intern it."
     )
     DENIED = "Module was denied by a pattern."
+    MOCKED_BUT_STILL_USED = (
+        "Module was mocked out, but is still being used in the package. "
+        "Please intern or extern the mocked modules if objects are supposed to be in "
+        "the package."
+    )
 
 
 @dataclass
@@ -387,8 +400,8 @@ class PackageExporter:
             if not is_mangled(module_name):
                 raise
             msg = (
-                f"Module not found: '{module_name}'. Modules imported "
-                "from a torch.package cannot be re-exported directly."
+                f"Module not found: '{module_name}'. Make sure the PackageImporter that "
+                "created this module is present in `self.importer`"
             )
             raise ModuleNotFoundError(msg) from None
 
@@ -420,6 +433,17 @@ class PackageExporter:
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
+            return
+
+        # Special case: PackageImporter provides a special module called
+        # `torch_package_importer` that allows packaged modules to reference
+        # their PackageImporter. We don't want to re-export this.
+        if module_name == "torch_package_importer":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.SKIP,
+                provided=True,
+            )
             return
 
         if module_name == "_mock":
@@ -474,10 +498,6 @@ class PackageExporter:
                 "save_module() expects a string input, did you perhaps mean to pass `__name__`?"
             )
 
-        self.dependency_graph.add_node(
-            module_name,
-            provided=True,
-        )
         self._intern_module(module_name, dependencies)
 
     def _intern_module(
@@ -489,6 +509,13 @@ class PackageExporter:
         along with any metadata needed to write it out to the zipfile at serialization time.
         """
         module_obj = self._import_module(module_name)
+        # Subtle: if the import above succeeded, either:
+        #   1. The module name is not mangled, and this was just a regular import, or
+        #   2. The module name is mangled, but one of the importers was able to
+        #      recognize the mangling and import it.
+        # Either way, it is now safe to demangle this name so that we don't
+        # serialize the mangled version to the package.
+        module_name = demangle(module_name)
 
         # Find dependencies of this module and require them as well.
         is_package = hasattr(module_obj, "__path__")
@@ -511,6 +538,7 @@ class PackageExporter:
                 is_package=is_package,
                 error=packaging_error,
                 error_context=error_context,
+                provided=True,
             )
             return
 
@@ -529,7 +557,12 @@ class PackageExporter:
                 self.add_dependency(dep)
 
     def save_pickle(
-        self, package: str, resource: str, obj: Any, dependencies: bool = True
+        self,
+        package: str,
+        resource: str,
+        obj: Any,
+        dependencies: bool = True,
+        pickle_protocol: int = 3,
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -547,14 +580,19 @@ class PackageExporter:
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
+
+        assert (pickle_protocol == 4) or (
+            pickle_protocol == 3
+        ), "torch.package only supports pickle protocols 3 and 4"
+
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer, protocol=pickle_protocol)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
-
+        mocked_modules = defaultdict(list)
         name_in_dependency_graph = f"<{package}.{resource}>"
         self.dependency_graph.add_node(
             name_in_dependency_graph,
@@ -563,18 +601,85 @@ class PackageExporter:
             is_pickle=True,
         )
 
+        def _check_mocked_error(module: Optional[str], field: Optional[str]):
+            """
+            checks if an object (field) comes from a mocked module and then adds
+            the pair to mocked_modules which contains mocked modules paired with their
+            list of mocked objects present in the pickle.
+
+            We also hold the invariant that the first user defined rule that applies
+            to the module is the one we use.
+            """
+
+            assert isinstance(module, str)
+            assert isinstance(field, str)
+            if self._can_implicitly_extern(module):
+                return
+            for pattern, pattern_info in self.patterns.items():
+                if pattern.matches(module):
+                    if pattern_info.action == _ModuleProviderAction.MOCK:
+                        mocked_modules[module].append(field)
+                    return
+
         if dependencies:
             all_dependencies = []
+            module = None
+            field = None
+            memo: DefaultDict[int, str] = defaultdict(None)
+            memo_count = 0
+            # pickletools.dis(data_value)
             for opcode, arg, pos in pickletools.genops(data_value):
-                if opcode.name == "GLOBAL":  # a global reference
+                if pickle_protocol == 4:
+                    if (
+                        opcode.name == "SHORT_BINUNICODE"
+                        or opcode.name == "BINUNICODE8"
+                    ):
+                        assert isinstance(arg, str)
+                        module = field
+                        field = arg
+                        memo[memo_count] = arg
+                    elif (
+                        opcode.name == "BINGET_LONG"
+                        or opcode.name == "BINGET"
+                        or opcode.name == "GET"
+                    ):
+                        assert isinstance(arg, int)
+                        module = field
+                        field = memo.get(arg, None)
+                    elif opcode.name == "MEMOIZE":
+                        memo_count += 1
+                    elif opcode.name == "STACK_GLOBAL":
+                        assert isinstance(module, str)
+                        if module not in all_dependencies:
+                            all_dependencies.append(module)
+                        _check_mocked_error(module, field)
+                elif (
+                    pickle_protocol == 3 and opcode.name == "GLOBAL"
+                ):  # a global reference
                     assert isinstance(arg, str)
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
-
+                    _check_mocked_error(module, field)
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
-                self.add_dependency(module_name)
+
+                """ If an object happens to come from a mocked module, then we collect these errors and spit them
+                    out with the other errors found by package exporter.
+                """
+                if module in mocked_modules:
+                    assert isinstance(module, str)
+                    fields = mocked_modules[module]
+                    self.dependency_graph.add_node(
+                        module_name,
+                        action=_ModuleProviderAction.MOCK,
+                        error=PackagingErrorReason.MOCKED_BUT_STILL_USED,
+                        error_context=f"Object(s) '{fields}' from module `{module_name}` was mocked out during packaging "
+                        f"but is being used in resource - `{resource}` in package `{package}`. ",
+                        provided=True,
+                    )
+                else:
+                    self.add_dependency(module_name)
 
         self._write(filename, data_value)
 
@@ -769,21 +874,36 @@ class PackageExporter:
         )
 
     def _persistent_id(self, obj):
-        if torch.is_storage(obj):
-            storage_type = normalize_storage_type(type(obj))
-            location = location_tag(obj)
+        if torch.is_storage(obj) or isinstance(obj, torch.storage._TypedStorage):
+            if isinstance(obj, torch.storage._TypedStorage):
+                # TODO: Once we decide to break serialization FC, we can
+                # remove this case
+                storage = obj._storage
+                storage_type_str = obj.pickle_storage_type()
+                storage_type = getattr(torch, storage_type_str)
+                dtype = obj.dtype
+                storage_numel = obj.size()
+
+            else:
+                storage = obj
+                storage_type = normalize_storage_type(type(storage))
+                dtype = torch.uint8
+                storage_numel = storage.nbytes()
+
+            storage = cast(Storage, storage)
+            location = location_tag(storage)
 
             # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(obj)
-            storage_id = self.storage_context.get_or_add_storage(obj)
+            storage_present = self.storage_context.has_storage(storage)
+            storage_id = self.storage_context.get_or_add_storage(storage)
             if not storage_present:
-                if obj.device.type != "cpu":
-                    obj = obj.cpu()
-                num_bytes = obj.size() * obj.element_size()
+                if storage.device.type != "cpu":
+                    storage = storage.cpu()
+                num_bytes = storage.nbytes()
                 self.zip_file.write_record(
-                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
+                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
                 )
-            return ("storage", storage_type, storage_id, location, obj.size())
+            return ("storage", storage_type, storage_id, location, storage_numel)
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(
@@ -861,7 +981,6 @@ class PackageExporter:
         self._validate_dependency_graph()
 
         extern_modules = []
-        _mock_written = False
         for module_name, attrs in self.dependency_graph.nodes.items():
             action = attrs["action"]
 
@@ -901,7 +1020,8 @@ class PackageExporter:
 
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
                 self._write_mock_file()
-
+            elif action == _ModuleProviderAction.SKIP:
+                continue
             else:
                 raise AssertionError(
                     f"Invalid action: {module_name}, {action}. Please report a bug to PyTorch."
@@ -909,6 +1029,10 @@ class PackageExporter:
 
         extern_file_contents = "\n".join(extern_modules) + "\n"
         self._write(".data/extern_modules", extern_file_contents)
+
+    def _write_python_version(self):
+        """Writes the python version that the package was created with to .data/python_version"""
+        self._write(".data/python_version", platform.python_version())
 
     def close(self):
         """Write the package to the filesystem. Any calls after :meth:`close` are now invalid.
@@ -918,6 +1042,7 @@ class PackageExporter:
                 ...
         """
         self._execute_dependency_graph()
+        self._write_python_version()
 
         self.script_module_serializer.write_files()
         self._finalize_zip()
@@ -946,14 +1071,7 @@ class PackageExporter:
         Returns:
             A string representation of dependencies in package.
         """
-        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
-        return f"""\
-digraph G {{
-rankdir = LR;
-node [shape=box];
-{edges}
-}}
-"""
+        return self.dependency_graph.to_dot()
 
     def _nodes_with_action_type(
         self, action: Optional[_ModuleProviderAction]
@@ -1012,6 +1130,16 @@ node [shape=box];
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []
+
+    def all_paths(self, src: str, dst: str) -> str:
+        """Return a dot representation of the subgraph
+           that has all paths from src to dst.
+
+        Returns:
+            A dot representation containing all paths from src to dst.
+            (https://graphviz.org/doc/info/lang.html)
+        """
+        return self.dependency_graph.all_paths(src, dst)
 
 
 # even though these are in the standard library, we do not allow them to be

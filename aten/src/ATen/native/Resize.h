@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/TensorUtils.h>
 
@@ -35,7 +35,7 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
   // new_size is 0, so just bail in that case
-  // (same comment is in Resize.cuh)
+  // (same comment is in cuda/Resize.h)
   if (new_size == 0) {
     return;
   }
@@ -62,9 +62,9 @@ static inline void maybe_resize_storage_cpu(TensorImpl* self, uint64_t new_size)
 inline TensorImpl* resize_impl_cpu_(
     TensorImpl* self,
     IntArrayRef size,
-    c10::optional<IntArrayRef> stride,
+    at::OptionalIntArrayRef stride,
     bool resize_storage = true) {
-  if (self->sizes() == size && (!stride || self->strides() == stride)) {
+  if (self->sizes() == size && (!stride || self->strides() == stride.value())) {
     return self;
   }
 

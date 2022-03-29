@@ -57,6 +57,7 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::QUInt8:
     case ScalarType::QInt32:
     case ScalarType::QUInt4x2:
+    case ScalarType::QUInt2x4:
       TORCH_CHECK(false, "QUInt/QInt types are not supported by dlpack");
       break;
     case ScalarType::Undefined:
@@ -80,7 +81,7 @@ DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
       // while everyone else should see HIP
       ctx.device_type = DLDeviceType::kDLROCM;
 #else
-      ctx.device_type = DLDeviceType::kDLGPU;
+      ctx.device_type = DLDeviceType::kDLCUDA;
 #endif
       break;
     case DeviceType::OPENCL:
@@ -101,7 +102,7 @@ static Device getATenDevice(const DLDevice& ctx) {
       return at::Device(DeviceType::CPU);
 #ifndef USE_ROCM
     // if we are compiled under HIP, we cannot do cuda
-    case DLDeviceType::kDLGPU:
+    case DLDeviceType::kDLCUDA:
       return at::Device(DeviceType::CUDA, ctx.device_id);
 #endif
     case DLDeviceType::kDLOpenCL:

@@ -1,3 +1,5 @@
+# Owner(s): ["module: unknown"]
+
 import io
 import numpy as np
 import os
@@ -22,6 +24,7 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CAFFE2 = True
 try:
+    import caffe2.python.caffe2_pybind11_state as _caffe2_pybind11_state  # noqa: F401
     from caffe2.python import brew, cnn, core, workspace
     from caffe2.python.model_helper import ModelHelper
 except ImportError:
@@ -71,10 +74,11 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from torch.utils.tensorboard._convert_np import make_np
-    from torch.utils.tensorboard import _caffe2_graph as c2_graph
     from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
+if TEST_TENSORBOARD and TEST_CAFFE2:
+    from torch.utils.tensorboard import _caffe2_graph as c2_graph
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
     def test_pytorch_np(self):
@@ -558,15 +562,63 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         expected_proto = GraphDef()
         text_format.Parse(expected_str, expected_proto)
 
-        self.assertEquals(len(expected_proto.node), len(actual_proto.node))
+        self.assertEqual(len(expected_proto.node), len(actual_proto.node))
         for i in range(len(expected_proto.node)):
             expected_node = expected_proto.node[i]
             actual_node = actual_proto.node[i]
-            self.assertEquals(expected_node.name, actual_node.name)
-            self.assertEquals(expected_node.op, actual_node.op)
-            self.assertEquals(expected_node.input, actual_node.input)
-            self.assertEquals(expected_node.device, actual_node.device)
-            self.assertEquals(
+            self.assertEqual(expected_node.name, actual_node.name)
+            self.assertEqual(expected_node.op, actual_node.op)
+            self.assertEqual(expected_node.input, actual_node.input)
+            self.assertEqual(expected_node.device, actual_node.device)
+            self.assertEqual(
+                sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
+
+    def test_nested_nn_squential(self):
+
+        dummy_input = torch.randn(2, 3)
+
+        class InnerNNSquential(torch.nn.Module):
+            def __init__(self, dim1, dim2):
+                super().__init__()
+                self.inner_nn_squential = torch.nn.Sequential(
+                    torch.nn.Linear(dim1, dim2),
+                    torch.nn.Linear(dim2, dim1),
+                )
+
+            def forward(self, x):
+                x = self.inner_nn_squential(x)
+                return x
+
+        class OuterNNSquential(torch.nn.Module):
+            def __init__(self, dim1=3, dim2=4, depth=2):
+                super().__init__()
+                layers = []
+                for _ in range(depth):
+                    layers.append(InnerNNSquential(dim1, dim2))
+                self.outer_nn_squential = torch.nn.Sequential(*layers)
+
+            def forward(self, x):
+                x = self.outer_nn_squential(x)
+                return x
+
+        with self.createSummaryWriter() as w:
+            w.add_graph(OuterNNSquential(), dummy_input)
+
+        actual_proto, _ = graph(OuterNNSquential(), dummy_input)
+
+        expected_str = read_expected_content(self)
+        expected_proto = GraphDef()
+        text_format.Parse(expected_str, expected_proto)
+
+        self.assertEqual(len(expected_proto.node), len(actual_proto.node))
+        for i in range(len(expected_proto.node)):
+            expected_node = expected_proto.node[i]
+            actual_node = actual_proto.node[i]
+            self.assertEqual(expected_node.name, actual_node.name)
+            self.assertEqual(expected_node.op, actual_node.op)
+            self.assertEqual(expected_node.input, actual_node.input)
+            self.assertEqual(expected_node.device, actual_node.device)
+            self.assertEqual(
                 sorted(expected_node.attr.keys()), sorted(actual_node.attr.keys()))
 
     def test_pytorch_graph_dict_input(self):

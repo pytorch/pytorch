@@ -5,8 +5,8 @@
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 template <>
 class Vectorized<int16_t> {

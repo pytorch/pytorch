@@ -16,7 +16,6 @@ per-file-ignores = __init__.py: F401 torch/utils/cpp_extension.py: B950
 optional-ascii-coding = True
 exclude =
     ./.git,
-    ./build_code_analyzer,
     ./build_test_custom_build,
     ./build,
     ./caffe2,

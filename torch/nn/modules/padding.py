@@ -510,3 +510,6 @@ class ZeroPad2d(ConstantPad2d):
 
     def __init__(self, padding: _size_4_t) -> None:
         super(ZeroPad2d, self).__init__(padding, 0.)
+
+    def extra_repr(self) -> str:
+        return '{}'.format(self.padding)

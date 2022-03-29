@@ -53,7 +53,6 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/python_dimname.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -64,7 +63,7 @@
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -120,7 +119,7 @@ private:
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
-  ssize_t max_args;
+  size_t max_args;
   bool traceable;
 };
 
@@ -135,9 +134,9 @@ struct PYBIND11_EXPORT FunctionSignature {
   std::string name;
   std::vector<FunctionParameter> params;
   std::vector<py::handle> overloaded_args;
-  ssize_t min_args;
-  ssize_t max_args;
-  ssize_t max_pos_args;
+  size_t min_args;
+  size_t max_args;
+  size_t max_pos_args;
   int index;
   bool hidden;
   bool deprecated;
@@ -172,6 +171,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline c10::optional<at::Generator> generator(int i);
   inline at::Storage storage(int i);
+  inline at::Storage storage(int i, at::ScalarType& storage_scalar_type, bool& is_typed_storage);
   inline c10::Stream stream(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -622,7 +622,7 @@ inline int64_t PythonArgs::toInt64(int i) {
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
     auto & var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
-        signature.params[i].name, idx, var, jit::IntType::get());
+        signature.params[i].name, idx, var, c10::IntType::get());
   }
   return THPUtils_unpackLong(args[i]);
 }
@@ -697,6 +697,18 @@ inline c10::optional<at::Generator> PythonArgs::generator(int i) {
 inline at::Storage PythonArgs::storage(int i) {
   if (!args[i]) return at::Storage();
   return createStorage(args[i]);
+}
+
+inline at::Storage PythonArgs::storage(int i, at::ScalarType& storage_scalar_type, bool& is_typed_storage) {
+  at::Storage storage;
+  if (!args[i]) {
+    storage = at::Storage();
+    is_typed_storage = false;
+    storage_scalar_type = at::ScalarType::Undefined;
+  } else {
+    storage = createStorageGetType(args[i], storage_scalar_type, is_typed_storage);
+  }
+  return storage;
 }
 
 inline c10::Stream PythonArgs::stream(int i) {
@@ -774,7 +786,7 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
 auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* kwargs=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
 
 // Used for functions created in C++, e.g., C++ custom op, which doesn't use PythonArgParser to get overloaded_args.
-auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name = "__torch_function__") -> PyObject*;
+auto TORCH_API handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name, const char* torch_function_name = "__torch_function__") -> PyObject*;
 
 // Used for getters of Tensor properties
 auto handle_torch_function_getter(THPVariable* self, const std::string& property_name) -> PyObject*;

@@ -33,11 +33,12 @@ modernize-*,
 -modernize-use-default-member-init,
 -modernize-use-using,
 -modernize-use-trailing-return-type,
+-modernize-use-nodiscard,
 performance-*,
 -performance-noexcept-move-constructor,
 -performance-unnecessary-value-param,
 '
-HeaderFilterRegex: 'torch/csrc/.*'
+HeaderFilterRegex: 'torch/csrc/(?!deploy/interpreter/cpython).*'
 AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
 CheckOptions:

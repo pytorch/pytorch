@@ -1,6 +1,5 @@
 #pragma once
-#include <ATen/ATen.h>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 
 namespace at {
 namespace native {
@@ -33,8 +32,9 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (                         \
-    (CUDA_VERSION < 10000) || \
+#if (                      \
+    (defined(USE_ROCM)) || \
+    (defined(CUDA_VERSION) && (CUDA_VERSION < 10000)) || \
     (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,

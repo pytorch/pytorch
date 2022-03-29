@@ -4,8 +4,8 @@
 #include <unordered_map>
 
 #include <libshm/err.h>
-#include <libshm/socket.h>
 #include <libshm/libshm.h>
+#include <libshm/socket.h>
 
 std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;
@@ -47,7 +47,7 @@ void start_manager() {
   constexpr auto MAX_BUFFER_SIZE = 1000;
   std::array<char, MAX_BUFFER_SIZE> buffer;
   std::string handle;
-  while(handle.empty() || handle.back() != '\n') {
+  while (handle.empty() || handle.back() != '\n') {
     const auto bytes_read = read(pipe_ends[0], buffer.data(), buffer.size());
     SYSCHECK_ERR_RETURN_NEG1(bytes_read);
     if (bytes_read == 0) {
@@ -68,11 +68,11 @@ void start_manager() {
     std::string msg("torch_shm_manager at \"");
     msg += manager_executable_path;
     msg += "\": ";
-    msg += handle.substr(7);  // remove "ERROR: "
+    msg += handle.substr(7); // remove "ERROR: "
     throw std::runtime_error(msg);
   }
 
-  ClientSocket manager {handle};
+  ClientSocket manager{handle};
   managers.emplace(std::move(handle), std::move(manager));
 }
 
@@ -87,41 +87,49 @@ ClientSocket& get_manager_socket(const std::string& manager_handle) {
   }
 }
 
-void libshm_init(const char *manager_exec_path) {
+void libshm_init(const char* manager_exec_path) {
   manager_executable_path = std::string(manager_exec_path);
 }
 
-THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle, const char* filename)
-  : manager_handle_(manager_handle ? manager_handle : "") {
+THManagedMapAllocatorInit::THManagedMapAllocatorInit(
+    const char* manager_handle,
+    const char* filename)
+    : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ClientSocket *socket;
+    ClientSocket* socket;
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
     } else {
       if (managers.size() == 0) {
         start_manager();
       }
-      const auto &manager = managers.begin();
+      const auto& manager = managers.begin();
       manager_handle_ = manager->first;
       socket = &manager->second;
     }
     AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
-  } catch(std::exception &e) {
+  } catch (std::exception& e) {
     TORCH_CHECK(false, e.what());
   }
 }
 
-THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const char *filename, int flags, ptrdiff_t size)
-  : THManagedMapAllocatorInit(manager_handle, filename), at::RefcountedMapAllocator(filename, flags, size) {}
+THManagedMapAllocator::THManagedMapAllocator(
+    const char* manager_handle,
+    const char* filename,
+    int flags,
+    ptrdiff_t size)
+    : THManagedMapAllocatorInit(manager_handle, filename),
+      at::RefcountedMapAllocator(filename, flags, size) {}
 
 void THManagedMapAllocator::close() {
-  if (closed_) return;
+  if (closed_)
+    return;
   AllocInfo info = get_alloc_info(filename());
   info.free = true;
-  ClientSocket &socket = get_manager_socket(manager_handle_);
+  ClientSocket& socket = get_manager_socket(manager_handle_);
   at::RefcountedMapAllocator::close();
   socket.register_deallocation(info);
 }
@@ -130,11 +138,21 @@ static void deleteTHManagedMapAllocator(void* ptr) {
   delete static_cast<THManagedMapAllocator*>(ptr);
 }
 
-at::DataPtr THManagedMapAllocator::makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
-  auto* context = new THManagedMapAllocator(manager_handle, filename, flags, size);
-  return {context->data(), context, &deleteTHManagedMapAllocator, at::DeviceType::CPU};
+at::DataPtr THManagedMapAllocator::makeDataPtr(
+    const char* manager_handle,
+    const char* filename,
+    int flags,
+    ptrdiff_t size) {
+  auto* context =
+      new THManagedMapAllocator(manager_handle, filename, flags, size);
+  return {
+      context->data(),
+      context,
+      &deleteTHManagedMapAllocator,
+      at::DeviceType::CPU};
 }
 
-THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(
+    const at::DataPtr& dptr) {
   return dptr.cast_context<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
 }

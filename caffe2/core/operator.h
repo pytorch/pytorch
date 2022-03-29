@@ -38,6 +38,11 @@
 #include <ATen/core/ivalue.h>
 #endif
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_exceptions);
 C10_DECLARE_bool(caffe2_operator_throw_if_fp_overflow_exceptions);
 #ifdef __GNU_LIBRARY__
@@ -731,14 +736,8 @@ inline vector<int16_t> OperatorBase::GetVectorFromIValueList<int16_t>(
 
 // OP_SINGLE_ARG provides a shorter initialization choice for initialization of
 // member variables for the class constructors.
-// This is a workaround for CUDA9.2 and GCC7
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 9020 && __GNUC__ >= 7
-#define OP_SINGLE_ARG(type, name, variable, default) \
-  variable(this->template GetSingleArgument<type>(name, (default)))
-#else
 #define OP_SINGLE_ARG(type, name, variable, default) \
   variable(OperatorBase::GetSingleArgument<type>(name, (default)))
-#endif
 
 // INPUT_TAGS and OUTPUT_TAGS are optional features to name the indices of the
 // operator's inputs and outputs, in order to avoid confusion. For example, for
@@ -1606,5 +1605,7 @@ inline unique_ptr<ExternalTensorFunctionsBase> CreateExternalTensorFunctions(
 #endif // C10_MOBILE
 
 } // namespace caffe2
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #endif // CAFFE2_CORE_OPERATOR_H_

@@ -11,11 +11,12 @@ from typing import List, Sequence, Tuple
 from tools.codegen.api.autograd import (Derivative, DifferentiabilityInfo,
                                         SavedAttribute, uses_retain_variables,
                                         uses_single_grad)
-from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, intT,
+from tools.codegen.api.types import (Binding, BaseCType, OptionalCType, tensorT, longT,
                                      doubleT, scalarT, stringT, boolT, intArrayRefT,
-                                     tensorListT, MutRefCType, ListCType, ArrayRefCType)
+                                     tensorListT, MutRefCType, ListCType, ArrayRefCType,
+                                     optionalIntArrayRefT)
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import FileManager
+from tools.codegen.utils import FileManager
 from tools.codegen.model import Argument
 
 FUNCTION_DECLARATION = CodeTemplate("""\
@@ -276,7 +277,7 @@ if (prop.isComplex()) {
 """
 
 MISC_GETTER_DEFS = {
-    OptionalCType(BaseCType(intT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
+    OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
     BaseCType(doubleT): (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
     OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
@@ -422,6 +423,10 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'std::vector<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
+        elif type == BaseCType(optionalIntArrayRefT):
+            saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
+            getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG))
         elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f'c10::OptionalArray<int64_t> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
@@ -430,7 +435,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             saved_variables.append(f'c10::OptionalArray<double> {name};')
             getter_definitions.append(GETTER_DEFINITION_OPT_ARRAYREF.substitute(
                 op=info.op, name=name, body=GETTER_BODY_ARRAYREF_DOUBLE))
-        elif type == BaseCType(intT):
+        elif type == BaseCType(longT):
             saved_variables.append(f'{type.cpp_type()} {name} = 0;')
             getter_definitions.append(GETTER_DEFINITION.substitute(
                 op=info.op, name=name, body=GETTER_BODY_INT64_T))
@@ -480,6 +485,11 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
 
     if uses_single_grad(info):
         body.append('const auto& grad = grads[0];')
+    else:
+        # Generate aliases for gradients named for returned values.
+        body.extend(
+            f'const auto& {name} = grads[{info.available_named_gradients.index(name)}];'
+            for name in info.used_named_gradients)
 
     def emit_derivative(
         derivative: Derivative,

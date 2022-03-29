@@ -12,9 +12,11 @@ namespace at {
 ThreadLocalState::ThreadLocalState()
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
+      functorch_tls_(functorch::getCopyOfFuncTorchTLS()),
       autograd_tls_(c10::AutogradState::get_tls_state()) {
   rf_tls_ = at::get_record_function_tls_();
-  saved_tensors_default_hooks_ = SavedTensorDefaultHooks::get_hooks();
+
+  saved_tensors_default_hooks_ = at::SavedTensorDefaultHooks::get_stack();
 
   bumped_record_all_functions_ = at::checkRecordAllFunctions();
   python_mode_state_ = at::impl::PythonModeTLS::get_state();
@@ -35,13 +37,13 @@ void ThreadLocalState::setThreadLocalState(
 
   at::set_record_function_tls_(state.rf_tls_);
 
-  SavedTensorDefaultHooks::set_hooks(
-      state.saved_tensors_default_hooks_.first,
-      state.saved_tensors_default_hooks_.second);
+  at::SavedTensorDefaultHooks::set_stack(state.saved_tensors_default_hooks_);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
+
+  functorch::setFuncTorchTLS(state.functorch_tls_);
 }
 
 } // namespace at

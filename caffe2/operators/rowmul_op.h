@@ -5,6 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 
@@ -32,9 +33,9 @@ class RowMulOp : public Operator<Context> {
         "Length of w should be equal to the first dim of mat");
 
     auto block_size = mat.size_from_dim(1);
-    for (int i = 0; i < w.numel(); i++) {
+    for (const auto i : c10::irange(w.numel())) {
       size_t offset = i * block_size;
-      for (int j = 0; j < block_size; j++) {
+      for (const auto j : c10::irange(block_size)) {
         output_data[offset + j] = mat_data[offset + j] * w_data[i];
       }
     }
@@ -60,10 +61,10 @@ class ReduceTailSumOp : public Operator<Context> {
     T* output_data = output->template mutable_data<T>();
     const T* mat_data = mat.template data<T>();
 
-    for (int i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       output_data[i] = 0;
       size_t offset = i * block_size;
-      for (int j = 0; j < block_size; j++) {
+      for (const auto j : c10::irange(block_size)) {
         output_data[i] += mat_data[offset + j];
       }
     }

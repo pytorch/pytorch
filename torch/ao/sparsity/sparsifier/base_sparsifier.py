@@ -1,8 +1,7 @@
-
 import abc
 import copy
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, Optional, Tuple
 
 import torch
 from torch import nn
@@ -74,28 +73,6 @@ class BaseSparsifier(abc.ABC):
         format_string += ')'
         return format_string
 
-    def _pack_state(self):
-        state: Dict[str, Dict] = defaultdict(dict)
-        for g in self.module_groups:
-            parametrization = g['module'].parametrizations['weight']
-            # original_weight = parametrization.original
-            key = g['fqn']
-            mask = None
-            # Find the mask in the FakeSparsity.
-            found = False
-            for p in parametrization:
-                if isinstance(p, FakeSparsity):
-                    parametrization = p
-                    found = True
-                    break
-            if found:
-                mask = parametrization.mask
-            state[key]['mask'] = mask
-            # Get all the tensors inside the module_group
-            state[key].update(
-                {key: value for key, value in self.state[key].items()})
-        return state
-
     def state_dict(self):
         r"""Returns the state of the optimizer as a :class:`dict`.
 
@@ -103,6 +80,8 @@ class BaseSparsifier(abc.ABC):
         * state - current state of the sparsification.
         * module_groups - a list containing all sparsity configuration groups
             with the key 'fqn' specifying the layer path within a model
+
+        TODO: Need a clean way of loading the state of the "preapred" module
         """
         module_groups = [
             dict(filter(lambda key_value: key_value[0] != 'module', mg.items()))
@@ -110,7 +89,7 @@ class BaseSparsifier(abc.ABC):
         ]
 
         return {
-            'state': self._pack_state(),
+            'state': self.state,
             'module_groups': module_groups,
         }
 
@@ -162,16 +141,34 @@ class BaseSparsifier(abc.ABC):
                     else:
                         stack.append(child)
 
+        # TODO: Remove the configuration by reference ('module')
         for module_config in self.config:
             if isinstance(module_config, nn.Module):
                 module_config = {'module': module_config}
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
-            module = local_args['module']
-            module_fqn = module_to_fqn(model, module)
+            # Make sure there is at least one way of handling the model
+            module = local_args.get('module', None)
+            module_fqn = local_args.get('fqn', None)
+            if module is None and module_fqn is None:
+                # No module given for this group
+                raise ValueError('Either `module` or `fqn` must be specified!')
+            elif module is None:
+                # FQN is given
+                module = fqn_to_module(model, module_fqn)
+            elif module_fqn is None:
+                # Module is given
+                module_fqn = module_to_fqn(model, module)
+            else:
+                # Both Module and FQN are given
+                module_from_fqn = fqn_to_module(model, module_fqn)
+                assert module is module_from_fqn, \
+                    'Given both `module` and `fqn`, it is expected them to ' \
+                    'refer to the same thing!'
             if module_fqn and module_fqn[0] == '.':
                 module_fqn = module_fqn[1:]
             local_args['fqn'] = module_fqn
+            local_args['module'] = module
             self.module_groups.append(local_args)
 
         self._prepare()
@@ -182,14 +179,80 @@ class BaseSparsifier(abc.ABC):
         for config in self.module_groups:
             module = config['module']
             param = config.get('parametrization', FakeSparsity)
-            mask = config.get('mask', torch.ones(module.weight.shape))
+            mask = config.get('mask', torch.ones_like(module.weight))
+            self.state[config['fqn']]['mask'] = mask
             parametrize.register_parametrization(module, 'weight', param(mask))
 
-    def squash_mask(self, *args, **kwargs):
+    def squash_mask(self,
+                    params_to_keep: Optional[Tuple[str, ...]] = None,
+                    params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
+                    *args, **kwargs):
+        r"""Squashes the sparse masks into the appropriate tensors.
+
+        If either the `params_to_keep` or `params_to_keep_per_layer` is set,
+        the module will have a `sparse_params` dict attached to it.
+
+        Args:
+            params_to_keep: List of keys to save in the module or a dict
+                            representing the modules and keys that will have
+                            sparsity parameters saved
+            params_to_keep_per_layer: Dict to specify the params that should be
+                            saved for specific layers. The keys in the dict
+                            should be the module fqn, while the values should
+                            be a list of strings with the names of the variables
+                            to save in the `sparse_params`
+
+        Examples:
+            >>> # Don't save any sparse params
+            >>> sparsifier.squash_mask()
+            >>> hasattr(model.submodule1, 'sparse_params')
+            False
+
+            >>> # Keep sparse params per layer
+            >>> sparsifier.squash_mask(
+            ...     params_to_keep_per_layer={
+            ...         'submodule1.linear1': ('foo', 'bar'),
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'baz': 0.1}
+
+            >>> # Keep sparse params for all layers
+            >>> sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'foo': 42, 'bar': 24}
+
+            >>> # Keep some sparse params for all layers, and specific ones for
+            >>> # some other layers
+            >>> sparsifier.squash_mask(
+            ...     params_to_keep=('foo', 'bar'),
+            ...     params_to_keep_per_layer={
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'foo': 42, 'bar': 24, 'baz': 0.1}
+        """
         for config in self.module_groups:
             module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
                                                 leave_parametrized=True)
+            sparse_params = dict()
+            if params_to_keep is not None:
+                global_params = {k: config[k] for k in params_to_keep}
+                sparse_params.update(global_params)
+            if params_to_keep_per_layer is not None:
+                params = params_to_keep_per_layer.get(config['fqn'], None)
+                if params is not None:
+                    per_layer_params = {k: config[k] for k in params}
+                    sparse_params.update(per_layer_params)
+            if sparse_params:
+                module.sparse_params = sparse_params
 
     def convert(self):
         # TODO: Call the torch.ao.utils.convert in here

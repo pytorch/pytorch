@@ -9,6 +9,7 @@
 
 #include <c10/util/Logging.h>
 #include <c10/util/string_view.h>
+#include <c10/util/irange.h>
 
 #include "caffe2/utils/proto_wrap.h"
 #include "caffe2/proto/caffe2_pb.h"

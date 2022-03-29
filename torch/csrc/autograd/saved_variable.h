@@ -1,10 +1,10 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <cstdint>
 #include <memory>
@@ -18,6 +18,7 @@ TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
 /// A snapshot of a variable at a certain version. A `SavedVariable` stores
 /// enough information to reconstruct a variable from a certain point in time.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API SavedVariable {
  public:
   SavedVariable() = default;

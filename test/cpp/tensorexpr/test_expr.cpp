@@ -2,6 +2,7 @@
 
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/padded_buffer.h>
 #include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -163,7 +164,7 @@ TEST(Expr, VectorAdd01) {
 
   /*
   Build the following:
-    for (int index = 0; index < kVectorCount; index++) {
+    for (const auto index : c10::irange(kVectorCount)) {
       store(c_buf, ramp(index * 8, 1, 8),
             load(a_buf, ramp(index * 8, 1, 8) +
             load(b_buf, ramp(index * 8, 1, 8))))
@@ -187,7 +188,7 @@ TEST(Expr, VectorAdd01) {
   PaddedBuffer<float> b_v(kTotalSize);
   PaddedBuffer<float> c_v(kTotalSize);
   PaddedBuffer<float> c_ref(kTotalSize);
-  for (int i = 0; i < kTotalSize; i++) {
+  for (const auto i : c10::irange(kTotalSize)) {
     a_v(i) = i * i;
     b_v(i) = i * i * 4;
     c_ref(i) = a_v(i) + b_v(i);
@@ -555,6 +556,65 @@ TEST(Expr, DynamicShapeAdd) {
   testWithSize(37);
 }
 
+TEST(Expr, OutOfBounds) {
+  ExprHandle N(10);
+  ExprHandle start(0);
+  ExprHandle stop(15);
+  VarHandle i("i", kInt);
+
+  BufHandle X("X", {N}, kInt);
+
+  auto body = Store::make(X, {i}, i);
+  auto stmt = For::make(i, start, stop, body);
+
+  PaddedBuffer<int> data(20);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
+TEST(Expr, OutOfBounds2d) {
+  std::vector<std::pair<int, int>> size_options = {{10, 15}, {15, 10}};
+  for (auto sizes : size_options) {
+    ExprHandle N(sizes.first);
+    ExprHandle M(sizes.second);
+    ExprHandle start(0);
+    ExprHandle stopInner(15);
+    ExprHandle stopOuter(15);
+    VarHandle i("i", kInt);
+    VarHandle j("j", kInt);
+
+    BufHandle X("X", {N, M}, kInt);
+
+    auto body = Store::make(X, {i, j}, i);
+    auto inner = For::make(j, start, stopInner, body);
+    auto stmt = For::make(i, start, stopOuter, inner);
+
+    PaddedBuffer<int> data(400);
+
+    EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+  }
+}
+
+TEST(Expr, OutOfBounds2dFlattenedIndex) {
+  ExprHandle buf_size(149);
+  ExprHandle start(0);
+  ExprHandle stopInner(15);
+  ExprHandle stopOuter(10);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+
+  BufHandle X("X", {buf_size}, kInt);
+
+  auto idx = Add::make(Mul::make(i, stopInner), j);
+  auto body = Store::make(X, {idx}, i);
+  auto inner = For::make(j, start, stopInner, body);
+  auto stmt = For::make(i, start, stopOuter, inner);
+
+  PaddedBuffer<int> data(400);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
 void testCond01() {
   const int N = 16;
   PaddedBuffer<float> a_v(N);
@@ -568,7 +628,7 @@ void testCond01() {
   SimpleIREvaluator(for_stmt, {a_buf})(a_v);
 
   PaddedBuffer<float> a_ref(N);
-  for (int i = 0; i < N; i++) {
+  for (const auto i : c10::irange(N)) {
     if (i % 2 == 0) {
       a_ref(i) = i * 2;
     } else {

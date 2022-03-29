@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -11,8 +13,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyOnCPUAndCUDA,
-    dtypesIfCPU, dtypesIfCUDA, largeTensorTest)
+    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
+    dtypesIfCUDA, largeTensorTest)
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 # TODO: replace with make_tensor
@@ -224,13 +226,13 @@ class TestShapeOps(TestCase):
         self.assertEqual(expected.shape, result.shape)
         self.assertEqual(expected, result)
 
-    @onlyOnCPUAndCUDA
-    @dtypesIfCPU(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
-                                 include_bfloat16=False))
+    @onlyNativeDeviceTypes
+    @dtypes(*get_all_dtypes(include_complex=False, include_bool=False, include_half=False,
+                            include_bfloat16=False))
     @dtypesIfCUDA(*get_all_dtypes(include_complex=False, include_bool=False, include_bfloat16=False))
     def test_trace(self, device, dtype):
         def test(shape):
-            tensor = make_tensor(shape, device, dtype, low=-9, high=9)
+            tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             expected_dtype = tensor.sum().dtype
             expected_dtype = torch_to_numpy_dtype_dict[expected_dtype]
 
@@ -646,7 +648,7 @@ class TestShapeOps(TestCase):
         self.assertEqual(traced_nontuple, expected_nontuple)
         self.assertEqual(traced_out, expected_nontuple)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)

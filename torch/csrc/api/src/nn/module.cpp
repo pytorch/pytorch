@@ -250,15 +250,19 @@ bool Module::is_training() const noexcept {
   return is_training_;
 }
 
-void Module::zero_grad() {
+void Module::zero_grad(bool set_to_none) {
   for (auto& child : children_) {
-    child.value()->zero_grad();
+    child.value()->zero_grad(set_to_none);
   }
   for (auto& parameter : named_parameters(/*recurse=*/false)) {
     auto& grad = parameter->mutable_grad();
     if (grad.defined()) {
       grad = grad.detach();
-      grad.zero_();
+
+      if (set_to_none)
+        grad.reset();
+      else
+        grad.zero_();
     }
   }
 }

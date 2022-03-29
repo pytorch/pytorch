@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: quantization"]
+
 import torch
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM

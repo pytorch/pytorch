@@ -120,7 +120,11 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if typename.startswith("__torch__.") or typename.startswith("torch.jit.LoweredModule."):
+        if (
+            typename.startswith("__torch__.") or
+            typename.startswith("torch.jit.LoweredWrapper.") or
+            typename.startswith("torch.jit.LoweredModule.")
+        ):
             assert data.args == ()
             return {
                 "__module_type__": typename,
@@ -365,6 +369,13 @@ def burn_in_info(skeleton, info):
     return skeleton.replace(
         "BURNED_IN_MODEL_INFO = null",
         "BURNED_IN_MODEL_INFO = " + json.dumps(info, sort_keys=True).replace("/", "\\/"))
+
+
+def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
+    model_info = get_model_info(path_or_bytesio, **kwargs)
+    skeleton = get_inline_skeleton()
+    page = burn_in_info(skeleton, model_info)
+    return page
 
 
 def main(argv, *, stdout=None):

@@ -7,7 +7,8 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-
+#include <ATen/ExpandUtils.h>
+#include <ATen/RedispatchFunctions.h>
 #include <torch/library.h>
 
 namespace at {
@@ -204,26 +205,19 @@ void comparison_op_check(const Tensor& self, const Tensor& other, const Tensor& 
       native::check_convert(self.item(), other.scalar_type());
     }
   }
-  // In-place operation To avoid overflow during type promotion we will check that
-  // both dtypes of self and other are same
-  if (result.is_same(self)) {
-    TORCH_CHECK(self.dtype() == other.dtype(),
-                "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-                other.dtype(), " for argument 'other'");
-  }
 }
 
 #define CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(func)                     \
   TORCH_META_FUNC2(func, Tensor)(const Tensor& self, const Tensor& other) { \
     const Tensor& result = maybe_get_output();                              \
     comparison_op_check(self, other, result);                               \
-    build_comparison_op(result, self, other);                               \
+    build_borrowing_comparison_op(result, self, other);                     \
   }                                                                         \
                                                                             \
   TORCH_META_FUNC2(func, Scalar)(const Tensor& self, const Scalar& other) { \
     auto other_tensor =                                                     \
         native::wrapped_scalar_tensor_and_check_convert(other, self);       \
-    build_comparison_op(maybe_get_output(), self, other_tensor);            \
+    build_borrowing_except_last_argument_comparison_op(maybe_get_output(), self, other_tensor);  \
   }
 
 CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(eq);
@@ -238,10 +232,9 @@ CREATE_COMPARISON_SCALAR_TENSOR_META_FUNC(ge);
 
 namespace native {
 
-DEFINE_DISPATCH(add_stub);
 DEFINE_DISPATCH(add_clamp_stub);
-DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(sub_stub);
 DEFINE_DISPATCH(div_true_stub);
 DEFINE_DISPATCH(div_floor_stub);
 DEFINE_DISPATCH(div_trunc_stub);
@@ -283,17 +276,10 @@ DEFINE_DISPATCH(xlogy_stub);
 DEFINE_DISPATCH(xlog1py_stub);
 DEFINE_DISPATCH(zeta_stub);
 
-TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
-) {
-  add_stub(device_type(), *this, alpha);
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
-}
-
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
 ) {
-  sub_stub(device_type(), *this, alpha);
+  add_stub(device_type(), *this, -alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
 }
 
@@ -415,6 +401,18 @@ TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tenso
   atan2_stub(device_type(), *this);
 }
 
+Tensor arctan2(const Tensor& self, const Tensor& other) {
+  return at::atan2(self, other);
+}
+
+Tensor& arctan2_(Tensor& self, const Tensor& other) {
+  return self.atan2_(other);
+}
+
+Tensor& arctan2_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  return at::atan2_out(result, self, other);
+}
+
 Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, const Scalar& alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -440,7 +438,7 @@ Tensor& add_relu_impl(
     max_val = std::numeric_limits<double>::max();
   } else {
     TORCH_INTERNAL_ASSERT(
-        "Unsupported datatype for add_relu:", self.dtype().name());
+        false, "Unsupported datatype for add_relu:", self.dtype().name());
   }
 
   result = iter.output();
@@ -618,6 +616,75 @@ Tensor mul(const Tensor& self, const Scalar& other) {
 
 Tensor& mul_(Tensor& self, const Scalar& other) {
   return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
+}
+
+Device correct_out_device(const Tensor& self, const Tensor& other) {
+  if (self.device() == at::kCPU){
+      return other.device();
+  } else {
+    return self.device();
+  }
+}
+
+Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::mul(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+  return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+}
+
+Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT(self._is_zerotensor() || other._is_zerotensor());
+
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::div(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+
+  if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      // 0/0, return full NAN
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::quiet_NaN(), meta_out.options().device(out_device));
+    }
+    else {
+      // 0/x, return zero tensor
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+  }
+  else {
+    if (other._is_zerotensor()) {
+      // x/0, return full INF
+      return at::full(meta_out.sizes(), std::numeric_limits<float>::infinity(), meta_out.options().device(out_device));
+    }
+    else {
+      // x/y -- unreachable, see TORCH_INTERNAL_ASSERT above
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+  }
+}
+
+Tensor add_zerotensor(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  auto out_device = correct_out_device(self, other);
+  // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
+  auto device_ = Device(DeviceType::Meta);
+  auto meta_out = at::redispatch::add(c10::DispatchKeySet(at::DispatchKey::Meta), self.to(device_), other.to(device_));
+
+  auto get_out_like = [&] (const Tensor& tensor)
+  {
+      auto sizes = meta_out.sizes();
+      return at::_to_copy(tensor.expand(sizes), meta_out.options().device(out_device));
+  };
+
+  if (self._is_zerotensor()) {
+    if (other._is_zerotensor()) {
+      return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
+    }
+    auto res = get_out_like(other);
+    return alpha.equal(1) ? res : res.mul(alpha);
+  } else {
+    return get_out_like(self);
+  }
 }
 
 // multiply, alias for mul
@@ -915,9 +982,6 @@ Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl)
 // To avoid overflow during type promotion we will check that both dtypes of self and other are same
 template <typename OutImpl>
 Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
   return out_impl(self, self, other);
 }
 

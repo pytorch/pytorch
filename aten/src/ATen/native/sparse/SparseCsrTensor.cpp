@@ -1,14 +1,34 @@
 // Basic functions on sparse tensors
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/InitialTensorOptions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
+#include <ATen/ops/_validate_sparse_csr_tensor_args_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/col_indices_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/crow_indices_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/resize_native.h>
+#include <ATen/ops/sparse_csr_tensor_native.h>
+#include <ATen/ops/values_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -193,15 +213,12 @@ Tensor sparse_csr_tensor(
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-  std::array<int64_t, 2> size;
+  std::array<int64_t, 2> size = {0, 0};
   if (col_indices.numel() > 0) {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "csr_construct_check", [&] {
       size[0] = crow_indices.numel() - 1;
       size[1] = col_indices.max().item<index_t>() + 1;
     });
-  } else {
-    size[0] = 0;
-    size[1] = 0;
   }
 
   at::native::_validate_sparse_csr_tensor_args(crow_indices, col_indices, values, size);
@@ -215,6 +232,72 @@ Tensor sparse_csr_tensor(
       options.layout_opt(),
       options.device_opt(),
       options.pinned_memory_opt());
+}
+
+Tensor empty_sparse_csr(
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  check_size_nonnegative(size);
+
+  TORCH_CHECK(size.size() == 2, "torch.empty: Only 2D sparse CSR tensors are supported.");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout == Layout::SparseCsr);
+
+  auto rows = size[0];
+  int64_t nnz = 0;
+
+  TensorOptions options = TensorOptions().dtype(ScalarType::Long).layout(Layout::Strided).device(device).pinned_memory(pin_memory);
+  auto crow_indices = at::empty({rows + 1}, options);
+  auto col_indices = at::empty({nnz}, options);
+  auto values = at::empty({nnz}, options.dtype(dtype));
+
+  return at::native::_sparse_csr_tensor_unsafe(
+      crow_indices,
+      col_indices,
+      values,
+      size,
+      dtype,
+      layout,
+      device,
+      pin_memory);
+}
+
+const Tensor& resize_sparse_csr_(
+    const Tensor& self,
+    IntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  check_size_nonnegative(size);
+  TORCH_CHECK(size.size() == 2, "torch.resize_: Only 2D sparse CSR tensors are supported.");
+  TORCH_CHECK(
+      self.size(1) <= size[1],
+      "torch.resize_: Resizing columns of sparse CSR tensors to a smaller value is not supported. ",
+      "The original number of columns is ",
+      self.size(1),
+      " while the requested new number of columns is ", size[1], ".");
+  get_sparse_csr_impl(self)->resize_(self._nnz(), size);
+  return self;
+}
+
+Tensor& copy_sparse_csr_(Tensor& self, const Tensor& src, bool non_blocking) {
+  TORCH_CHECK(
+      self.sizes() == src.sizes(),
+      "copy_sparse_csr_: only same size tensors are supported.");
+  TORCH_CHECK(
+      self.is_sparse_csr() && src.is_sparse_csr(),
+      "copy_sparse_csr_: copy between different layouts is not supported. Found self type = ",
+      self.toString(),
+      " and src type = ",
+      src.toString());
+  TORCH_CHECK(
+      self._nnz() == src._nnz(),
+      "copy_sparse_csr_: only tensors with the same number of specified elements are supported.");
+  self.crow_indices().copy_(src.crow_indices(), non_blocking);
+  self.col_indices().copy_(src.col_indices(), non_blocking);
+  self.values().copy_(src.values(), non_blocking);
+  return self;
 }
 
 // Access members of CSR tensors.
@@ -245,13 +328,64 @@ const SparseCsrTensor& resize_as_sparse_csr_(
     const SparseCsrTensor& src) {
   TORCH_CHECK(
       src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got self, src: ",
+      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
       self.layout(),
-      src.layout());
+      " for self, and ",
+      src.layout(),
+      " for src");
   if (!_is_same_size_as_sparse_csr(self, src)) {
     get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
   }
   return self;
+}
+
+SparseCsrTensor clone_sparse_csr(
+    const SparseCsrTensor& self,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TORCH_CHECK(
+      !optional_memory_format.has_value(),
+      "unsupported memory format option ",
+      optional_memory_format.value());
+  TensorOptions options = self.options();
+  return at::native::_sparse_csr_tensor_unsafe(
+                                               self.crow_indices().clone(),
+                                               self.col_indices().clone(),
+                                               self.values().clone(),
+                                               self.sizes(),
+                                               optTypeMetaToScalarType(options.dtype_opt()),
+                                               options.layout_opt(),
+                                               options.device_opt(),
+                                               options.pinned_memory_opt());
+}
+
+Tensor empty_like_sparse_csr(
+    const Tensor& self,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      self.options()
+          .merge_in(options_)
+          .merge_memory_format(optional_memory_format);
+
+  if (options.layout() == kSparseCsr) {
+    auto result = at::native::_sparse_csr_tensor_unsafe(
+        self.crow_indices().clone(),
+        self.col_indices().clone(),
+        at::empty(self.values().sizes(), options.layout(kStrided)),
+        self.sizes(),
+        dtype,
+        self.layout(),
+        device);
+    return result;
+  } else if (options.layout() == kStrided) {
+    return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+  } else {
+    TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+  }
 }
 
 } // namespace native
