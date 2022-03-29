@@ -576,7 +576,11 @@ class TestNumericSuiteEager(QuantizationTestCase):
         act_compare_dict = get_matching_activations(float_model, qmodel)
 
     @skip_if_no_torchvision
-    def test_mobilenet(self):
-        from torchvision.models.quantization import mobilenet_v2, mobilenet_v3_large
+    def test_mobilenet_v2(self):
+        from torchvision.models.quantization import mobilenet_v2
         self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v3(self):
+        from torchvision.models.quantization import mobilenet_v3_large
         self._test_vision_model(mobilenet_v3_large(pretrained=True, quantize=False))
