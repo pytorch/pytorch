@@ -413,10 +413,54 @@ inline void convert(const float* src, float* dst, int64_t n) {
   }
 }
 
-
 template <>
 Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
   return _mm256_fmadd_ps(a, b, c);
+}
+
+template <>
+inline void cumsum<float>(float base, const float* src, float* dst, int64_t n) {
+  __m256 offset = _mm256_set1_ps(base);
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
+    __m256 x = _mm256_loadu_ps(src + i);
+
+    // shift 32 bit
+    // x = {a0, a1, a2, a3, a4, a5, a6, a7}
+    // y = { 0, a0, a1, a2, a3, a4, a5, a6}
+    __m256 t0 = _mm256_permute_ps(x, 0x93);
+    __m256 t1 = _mm256_permute2f128_ps(t0, t0, 0x29);
+    __m256 y = _mm256_blend_ps(t0, t1, 0x11);
+    x = _mm256_add_ps(x, y);
+
+    // shift 64 bit
+    // x = {a0, a01, a12, a23, a34, a45, a56, a67}
+    // y = { 0,  0,   a0, a01, a12, a23, a34, a45}
+    t0 = _mm256_permute_ps(x, 0x4E);
+    t1 = _mm256_permute2f128_ps(t0, t0, 0x29);
+    y = _mm256_blend_ps(t0, t1, 0x33);
+    x = _mm256_add_ps(x, y);
+
+    // shift 128 bit
+    // x = {a0, a01, a012, a0123, a1234, a2345, a3456, a4567}
+    // y = { 0,   0,    0,     0,    a0,   a01,  a012, a0123}
+    y = _mm256_permute2f128_ps(x, x, 0x29);
+    x = _mm256_add_ps(x, y);
+    x = x + offset;
+
+    _mm256_storeu_ps(dst + i, x);
+
+    // broadcast the offset
+    t0 = _mm256_permute2f128_ps(x, x, 0x11);
+    offset = _mm256_permute_ps(t0, 0xFF);
+  }
+  float offset_val = _mm256_cvtss_f32(offset);
+#pragma unroll
+  for (; i < n; ++i) {
+    offset_val += src[i];
+    dst[i] = offset_val;
+  }
 }
 
 #endif

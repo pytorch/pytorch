@@ -26,6 +26,26 @@ namespace at { namespace native { namespace {
 
 using namespace vec;
 
+template <typename scalar_t>
+static inline void cpu_cum_base_lastdim_kernel(const Tensor& result,
+    const Tensor& self,
+    scalar_t init_val) {
+  int64_t dim_size = self.size(self.dim() - 1);
+  int64_t outer_size = self.numel() / dim_size;
+
+  scalar_t* result_data = result.data_ptr<scalar_t>();
+  const scalar_t* self_data = self.data_ptr<scalar_t>();
+
+  int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
+  at::parallel_for(0, outer_size, grain_size, [&](int64_t begin, int64_t end) {
+    for (const auto i : c10::irange(begin, end)) {
+      scalar_t* result_ptr = result_data + i * dim_size;
+      const scalar_t* self_ptr = self_data + i * dim_size;
+      vec::cumsum((scalar_t)0, self_ptr, result_ptr, dim_size);
+    }
+  });
+}
+
 template <typename scalar_t, typename func_t>
 static inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
@@ -77,21 +97,31 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
 }
 
 static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  auto ndim = self.dim();
+  auto wrap_dim = maybe_wrap_dim(dim, ndim);
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
+  bool is_lastdim_fast_path = (ndim != 0) && (self.numel() != 0)
+      && (wrap_dim == ndim - 1) && result.sizes() == self.sizes()
+      && self.is_contiguous() && result.is_contiguous()
+      && (self.scalar_type() == kFloat || self.scalar_type() == kBFloat16);
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(ScalarType::BFloat16, self.scalar_type(), "cumsum_out_cpu", [&] {
-    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
-      scalar_t* result_data, auto result_dim_stride,
-      const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
-        // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-        auto cum_number = (at::acc_type<scalar_t, false>)init_val;
-        for (const auto i : c10::irange(self_dim_size)) {
-          cum_number += self_data[i * self_dim_stride];
-          result_data[i * result_dim_stride] = (scalar_t)cum_number;
-        }
-      }, /*init_val=*/ 0
-    );
+    if (is_lastdim_fast_path) {
+      cpu_cum_base_lastdim_kernel<scalar_t>(result, self, /*init_val=*/ 0);
+    } else {
+      cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+        scalar_t* result_data, auto result_dim_stride,
+        const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+          auto cum_number = (at::acc_type<scalar_t, false>)init_val;
+          for (const auto i : c10::irange(self_dim_size)) {
+            cum_number += self_data[i * self_dim_stride];
+            result_data[i * result_dim_stride] = (scalar_t)cum_number;
+          }
+        }, /*init_val=*/ 0
+      );
+    }
   });
 }
 

@@ -712,6 +712,59 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
   return cvtfp32_bf16(o1, o2);
 }
 
+template <>
+inline void cumsum<BFloat16>(BFloat16 base, const BFloat16* src, BFloat16* dst, int64_t n) {
+  __m256 offset = _mm256_set1_ps(base);
+  int64_t i;
+#pragma unroll
+  for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
+    auto vec = Vectorized<c10::BFloat16>::loadu(src + i);
+    __m256 x0, x1;
+    cvtbf16_fp32(vec, x0, x1);
+
+    // prefix sum on 1st float
+    __m256 t0 = _mm256_permute_ps(x0, 0x93);
+    __m256 t1 = _mm256_permute2f128_ps(t0, t0, 0x29);
+    x0 = _mm256_add_ps(x0, _mm256_blend_ps(t0, t1, 0x11));
+
+    t0 = _mm256_permute_ps(x0, 0x4E);
+    t1 = _mm256_permute2f128_ps(t0, t0, 0x29);
+    x0 = _mm256_add_ps(x0, _mm256_blend_ps(t0, t1, 0x33));
+
+    x0 = _mm256_add_ps(x0, _mm256_permute2f128_ps(x0, x0, 0x29));
+    x0 = x0 + offset;
+
+    // broadcast the offset
+    t0 = _mm256_permute2f128_ps(x0, x0, 0x11);
+    offset = _mm256_permute_ps(t0, 0xFF);
+
+    // prefix sum on 2nd float
+    t0 = _mm256_permute_ps(x1, 0x93);
+    t1 = _mm256_permute2f128_ps(t0, t0, 0x29);
+    x1 = _mm256_add_ps(x1, _mm256_blend_ps(t0, t1, 0x11));
+
+    t0 = _mm256_permute_ps(x1, 0x4E);
+    t1 = _mm256_permute2f128_ps(t0, t0, 0x29);
+    x1 = _mm256_add_ps(x1, _mm256_blend_ps(t0, t1, 0x33));
+
+    x1 = _mm256_add_ps(x1, _mm256_permute2f128_ps(x1, x1, 0x29));
+    x1 = x1 + offset;
+
+    // broadcast the offset
+    t0 = _mm256_permute2f128_ps(x1, x1, 0x11);
+    offset = _mm256_permute_ps(t0, 0xFF);
+
+    Vectorized<BFloat16> out = cvtfp32_bf16(x0, x1);
+    out.store(dst + i);
+  }
+  float offset_val = _mm256_cvtss_f32(offset);
+#pragma unroll
+  for (; i < n; ++i) {
+    offset_val += float(src[i]);
+    dst[i] = offset_val;
+  }
+}
+
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
   __m256 o1, o2;
   cvtbf16_fp32(__m256i(a), o1, o2);

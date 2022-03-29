@@ -980,4 +980,13 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
   }
 }
 
+template <typename T>
+inline void cumsum(T base, const T* src, T* dst, int64_t n) {
+  T offset = base;
+  for (const auto i : c10::irange(n)) {
+    offset += src[i];
+    dst[i] = offset;
+  }
+}
+
 }}}
